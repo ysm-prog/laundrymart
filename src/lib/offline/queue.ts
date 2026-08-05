@@ -53,6 +53,16 @@ export type QueuedRecord =
       signedBy?: string | null;
       notes?: string | null;
       lines: QueuedLine[];
+    } & QueuedMedia)
+  // "Something's wrong at this stop" (design spec P-5): flagged from the run
+  // screen, queued and synced exactly like a pickup so it works with no signal.
+  | ({
+      kind: "exception";
+      clientRef: string;
+      jobId: string;
+      capturedAt: string;
+      reason: string;
+      notes?: string | null;
     } & QueuedMedia);
 
 export function newClientRef(): string {

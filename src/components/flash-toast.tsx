@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { cx } from "./ui";
 import type { Flash } from "@/lib/actions";
 
@@ -49,7 +50,17 @@ export function FlashToast({ flash }: { flash: Flash | null }) {
             : "border-success/40 border-l-success text-success",
         )}
       >
-        <p className="min-w-0 flex-1">{current.message}</p>
+        <div className="min-w-0 flex-1">
+          <p>{current.message}</p>
+          {current.link ? (
+            // The one-click fix: a prerequisite failure names the screen that
+            // resolves it. Same status colour — the link is part of the message.
+            <Link href={current.link.href} onClick={() => setCurrent(null)}
+                  className="mt-0.5 inline-block font-medium underline underline-offset-2">
+              {current.link.label} →
+            </Link>
+          ) : null}
+        </div>
         <button
           type="button"
           onClick={() => setCurrent(null)}

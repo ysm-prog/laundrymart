@@ -12,6 +12,8 @@ import {
 import { Field, Input, Select, SubmitButton, Textarea } from "@/components/form";
 import { MediaUploadField } from "@/components/media-upload-field";
 import { ProofOfService } from "@/components/proof-of-service";
+import { parseExceptionNotes } from "@/lib/exceptions";
+import { EXCEPTION_REASONS } from "../exception-reasons";
 import { flagException, recordDelivery, recordPickup, setJobProgress } from "../actions";
 
 export const dynamic = "force-dynamic";
@@ -22,15 +24,6 @@ const PROGRESS_STEPS = [
   { value: "completed", label: "Complete job" },
 ];
 
-const EXCEPTION_REASONS = [
-  { value: "customer_closed", label: "Customer closed" },
-  { value: "no_access", label: "No access" },
-  { value: "nothing_to_collect", label: "Nothing to collect" },
-  { value: "vehicle_issue", label: "Vehicle issue" },
-  { value: "customer_refused", label: "Customer refused" },
-  { value: "short_delivery", label: "Short delivery" },
-  { value: "other", label: "Other" },
-];
 
 type JobDetail = Job & {
   customers: { business_name: string; customer_number: string; phone: string | null; special_instructions: string | null } | null;
@@ -83,9 +76,11 @@ export default async function JobDetailPage({
       />
 
       {job.status === "exception" ? (
-        <Notice tone="danger" title={`Exception: ${humanise(job.exception_reason)}`}>
-          {job.exception_notes || "No further detail recorded."}
-        </Notice>
+        <ExceptionNotice
+          reason={job.exception_reason}
+          rawNotes={job.exception_notes}
+          tenantId={session.tenantId}
+        />
       ) : null}
 
       {job.customers?.special_instructions ? (
@@ -145,6 +140,25 @@ export default async function JobDetailPage({
         </Suspense>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * The exception, with any photo the driver took at the kerb. The photo path
+ * rides inside `exception_notes` as a marker (see `lib/exceptions.ts`), so the
+ * raw column never renders directly.
+ */
+function ExceptionNotice({
+  reason, rawNotes, tenantId,
+}: { reason: string | null; rawNotes: string | null; tenantId: string }) {
+  const { note, photos } = parseExceptionNotes(rawNotes);
+  return (
+    <Notice tone="danger" title={`Exception: ${humanise(reason)}`}>
+      {note || "No further detail recorded."}
+      {photos.length > 0 ? (
+        <ProofOfService photoPaths={photos} tenantId={tenantId} />
+      ) : null}
+    </Notice>
   );
 }
 

@@ -6,6 +6,7 @@ import { date } from "@/lib/format";
 import {
   DataTable, EmptyState, PageHeader, SkeletonRows, humanise,
 } from "@/components/ui";
+import { parseExceptionNotes } from "@/lib/exceptions";
 import { resolveException } from "@/app/(app)/jobs/actions";
 
 export const metadata = { title: "Problems" };
@@ -58,7 +59,12 @@ async function ExceptionList({ writable }: { writable: boolean }) {
         { header: "Customer", cell: (row) => row.customers?.business_name ?? "—" },
         { header: "Date", cell: (row) => date(row.scheduled_date), hideBelow: "sm" },
         { header: "Reason", cell: (row) => humanise(row.exception_reason) },
-        { header: "Notes", cell: (row) => row.exception_notes ?? "—", hideBelow: "lg" },
+        {
+          header: "Notes",
+          // Photo markers ride inside the column; the job page shows the photos.
+          cell: (row) => parseExceptionNotes(row.exception_notes).note || "—",
+          hideBelow: "lg",
+        },
         { header: "Driver", cell: (row) => row.drivers?.full_name ?? "—", hideBelow: "md" },
         {
           header: "",

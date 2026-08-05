@@ -8,7 +8,7 @@ import { recordAudit } from "@/lib/audit";
 import { isValidAbn, normaliseAbn } from "@/lib/domain/abn";
 import {
   checkbox, count, describeDbError, done, fail, firstIssue,
-  optionalText, optionalUuid, toObject,
+  optionalText, optionalUuid, returnTo, toObject,
 } from "@/lib/actions";
 
 const abn = optionalText
@@ -39,8 +39,15 @@ const customerSchema = z.object({
 
 export async function createCustomer(formData: FormData): Promise<void> {
   const session = await assertCapability("customers.write");
+  // The quick-create embedded in the contract wizard posts a return_to; the
+  // failure path has to land back on it, not on /customers/new.
+  const backTo = returnTo(formData, "/customers/new");
   const parsed = customerSchema.safeParse(toObject(formData));
-  if (!parsed.success) return fail("/customers/new", firstIssue(parsed.error));
+  if (!parsed.success) return fail(backTo, firstIssue(parsed.error));
+
+  // The quick-create's fourth field: one address line that becomes the first
+  // site, so the customer is routable the moment they exist.
+  const siteAddress = optionalText.parse(formData.get("site_address") ?? "");
 
   const supabase = await createClient();
 
@@ -48,7 +55,7 @@ export async function createCustomer(formData: FormData): Promise<void> {
   // two dispatchers creating a customer at once can't collide.
   const { data: customerNumber, error: numberError } = await supabase
     .rpc("next_number", { t: session.tenantId, k: "customer", p: "CUST" });
-  if (numberError) return fail("/customers/new", describeDbError(numberError));
+  if (numberError) return fail(backTo, describeDbError(numberError));
 
   const { data, error } = await supabase
     .from("customers")
@@ -61,7 +68,23 @@ export async function createCustomer(formData: FormData): Promise<void> {
     .select("id, business_name, customer_number")
     .single();
 
-  if (error) return fail("/customers/new", describeDbError(error));
+  if (error) return fail(backTo, describeDbError(error));
+
+  if (siteAddress) {
+    const { error: locationError } = await supabase.from("customer_locations").insert({
+      tenant_id: session.tenantId,
+      created_by: session.userId,
+      customer_id: data.id,
+      name: "Main site",
+      address_line1: siteAddress,
+      is_pickup: true,
+      is_delivery: true,
+    });
+    if (locationError) {
+      return fail(`/customers/${data.id}`,
+        `${data.customer_number} was created but its site could not be saved: ${describeDbError(locationError)}`);
+    }
+  }
 
   await recordAudit(session, {
     entity: "customer", entityId: data.id, action: "create",
@@ -69,6 +92,12 @@ export async function createCustomer(formData: FormData): Promise<void> {
   });
 
   revalidatePath("/customers");
+  if (backTo !== "/customers/new") {
+    // Back to the caller (the wizard) with the new customer preselected.
+    const separator = backTo.includes("?") ? "&" : "?";
+    return done(`${backTo}${separator}customer=${data.id}`,
+      `Customer ${data.customer_number} created.`);
+  }
   return done(`/customers/${data.id}`, `Customer ${data.customer_number} created.`);
 }
 

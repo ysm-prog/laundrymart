@@ -256,6 +256,101 @@ export function OfflineCapture({
   );
 }
 
+/**
+ * "Something's wrong at this stop" (design spec P-5): the exception capture
+ * that never leaves the run screen. Same reasons as the job page's office form,
+ * queued through the same outbox as every other capture, so it works exactly
+ * the same with no signal. A disclosure rather than an always-open form —
+ * flagging a problem is the exception, not the routine.
+ */
+export function ExceptionCapture({
+  jobId, reasons, preview = false,
+}: {
+  jobId: string;
+  reasons: ReadonlyArray<{ value: string; label: string }>;
+  /** Design-preview mode: render everything, queue nothing. */
+  preview?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [photos, setPhotos] = useState<string[]>([]);
+  const [status, setStatus] = useState<string | null>(null);
+
+  async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const data = new FormData(form);
+
+    if (!preview) {
+      await enqueue({
+        kind: "exception",
+        clientRef: newClientRef(),
+        jobId,
+        capturedAt: new Date().toISOString(),
+        reason: (data.get("reason") as string) || "other",
+        notes: (data.get("notes") as string) || null,
+        photos,
+      });
+    }
+
+    form.reset();
+    setPhotos([]);
+    setStatus("Saved on this device — the office will see it when it syncs.");
+    setOpen(false);
+    if (!preview) await flush();
+  }
+
+  if (!open) {
+    return (
+      <div className="border-t pt-4">
+        <button type="button" onClick={() => { setOpen(true); setStatus(null); }}
+                className="border border-danger/40 px-3 py-1.5 text-[12.5px] font-medium text-danger hover:bg-danger/5">
+          Something&rsquo;s wrong at this stop
+        </button>
+        {status ? <p className="mt-2 text-xs text-muted-foreground">{status}</p> : null}
+      </div>
+    );
+  }
+
+  return (
+    <form onSubmit={onSubmit}
+          className="space-y-3 border-t border-l-[5px] border-l-danger pt-4 pl-3">
+      <p className="font-mono text-3xs uppercase tracking-[0.12em] text-danger">
+        Something&rsquo;s wrong
+      </p>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <label className="text-sm">
+          <span className="mb-1 block font-medium">What happened?</span>
+          <select name="reason" defaultValue={reasons[0]?.value}
+                  className="w-full border border-strong bg-surface-muted px-2.5 py-1.5 text-sm">
+            {reasons.map((reason) => (
+              <option key={reason.value} value={reason.value}>{reason.label}</option>
+            ))}
+          </select>
+        </label>
+        <label className="text-sm">
+          <span className="mb-1 block font-medium">Notes</span>
+          <input name="notes" placeholder="Gate locked, no answer on the intercom"
+                 className="w-full border border-strong bg-surface-muted px-2.5 py-1.5 text-sm" />
+        </label>
+      </div>
+      <PhotoPicker photos={photos} onChange={setPhotos} label="Photo (optional)" />
+      <div className="flex flex-wrap items-center gap-2">
+        <button type="submit"
+                className="bg-danger px-3 py-1.5 text-[12.5px] font-medium text-white hover:opacity-90">
+          Flag the problem
+        </button>
+        <button type="button" onClick={() => setOpen(false)}
+                className="border border-strong bg-surface px-3 py-1.5 text-[12.5px] font-medium hover:bg-surface-muted">
+          Cancel
+        </button>
+        <span className="text-xs text-muted-foreground">
+          The stop stays on your run — carry on to the next one.
+        </span>
+      </div>
+    </form>
+  );
+}
+
 /** Registers the service worker once, on the client. */
 export function ServiceWorkerRegistrar() {
   useEffect(() => {

@@ -22,9 +22,12 @@ The master spec names a .NET 9 Web API; this build follows the supplied skeleton
 - The session refresh + auth gate is `src/proxy.ts` (Next 16's rename of `middleware`).
 - Server Actions only for writes. They derive `tenant_id` from the session; `fail()`/`done()`
   set a one-shot flash cookie and redirect clean (always `return fail(...)` — the `return` is
-  what lets TS narrow). `(app)/template.tsx` reads the cookie — a template, not the layout,
-  because templates re-render on every navigation including a same-path action redirect — and
-  `FlashToast` shows it (success auto-dismisses, errors stick) then deletes it. The one
+  what lets TS narrow). Both take an optional `{ href, label }` link — used when a failure is
+  a missing prerequisite, so the toast carries the screen that fixes it; the reader re-checks
+  the href is a plain same-site path because the cookie is not httpOnly. `(app)/template.tsx`
+  reads the cookie — a template, not the layout, because templates re-render on every
+  navigation including a same-path action redirect — and `FlashToast` shows it (success
+  auto-dismisses, errors stick) then deletes it. The one
   URL-param survivor is the auth gate's `?error=forbidden`, set during render where a cookie
   cannot be. `/api/sync` stays the one API exception for the offline outbox.
 - Pure domain logic lives in `src/lib/domain/` with no database access: the service calendar,
@@ -125,6 +128,15 @@ policies to.
 `public/sw.js` (shell cache, never intercepts writes) + `/api/sync` (idempotent batch insert
 keyed on `client_ref`, unique per tenant).
 
+The outbox carries three record kinds: `pickup`, `delivery` and `exception` — the run
+screen's "Something's wrong at this stop" (reason + note + optional photo) rides the same
+queue, so a problem can be flagged with no signal and without leaving `/run`. Exceptions
+sync as a job *update* (status/reason/notes), which is naturally idempotent, so they skip
+the `client_ref` duplicate check the insert kinds need. The photo path travels inside
+`exception_notes` as a `[photo:…]` marker (`src/lib/exceptions.ts` packs and parses it —
+every display site strips the marker; jobs have no media column and Phase B adds no
+migration).
+
 Photos and signatures ride in the same record as data URLs and upload one file at a time to
 `/api/media` *before* the batch goes out, so a queue of stops is never one multi-megabyte
 request that fails as a unit. Object keys are deterministic (`clientRef` + index) and the
@@ -137,6 +149,8 @@ request, tenant segment written from the session) · `src/lib/media-urls.ts` (`s
 short-lived signed URLs, server-only) · `src/components/media-capture.tsx` (camera + canvas
 signature, downscales on device) · `media-upload-field.tsx` (the online forms) ·
 `proof-of-service.tsx` (display). Nothing is public: reads always go through a signed URL.
+Scopes: `pickup` / `delivery` / `inspection` / `exception` — a new scope is just a new path
+segment, since the storage policies check only the tenant segment.
 
 ## 10. Environment
 See `.env.example`; validated fail-fast in `src/lib/env.ts`. Email delivery
@@ -229,6 +243,46 @@ Both are compositions over existing tables — neither added a migration.
   are edited and invoices voided.
 
 ## 18. Changelog
+### 2026-08-05 · Simplification Phase B: wizards, one-click planning, in-run problems
+Per `docs/SIMPLIFICATION-ROADMAP.md` Phase B / design spec P-3, P-4, P-5, AD-2. No
+migrations.
+- **Contract creation is a 3-step wizard** (`agreements/agreement-wizard.tsx`, replaces the
+  19-field form on `/agreements/new`; the full `AgreementForm` remains for editing on the
+  detail page). Client-held step state using the `Stage` idiom, one post to `createAgreement`
+  at the end — steps hide rather than unmount, so a single form carries every field, and no
+  input uses `required` (a hidden required field would fail native validation unfocusable).
+  Step 2's common case is one checkbox: "deliver on the next service day" posts
+  `delivery_follows` and the action copies the pickup pattern. Step 3's item rows post as
+  JSON in one hidden `lines` field (the planner's compose-locally-commit-once shape);
+  `createAgreement` now inserts them. Per-kg, included allowances, minimum charge and levies
+  sit behind "Advanced pricing". A live plain-English summary says only what the entered
+  numbers can stand behind (per-kg lines get a sentence, never an invented figure).
+- **Customer quick-create** (P-4): four required fields — business name, phone, billing
+  email, site address — where `site_address` becomes the first `customer_locations` row, so
+  a new customer is immediately routable. `/customers/new` restructured to essentials +
+  collapsed `<details>` disclosures (`FormDisclosure`), status now defaulting to active.
+  Embedded in wizard step 1 via the HTML `form` attribute (fields inside another form's
+  markup, associated to a sibling form element — no nesting); `createCustomer` honours
+  `return_to` and comes back with `?customer=<id>` preselected.
+- **"Plan my day"** on the dashboard (B3): one click runs the shared `instantiateRoutes`
+  (extracted from `generateDailyRoutes`), pre-assigns each template's usual driver/vehicle,
+  then lands on `/routes/planner` only if a run is crewless or a stop is on no run —
+  otherwise it lands on today's runs and says nothing needs a decision.
+- **"Something's wrong at this stop"** on `/run` (P-5, F11): inline reason + note + optional
+  photo on the capture card, through the offline outbox (new `exception` record kind, new
+  `exception` media scope). The driver never leaves the run screen. See §8 for the
+  `[photo:…]` notes marker; the job page shows the photo via the usual signed URLs, and the
+  dashboard/problems lists strip the marker. Exception reasons moved to
+  `jobs/exception-reasons.ts`, shared by the office form, the run capture and `/api/sync`.
+- **Toasts can carry the fix** (B4): `fail()`/`done()` take an optional `{ href, label }`,
+  rendered as a link in `FlashToast`; the template re-validates it as a plain same-site
+  path. Wired where an action fails on a missing prerequisite: no weekly run for the
+  day/weekday → set one up; invoice email with no billing email → the customer's edit form;
+  generate invoices with no covering contracts → the contracts list.
+- `/design-preview` gained the wizard (live, with fixtures), the quick-create, the exception
+  capture (a `preview` prop keeps it out of the real outbox) and the linked-toast sample;
+  all screenshotted light and dark. 88 unit tests (was 81; pack/parse for exception notes).
+
 ### 2026-08-05 · Simplification Phase A: flash toasts, operator language, guided setup
 Per `docs/SIMPLIFICATION-ROADMAP.md` / `docs/SIMPLIFICATION-DESIGN.md` (the BA + design
 review of first-time operability). No migrations.

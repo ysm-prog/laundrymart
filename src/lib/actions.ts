@@ -16,13 +16,21 @@ import { z } from "zod";
  * come back, and the `return` is what lets TypeScript narrow after the call.
  */
 
-export type Flash = { tone: "success" | "error"; message: string };
+/**
+ * `link` is the one-click fix: when an action fails on a missing prerequisite
+ * ("no weekly run is set up for today"), the toast carries the screen that
+ * fixes it instead of leaving the user to find it.
+ */
+export type FlashLink = { href: string; label: string };
+export type Flash = { tone: "success" | "error"; message: string; link?: FlashLink };
 
 export const FLASH_COOKIE = "flash";
 
-async function flash(path: string, tone: Flash["tone"], message: string): Promise<never> {
+async function flash(
+  path: string, tone: Flash["tone"], message: string, link?: FlashLink,
+): Promise<never> {
   const store = await cookies();
-  store.set(FLASH_COOKIE, JSON.stringify({ tone, message } satisfies Flash), {
+  store.set(FLASH_COOKIE, JSON.stringify({ tone, message, link } satisfies Flash), {
     path: "/",
     maxAge: 60,
     sameSite: "lax",
@@ -31,12 +39,12 @@ async function flash(path: string, tone: Flash["tone"], message: string): Promis
   redirect(path);
 }
 
-export function fail(path: string, message: string): Promise<never> {
-  return flash(path, "error", message);
+export function fail(path: string, message: string, link?: FlashLink): Promise<never> {
+  return flash(path, "error", message, link);
 }
 
-export function done(path: string, message: string): Promise<never> {
-  return flash(path, "success", message);
+export function done(path: string, message: string, link?: FlashLink): Promise<never> {
+  return flash(path, "success", message, link);
 }
 
 /**
