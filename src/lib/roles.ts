@@ -44,6 +44,10 @@ export const CAPABILITIES = [
   "fleet.write",
   "routes.read",
   "routes.write",
+  // Advancing a run through its workflow states. Split from `routes.write`
+  // (which plans and assigns) because moving a run that is already out on the
+  // road is a floor decision, not a planning one — see ROLE_CAPABILITIES.
+  "routes.status",
   "operations.read",
   "operations.write",
   "run.execute",
@@ -74,15 +78,16 @@ export const ROLE_CAPABILITIES: Record<Role, readonly Capability[]> = {
     "agreements.read",
     "items.read",
     "fleet.read", "fleet.write",
-    "routes.read", "routes.write",
+    "routes.read", "routes.write", "routes.status",
     "operations.read", "operations.write",
     "inventory.read",
     "warehouse.read",
     "invoices.read", "invoices.write",
     "reports.read",
   ],
-  // Own run only.
-  driver: ["run.execute", "routes.read", "operations.read", "operations.write"],
+  // Own run only — RLS confines every routes row to their own `drivers.id`, so
+  // `routes.status` here means "my run", not "any run".
+  driver: ["run.execute", "routes.read", "routes.status", "operations.read", "operations.write"],
   // Invoices, payments, reports.
   finance: [
     "customers.read",
@@ -96,7 +101,10 @@ export const ROLE_CAPABILITIES: Record<Role, readonly Capability[]> = {
     "warehouse.read", "warehouse.write",
     "items.read", "operations.read",
   ],
-  customer_service: ["customers.read", "customers.write", "agreements.read", "operations.read", "routes.read"],
+  customer_service: [
+    "customers.read", "customers.write", "agreements.read", "operations.read",
+    "routes.read", "routes.status",
+  ],
   sales: ["customers.read", "customers.write", "agreements.read", "agreements.write", "items.read", "reports.read"],
   branch_manager: ALL.filter((c) => !c.startsWith("admin.")),
   regional_manager: ALL.filter((c) => c !== "admin.write"),

@@ -86,8 +86,12 @@ export default async function RunPage({
 }
 
 /**
- * The guided workflow from spec §7.8. Exactly one step is actionable at a time,
- * so a driver can never skip the inspection or the load confirmation.
+ * The guided workflow from spec §7.8, in order, with the next step actionable.
+ *
+ * The inspection is step 1 and stays the expected start of the day, but it no
+ * longer blocks the load confirmation — a run whose inspection went on paper,
+ * or whose driver is not linked to a driver record, used to be unstartable by
+ * anyone. The database rule went with it (migration 0012).
  */
 function RunWorkflow({ route }: { route: DailyRoute }) {
   const inspectionDone = !!route.inspection_id;
@@ -98,8 +102,8 @@ function RunWorkflow({ route }: { route: DailyRoute }) {
     <Card title={`${route.code} · ${route.name}`}>
       <ol className="space-y-3">
         <Stage index={1} label="Vehicle inspection" done={inspectionDone}
-               detail={inspectionDone ? "Recorded" : "Required before the run can start"}>
-          {!inspectionDone ? (
+               detail={inspectionDone ? "Recorded" : "Record it before you set off"}>
+          {!inspectionDone && !started ? (
             route.vehicle_id ? (
               <form action={submitInspection} className="space-y-3">
                 <input type="hidden" name="route_id" value={route.id} />
@@ -135,7 +139,7 @@ function RunWorkflow({ route }: { route: DailyRoute }) {
 
         <Stage index={2} label="Load clean linen" done={loadDone}
                detail={loadDone ? `Confirmed ${dateTime(route.load_confirmed_at)}` : "Confirm once the van is loaded"}>
-          {inspectionDone && !loadDone ? (
+          {!loadDone ? (
             <form action={confirmLoad}>
               <input type="hidden" name="route_id" value={route.id} />
               <SubmitButton>Confirm load</SubmitButton>
@@ -144,7 +148,7 @@ function RunWorkflow({ route }: { route: DailyRoute }) {
         </Stage>
 
         <Stage index={3} label="Start route" done={started}
-               detail={started ? `Started ${dateTime(route.started_at)}` : "Available once inspection and load are done"}>
+               detail={started ? `Started ${dateTime(route.started_at)}` : "Available once the load is confirmed"}>
           {loadDone && !started ? (
             <form action={startRun}>
               <input type="hidden" name="route_id" value={route.id} />
