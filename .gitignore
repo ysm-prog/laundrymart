@@ -8,3 +8,6 @@ out
 coverage
 .vercel
 next-env.d.ts
+
+# TypeScript incremental build cache
+*.tsbuildinfo
