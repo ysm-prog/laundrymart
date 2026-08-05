@@ -3,19 +3,32 @@ import Link from "next/link";
 import { requireSession, type Session } from "@/lib/auth/context";
 import { createClient } from "@/lib/supabase/server";
 import { can } from "@/lib/roles";
-import { money, today } from "@/lib/format";
+import { date as formatDate, money, number, relativeDays, today } from "@/lib/format";
 import {
-  Card, DataTable, EmptyState, FlashMessages, PageHeader, SkeletonRows,
-  SkeletonStats, Stat, StatusBadge,
+  Card, EmptyState, Eyebrow, FlashMessages, PageHeader, SkeletonRows, SkeletonStats,
+  Stat, StatusBadge, cx, humanise,
 } from "@/components/ui";
+import {
+  PLANT_STAGES, SEVERITY_RULE, SEVERITY_TEXT, sortDecisions, type Decision,
+} from "./decisions";
 
 export const metadata = { title: "Dashboard" };
-
-// Per-request session read; the heavy widgets stream in under Suspense.
 export const dynamic = "force-dynamic";
 
 const FORBIDDEN = "You do not have access to that area.";
 
+/**
+ * The control tower (design pack, screen 02).
+ *
+ * Exceptions are the work surface — the pack is emphatic that this screen is a
+ * list of things needing a decision, not a wall of charts. Everything else here
+ * exists to give them context: the KPI row says how the day is going, the stage
+ * strip says where the linen is, the right rail says where the trucks are.
+ *
+ * Role gating is not cosmetic. The pack states that floor staff and drivers see
+ * no dollar figures anywhere, so every money surface sits behind
+ * `invoices.read` rather than being dimmed or truncated.
+ */
 export default async function DashboardPage({
   searchParams,
 }: {
@@ -24,47 +37,410 @@ export default async function DashboardPage({
   const params = await searchParams;
   const session = await requireSession();
   const date = today();
+  const seesMoney = can(session.role, "invoices.read");
+  const seesOperations = can(session.role, "operations.read");
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       <FlashMessages error={params.error === "forbidden" ? FORBIDDEN : params.error} ok={params.ok} />
       <PageHeader
-        title={`Good day, ${session.email?.split("@")[0] ?? "there"}`}
-        description={`${session.tenantName} · ${date}`}
+        eyebrow={`${session.tenantName} · ${formatDate(date)}`}
+        title="Dashboard"
+        description="What needs a decision today."
       />
 
+      <Suspense fallback={<SkeletonStats count={seesMoney ? 5 : 4} />}>
+        <Kpis date={date} seesMoney={seesMoney} />
+      </Suspense>
+
       {can(session.role, "run.execute") ? (
-        <Suspense fallback={<SkeletonStats count={3} />}>
-          <DriverPanel session={session} date={date} />
+        <Suspense fallback={<SkeletonRows rows={2} />}>
+          <MyRun session={session} date={date} />
         </Suspense>
       ) : null}
 
-      {can(session.role, "routes.read") ? (
-        <Suspense fallback={<SkeletonStats />}>
-          <DispatchPanel date={date} />
-        </Suspense>
-      ) : null}
-
-      {can(session.role, "invoices.read") ? (
-        <Suspense fallback={<SkeletonStats count={3} />}>
-          <FinancePanel date={date} />
-        </Suspense>
-      ) : null}
-
-      {can(session.role, "admin.read") ? (
-        <Suspense fallback={<SkeletonRows rows={3} />}>
-          <AdminPanel />
-        </Suspense>
+      {seesOperations ? (
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_300px]">
+          <div className="space-y-4">
+            <Suspense fallback={<SkeletonRows rows={6} />}>
+              <NeedsDecision seesMoney={seesMoney} />
+            </Suspense>
+            <Suspense fallback={<SkeletonRows rows={2} />}>
+              <PlantStages />
+            </Suspense>
+          </div>
+          <Suspense fallback={<SkeletonRows rows={4} />}>
+            <RunsToday date={date} />
+          </Suspense>
+        </div>
       ) : null}
     </div>
   );
 }
 
-/* ----------------------------------------------------------- driver panel */
+/* ------------------------------------------------------------------- KPIs */
 
-async function DriverPanel({ session, date }: { session: Session; date: string }) {
+/**
+ * The pack's third KPI is average turnaround against a promised time. Nothing
+ * in this schema records a promise per customer, so rather than invent a number
+ * the row shows what is ready to leave — something the data can stand behind.
+ */
+async function Kpis({ date, seesMoney }: { date: string; seesMoney: boolean }) {
   const supabase = await createClient();
+  const head = { count: "exact" as const, head: true };
 
+  const [jobsTotal, jobsDone, exceptions, pools, overdue] = await Promise.all([
+    supabase.from("jobs").select("id", head).eq("scheduled_date", date),
+    supabase.from("jobs").select("id", head).eq("scheduled_date", date).eq("status", "completed"),
+    supabase.from("jobs").select("id", head).eq("status", "exception"),
+    supabase.from("inventory_pools").select("state, quantity")
+      .in("state", ["washing", "drying", "folding", "packing", "ready_for_dispatch"])
+      .gt("quantity", 0)
+      .returns<Array<{ state: string; quantity: number }>>(),
+    seesMoney
+      ? supabase.from("invoices").select("balance")
+          .in("status", ["issued", "part_paid", "overdue"])
+          .lt("due_date", date).is("deleted_at", null)
+          .returns<Array<{ balance: number }>>()
+      : Promise.resolve({ data: [] as Array<{ balance: number }> }),
+  ]);
+
+  const total = jobsTotal.count ?? 0;
+  const done = jobsDone.count ?? 0;
+  const remaining = Math.max(0, total - done);
+  const rows = pools.data ?? [];
+  const inPlant = rows.reduce((sum, row) => sum + Number(row.quantity ?? 0), 0);
+  const ready = rows.filter((row) => row.state === "ready_for_dispatch")
+    .reduce((sum, row) => sum + Number(row.quantity ?? 0), 0);
+  const overdueRows = overdue.data ?? [];
+  const overdueTotal = overdueRows.reduce((sum, row) => sum + Number(row.balance ?? 0), 0);
+  const late = exceptions.count ?? 0;
+
+  return (
+    <div className={cx(
+      "grid gap-px border bg-border",
+      seesMoney ? "sm:grid-cols-3 lg:grid-cols-5" : "sm:grid-cols-2 lg:grid-cols-4",
+    )}>
+      <Stat
+        flush
+        label="Stops today"
+        value={<>{done}<span className="text-sm font-normal text-muted-foreground"> / {total}</span></>}
+        hint={total === 0 ? "nothing scheduled" : `${remaining} remaining`}
+        tone={total > 0 && remaining === 0 ? "success" : "default"}
+      />
+      <Stat flush label="In the plant" value={number(inPlant)} hint="washing through to ready" />
+      <Stat
+        flush
+        label="Ready to dispatch"
+        value={number(ready)}
+        hint={ready > 0 ? "waiting on a truck" : "nothing staged"}
+        tone={ready > 0 ? "success" : "default"}
+      />
+      <Stat
+        flush
+        label="Exceptions"
+        value={String(late)}
+        hint={late === 0 ? "none open" : "need a decision"}
+        tone={late > 0 ? "danger" : "success"}
+      />
+      {seesMoney ? (
+        <Stat
+          flush
+          label="Overdue"
+          value={money(overdueTotal)}
+          hint={`${overdueRows.length} invoice(s) past terms`}
+          tone={overdueTotal > 0 ? "warning" : "success"}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+/* -------------------------------------------------------- needs a decision */
+
+type ExceptionJob = {
+  id: string; job_number: string; scheduled_date: string;
+  exception_reason: string | null; exception_notes: string | null;
+  customers: { business_name: string } | null;
+};
+
+type MissingLine = {
+  missing_quantity: number;
+  pickups: {
+    pickup_date: string; job_id: string; customers: { business_name: string } | null;
+  } | null;
+  items: { name: string } | null;
+};
+
+type OverdueInvoice = {
+  id: string; invoice_number: string; due_date: string | null; balance: number;
+  customers: { business_name: string } | null;
+};
+
+/**
+ * Merged from the places the system already records trouble — exception jobs,
+ * linen short at collection, invoices past terms, vehicles off the road. No new
+ * "exceptions" table: a second record of a problem is a second thing to keep
+ * in step with the first.
+ */
+async function NeedsDecision({ seesMoney }: { seesMoney: boolean }) {
+  const supabase = await createClient();
+  const date = today();
+
+  const [jobs, missing, invoices, vehicles] = await Promise.all([
+    supabase.from("jobs")
+      .select("id, job_number, scheduled_date, exception_reason, exception_notes, customers(business_name)")
+      .eq("status", "exception").order("scheduled_date", { ascending: true }).limit(15)
+      .returns<ExceptionJob[]>(),
+    supabase.from("pickup_lines")
+      .select("missing_quantity, pickups!inner(pickup_date, job_id, customers(business_name)), items(name)")
+      .gt("missing_quantity", 0).order("created_at", { ascending: false }).limit(10)
+      .returns<MissingLine[]>(),
+    seesMoney
+      ? supabase.from("invoices")
+          .select("id, invoice_number, due_date, balance, customers(business_name)")
+          .in("status", ["issued", "part_paid", "overdue"])
+          .lt("due_date", date).is("deleted_at", null)
+          .order("due_date", { ascending: true }).limit(10)
+          .returns<OverdueInvoice[]>()
+      : Promise.resolve({ data: [] as OverdueInvoice[] }),
+    supabase.from("vehicles")
+      .select("id, registration, maintenance_status")
+      .in("maintenance_status", ["out_of_service", "overdue"]).is("deleted_at", null).limit(5)
+      .returns<Array<{ id: string; registration: string; maintenance_status: string }>>(),
+  ]);
+
+  const decisions: Decision[] = [
+    ...(jobs.data ?? []).map((job): Decision => ({
+      reference: job.job_number,
+      severity: "late",
+      customer: job.customers?.business_name ?? "Unknown customer",
+      summary: job.exception_notes?.trim() || humanise(job.exception_reason).toLowerCase(),
+      state: humanise(job.exception_reason),
+      measure: "—",
+      when: job.scheduled_date,
+      action: "Resolve",
+      href: `/jobs/${job.id}`,
+    })),
+    ...(missing.data ?? []).flatMap((line): Decision[] => {
+      const pickup = line.pickups;
+      if (!pickup) return [];
+      return [{
+        reference: "MISSING",
+        severity: "warning",
+        customer: pickup.customers?.business_name ?? "Unknown customer",
+        summary: `${line.missing_quantity} × ${line.items?.name ?? "item"} short at collection`,
+        state: "Missing",
+        measure: String(line.missing_quantity),
+        when: pickup.pickup_date,
+        action: "Investigate",
+        href: `/jobs/${pickup.job_id}`,
+      }];
+    }),
+    ...(invoices.data ?? []).map((invoice): Decision => {
+      const daysOver = relativeDays(invoice.due_date ?? date, date);
+      return {
+        reference: invoice.invoice_number,
+        severity: daysOver > 60 ? "late" : "warning",
+        customer: invoice.customers?.business_name ?? "Unknown customer",
+        summary: `${daysOver} day(s) past terms`,
+        state: "Overdue",
+        measure: money(invoice.balance),
+        when: invoice.due_date ?? date,
+        action: "Chase",
+        href: `/invoices/${invoice.id}`,
+      };
+    }),
+    ...(vehicles.data ?? []).map((vehicle): Decision => ({
+      reference: vehicle.registration,
+      severity: vehicle.maintenance_status === "out_of_service" ? "late" : "warning",
+      customer: "Fleet",
+      summary: vehicle.maintenance_status === "out_of_service"
+        ? "off the road — reassign anything planned on it"
+        : "service overdue",
+      state: humanise(vehicle.maintenance_status),
+      measure: "—",
+      when: date,
+      action: "Open",
+      href: "/vehicles",
+    })),
+  ];
+
+  const rows = sortDecisions(decisions);
+
+  return (
+    <Card
+      title="Needs a decision"
+      description={rows.length === 0 ? undefined : `${rows.length} open`}
+      className="[&>div]:p-0"
+    >
+      {rows.length === 0 ? (
+        <div className="p-4">
+          <EmptyState
+            title="Nothing needs a decision"
+            description="No exceptions, no linen short, nothing past terms."
+          />
+        </div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse text-[12.5px]">
+            <thead className="bg-surface-muted text-left">
+              <tr>
+                {["Reference", "Customer / issue", "State", "Size", "Since", "Action"].map((header, index) => (
+                  <th key={header} scope="col"
+                      className={cx(
+                        "px-3 py-1.5 font-mono text-3xs font-normal uppercase",
+                        "tracking-[0.08em] text-muted-foreground",
+                        index === 3 && "text-right",
+                      )}>
+                    {header}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row, index) => (
+                <tr key={`${row.reference}-${row.when}-${index}`}
+                    className={cx(
+                      "border-t border-l-[3px] transition hover:bg-surface-muted",
+                      SEVERITY_RULE[row.severity],
+                    )}>
+                  <td className="px-3 py-2 font-mono text-[11.5px] whitespace-nowrap">{row.reference}</td>
+                  <td className="px-3 py-2">
+                    <span className="font-semibold">{row.customer}</span>
+                    <span className="text-muted-foreground"> — {row.summary}</span>
+                  </td>
+                  <td className={cx("px-3 py-2 text-[11.5px] whitespace-nowrap", SEVERITY_TEXT[row.severity])}>
+                    {row.state}
+                  </td>
+                  <td className="px-3 py-2 text-right font-mono text-[11.5px] tabular-nums whitespace-nowrap">
+                    {row.measure}
+                  </td>
+                  <td className="px-3 py-2 font-mono text-[11.5px] text-muted-foreground whitespace-nowrap">
+                    {formatDate(row.when)}
+                  </td>
+                  <td className="px-3 py-2 whitespace-nowrap">
+                    <Link href={row.href} className="font-medium text-primary hover:underline">{row.action}</Link>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+/* ------------------------------------------------------------ plant stages */
+
+async function PlantStages() {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("inventory_pools").select("state, quantity").gt("quantity", 0)
+    .returns<Array<{ state: string; quantity: number }>>();
+
+  const byState = new Map<string, number>();
+  for (const row of data ?? []) {
+    byState.set(row.state, (byState.get(row.state) ?? 0) + Number(row.quantity ?? 0));
+  }
+
+  // The pack highlights whichever stage has backed up. Derived rather than
+  // hard-coded to folding, so the highlight follows the actual bottleneck.
+  const peak = Math.max(...PLANT_STAGES.map((stage) => byState.get(stage.state) ?? 0), 0);
+
+  return (
+    <Card title="Plant stages now" description="Items currently held in each state.">
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
+        {PLANT_STAGES.map((stage) => {
+          const quantity = byState.get(stage.state) ?? 0;
+          const bottleneck = quantity > 0 && quantity === peak && stage.state !== "at_depot";
+          return (
+            <div key={stage.state}
+                 className={cx("border px-2.5 py-2", bottleneck && "border-warning/40 bg-warning/5")}>
+              <Eyebrow className={bottleneck ? "text-warning" : undefined}>{stage.label}</Eyebrow>
+              <div className={cx(
+                "mt-0.5 text-[17px] font-semibold tabular-nums",
+                bottleneck && "text-warning",
+              )}>
+                {number(quantity)}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </Card>
+  );
+}
+
+/* -------------------------------------------------------------- runs today */
+
+type RunRow = {
+  id: string; code: string; name: string; status: string;
+  drivers: { full_name: string } | null;
+  jobs: Array<{ status: string }>;
+};
+
+async function RunsToday({ date }: { date: string }) {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("daily_routes")
+    .select("id, code, name, status, drivers(full_name), jobs(status)")
+    .eq("route_date", date).order("code")
+    .returns<RunRow[]>();
+
+  const runs = data ?? [];
+
+  return (
+    <Card title="Runs today" className="[&>div]:p-0">
+      {runs.length === 0 ? (
+        <div className="p-4">
+          <EmptyState title="No runs planned" description="Generate today's routes from a template." />
+        </div>
+      ) : (
+        <ul>
+          {runs.map((run) => {
+            const total = run.jobs?.length ?? 0;
+            const done = (run.jobs ?? []).filter((job) => job.status === "completed").length;
+            const percent = total === 0 ? 0 : Math.round((done / total) * 100);
+            const behind = percent < 100 && run.status === "in_progress";
+            return (
+              <li key={run.id} className="border-b last:border-b-0">
+                <Link href={`/routes/daily/${run.id}`}
+                      className="block px-4 py-2.5 transition hover:bg-surface-muted">
+                  <div className="flex items-baseline justify-between gap-2">
+                    <span className="truncate text-[12.5px] font-semibold">{run.code} · {run.name}</span>
+                    <span className={cx(
+                      "font-mono text-[11px] tabular-nums",
+                      percent === 100 ? "text-success" : behind ? "text-warning" : "text-muted-foreground",
+                    )}>
+                      {done} / {total}
+                    </span>
+                  </div>
+                  <div className="mt-1 flex flex-wrap items-center gap-2">
+                    <span className="truncate text-[11.5px] text-muted-foreground">
+                      {run.drivers?.full_name ?? "Unassigned"}
+                    </span>
+                    <StatusBadge status={run.status} />
+                  </div>
+                  <div aria-hidden className="mt-1.5 h-[5px] bg-surface-muted">
+                    <div className={cx("h-full", percent === 100 ? "bg-success" : "bg-primary")}
+                         style={{ width: `${percent}%` }} />
+                  </div>
+                </Link>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </Card>
+  );
+}
+
+/* ------------------------------------------------------------------ my run */
+
+async function MyRun({ session, date }: { session: Session; date: string }) {
+  const supabase = await createClient();
   const { data: driver } = await supabase
     .from("drivers").select("id, full_name").eq("user_id", session.userId).maybeSingle();
 
@@ -73,15 +449,14 @@ async function DriverPanel({ session, date }: { session: Session; date: string }
       <Card title="Today's run">
         <EmptyState
           title="No driver profile linked to your account"
-          description="Ask a dispatcher to link your login to a driver record."
+          description="A dispatcher needs to link your login to a driver record."
         />
       </Card>
     );
   }
 
   const [{ data: route }, { count: stops }, { count: doneStops }] = await Promise.all([
-    supabase.from("daily_routes")
-      .select("id, code, name, status, load_confirmed_at, inspection_id")
+    supabase.from("daily_routes").select("id, code, name, status")
       .eq("driver_id", driver.id).eq("route_date", date).maybeSingle(),
     supabase.from("jobs").select("id", { count: "exact", head: true })
       .eq("driver_id", driver.id).eq("scheduled_date", date),
@@ -90,140 +465,19 @@ async function DriverPanel({ session, date }: { session: Session; date: string }
   ]);
 
   return (
-    <Card
-      title="Today's run"
-      actions={route ? <Link href="/run" className="text-sm font-medium text-primary hover:underline">Open run →</Link> : null}
-    >
+    <Card title="Today's run" description={driver.full_name}>
       {route ? (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <Stat label="Route" value={route.code} hint={route.name} />
-          <Stat label="Status" value={<StatusBadge status={route.status} />} />
-          <Stat label="Stops done" value={`${doneStops ?? 0} / ${stops ?? 0}`} />
-          <Stat
-            label="Pre-start"
-            value={route.inspection_id ? (route.load_confirmed_at ? "Ready" : "Load pending") : "Inspection due"}
-            tone={route.inspection_id && route.load_confirmed_at ? "success" : "warning"}
-          />
+        <div className="flex flex-wrap items-center gap-3 text-[12.5px]">
+          <span className="font-semibold">{route.code} · {route.name}</span>
+          <StatusBadge status={route.status} />
+          <span className="font-mono text-[11.5px] text-muted-foreground">
+            {doneStops ?? 0} / {stops ?? 0} stops
+          </span>
+          <Link href="/run" className="font-medium text-primary hover:underline">Open my run →</Link>
         </div>
       ) : (
-        <EmptyState title="No run assigned for today" description="Check back later or contact your dispatcher." />
+        <EmptyState title="No run assigned for today" />
       )}
     </Card>
-  );
-}
-
-/* --------------------------------------------------------- dispatch panel */
-
-async function DispatchPanel({ date }: { date: string }) {
-  const supabase = await createClient();
-
-  const [routes, jobsToday, unassigned, exceptions, drivers] = await Promise.all([
-    supabase.from("daily_routes")
-      .select("id, code, name, status, route_date, driver_id, vehicle_id")
-      .eq("route_date", date).order("code"),
-    supabase.from("jobs").select("id", { count: "exact", head: true }).eq("scheduled_date", date),
-    supabase.from("jobs").select("id", { count: "exact", head: true })
-      .eq("scheduled_date", date).is("route_id", null),
-    supabase.from("jobs").select("id", { count: "exact", head: true })
-      .eq("scheduled_date", date).eq("status", "exception"),
-    supabase.from("drivers").select("id", { count: "exact", head: true }).eq("status", "active"),
-  ]);
-
-  const routeRows = routes.data ?? [];
-  const active = routeRows.filter((r) => ["in_progress", "returning", "unloading"].includes(r.status)).length;
-
-  return (
-    <div className="space-y-4">
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Stat label="Routes today" value={routeRows.length} hint={`${active} on the road`} href="/routes/daily" />
-        <Stat label="Jobs today" value={jobsToday.count ?? 0} href="/jobs" />
-        <Stat label="Unassigned jobs" value={unassigned.count ?? 0}
-              tone={(unassigned.count ?? 0) > 0 ? "warning" : "default"} href="/jobs?status=unassigned" />
-        <Stat label="Exceptions" value={exceptions.count ?? 0}
-              tone={(exceptions.count ?? 0) > 0 ? "danger" : "default"} href="/operations/exceptions" />
-      </div>
-
-      <Card title="Today's routes" description={`${drivers.count ?? 0} active drivers`}>
-        <DataTable
-          rows={routeRows}
-          rowHref={(row) => `/routes/daily/${row.id}`}
-          empty={
-            <EmptyState
-              title="No routes planned for today"
-              description="Generate today's routes from your route templates."
-            />
-          }
-          columns={[
-            { header: "Route", cell: (row) => row.code },
-            { header: "Name", cell: (row) => row.name, hideBelow: "sm" },
-            { header: "Status", cell: (row) => <StatusBadge status={row.status} /> },
-            { header: "Driver", cell: (row) => (row.driver_id ? "Assigned" : "—"), hideBelow: "md" },
-            { header: "Vehicle", cell: (row) => (row.vehicle_id ? "Assigned" : "—"), hideBelow: "md" },
-          ]}
-        />
-      </Card>
-    </div>
-  );
-}
-
-/* ---------------------------------------------------------- finance panel */
-
-async function FinancePanel({ date }: { date: string }) {
-  const supabase = await createClient();
-
-  const [outstanding, overdue, paidThisMonth] = await Promise.all([
-    supabase.from("invoices").select("balance").in("status", ["issued", "part_paid", "overdue"]),
-    supabase.from("invoices").select("balance").lt("due_date", date).in("status", ["issued", "part_paid", "overdue"]),
-    supabase.from("payments").select("amount").gte("paid_on", `${date.slice(0, 7)}-01`),
-  ]);
-
-  const sum = (rows: Array<{ balance?: number; amount?: number }> | null, key: "balance" | "amount") =>
-    (rows ?? []).reduce((total, row) => total + Number(row[key] ?? 0), 0);
-
-  return (
-    <div className="grid gap-3 sm:grid-cols-3">
-      <Stat label="Outstanding" value={money(sum(outstanding.data, "balance"))}
-            hint={`${outstanding.data?.length ?? 0} open invoices`} href="/invoices" />
-      <Stat label="Overdue" value={money(sum(overdue.data, "balance"))}
-            tone={(overdue.data?.length ?? 0) > 0 ? "danger" : "default"}
-            hint={`${overdue.data?.length ?? 0} past due`} href="/invoices?status=overdue" />
-      <Stat label="Received this month" value={money(sum(paidThisMonth.data, "amount"))} tone="success" />
-    </div>
-  );
-}
-
-/* ------------------------------------------------------------ admin panel */
-
-async function AdminPanel() {
-  const supabase = await createClient();
-
-  const [customers, agreements, depots, recent] = await Promise.all([
-    supabase.from("customers").select("id", { count: "exact", head: true }).eq("status", "active"),
-    supabase.from("service_agreements").select("id", { count: "exact", head: true }).eq("status", "active"),
-    supabase.from("depots").select("id", { count: "exact", head: true }).eq("status", "active"),
-    supabase.from("audit_logs").select("id, entity, action, summary, created_at")
-      .order("created_at", { ascending: false }).limit(6),
-  ]);
-
-  return (
-    <div className="space-y-4">
-      <div className="grid gap-3 sm:grid-cols-3">
-        <Stat label="Active customers" value={customers.count ?? 0} href="/customers" />
-        <Stat label="Active agreements" value={agreements.count ?? 0} href="/agreements" />
-        <Stat label="Depots" value={depots.count ?? 0} href="/admin/depots" />
-      </div>
-      <Card title="Recent activity"
-            actions={<Link href="/admin/audit" className="text-sm text-primary hover:underline">View all</Link>}>
-        <DataTable
-          rows={recent.data ?? []}
-          empty={<EmptyState title="Nothing has happened yet" />}
-          columns={[
-            { header: "Entity", cell: (row) => row.entity },
-            { header: "Action", cell: (row) => row.action },
-            { header: "Detail", cell: (row) => row.summary ?? "—", hideBelow: "sm" },
-          ]}
-        />
-      </Card>
-    </div>
   );
 }

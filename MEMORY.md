@@ -1,35 +1,31 @@
 # MEMORY — working session handoff
 > Auto-loaded each session. Canonical state is CLAUDE.md; this is the live delta.
 
-**Status:** Deployed to a live Sydney Supabase project, on the upgraded stack (Next 16,
-Tailwind 4, Zod 4, vitest 4). All 11 migrations are applied to `laundrymart-syd` (ref
-`xujhwljrmogenhvqpkrf`) and the demo tenant is seeded. `npm run verify` passes (68 unit
-tests) and `npm run db:test` passes (47 pgTAP assertions). Everything is merged into `Prod`
-and `Dev`, which are identical; no feature branch carries unmerged work.
+**Status:** Live, signed into, and on the upgraded stack (Next 16, Tailwind 4, Zod 4,
+vitest 4). `laundrymart-syd` (ref `xujhwljrmogenhvqpkrf`) has all 11 migrations and the demo
+tenant; the app is on Vercel at `ats.coreit.com.au`; sign-in verified end to end.
+
+Working through the Plantline design handoff in four stages. **1 (theme), 2 (shell) and the
+dashboard from 3 are done.** Remaining: dispatch planner, billing two-pane, then stage 4 —
+customer portal, public tracking, Xero push, bag scan. The handoff bundle lives in the
+scratchpad, not the repo; re-upload it in a new session.
+
+The theme was written against Tailwind 3 and ported to 4 during the merge from `Dev`: there is
+no `tailwind.config.ts` any more, everything lives in the `@theme` block of `globals.css`.
 
 CI's DB job runs Postgres on the runner, not in a `services:` container — pgTAP is a
 server-side extension, so its `.control` file has to sit in the postmaster's own filesystem
 and apt on the runner cannot reach into a container.
 
 **Next up**
-1. **Create the first login.** Auth has no users, so `memberships` is empty and nobody can get
-   past `/login`. Dashboard → Authentication → Add user, then run:
-   ```sql
-   insert into public.memberships (user_id, tenant_id, role)
-   select u.id, '10000000-0000-4000-8000-000000000001', 'super_admin'
-     from auth.users u where u.email = 'YOU@example.com';
-   ```
-   For the driver run, also: `update public.drivers set user_id = <that user's id>
-   where id = '60000000-0000-4000-8000-000000000001';`
-2. **Paste `SUPABASE_SERVICE_ROLE_KEY` into `.env.local`.** Everything else is filled in. The
-   key is not readable through the management API — Settings → API → service_role.
-3. **Enable asymmetric JWT signing keys** on the project so `getClaims()` verifies locally
+1. Dispatch planner and billing two-pane (stage 3), then stage 4.
+2. **Enable asymmetric JWT signing keys** on the project so `getClaims()` verifies locally
    instead of calling the auth server on every navigation (§2 assumes this).
-4. Send one real invoice email end to end — the Resend path is still untested against the
+3. Send one real invoice email end to end — the Resend path is still untested against the
    provider. PDF render and template are unit-tested.
-5. Photo retention: nothing prunes `run-media`. Per-tenant path prefixes make a lifecycle
+4. Photo retention: nothing prunes `run-media`. Per-tenant path prefixes make a lifecycle
    rule straightforward.
-6. Consolidated invoices: `generateInvoices` dedupes on customer + period, so a customer with
+5. Consolidated invoices: `generateInvoices` dedupes on customer + period, so a customer with
    two active agreements only gets the first billed. Pre-existing; confirm intent first.
 
 **Toolchain decisions from the dependency merge**
@@ -70,7 +66,7 @@ and apt on the runner cannot reach into a container.
 
 ## Environment readiness
 - node v22.22.2; deps installed
-- `.env.local` written with the live URL + anon key; service-role key still blank
+- `.env.local` has the live URL + anon key; service-role key is set on Vercel, still blank here
 - local Postgres 16 + pgTAP available; `npm run db:test` needs a clean `public` schema
   (`drop schema public cascade; create schema public;` first) and Postgres may need
   `service postgresql start`

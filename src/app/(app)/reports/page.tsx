@@ -306,7 +306,10 @@ async function VehicleUtilisation({ from, to }: { from: string; to: string }) {
   const supabase = await createClient();
   const [{ data: routes }, { count: fleet }] = await Promise.all([
     supabase.from("daily_routes")
-      .select("vehicle_id, route_date, status, odometer_start_km, odometer_end_km, vehicles(registration)")
+      // Disambiguated: daily_routes has two FKs to vehicles (vehicle_id and
+      // trailer_id), so a bare `vehicles(...)` embed is rejected as ambiguous.
+      .select("vehicle_id, route_date, status, odometer_start_km, odometer_end_km, " +
+              "vehicles!daily_routes_vehicle_id_fkey(registration)")
       .gte("route_date", from).lte("route_date", to).not("vehicle_id", "is", null)
       .returns<Array<{ vehicle_id: string; route_date: string; status: string; odometer_start_km: number | null; odometer_end_km: number | null; vehicles: { registration: string } | null }>>(),
     supabase.from("vehicles").select("id", { count: "exact", head: true })

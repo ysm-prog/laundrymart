@@ -33,7 +33,7 @@ export default async function RouteSheetPage({ params }: { params: Promise<{ id:
   const supabase = await createClient();
   const [{ data: route }, { data: jobs }] = await Promise.all([
     supabase.from("daily_routes")
-      .select("id, code, name, route_date, status, notes, drivers(full_name), vehicles(registration)")
+      .select("id, code, name, route_date, status, notes, drivers(full_name), vehicles!daily_routes_vehicle_id_fkey(registration)")
       .eq("id", id).maybeSingle<{
         id: string; code: string; name: string; route_date: string; status: string; notes: string | null;
         drivers: { full_name: string } | null; vehicles: { registration: string } | null;
