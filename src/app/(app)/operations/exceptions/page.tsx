@@ -4,11 +4,11 @@ import { createClient } from "@/lib/supabase/server";
 import { can } from "@/lib/roles";
 import { date } from "@/lib/format";
 import {
-  DataTable, EmptyState, FlashMessages, PageHeader, SkeletonRows, humanise,
+  DataTable, EmptyState, PageHeader, SkeletonRows, humanise,
 } from "@/components/ui";
 import { resolveException } from "@/app/(app)/jobs/actions";
 
-export const metadata = { title: "Exceptions" };
+export const metadata = { title: "Problems" };
 export const dynamic = "force-dynamic";
 
 type Row = {
@@ -21,19 +21,13 @@ type Row = {
   drivers: { full_name: string } | null;
 };
 
-export default async function ExceptionsPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ error?: string; ok?: string }>;
-}) {
-  const params = await searchParams;
+export default async function ExceptionsPage() {
   const session = await requireCapability("operations.read");
 
   return (
     <div className="space-y-6">
-      <FlashMessages error={params.error} ok={params.ok} />
       <PageHeader
-        title="Exceptions"
+        title="Problems" eyebrow="Exceptions"
         description="Stops that could not be completed. Clearing one puts the job back in the queue."
       />
       <Suspense fallback={<SkeletonRows rows={6} />}>
@@ -58,7 +52,7 @@ async function ExceptionList({ writable }: { writable: boolean }) {
     <DataTable
       rows={data ?? []}
       rowHref={(row) => `/jobs/${row.id}`}
-      empty={<EmptyState title="No open exceptions" description="Every stop either completed or is still in progress." />}
+      empty={<EmptyState title="No open problems" description="Every stop either completed or is still in progress." />}
       columns={[
         { header: "Job", cell: (row) => row.job_number },
         { header: "Customer", cell: (row) => row.customers?.business_name ?? "—" },

@@ -6,7 +6,7 @@ import { can } from "@/lib/roles";
 import { date, dateTime, number } from "@/lib/format";
 import type { Delivery, Item, Job, Pickup } from "@/lib/db/types";
 import {
-  Button, ButtonLink, Card, DataTable, EmptyState, FlashMessages, Notice,
+  Button, ButtonLink, Card, DataTable, EmptyState, Notice,
   PageHeader, SkeletonRows, StatusBadge, humanise,
 } from "@/components/ui";
 import { Field, Input, Select, SubmitButton, Textarea } from "@/components/form";
@@ -39,13 +39,11 @@ type JobDetail = Job & {
 };
 
 export default async function JobDetailPage({
-  params, searchParams,
+  params,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ error?: string; ok?: string }>;
 }) {
   const { id } = await params;
-  const flash = await searchParams;
   const session = await requireCapability("operations.read");
   const writable = can(session.role, "operations.write");
 
@@ -70,7 +68,6 @@ export default async function JobDetailPage({
 
   return (
     <div className="space-y-6">
-      <FlashMessages error={flash.error} ok={flash.ok} />
       <PageHeader
         title={`${job.job_number} · ${job.customers?.business_name ?? "Unknown customer"}`}
         description={`${date(job.scheduled_date)} · ${humanise(job.service_type)}${

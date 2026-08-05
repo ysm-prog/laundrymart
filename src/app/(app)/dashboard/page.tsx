@@ -5,8 +5,8 @@ import { createClient } from "@/lib/supabase/server";
 import { can } from "@/lib/roles";
 import { date as formatDate, money, number, relativeDays, today } from "@/lib/format";
 import {
-  Card, EmptyState, Eyebrow, FlashMessages, PageHeader, SkeletonRows, SkeletonStats,
-  Stat, StatusBadge, cx, humanise,
+  ButtonLink, Card, EmptyState, Eyebrow, FlashMessages, PageHeader, SkeletonRows,
+  SkeletonStats, Stage, Stat, StatusBadge, cx, humanise,
 } from "@/components/ui";
 import {
   PLANT_STAGES, SEVERITY_RULE, SEVERITY_TEXT, sortDecisions, type Decision,
@@ -32,7 +32,9 @@ const FORBIDDEN = "You do not have access to that area.";
 export default async function DashboardPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string; ok?: string }>;
+  // The auth gate redirects here during render, where a cookie cannot be set —
+  // so this one message still travels as a query parameter, unlike the toasts.
+  searchParams: Promise<{ error?: string }>;
 }) {
   const params = await searchParams;
   const session = await requireSession();
@@ -40,14 +42,34 @@ export default async function DashboardPage({
   const seesMoney = can(session.role, "invoices.read");
   const seesOperations = can(session.role, "operations.read");
 
+  // The person doing first-time setup needs admin.read (sites live there).
+  const setup = can(session.role, "admin.read") ? await setupSteps() : null;
+
+  // A brand-new account gets the checklist and nothing else: one obvious thing
+  // to do, rather than a wall of empty panels saying "nothing yet".
+  if (setup && setup.fresh) {
+    return (
+      <div className="space-y-4">
+        <PageHeader
+          eyebrow={session.tenantName}
+          title="Welcome"
+          description="Five steps from an empty account to a planned day."
+        />
+        <GettingStarted steps={setup.steps} />
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4">
-      <FlashMessages error={params.error === "forbidden" ? FORBIDDEN : params.error} ok={params.ok} />
+      <FlashMessages error={params.error === "forbidden" ? FORBIDDEN : undefined} />
       <PageHeader
         eyebrow={`${session.tenantName} · ${formatDate(date)}`}
         title="Dashboard"
         description="What needs a decision today."
       />
+
+      {setup && !setup.complete ? <GettingStarted steps={setup.steps} /> : null}
 
       <Suspense fallback={<SkeletonStats count={seesMoney ? 5 : 4} />}>
         <Kpis date={date} seesMoney={seesMoney} />
@@ -75,6 +97,88 @@ export default async function DashboardPage({
         </div>
       ) : null}
     </div>
+  );
+}
+
+/* --------------------------------------------------------- getting started */
+
+type SetupStep = { label: string; detail: string; href: string; action: string; done: boolean };
+
+/**
+ * The five row-counts that mean "this account can run a day". Head-only
+ * queries, same trick as the nav badges. Any query failure counts as not done —
+ * an unticked step is honest, a wrongly ticked one hides the next action.
+ */
+async function setupSteps(): Promise<{ steps: SetupStep[]; complete: boolean; fresh: boolean }> {
+  const supabase = await createClient();
+  const head = { count: "exact" as const, head: true };
+
+  const [depots, customers, agreements, templates, routes] = await Promise.all([
+    supabase.from("depots").select("id", head).is("deleted_at", null),
+    supabase.from("customers").select("id", head).is("deleted_at", null),
+    supabase.from("service_agreements").select("id", head).is("deleted_at", null),
+    supabase.from("route_templates").select("id", head).is("deleted_at", null),
+    supabase.from("daily_routes").select("id", head),
+  ]);
+
+  const steps: SetupStep[] = [
+    {
+      label: "Add your first site",
+      detail: "Sites own your routes, vehicles and stock. One is enough to start.",
+      href: "/admin/depots", action: "Add a site",
+      done: (depots.count ?? 0) > 0,
+    },
+    {
+      label: "Add a customer",
+      detail: "Just a name, a phone number and where they are.",
+      href: "/customers/new", action: "Add a customer",
+      done: (customers.count ?? 0) > 0,
+    },
+    {
+      label: "Create their contract",
+      detail: "Which days you collect and deliver, and what you charge.",
+      href: "/agreements/new", action: "Create a contract",
+      done: (agreements.count ?? 0) > 0,
+    },
+    {
+      label: "Set up the weekly run",
+      detail: "The recurring week: which customers a driver visits, in what order.",
+      href: "/routes/templates", action: "Set up a weekly run",
+      done: (templates.count ?? 0) > 0,
+    },
+    {
+      label: "Plan today's runs",
+      detail: "Turn the weekly run into today's work and hand it to a driver.",
+      href: "/routes/daily", action: "Plan today",
+      done: (routes.count ?? 0) > 0,
+    },
+  ];
+
+  return {
+    steps,
+    complete: steps.every((step) => step.done),
+    fresh: (customers.count ?? 0) === 0,
+  };
+}
+
+function GettingStarted({ steps }: { steps: SetupStep[] }) {
+  const firstOpen = steps.findIndex((step) => !step.done);
+  return (
+    <Card
+      title="Getting started"
+      description="Each step ticks itself off as soon as the thing exists."
+    >
+      <ol className="space-y-3">
+        {steps.map((step, index) => (
+          <Stage key={step.label} index={index + 1} label={step.label}
+                 detail={step.detail} done={step.done}>
+            {index === firstOpen ? (
+              <ButtonLink href={step.href} variant="primary">{step.action}</ButtonLink>
+            ) : null}
+          </Stage>
+        ))}
+      </ol>
+    </Card>
   );
 }
 
@@ -138,7 +242,7 @@ async function Kpis({ date, seesMoney }: { date: string; seesMoney: boolean }) {
       />
       <Stat
         flush
-        label="Exceptions"
+        label="Problems"
         value={String(late)}
         hint={late === 0 ? "none open" : "need a decision"}
         tone={late > 0 ? "danger" : "success"}

@@ -5,10 +5,12 @@ import { createClient } from "@/lib/supabase/server";
 import { date, dateTime, today } from "@/lib/format";
 import type { DailyRoute, Item } from "@/lib/db/types";
 import {
-  Button, Card, EmptyState, FlashMessages, Notice, PageHeader, SkeletonRows,
-  StatusBadge, humanise,
+  Card, EmptyState, Notice, PageHeader, SkeletonRows,
+  Stage, StatusBadge, humanise,
 } from "@/components/ui";
-import { Checkbox, Field, Input, Select, SubmitButton, Textarea } from "@/components/form";
+import { Field, Input, Select, SubmitButton, Textarea } from "@/components/form";
+import { ConfirmSubmit } from "@/components/confirm-submit";
+import { InspectionChecklist } from "./inspection-checklist";
 import { OfflineCapture, ServiceWorkerRegistrar } from "@/components/offline-capture";
 import { MediaUploadField } from "@/components/media-upload-field";
 import { CHECKLIST_KEYS, CHECKLIST_LABELS } from "./checklist";
@@ -61,7 +63,6 @@ export default async function RunPage({
   return (
     <div className="space-y-6">
       <ServiceWorkerRegistrar />
-      <FlashMessages error={params.error} ok={params.ok} />
       <PageHeader
         title={`Today's run · ${date(routeDate)}`}
         description={driver.full_name}
@@ -86,8 +87,12 @@ export default async function RunPage({
 }
 
 /**
- * The guided workflow from spec §7.8. Exactly one step is actionable at a time,
- * so a driver can never skip the inspection or the load confirmation.
+ * The guided workflow from spec §7.8, in order, with the next step actionable.
+ *
+ * The inspection is step 1 and stays the expected start of the day, but it no
+ * longer blocks the load confirmation — a run whose inspection went on paper,
+ * or whose driver is not linked to a driver record, used to be unstartable by
+ * anyone. The database rule went with it (migration 0012).
  */
 function RunWorkflow({ route }: { route: DailyRoute }) {
   const inspectionDone = !!route.inspection_id;
@@ -98,17 +103,15 @@ function RunWorkflow({ route }: { route: DailyRoute }) {
     <Card title={`${route.code} · ${route.name}`}>
       <ol className="space-y-3">
         <Stage index={1} label="Vehicle inspection" done={inspectionDone}
-               detail={inspectionDone ? "Recorded" : "Required before the run can start"}>
-          {!inspectionDone ? (
+               detail={inspectionDone ? "Recorded" : "Record it before you set off"}>
+          {!inspectionDone && !started ? (
             route.vehicle_id ? (
               <form action={submitInspection} className="space-y-3">
                 <input type="hidden" name="route_id" value={route.id} />
                 <input type="hidden" name="vehicle_id" value={route.vehicle_id} />
-                <div className="grid gap-2 sm:grid-cols-2">
-                  {CHECKLIST_KEYS.map((key) => (
-                    <Checkbox key={key} name={`check_${key}`} label={CHECKLIST_LABELS[key]} defaultChecked />
-                  ))}
-                </div>
+                <InspectionChecklist
+                  items={CHECKLIST_KEYS.map((key) => ({ name: `check_${key}`, label: CHECKLIST_LABELS[key] }))}
+                />
                 <div className="grid gap-3 sm:grid-cols-3">
                   <Field label="Odometer (km)" name="odometer_km">
                     <Input name="odometer_km" type="number" min={0} inputMode="numeric" />
@@ -135,7 +138,7 @@ function RunWorkflow({ route }: { route: DailyRoute }) {
 
         <Stage index={2} label="Load clean linen" done={loadDone}
                detail={loadDone ? `Confirmed ${dateTime(route.load_confirmed_at)}` : "Confirm once the van is loaded"}>
-          {inspectionDone && !loadDone ? (
+          {!loadDone ? (
             <form action={confirmLoad}>
               <input type="hidden" name="route_id" value={route.id} />
               <SubmitButton>Confirm load</SubmitButton>
@@ -144,7 +147,7 @@ function RunWorkflow({ route }: { route: DailyRoute }) {
         </Stage>
 
         <Stage index={3} label="Start route" done={started}
-               detail={started ? `Started ${dateTime(route.started_at)}` : "Available once inspection and load are done"}>
+               detail={started ? `Started ${dateTime(route.started_at)}` : "Available once the load is confirmed"}>
           {loadDone && !started ? (
             <form action={startRun}>
               <input type="hidden" name="route_id" value={route.id} />
@@ -183,35 +186,18 @@ function RunWorkflow({ route }: { route: DailyRoute }) {
           {route.unloaded_at && !route.closed_at ? (
             <form action={closeRun}>
               <input type="hidden" name="route_id" value={route.id} />
-              <Button variant="primary">Close run</Button>
+              <ConfirmSubmit
+                label="Close run"
+                variant="primary"
+                eyebrow="Final step"
+                consequence="This closes the run for the day. A closed run cannot be reopened."
+                pendingLabel="Closing…"
+              />
             </form>
           ) : null}
         </Stage>
       </ol>
     </Card>
-  );
-}
-
-function Stage({
-  index, label, detail, done, children,
-}: {
-  index: number; label: string; detail: string; done: boolean; children?: React.ReactNode;
-}) {
-  return (
-    <li className="rounded-md border p-3">
-      <div className="flex items-start gap-3">
-        <span aria-hidden
-              className={`flex h-6 w-6 shrink-0 items-center justify-center text-xs font-semibold ${
-                done ? "bg-success/15 text-success" : "bg-surface-muted text-muted-foreground"}`}>
-          {done ? "✓" : index}
-        </span>
-        <div className="min-w-0 flex-1">
-          <p className="text-sm font-medium">{label}</p>
-          <p className="text-xs text-muted-foreground">{detail}</p>
-          {children ? <div className="mt-3">{children}</div> : null}
-        </div>
-      </div>
-    </li>
   );
 }
 

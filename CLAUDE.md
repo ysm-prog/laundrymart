@@ -20,9 +20,13 @@ The master spec names a .NET 9 Web API; this build follows the supplied skeleton
   request. `requireCapability()` guards pages; `assertCapability()` guards actions.
 - Functions pinned to `syd1` to co-locate with the Sydney DB (vercel.json).
 - The session refresh + auth gate is `src/proxy.ts` (Next 16's rename of `middleware`).
-- Server Actions only for writes. They derive `tenant_id` from the session and redirect with
-  `?error=` / `?ok=`. The one exception is `/api/sync`, which exists because the offline
-  outbox needs a batch endpoint it can replay.
+- Server Actions only for writes. They derive `tenant_id` from the session; `fail()`/`done()`
+  set a one-shot flash cookie and redirect clean (always `return fail(...)` — the `return` is
+  what lets TS narrow). `(app)/template.tsx` reads the cookie — a template, not the layout,
+  because templates re-render on every navigation including a same-path action redirect — and
+  `FlashToast` shows it (success auto-dismisses, errors stick) then deletes it. The one
+  URL-param survivor is the auth gate's `?error=forbidden`, set during render where a cookie
+  cannot be. `/api/sync` stays the one API exception for the offline outbox.
 - Pure domain logic lives in `src/lib/domain/` with no database access: the service calendar,
   pricing, ABN validation and date helpers. Unit-tested; shared by preview, route generation
   and invoicing so they cannot diverge.
@@ -47,11 +51,15 @@ Resource-scoped beyond tenancy:
   so it is always written from the session and never from the request.
 
 Roles and capabilities are declared once in `src/lib/roles.ts` and drive the nav, page guards
-and action guards.
+and action guards. `routes.write` (plan and assign) is separate from `routes.status` (advance
+a run that is already out): the latter also goes to `driver` — RLS confines them to their own
+run — and to `customer_service`, so a stuck run is not waiting on a dispatcher.
 
 ## 4. Business rules enforced in the database
-- Run cannot start without `inspection_id` and `load_confirmed_at`; cannot close before
-  `unloaded_at` (`guard_route_transition`).
+- Run cannot start without `load_confirmed_at`; cannot close before `unloaded_at`
+  (`guard_route_transition`). The vehicle inspection is recorded and surfaced but is **not**
+  a gate — 0012 dropped that check, because only a driver on `/run` can create an inspection
+  and a run without one had no legal transition out of `inspection_pending`.
 - Items on an active agreement cannot be soft-deleted (`guard_item_soft_delete`).
 - Customer / agreement / job / invoice / credit-note numbers come from `next_number()`.
 - `move_inventory()` is the single entry point for stock changes: it upserts both pools and
@@ -94,6 +102,9 @@ branches deploy. Never force-push `Prod`.
 - `0009_warehouse` — production batches and their manifest lines, stage/manifest guards.
 - `0010_function_hardening` — tenant check inside `next_number()`, pinned `search_path`.
 - `0011_revoke_public_execute` — closes the implicit PUBLIC grant on `public` functions.
+- `0012_optional_inspection` — `guard_route_transition` no longer requires `inspection_id`
+  to start a run. Restates the pinned `search_path` (a `create or replace` drops it) and the
+  revoke, then asserts `anon` still cannot execute it.
 
 Proofs in `supabase/tests/`: `rls_isolation`, `rls_coverage`, `driver_scope`,
 `business_rules`, `media_scope`, `warehouse_rules` (47 assertions). Demo data in
@@ -163,6 +174,13 @@ The sidebar rail keeps literal hex colours: it is the one surface that stays nea
 both themes, so it must not follow the surface tokens — and it needs its own `border-r`,
 because in dark mode the page background is that same near-black and the edge vanishes.
 
+Guidance idiom: `Stage` in `ui.tsx` (the run screen's numbered-step pattern, also the
+dashboard's getting-started checklist — exactly one step actionable at a time);
+`ConfirmSubmit` for final actions (inline consequence strip + optional reason, no modals);
+`FlashToast` for action feedback. UI labels use operator language (Sites, Contracts, Problems,
+Stops, Weekly runs, Today's runs, People) while routes and schema keep the domain names —
+`docs/SIMPLIFICATION-DESIGN.md` holds the rename map and the rest of the redesign spec.
+
 `/design-preview` is a static component gallery: no data, 404s in production, outside the auth
 gate so it can be rendered from a build box. It exists because every real screen is an async
 server component reading Supabase, so none render without a live project — which is how a
@@ -178,7 +196,7 @@ production_batches→auth.users.
 
 ## 11. Hosted project
 `laundrymart-syd` · ref `xujhwljrmogenhvqpkrf` · ap-southeast-2 (Sydney) · org `ysm-prog`.
-Deployed on Vercel at `ats.coreit.com.au`. All 11 migrations applied; demo tenant seeded
+Deployed on Vercel at `ats.coreit.com.au`. All 12 migrations applied; demo tenant seeded
 (`Harbour Commercial Laundry`); two `super_admin` logins, one also linked to the seeded driver.
 Sign-in verified end to end 2026-08-05.
 
@@ -211,6 +229,51 @@ Both are compositions over existing tables — neither added a migration.
   are edited and invoices voided.
 
 ## 18. Changelog
+### 2026-08-05 · Simplification Phase A: flash toasts, operator language, guided setup
+Per `docs/SIMPLIFICATION-ROADMAP.md` / `docs/SIMPLIFICATION-DESIGN.md` (the BA + design
+review of first-time operability). No migrations.
+- **Flash messages moved out of the URL.** `fail()`/`done()` now set a one-shot cookie and
+  redirect clean; a new `(app)/template.tsx` + `FlashToast` render it (success auto-dismisses
+  in 5 s, errors stick). Kills the stale-message-on-refresh/bookmark class, and incidentally
+  the broken `?selected=…?error=…` double-query URLs the old string-append produced. All 267
+  call sites became `return fail(...)`; the dead `<FlashMessages>` plumbing came out of every
+  `(app)` page (the dashboard keeps one for the auth gate's render-time `?error=forbidden`).
+- **Operator language.** Nav and titles: Sites, Contracts, Problems, Stops, Weekly runs,
+  Today's runs, Plan the day, People, "Create this month's invoices", "Adjust stock". Routes
+  and schema unchanged; trade terms kept as eyebrows where useful.
+- **Getting-started checklist on the dashboard** (site → customer → contract → weekly run →
+  plan today), row-count driven, using `Stage` — extracted from the run screen into `ui.tsx`
+  as the app-wide guidance idiom. A tenant with no customers sees only the checklist.
+- **People screen shows emails, not UUID prefixes** — resolved per-membership via the admin
+  client (tenant's membership rows first, never list-and-filter); degrades to short ids
+  without a service key. Supabase/RLS jargon rewritten out of the page copy.
+- **`ConfirmSubmit`** inline confirm strip (consequence sentence + optional required reason)
+  on void invoice and close run. **Inspection checklist now starts unchecked** with a
+  deliberate "All checks OK" fast path — an attestation, not a pre-signed form.
+- Hints/defaults pass on the customer and contract forms (start date defaults to today);
+  empty states gained next-step actions; `/design-preview` gained a Guidance section.
+
+### 2026-08-05 · A run could be stranded; the inspection no longer gates the start
+- **`inspection_pending` was a dead end.** The office status control listed no transition out
+  of it, so once a dispatcher requested an inspection the only remaining button was "Cancel
+  run" — and the database refused `in_progress` without an `inspection_id`, which only a
+  driver on `/run` can create. A run whose driver inspected on paper, or whose login was not
+  linked to a driver record, could not be started by anyone. `0012` drops the inspection check
+  (the inspection is still recorded and shown); load-before-start and unload-before-close stay,
+  because those protect data rather than process.
+- **`routes.status` split out of `routes.write`.** Advancing a run that is already out on the
+  road is a floor decision, not a planning one. It now also goes to `driver` (RLS keeps them to
+  their own run) and `customer_service`. Planning and assignment stay on `routes.write`.
+- **Every non-terminal state now has a forward move**, including "Confirm load" from the
+  office, and `setRouteStatus` stamps the timestamps each state implies. Previously the office
+  could set `unloading` without `unloaded_at` and then be refused at "Close run" — a second
+  dead end, reached from the opposite direction.
+- The unload inventory sweep moved to `src/lib/routes/unload.ts` and is shared by the driver's
+  unload and the office one, so marking a run unloaded from a desk cannot strand stock in
+  `in_transit` on a vehicle that is back at the depot.
+- Recording an inspection no longer walks a moving run's status backwards to
+  `inspection_complete` — reachable now that the inspection can arrive late.
+
 ### 2026-08-05 · Dispatch planner and the billing two-pane (stage 3 complete)
 - **`/routes/planner`** — the pack's day board. See §17. New nav entry gated on `routes.write`,
   since a board you cannot apply is worse than no board.

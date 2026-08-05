@@ -40,7 +40,7 @@ const customerSchema = z.object({
 export async function createCustomer(formData: FormData): Promise<void> {
   const session = await assertCapability("customers.write");
   const parsed = customerSchema.safeParse(toObject(formData));
-  if (!parsed.success) fail("/customers/new", firstIssue(parsed.error));
+  if (!parsed.success) return fail("/customers/new", firstIssue(parsed.error));
 
   const supabase = await createClient();
 
@@ -48,7 +48,7 @@ export async function createCustomer(formData: FormData): Promise<void> {
   // two dispatchers creating a customer at once can't collide.
   const { data: customerNumber, error: numberError } = await supabase
     .rpc("next_number", { t: session.tenantId, k: "customer", p: "CUST" });
-  if (numberError) fail("/customers/new", describeDbError(numberError));
+  if (numberError) return fail("/customers/new", describeDbError(numberError));
 
   const { data, error } = await supabase
     .from("customers")
@@ -61,7 +61,7 @@ export async function createCustomer(formData: FormData): Promise<void> {
     .select("id, business_name, customer_number")
     .single();
 
-  if (error) fail("/customers/new", describeDbError(error));
+  if (error) return fail("/customers/new", describeDbError(error));
 
   await recordAudit(session, {
     entity: "customer", entityId: data.id, action: "create",
@@ -69,16 +69,16 @@ export async function createCustomer(formData: FormData): Promise<void> {
   });
 
   revalidatePath("/customers");
-  done(`/customers/${data.id}`, `Customer ${data.customer_number} created.`);
+  return done(`/customers/${data.id}`, `Customer ${data.customer_number} created.`);
 }
 
 export async function updateCustomer(formData: FormData): Promise<void> {
   const session = await assertCapability("customers.write");
   const id = z.string().uuid().safeParse(formData.get("id"));
-  if (!id.success) fail("/customers", "That customer could not be found.");
+  if (!id.success) return fail("/customers", "That customer could not be found.");
 
   const parsed = customerSchema.safeParse(toObject(formData));
-  if (!parsed.success) fail(`/customers/${id.data}/edit`, firstIssue(parsed.error));
+  if (!parsed.success) return fail(`/customers/${id.data}/edit`, firstIssue(parsed.error));
 
   const supabase = await createClient();
   const { error } = await supabase
@@ -88,7 +88,7 @@ export async function updateCustomer(formData: FormData): Promise<void> {
     // Belt and braces: RLS already scopes this, the filter documents the intent.
     .eq("tenant_id", session.tenantId);
 
-  if (error) fail(`/customers/${id.data}/edit`, describeDbError(error));
+  if (error) return fail(`/customers/${id.data}/edit`, describeDbError(error));
 
   await recordAudit(session, {
     entity: "customer", entityId: id.data, action: "update",
@@ -96,7 +96,7 @@ export async function updateCustomer(formData: FormData): Promise<void> {
   });
 
   revalidatePath(`/customers/${id.data}`);
-  done(`/customers/${id.data}`, "Customer updated.");
+  return done(`/customers/${id.data}`, "Customer updated.");
 }
 
 const locationSchema = z.object({
@@ -114,7 +114,7 @@ const locationSchema = z.object({
 export async function addLocation(formData: FormData): Promise<void> {
   const session = await assertCapability("customers.write");
   const parsed = locationSchema.safeParse(toObject(formData));
-  if (!parsed.success) fail("/customers", firstIssue(parsed.error));
+  if (!parsed.success) return fail("/customers", firstIssue(parsed.error));
 
   const supabase = await createClient();
   const { error } = await supabase.from("customer_locations").insert({
@@ -122,7 +122,7 @@ export async function addLocation(formData: FormData): Promise<void> {
     tenant_id: session.tenantId,
     created_by: session.userId,
   });
-  if (error) fail(`/customers/${parsed.data.customer_id}`, describeDbError(error));
+  if (error) return fail(`/customers/${parsed.data.customer_id}`, describeDbError(error));
 
   await recordAudit(session, {
     entity: "customer_location", entityId: parsed.data.customer_id,
@@ -130,7 +130,7 @@ export async function addLocation(formData: FormData): Promise<void> {
   });
 
   revalidatePath(`/customers/${parsed.data.customer_id}`);
-  done(`/customers/${parsed.data.customer_id}`, `Site "${parsed.data.name}" added.`);
+  return done(`/customers/${parsed.data.customer_id}`, `Site "${parsed.data.name}" added.`);
 }
 
 const contactSchema = z.object({
@@ -148,7 +148,7 @@ const contactSchema = z.object({
 export async function addContact(formData: FormData): Promise<void> {
   const session = await assertCapability("customers.write");
   const parsed = contactSchema.safeParse(toObject(formData));
-  if (!parsed.success) fail("/customers", firstIssue(parsed.error));
+  if (!parsed.success) return fail("/customers", firstIssue(parsed.error));
 
   const supabase = await createClient();
   const { error } = await supabase.from("customer_contacts").insert({
@@ -156,7 +156,7 @@ export async function addContact(formData: FormData): Promise<void> {
     tenant_id: session.tenantId,
     created_by: session.userId,
   });
-  if (error) fail(`/customers/${parsed.data.customer_id}`, describeDbError(error));
+  if (error) return fail(`/customers/${parsed.data.customer_id}`, describeDbError(error));
 
   await recordAudit(session, {
     entity: "customer_contact", entityId: parsed.data.customer_id,
@@ -164,14 +164,14 @@ export async function addContact(formData: FormData): Promise<void> {
   });
 
   revalidatePath(`/customers/${parsed.data.customer_id}`);
-  done(`/customers/${parsed.data.customer_id}`, `Contact "${parsed.data.name}" added.`);
+  return done(`/customers/${parsed.data.customer_id}`, `Contact "${parsed.data.name}" added.`);
 }
 
 /** Soft delete (business rule §11) — history stays intact. */
 export async function archiveCustomer(formData: FormData): Promise<void> {
   const session = await assertCapability("customers.write");
   const id = z.string().uuid().safeParse(formData.get("id"));
-  if (!id.success) fail("/customers", "That customer could not be found.");
+  if (!id.success) return fail("/customers", "That customer could not be found.");
 
   const supabase = await createClient();
   const { error } = await supabase
@@ -180,9 +180,9 @@ export async function archiveCustomer(formData: FormData): Promise<void> {
     .eq("id", id.data)
     .eq("tenant_id", session.tenantId);
 
-  if (error) fail(`/customers/${id.data}`, describeDbError(error));
+  if (error) return fail(`/customers/${id.data}`, describeDbError(error));
 
   await recordAudit(session, { entity: "customer", entityId: id.data, action: "delete" });
   revalidatePath("/customers");
-  done("/customers", "Customer archived.");
+  return done("/customers", "Customer archived.");
 }

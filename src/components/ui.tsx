@@ -104,6 +104,37 @@ export function Stat({
   return href ? <Link href={href} className={className}>{body}</Link> : <div className={className}>{body}</div>;
 }
 
+/**
+ * One step of a guided sequence — the run screen's stage pattern, promoted to
+ * the app-wide guidance idiom: a numbered square that becomes a tick, a label,
+ * a one-line detail, and (for the step that is live right now) its controls.
+ * Render inside an <ol>; keep exactly one step actionable at a time.
+ */
+export function Stage({
+  index, label, detail, done, children,
+}: {
+  index: number; label: string; detail: string; done: boolean; children?: ReactNode;
+}) {
+  return (
+    <li className="border p-3">
+      <div className="flex items-start gap-3">
+        <span aria-hidden
+              className={cx(
+                "flex h-6 w-6 shrink-0 items-center justify-center text-xs font-semibold",
+                done ? "bg-success/15 text-success" : "bg-surface-muted text-muted-foreground",
+              )}>
+          {done ? "✓" : index}
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-medium">{label}</p>
+          <p className="text-xs text-muted-foreground">{detail}</p>
+          {children ? <div className="mt-3">{children}</div> : null}
+        </div>
+      </div>
+    </li>
+  );
+}
+
 export function EmptyState({
   title, description, action,
 }: { title: string; description?: string; action?: ReactNode }) {

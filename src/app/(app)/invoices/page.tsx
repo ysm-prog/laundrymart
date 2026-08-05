@@ -6,7 +6,7 @@ import { can } from "@/lib/roles";
 import { date, money, relativeDays, today } from "@/lib/format";
 import { CHARGE_TYPE_LABELS, type ChargeType } from "@/lib/domain/pricing";
 import {
-  Button, ButtonLink, Card, EmptyState, Eyebrow, FlashMessages, Notice, PageHeader,
+  Button, ButtonLink, Card, EmptyState, Eyebrow, Notice, PageHeader,
   SkeletonRows, SkeletonStats, StatusBadge, cx, humanise,
 } from "@/components/ui";
 import { Field, Input, Select, SubmitButton } from "@/components/form";
@@ -44,15 +44,14 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
 
   return (
     <div className="space-y-4">
-      <FlashMessages error={params.error} ok={params.ok} />
       <PageHeader
         eyebrow="Billing"
         title="Invoices"
-        description="Recurring invoices come from service agreements and completed work; manual and credit invoices sit alongside them."
+        description="Most invoices are created from contracts and completed work each month; one-off and credit invoices sit alongside them."
         actions={writable ? (
           <>
             <ButtonLink href={hrefWith(params, { tool: "recurring", selected: undefined })}>
-              Generate period
+              Create this month&apos;s invoices
             </ButtonLink>
             <ButtonLink href={hrefWith(params, { tool: "manual", selected: undefined })}>
               Manual invoice
@@ -285,7 +284,7 @@ async function WorkPane({ params, writable }: { params: Search; writable: boolea
         action={writable ? (
           <div className="flex flex-wrap justify-center gap-1.5">
             <ButtonLink href={hrefWith(params, { tool: "recurring" })} variant="primary">
-              Generate period
+              Create this month&apos;s invoices
             </ButtonLink>
             <ButtonLink href={hrefWith(params, { tool: "manual" })}>Manual invoice</ButtonLink>
           </div>
@@ -564,8 +563,8 @@ function PaneSection({ title, children }: { title: string; children: React.React
 function GenerateTool({ params }: { params: Search }) {
   return (
     <Card
-      title="Generate recurring invoices"
-      description="Bills every active agreement for the period. Already-billed periods are skipped."
+      title="Create this month's invoices"
+      description="Bills every active contract for the period below. Anything already billed is skipped, so it is safe to run twice."
       actions={<ButtonLink href={hrefWith(params, { tool: undefined })}>Close</ButtonLink>}
     >
       <form action={generateInvoices} className="grid gap-3 sm:grid-cols-2">

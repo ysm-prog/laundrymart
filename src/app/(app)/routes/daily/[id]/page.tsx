@@ -6,7 +6,7 @@ import { can } from "@/lib/roles";
 import { date, dateTime, time } from "@/lib/format";
 import type { DailyRoute, Driver, Vehicle } from "@/lib/db/types";
 import {
-  Button, ButtonLink, Card, DataTable, EmptyState, FlashMessages, Notice,
+  Button, ButtonLink, Card, DataTable, EmptyState, Notice,
   PageHeader, SkeletonRows, StatusBadge, humanise,
 } from "@/components/ui";
 import { Field, FormActions, Select, SubmitButton, Textarea } from "@/components/form";
@@ -26,25 +26,51 @@ type JobRow = {
   customer_locations: { name: string; suburb: string | null } | null;
 };
 
-/** The run states a dispatcher can drive from the office, in workflow order. */
-const NEXT_STATUS: Array<{ from: string[]; to: string; label: string }> = [
+type Transition = {
+  from: string[];
+  to: string;
+  label: string;
+  /** Extra prerequisite the database will check, so we never offer a dead button. */
+  ready?: (route: DailyRoute) => boolean;
+};
+
+/**
+ * The run states an office user can drive, in workflow order.
+ *
+ * Every non-terminal state has at least one move out of it. It used to be
+ * possible to strand a run: `inspection_pending` had no entry here at all, so
+ * once a dispatcher requested an inspection the only remaining button was
+ * "Cancel run" unless a driver happened to be able to submit one. The
+ * inspection is no longer a database gate either (migration 0012), so the
+ * office can confirm the load and start the run on the driver's behalf.
+ */
+const ROUTE_TRANSITIONS: Transition[] = [
   { from: ["planned"], to: "inspection_pending", label: "Request inspection" },
-  { from: ["load_confirmed", "inspection_complete"], to: "in_progress", label: "Start route" },
+  {
+    from: ["planned", "inspection_pending", "inspection_complete"],
+    to: "load_confirmed", label: "Confirm load",
+  },
+  {
+    from: ["planned", "inspection_pending", "inspection_complete", "load_confirmed"],
+    to: "in_progress", label: "Start route", ready: (route) => !!route.load_confirmed_at,
+  },
   { from: ["in_progress"], to: "returning", label: "Mark returning" },
-  { from: ["returning"], to: "unloading", label: "Mark unloading" },
-  { from: ["unloading"], to: "closed", label: "Close run" },
+  { from: ["in_progress", "returning"], to: "unloading", label: "Mark unloaded" },
+  {
+    from: ["returning", "unloading"], to: "closed", label: "Close run",
+    ready: (route) => !!route.unloaded_at,
+  },
 ];
 
 export default async function DailyRouteDetailPage({
-  params, searchParams,
+  params,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ error?: string; ok?: string }>;
 }) {
   const { id } = await params;
-  const flash = await searchParams;
   const session = await requireCapability("routes.read");
   const writable = can(session.role, "routes.write");
+  const canAdvance = can(session.role, "routes.status");
 
   const supabase = await createClient();
   const { data: route } = await supabase
@@ -55,14 +81,16 @@ export default async function DailyRouteDetailPage({
 
   if (!route) notFound();
 
-  const blockers = [
-    !route.inspection_id && "vehicle inspection not recorded",
-    !route.load_confirmed_at && "load not confirmed",
-  ].filter(Boolean) as string[];
+  const moves = canAdvance
+    ? ROUTE_TRANSITIONS.filter((step) =>
+        step.from.includes(route.status) && (step.ready?.(route) ?? true))
+    : [];
+  // The inspection is recorded and shown, but no longer holds the run up.
+  const startBlocked = !route.load_confirmed_at
+    && !["in_progress", "returning", "unloading", "closed", "cancelled"].includes(route.status);
 
   return (
     <div className="space-y-6">
-      <FlashMessages error={flash.error} ok={flash.ok} />
       <PageHeader
         title={`${route.code} · ${date(route.route_date)}`}
         description={route.name}
@@ -74,16 +102,17 @@ export default async function DailyRouteDetailPage({
         }
       />
 
-      {blockers.length && !["closed", "cancelled"].includes(route.status) ? (
+      {startBlocked ? (
         <Notice tone="warning" title="This run cannot start yet">
-          {blockers.join(" · ")}. The database refuses the transition until both are done.
+          The load has not been confirmed. Confirm it below, or have the driver confirm it on
+          their run — the database refuses the start until then.
         </Notice>
       ) : null}
 
       <div className="grid gap-4 lg:grid-cols-3">
         <Card title="Run progress" className="lg:col-span-2">
           <ol className="grid gap-2 sm:grid-cols-2">
-            <Step label="Inspection" value={route.inspection_id ? "Recorded" : "Outstanding"} done={!!route.inspection_id} />
+            <Step label="Inspection" value={route.inspection_id ? "Recorded" : "Not recorded"} done={!!route.inspection_id} />
             <Step label="Load confirmed" value={dateTime(route.load_confirmed_at)} done={!!route.load_confirmed_at} />
             <Step label="Started" value={dateTime(route.started_at)} done={!!route.started_at} />
             <Step label="Returned" value={dateTime(route.returned_at)} done={!!route.returned_at} />
@@ -91,22 +120,21 @@ export default async function DailyRouteDetailPage({
             <Step label="Closed" value={dateTime(route.closed_at)} done={!!route.closed_at} />
           </ol>
 
-          {writable ? (
+          {canAdvance && !["closed", "cancelled"].includes(route.status) ? (
             <div className="mt-4 flex flex-wrap gap-2 border-t pt-4">
-              {NEXT_STATUS.filter((step) => step.from.includes(route.status)).map((step) => (
+              {moves.map((step, index) => (
                 <form key={step.to} action={setRouteStatus}>
                   <input type="hidden" name="id" value={id} />
                   <input type="hidden" name="status" value={step.to} />
-                  <Button variant="primary">{step.label}</Button>
+                  {/* Workflow order, so the first match is the natural next step. */}
+                  <Button variant={index === 0 ? "primary" : "secondary"}>{step.label}</Button>
                 </form>
               ))}
-              {!["closed", "cancelled"].includes(route.status) ? (
-                <form action={setRouteStatus}>
-                  <input type="hidden" name="id" value={id} />
-                  <input type="hidden" name="status" value="cancelled" />
-                  <Button variant="danger">Cancel run</Button>
-                </form>
-              ) : null}
+              <form action={setRouteStatus}>
+                <input type="hidden" name="id" value={id} />
+                <input type="hidden" name="status" value="cancelled" />
+                <Button variant="danger">Cancel run</Button>
+              </form>
             </div>
           ) : null}
         </Card>

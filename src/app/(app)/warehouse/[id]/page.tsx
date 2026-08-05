@@ -5,7 +5,7 @@ import { can } from "@/lib/roles";
 import { dateTime } from "@/lib/format";
 import type { Customer, Depot, Item } from "@/lib/db/types";
 import {
-  Button, ButtonLink, Card, DataTable, EmptyState, FlashMessages, Notice,
+  Button, ButtonLink, Card, DataTable, EmptyState, Notice,
   PageHeader, StatusBadge,
 } from "@/components/ui";
 import { Field, Input, Select, SubmitButton } from "@/components/form";
@@ -46,13 +46,11 @@ type LineRow = {
 };
 
 export default async function BatchDetailPage({
-  params, searchParams,
+  params,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ error?: string; ok?: string }>;
 }) {
   const { id } = await params;
-  const flash = await searchParams;
   const session = await requireCapability("warehouse.read");
   const writable = can(session.role, "warehouse.write");
 
@@ -84,7 +82,6 @@ export default async function BatchDetailPage({
 
   return (
     <div className="space-y-6">
-      <FlashMessages error={flash.error} ok={flash.ok} />
       <PageHeader
         title={`Batch ${batch.batch_number}`}
         description={[

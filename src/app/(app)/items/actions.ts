@@ -24,7 +24,7 @@ const itemSchema = z.object({
 export async function createItem(formData: FormData): Promise<void> {
   const session = await assertCapability("items.write");
   const parsed = itemSchema.safeParse(toObject(formData));
-  if (!parsed.success) fail("/items", firstIssue(parsed.error));
+  if (!parsed.success) return fail("/items", firstIssue(parsed.error));
 
   const supabase = await createClient();
   const { data, error } = await supabase
@@ -33,35 +33,35 @@ export async function createItem(formData: FormData): Promise<void> {
     .select("id, sku, name")
     .single();
 
-  if (error) fail("/items", describeDbError(error));
+  if (error) return fail("/items", describeDbError(error));
 
   await recordAudit(session, {
     entity: "item", entityId: data.id, action: "create", summary: `${data.sku} ${data.name}`,
   });
   revalidatePath("/items");
-  done("/items", `Item ${data.sku} created.`);
+  return done("/items", `Item ${data.sku} created.`);
 }
 
 export async function updateItem(formData: FormData): Promise<void> {
   const session = await assertCapability("items.write");
   const id = z.string().uuid().safeParse(formData.get("id"));
-  if (!id.success) fail("/items", "That item could not be found.");
+  if (!id.success) return fail("/items", "That item could not be found.");
 
   const parsed = itemSchema.safeParse(toObject(formData));
-  if (!parsed.success) fail(`/items/${id.data}`, firstIssue(parsed.error));
+  if (!parsed.success) return fail(`/items/${id.data}`, firstIssue(parsed.error));
 
   const supabase = await createClient();
   const { error } = await supabase
     .from("items").update(parsed.data)
     .eq("id", id.data).eq("tenant_id", session.tenantId);
 
-  if (error) fail(`/items/${id.data}`, describeDbError(error));
+  if (error) return fail(`/items/${id.data}`, describeDbError(error));
 
   await recordAudit(session, {
     entity: "item", entityId: id.data, action: "update", summary: parsed.data.sku,
   });
   revalidatePath("/items");
-  done(`/items/${id.data}`, "Item updated.");
+  return done(`/items/${id.data}`, "Item updated.");
 }
 
 /**
@@ -71,7 +71,7 @@ export async function updateItem(formData: FormData): Promise<void> {
 export async function archiveItem(formData: FormData): Promise<void> {
   const session = await assertCapability("items.write");
   const id = z.string().uuid().safeParse(formData.get("id"));
-  if (!id.success) fail("/items", "That item could not be found.");
+  if (!id.success) return fail("/items", "That item could not be found.");
 
   const supabase = await createClient();
   const { error } = await supabase
@@ -79,9 +79,9 @@ export async function archiveItem(formData: FormData): Promise<void> {
     .update({ status: "archived", deleted_at: new Date().toISOString() })
     .eq("id", id.data).eq("tenant_id", session.tenantId);
 
-  if (error) fail(`/items/${id.data}`, describeDbError(error));
+  if (error) return fail(`/items/${id.data}`, describeDbError(error));
 
   await recordAudit(session, { entity: "item", entityId: id.data, action: "delete" });
   revalidatePath("/items");
-  done("/items", "Item archived.");
+  return done("/items", "Item archived.");
 }

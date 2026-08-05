@@ -1,3 +1,4 @@
+import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 
@@ -5,16 +6,37 @@ import { z } from "zod";
  * Shared plumbing for server actions.
  *
  * The convention across the app: actions never return error objects to the
- * client. They redirect back to the originating page with `?error=` or `?ok=`,
- * which keeps the pages server-rendered and the messages linkable/refreshable.
+ * client. They set a one-shot flash cookie and redirect back to the
+ * originating page; `(app)/template.tsx` reads the cookie on the next render
+ * and shows it as a toast. The cookie (not the URL) carries the message, so a
+ * refresh or a shared link never replays a stale one. It is deliberately not
+ * httpOnly — the toast deletes it from the browser once shown.
+ *
+ * Always `return fail(...)` / `return done(...)`: both redirect and never
+ * come back, and the `return` is what lets TypeScript narrow after the call.
  */
 
-export function fail(path: string, message: string): never {
-  redirect(`${path}?error=${encodeURIComponent(message)}`);
+export type Flash = { tone: "success" | "error"; message: string };
+
+export const FLASH_COOKIE = "flash";
+
+async function flash(path: string, tone: Flash["tone"], message: string): Promise<never> {
+  const store = await cookies();
+  store.set(FLASH_COOKIE, JSON.stringify({ tone, message } satisfies Flash), {
+    path: "/",
+    maxAge: 60,
+    sameSite: "lax",
+    httpOnly: false,
+  });
+  redirect(path);
 }
 
-export function done(path: string, message: string): never {
-  redirect(`${path}?ok=${encodeURIComponent(message)}`);
+export function fail(path: string, message: string): Promise<never> {
+  return flash(path, "error", message);
+}
+
+export function done(path: string, message: string): Promise<never> {
+  return flash(path, "success", message);
 }
 
 /**

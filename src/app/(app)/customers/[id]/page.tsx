@@ -10,7 +10,7 @@ import type {
   Customer, CustomerContact, CustomerLocation, Invoice, Job, ServiceAgreement,
 } from "@/lib/db/types";
 import {
-  ButtonLink, Card, DataTable, EmptyState, FlashMessages, PageHeader,
+  ButtonLink, Card, DataTable, EmptyState, PageHeader,
   SkeletonRows, StatusBadge,
 } from "@/components/ui";
 import { Checkbox, Field, Input, SubmitButton, Textarea } from "@/components/form";
@@ -21,13 +21,11 @@ export const dynamic = "force-dynamic";
 type Params = { id: string };
 
 export default async function CustomerDetailPage({
-  params, searchParams,
+  params,
 }: {
   params: Promise<Params>;
-  searchParams: Promise<{ error?: string; ok?: string }>;
 }) {
   const { id } = await params;
-  const flash = await searchParams;
   const session = await requireCapability("customers.read");
   const writable = can(session.role, "customers.write");
 
@@ -47,7 +45,6 @@ export default async function CustomerDetailPage({
 
   return (
     <div className="space-y-6">
-      <FlashMessages error={flash.error} ok={flash.ok} />
       <PageHeader
         title={customer.business_name}
         description={`${customer.customer_number}${customer.trading_name ? ` · trading as ${customer.trading_name}` : ""}`}
@@ -236,7 +233,7 @@ async function Agreements({ customerId }: { customerId: string }) {
       "pickup_pattern" | "delivery_pattern" | "minimum_charge" | "holiday_rule">[]>();
 
   return (
-    <Card title="Service agreements">
+    <Card title="Contracts">
       <DataTable
         rows={data ?? []}
         rowHref={(row) => `/agreements/${row.id}`}

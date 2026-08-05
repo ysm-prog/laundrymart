@@ -40,7 +40,7 @@ const vehicleSchema = z.object({
 export async function createVehicle(formData: FormData): Promise<void> {
   const session = await assertCapability("fleet.write");
   const parsed = vehicleSchema.safeParse(toObject(formData));
-  if (!parsed.success) fail("/vehicles", firstIssue(parsed.error));
+  if (!parsed.success) return fail("/vehicles", firstIssue(parsed.error));
 
   const supabase = await createClient();
   const { data, error } = await supabase
@@ -54,13 +54,13 @@ export async function createVehicle(formData: FormData): Promise<void> {
     .select("id, registration")
     .single();
 
-  if (error) fail("/vehicles", describeDbError(error));
+  if (error) return fail("/vehicles", describeDbError(error));
 
   await recordAudit(session, {
     entity: "vehicle", entityId: data.id, action: "create", summary: data.registration,
   });
   revalidatePath("/vehicles");
-  done("/vehicles", `Vehicle ${data.registration} added.`);
+  return done("/vehicles", `Vehicle ${data.registration} added.`);
 }
 
 export async function updateVehicleStatus(formData: FormData): Promise<void> {
@@ -69,7 +69,7 @@ export async function updateVehicleStatus(formData: FormData): Promise<void> {
     id: z.string().uuid(),
     maintenance_status: z.enum(["ok", "due", "overdue", "in_service", "out_of_service"]),
   }).safeParse(toObject(formData));
-  if (!parsed.success) fail("/vehicles", firstIssue(parsed.error));
+  if (!parsed.success) return fail("/vehicles", firstIssue(parsed.error));
 
   const supabase = await createClient();
   const { error } = await supabase
@@ -77,14 +77,14 @@ export async function updateVehicleStatus(formData: FormData): Promise<void> {
     .update({ maintenance_status: parsed.data.maintenance_status })
     .eq("id", parsed.data.id).eq("tenant_id", session.tenantId);
 
-  if (error) fail("/vehicles", describeDbError(error));
+  if (error) return fail("/vehicles", describeDbError(error));
 
   await recordAudit(session, {
     entity: "vehicle", entityId: parsed.data.id, action: "status_change",
     summary: parsed.data.maintenance_status,
   });
   revalidatePath("/vehicles");
-  done("/vehicles", "Maintenance status updated.");
+  return done("/vehicles", "Maintenance status updated.");
 }
 
 const fuelLogSchema = z.object({
@@ -101,18 +101,18 @@ const fuelLogSchema = z.object({
 export async function logFuel(formData: FormData): Promise<void> {
   const session = await assertCapability("fleet.write");
   const parsed = fuelLogSchema.safeParse(toObject(formData));
-  if (!parsed.success) fail("/vehicles", firstIssue(parsed.error));
+  if (!parsed.success) return fail("/vehicles", firstIssue(parsed.error));
 
   const supabase = await createClient();
   const { error } = await supabase.from("fuel_logs").insert({
     ...parsed.data, tenant_id: session.tenantId, created_by: session.userId,
   });
-  if (error) fail("/vehicles", describeDbError(error));
+  if (error) return fail("/vehicles", describeDbError(error));
 
   await recordAudit(session, {
     entity: "fuel_log", entityId: parsed.data.vehicle_id, action: "create",
     summary: `${parsed.data.litres ?? 0} L`,
   });
   revalidatePath("/vehicles");
-  done("/vehicles", "Fuel logged.");
+  return done("/vehicles", "Fuel logged.");
 }

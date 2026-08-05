@@ -35,13 +35,13 @@ const movementSchema = z.object({
 export async function moveStock(formData: FormData): Promise<void> {
   const session = await assertCapability("inventory.write");
   const parsed = movementSchema.safeParse(toObject(formData));
-  if (!parsed.success) fail("/inventory", firstIssue(parsed.error));
+  if (!parsed.success) return fail("/inventory", firstIssue(parsed.error));
 
   if (!parsed.data.from_state && !parsed.data.to_state) {
-    fail("/inventory", "Choose at least a source or a destination state.");
+    return fail("/inventory", "Choose at least a source or a destination state.");
   }
   if (parsed.data.from_state === parsed.data.to_state) {
-    fail("/inventory", "Source and destination states must differ.");
+    return fail("/inventory", "Source and destination states must differ.");
   }
 
   const supabase = await createClient();
@@ -65,7 +65,7 @@ export async function moveStock(formData: FormData): Promise<void> {
     p_notes: parsed.data.notes ?? null,
   });
 
-  if (error) fail("/inventory", describeDbError(error));
+  if (error) return fail("/inventory", describeDbError(error));
 
   await recordAudit(session, {
     entity: "inventory_movement", action: "create",
@@ -73,5 +73,5 @@ export async function moveStock(formData: FormData): Promise<void> {
     metadata: { reason: parsed.data.reason },
   });
   revalidatePath("/inventory");
-  done("/inventory", "Stock movement recorded.");
+  return done("/inventory", "Stock movement recorded.");
 }

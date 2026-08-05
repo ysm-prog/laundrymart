@@ -6,6 +6,7 @@ import { assertCapability } from "@/lib/auth/context";
 import { createClient } from "@/lib/supabase/server";
 import { recordAudit } from "@/lib/audit";
 import { isoWeekday } from "@/lib/domain/dates";
+import { sweepVehicleToDepot } from "@/lib/routes/unload";
 import {
   describeDbError, done, fail, firstIssue, optionalText, optionalUuid, requiredDate, toObject,
 } from "@/lib/actions";
@@ -20,7 +21,7 @@ import {
 export async function generateDailyRoutes(formData: FormData): Promise<void> {
   const session = await assertCapability("routes.write");
   const parsed = z.object({ route_date: requiredDate }).safeParse(toObject(formData));
-  if (!parsed.success) fail("/routes/daily", firstIssue(parsed.error));
+  if (!parsed.success) return fail("/routes/daily", firstIssue(parsed.error));
 
   const routeDate = parsed.data.route_date;
   const backTo = `/routes/daily?date=${routeDate}`;
@@ -32,13 +33,13 @@ export async function generateDailyRoutes(formData: FormData): Promise<void> {
     .from("route_templates")
     .select("id, code, name, depot_id, default_driver_id, default_vehicle_id, weekdays")
     .eq("status", "active").is("deleted_at", null);
-  if (templateError) fail(backTo, describeDbError(templateError));
+  if (templateError) return fail(backTo, describeDbError(templateError));
 
   const due = (templates ?? []).filter((template) =>
     Array.isArray(template.weekdays) && template.weekdays.includes(weekday));
 
   if (due.length === 0) {
-    fail(backTo, "No active template runs on that weekday.");
+    return fail(backTo, "No active template runs on that weekday.");
   }
 
   const { data: existing } = await supabase
@@ -67,7 +68,7 @@ export async function generateDailyRoutes(formData: FormData): Promise<void> {
       })
       .select("id")
       .single();
-    if (routeError) fail(backTo, describeDbError(routeError));
+    if (routeError) return fail(backTo, describeDbError(routeError));
     routesCreated += 1;
 
     const { data: stops } = await supabase
@@ -78,7 +79,7 @@ export async function generateDailyRoutes(formData: FormData): Promise<void> {
     for (const stop of stops ?? []) {
       const { data: jobNumber, error: numberError } = await supabase
         .rpc("next_number", { t: session.tenantId, k: "job", p: "JOB" });
-      if (numberError) fail(backTo, describeDbError(numberError));
+      if (numberError) return fail(backTo, describeDbError(numberError));
 
       // A stop's agreement supplies pricing later; link it now while we know it.
       const { data: agreement } = await supabase
@@ -104,13 +105,13 @@ export async function generateDailyRoutes(formData: FormData): Promise<void> {
         status: template.default_driver_id ? "assigned" : "scheduled",
         notes: stop.notes,
       });
-      if (jobError) fail(backTo, describeDbError(jobError));
+      if (jobError) return fail(backTo, describeDbError(jobError));
       jobsCreated += 1;
     }
   }
 
   if (routesCreated === 0) {
-    fail(backTo, "Every template for that weekday already has a route on that date.");
+    return fail(backTo, "Every template for that weekday already has a route on that date.");
   }
 
   await recordAudit(session, {
@@ -119,7 +120,7 @@ export async function generateDailyRoutes(formData: FormData): Promise<void> {
     metadata: { routeDate, routesCreated, jobsCreated },
   });
   revalidatePath("/routes/daily");
-  done(backTo, `Generated ${routesCreated} route(s) and ${jobsCreated} job(s).`);
+  return done(backTo, `Generated ${routesCreated} route(s) and ${jobsCreated} job(s).`);
 }
 
 export async function assignRoute(formData: FormData): Promise<void> {
@@ -131,7 +132,7 @@ export async function assignRoute(formData: FormData): Promise<void> {
     trailer_id: optionalUuid,
     notes: optionalText,
   }).safeParse(toObject(formData));
-  if (!parsed.success) fail("/routes/daily", firstIssue(parsed.error));
+  if (!parsed.success) return fail("/routes/daily", firstIssue(parsed.error));
 
   const backTo = `/routes/daily/${parsed.data.id}`;
   const { id, ...assignment } = parsed.data;
@@ -140,7 +141,7 @@ export async function assignRoute(formData: FormData): Promise<void> {
   const { error } = await supabase
     .from("daily_routes").update(assignment)
     .eq("id", id).eq("tenant_id", session.tenantId);
-  if (error) fail(backTo, describeDbError(error));
+  if (error) return fail(backTo, describeDbError(error));
 
   // Keep the route's jobs in step so drivers see their work on their device.
   if (assignment.driver_id || assignment.vehicle_id) {
@@ -153,16 +154,29 @@ export async function assignRoute(formData: FormData): Promise<void> {
       })
       .eq("route_id", id).eq("tenant_id", session.tenantId)
       .in("status", ["scheduled", "assigned"]);
-    if (jobError) fail(backTo, describeDbError(jobError));
+    if (jobError) return fail(backTo, describeDbError(jobError));
   }
 
   await recordAudit(session, { entity: "daily_route", entityId: id, action: "update", summary: "assignment" });
   revalidatePath(backTo);
-  done(backTo, "Route assignment saved.");
+  return done(backTo, "Route assignment saved.");
 }
 
+/**
+ * Move a run to another workflow state from the office.
+ *
+ * Gated on `routes.status` rather than `routes.write`: advancing a run that is
+ * already out on the road is a floor decision, and restricting it to the roles
+ * that also plan and assign left runs stranded whenever the driver could not
+ * drive their own workflow (see ROUTE_TRANSITIONS on the detail page).
+ *
+ * The state machine's ordering rules live in the database. What this action
+ * adds is the bookkeeping each state implies — the timestamps the driver's own
+ * /run flow would have stamped — because a state reached without them is a run
+ * the guard will refuse to move again later.
+ */
 export async function setRouteStatus(formData: FormData): Promise<void> {
-  const session = await assertCapability("routes.write");
+  const session = await assertCapability("routes.status");
   const parsed = z.object({
     id: z.string().uuid(),
     status: z.enum([
@@ -170,21 +184,51 @@ export async function setRouteStatus(formData: FormData): Promise<void> {
       "in_progress", "returning", "unloading", "closed", "cancelled",
     ]),
   }).safeParse(toObject(formData));
-  if (!parsed.success) fail("/routes/daily", firstIssue(parsed.error));
+  if (!parsed.success) return fail("/routes/daily", firstIssue(parsed.error));
 
-  const backTo = `/routes/daily/${parsed.data.id}`;
+  const { id, status } = parsed.data;
+  const backTo = `/routes/daily/${id}`;
   const supabase = await createClient();
+
+  const { data: route } = await supabase
+    .from("daily_routes")
+    .select("id, status, load_confirmed_at, returned_at, unloaded_at")
+    .eq("id", id).eq("tenant_id", session.tenantId)
+    .maybeSingle();
+  if (!route) return fail(backTo, "That run could not be found.");
+  if (route.status === status) return fail(backTo, `This run is already ${humanStatus(status)}.`);
+
+  const now = new Date().toISOString();
+  const patch: Record<string, unknown> = { status };
+
+  // Only stamp what is still unset — re-entering a state must not rewrite the
+  // time it first happened.
+  if (status === "load_confirmed" && !route.load_confirmed_at) {
+    patch.load_confirmed_at = now;
+    patch.load_confirmed_by = session.userId;
+  }
+  if (status === "returning" && !route.returned_at) patch.returned_at = now;
+  if (status === "unloading" && !route.unloaded_at) {
+    // Same sweep the driver's own unload performs, so stock does not stay
+    // stranded in `in_transit` on a vehicle that is back at the depot.
+    const sweepError = await sweepVehicleToDepot(session.tenantId, id);
+    if (sweepError) return fail(backTo, sweepError);
+    patch.unloaded_at = now;
+  }
 
   // The database enforces the ordering rules; we just surface its message.
   const { error } = await supabase
-    .from("daily_routes").update({ status: parsed.data.status })
-    .eq("id", parsed.data.id).eq("tenant_id", session.tenantId);
-  if (error) fail(backTo, describeDbError(error));
+    .from("daily_routes").update(patch)
+    .eq("id", id).eq("tenant_id", session.tenantId);
+  if (error) return fail(backTo, describeDbError(error));
 
   await recordAudit(session, {
-    entity: "daily_route", entityId: parsed.data.id, action: "status_change",
-    summary: parsed.data.status,
+    entity: "daily_route", entityId: id, action: "status_change", summary: status,
   });
   revalidatePath(backTo);
-  done(backTo, `Route marked ${parsed.data.status.replace(/_/g, " ")}.`);
+  return done(backTo, `Route marked ${humanStatus(status)}.`);
+}
+
+function humanStatus(status: string): string {
+  return status.replace(/_/g, " ");
 }

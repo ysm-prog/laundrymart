@@ -9,6 +9,7 @@ import {
   describeDbError, done, fail, firstIssue, mediaPaths, optionalText, toObject,
 } from "@/lib/actions";
 import { isTenantPath } from "@/lib/media";
+import { sweepVehicleToDepot } from "@/lib/routes/unload";
 import { CHECKLIST_KEYS } from "./checklist";
 
 const BACK = "/run";
@@ -35,10 +36,10 @@ const inspectionSchema = z.object({
 export async function submitInspection(formData: FormData): Promise<void> {
   const session = await assertCapability("run.execute");
   const parsed = inspectionSchema.safeParse(toObject(formData));
-  if (!parsed.success) fail(BACK, firstIssue(parsed.error));
+  if (!parsed.success) return fail(BACK, firstIssue(parsed.error));
 
   const driver = await currentDriver(session);
-  if (!driver) fail(BACK, "Your login is not linked to a driver record.");
+  if (!driver) return fail(BACK, "Your login is not linked to a driver record.");
 
   const checklist = Object.fromEntries(
     CHECKLIST_KEYS.map((key) => [key, formData.get(`check_${key}`) === "on"]),
@@ -64,7 +65,7 @@ export async function submitInspection(formData: FormData): Promise<void> {
     .select("id")
     .single();
 
-  if (error) fail(BACK, describeDbError(error));
+  if (error) return fail(BACK, describeDbError(error));
 
   if (parsed.data.result === "fail") {
     // A failed inspection takes the vehicle off the road rather than silently
@@ -78,30 +79,39 @@ export async function submitInspection(formData: FormData): Promise<void> {
       summary: "inspection failed — vehicle taken out of service",
     });
     revalidatePath(BACK);
-    fail(BACK, "Inspection failed. The vehicle is out of service — contact your dispatcher.");
+    return fail(BACK, "Inspection failed. The vehicle is out of service — contact your dispatcher.");
   }
+
+  // The inspection no longer gates the start (migration 0012), so it can now
+  // legitimately arrive on a run that is already moving. Recording it must not
+  // then walk the status backwards.
+  const { data: route } = await supabase
+    .from("daily_routes").select("status")
+    .eq("id", parsed.data.route_id).eq("tenant_id", session.tenantId).maybeSingle();
 
   const { error: routeError } = await supabase
     .from("daily_routes")
     .update({
       inspection_id: inspection.id,
-      status: "inspection_complete",
       odometer_start_km: parsed.data.odometer_km ?? null,
+      ...(["planned", "inspection_pending"].includes(route?.status ?? "")
+        ? { status: "inspection_complete" }
+        : {}),
     })
     .eq("id", parsed.data.route_id).eq("tenant_id", session.tenantId);
-  if (routeError) fail(BACK, describeDbError(routeError));
+  if (routeError) return fail(BACK, describeDbError(routeError));
 
   await recordAudit(session, {
     entity: "vehicle_inspection", entityId: inspection.id, action: "create", summary: parsed.data.result,
   });
   revalidatePath(BACK);
-  done(BACK, "Inspection recorded.");
+  return done(BACK, "Inspection recorded.");
 }
 
 export async function confirmLoad(formData: FormData): Promise<void> {
   const session = await assertCapability("run.execute");
   const id = z.string().uuid().safeParse(formData.get("route_id"));
-  if (!id.success) fail(BACK, "That run could not be found.");
+  if (!id.success) return fail(BACK, "That run could not be found.");
 
   const supabase = await createClient();
   const { error } = await supabase
@@ -113,36 +123,37 @@ export async function confirmLoad(formData: FormData): Promise<void> {
     })
     .eq("id", id.data).eq("tenant_id", session.tenantId);
 
-  if (error) fail(BACK, describeDbError(error));
+  if (error) return fail(BACK, describeDbError(error));
 
   await recordAudit(session, { entity: "daily_route", entityId: id.data, action: "status_change", summary: "load confirmed" });
   revalidatePath(BACK);
-  done(BACK, "Load confirmed.");
+  return done(BACK, "Load confirmed.");
 }
 
 export async function startRun(formData: FormData): Promise<void> {
   const session = await assertCapability("run.execute");
   const id = z.string().uuid().safeParse(formData.get("route_id"));
-  if (!id.success) fail(BACK, "That run could not be found.");
+  if (!id.success) return fail(BACK, "That run could not be found.");
 
   const supabase = await createClient();
-  // The database refuses this transition without an inspection and a confirmed
-  // load — the rule lives there so no client can route around it.
+  // The database refuses this transition without a confirmed load — the rule
+  // lives there so no client can route around it. The inspection is recorded
+  // and shown, but no longer gates the start (migration 0012).
   const { error } = await supabase
     .from("daily_routes").update({ status: "in_progress" })
     .eq("id", id.data).eq("tenant_id", session.tenantId);
 
-  if (error) fail(BACK, describeDbError(error));
+  if (error) return fail(BACK, describeDbError(error));
 
   await recordAudit(session, { entity: "daily_route", entityId: id.data, action: "status_change", summary: "started" });
   revalidatePath(BACK);
-  done(BACK, "Run started. Drive safely.");
+  return done(BACK, "Run started. Drive safely.");
 }
 
 export async function markReturning(formData: FormData): Promise<void> {
   const session = await assertCapability("run.execute");
   const id = z.string().uuid().safeParse(formData.get("route_id"));
-  if (!id.success) fail(BACK, "That run could not be found.");
+  if (!id.success) return fail(BACK, "That run could not be found.");
 
   const supabase = await createClient();
   const { error } = await supabase
@@ -150,9 +161,9 @@ export async function markReturning(formData: FormData): Promise<void> {
     .update({ status: "returning", returned_at: new Date().toISOString() })
     .eq("id", id.data).eq("tenant_id", session.tenantId);
 
-  if (error) fail(BACK, describeDbError(error));
+  if (error) return fail(BACK, describeDbError(error));
   revalidatePath(BACK);
-  done(BACK, "Marked as returning to depot.");
+  return done(BACK, "Marked as returning to depot.");
 }
 
 /**
@@ -168,46 +179,12 @@ export async function unloadRun(formData: FormData): Promise<void> {
       z.number().int().min(0).optional(),
     ),
   }).safeParse(toObject(formData));
-  if (!parsed.success) fail(BACK, firstIssue(parsed.error));
+  if (!parsed.success) return fail(BACK, firstIssue(parsed.error));
+
+  const sweepError = await sweepVehicleToDepot(session.tenantId, parsed.data.route_id);
+  if (sweepError) return fail(BACK, sweepError);
 
   const supabase = await createClient();
-  const { data: route } = await supabase
-    .from("daily_routes")
-    .select("id, vehicle_id, depot_id")
-    .eq("id", parsed.data.route_id)
-    .maybeSingle();
-  if (!route) fail(BACK, "That run could not be found.");
-
-  if (route.vehicle_id) {
-    const { data: onboard } = await supabase
-      .from("inventory_pools")
-      .select("item_id, owner_type, quantity")
-      .eq("state", "in_transit").eq("vehicle_id", route.vehicle_id).gt("quantity", 0);
-
-    for (const pool of onboard ?? []) {
-      const { error } = await supabase.rpc("move_inventory", {
-        p_tenant: session.tenantId,
-        p_item: pool.item_id,
-        p_owner_type: pool.owner_type,
-        p_quantity: pool.quantity,
-        p_from_state: "in_transit",
-        p_to_state: "at_depot",
-        p_reason: "unload",
-        p_from_customer: null,
-        p_from_depot: null,
-        p_from_vehicle: route.vehicle_id,
-        p_to_customer: null,
-        p_to_depot: route.depot_id,
-        p_to_vehicle: null,
-        p_job: null,
-        p_pickup: null,
-        p_delivery: null,
-        p_notes: "run unload",
-      });
-      if (error) fail(BACK, describeDbError(error));
-    }
-  }
-
   const { error } = await supabase
     .from("daily_routes")
     .update({
@@ -216,28 +193,28 @@ export async function unloadRun(formData: FormData): Promise<void> {
       odometer_end_km: parsed.data.odometer_end_km ?? null,
     })
     .eq("id", parsed.data.route_id).eq("tenant_id", session.tenantId);
-  if (error) fail(BACK, describeDbError(error));
+  if (error) return fail(BACK, describeDbError(error));
 
   await recordAudit(session, {
     entity: "daily_route", entityId: parsed.data.route_id, action: "status_change", summary: "unloaded",
   });
   revalidatePath(BACK);
-  done(BACK, "Vehicle unloaded into depot receiving.");
+  return done(BACK, "Vehicle unloaded into depot receiving.");
 }
 
 export async function closeRun(formData: FormData): Promise<void> {
   const session = await assertCapability("run.execute");
   const id = z.string().uuid().safeParse(formData.get("route_id"));
-  if (!id.success) fail(BACK, "That run could not be found.");
+  if (!id.success) return fail(BACK, "That run could not be found.");
 
   const supabase = await createClient();
   const { error } = await supabase
     .from("daily_routes").update({ status: "closed" })
     .eq("id", id.data).eq("tenant_id", session.tenantId);
 
-  if (error) fail(BACK, describeDbError(error));
+  if (error) return fail(BACK, describeDbError(error));
 
   await recordAudit(session, { entity: "daily_route", entityId: id.data, action: "status_change", summary: "closed" });
   revalidatePath(BACK);
-  done(BACK, "Run closed. Have a good evening.");
+  return done(BACK, "Run closed. Have a good evening.");
 }

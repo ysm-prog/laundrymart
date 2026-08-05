@@ -2,8 +2,10 @@ import { AppNav } from "@/components/app-nav";
 import { Checkbox, Field, Input, Select, SubmitButton } from "@/components/form";
 import {
   Badge, Button, ButtonLink, Card, DataTable, EmptyState, Eyebrow, Notice,
-  PageHeader, Stat, StatusBadge, cx,
+  PageHeader, Stage, Stat, StatusBadge, cx,
 } from "@/components/ui";
+import { ConfirmSubmit } from "@/components/confirm-submit";
+import { InspectionChecklist } from "@/app/(app)/run/inspection-checklist";
 import type { NavSection } from "@/lib/nav";
 import { UNASSIGNED } from "@/app/(app)/routes/planner/plan";
 import {
@@ -33,8 +35,8 @@ const SECTIONS: NavSection[] = [
     label: "Today",
     items: [
       { label: "Dashboard", href: "/design-preview", capability: "reports.read" },
-      { label: "Daily routes", href: "/x1", capability: "routes.read", count: "routesToday" },
-      { label: "Jobs", href: "/x2", capability: "routes.read" },
+      { label: "Today's runs", href: "/x1", capability: "routes.read", count: "routesToday" },
+      { label: "Stops", href: "/x2", capability: "routes.read" },
       { label: "My run", href: "/x3", capability: "run.execute" },
     ],
   },
@@ -43,7 +45,7 @@ const SECTIONS: NavSection[] = [
     items: [
       { label: "Pickups", href: "/x4", capability: "operations.read" },
       { label: "Deliveries", href: "/x5", capability: "operations.read" },
-      { label: "Exceptions", href: "/x6", capability: "operations.read", count: "exceptions" },
+      { label: "Problems", href: "/x6", capability: "operations.read", count: "exceptions" },
     ],
   },
   {
@@ -57,7 +59,7 @@ const SECTIONS: NavSection[] = [
     label: "Accounts",
     items: [
       { label: "Customers", href: "/x9", capability: "customers.read" },
-      { label: "Service agreements", href: "/x10", capability: "agreements.read" },
+      { label: "Contracts", href: "/x10", capability: "agreements.read" },
       { label: "Invoices", href: "/x11", capability: "invoices.read", count: "unpaidInvoices" },
       { label: "Reports", href: "/x12", capability: "reports.read" },
     ],
@@ -483,6 +485,66 @@ export default function DesignPreviewPage() {
                   <span className="text-[12.5px] font-medium text-primary">Download PDF</span>
                 </div>
               </Card>
+            </div>
+          </div>
+
+          <div className="border-t pt-5">
+            <PageHeader
+              eyebrow="Guidance"
+              title="Stages, confirms and the toast"
+              description="The run screen's staged pattern promoted app-wide, the inline confirm strip, and the flash toast."
+            />
+            <div className="grid items-start gap-4 lg:grid-cols-2">
+              <Card title="Getting started" description="Each step ticks itself off as soon as the thing exists.">
+                <ol className="space-y-3">
+                  <Stage index={1} label="Add your first site" done
+                         detail="Sites own your routes, vehicles and stock. One is enough to start." />
+                  <Stage index={2} label="Add a customer" done
+                         detail="Just a name, a phone number and where they are." />
+                  <Stage index={3} label="Create their contract"
+                         detail="Which days you collect and deliver, and what you charge." done={false}>
+                    <ButtonLink href="/design-preview" variant="primary">Create a contract</ButtonLink>
+                  </Stage>
+                  <Stage index={4} label="Set up the weekly run" done={false}
+                         detail="The recurring week: which customers a driver visits, in what order." />
+                  <Stage index={5} label="Plan today's runs" done={false}
+                         detail="Turn the weekly run into today's work and hand it to a driver." />
+                </ol>
+              </Card>
+              <div className="space-y-4">
+                <Card title="Confirm strip" description="Final actions state their consequence in place — no modal.">
+                  <form action={previewApply} className="space-y-4">
+                    <ConfirmSubmit
+                      label="Void invoice"
+                      consequence="Voiding cancels INV00007 permanently. The number is kept for the audit trail and a replacement gets a new one."
+                      reasonName="p_void_reason"
+                      reasonLabel="Why is it being voided?"
+                    />
+                  </form>
+                </Card>
+                <Card title="Inspection checklist" description="Starts unchecked — ticking is an act, with a one-tap fast path.">
+                  <form action={previewApply}>
+                    <InspectionChecklist items={[
+                      { name: "p_tyres", label: "Tyres and wheels" },
+                      { name: "p_lights", label: "Lights and indicators" },
+                      { name: "p_brakes", label: "Brakes" },
+                      { name: "p_load", label: "Load area clean and secure" },
+                    ]} />
+                  </form>
+                </Card>
+                <Card title="Flash toast" description="Success dismisses itself in 5 s; an error stays until closed. Shown bottom-right in the app.">
+                  <div className="space-y-2">
+                    <div className="flex max-w-[440px] items-start gap-2.5 border border-l-[5px] border-success/40 border-l-success bg-surface px-3 py-2 text-[12.5px] text-success shadow-sm">
+                      <p className="min-w-0 flex-1">Invoice INV00008 emailed to accounts@dayspa.example.</p>
+                      <span aria-hidden className="shrink-0 px-1 leading-none">×</span>
+                    </div>
+                    <div className="flex max-w-[440px] items-start gap-2.5 border border-l-[5px] border-danger/40 border-l-danger bg-surface px-3 py-2 text-[12.5px] text-danger shadow-sm">
+                      <p className="min-w-0 flex-1">This customer has no billing email. Add one, or type an address to send to.</p>
+                      <span aria-hidden className="shrink-0 px-1 leading-none">×</span>
+                    </div>
+                  </div>
+                </Card>
+              </div>
             </div>
           </div>
         </main>

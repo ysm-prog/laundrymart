@@ -5,7 +5,7 @@ import { can } from "@/lib/roles";
 import { number } from "@/lib/format";
 import type { InventoryPool, Item } from "@/lib/db/types";
 import {
-  Button, ButtonLink, Card, DataTable, EmptyState, FlashMessages, PageHeader, humanise,
+  Button, ButtonLink, Card, DataTable, EmptyState, PageHeader, humanise,
 } from "@/components/ui";
 import { Field, FormActions, Input, Select, SubmitButton } from "@/components/form";
 import { ITEM_CATEGORIES } from "../categories";
@@ -14,13 +14,11 @@ import { archiveItem, updateItem } from "../actions";
 export const dynamic = "force-dynamic";
 
 export default async function ItemDetailPage({
-  params, searchParams,
+  params,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ error?: string; ok?: string }>;
 }) {
   const { id } = await params;
-  const flash = await searchParams;
   const session = await requireCapability("items.read");
   const writable = can(session.role, "items.write");
 
@@ -41,7 +39,6 @@ export default async function ItemDetailPage({
 
   return (
     <div className="max-w-3xl space-y-6">
-      <FlashMessages error={flash.error} ok={flash.ok} />
       <PageHeader
         title={item.name}
         description={`${item.sku} · ${humanise(item.category)} · ${number(onHand)} in circulation`}
