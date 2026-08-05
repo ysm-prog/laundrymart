@@ -130,10 +130,31 @@ See `.env.example`; validated fail-fast in `src/lib/env.ts`. Email delivery
 (`RESEND_API_KEY`, `INVOICE_FROM_EMAIL`) is optional — without it the app runs and the send
 action says so rather than the deployment refusing to boot.
 
+## 10a. Design system
+From the Plantline concept pack (`Logistics SaaS Product Design` handoff). Two rules carry it:
+
+- **Colour means status only.** Teal `--primary` = on track, amber = warning, red = late,
+  green = resolved. The solid call-to-action is therefore **near-black `--action`**, not teal —
+  a teal button would read as a status. Never use `bg-primary` for a button.
+- **Flat.** Hairline `--border` everywhere, `--border-strong` for inputs and frames, one faint
+  shadow, and radius 0. The radius and shadow scales are overridden wholesale in
+  `tailwind.config.ts`, so `rounded-*` classes are inert rather than scattered edits.
+
+IBM Plex Sans + Mono via `next/font` (self-hosted; the driver app must render without signal).
+Mono is structural — every number, identifier, date and uppercase label. `Eyebrow` in `ui.tsx`
+is the label voice; `text-3xs`/`text-2xs` are the 9px/10px steps.
+
+`border-strong` is extended onto `borderColor`, not nested under `colors.border` — nested it
+would spell `border-border-strong` and silently do nothing.
+
+The sidebar rail keeps literal hex colours: it is the one surface that stays near-black in
+both themes, so it must not follow the surface tokens.
+
 ## 11. Hosted project
 `laundrymart-syd` · ref `xujhwljrmogenhvqpkrf` · ap-southeast-2 (Sydney) · org `ysm-prog`.
-All 11 migrations applied; demo tenant seeded (`Harbour Commercial Laundry`). No Auth users
-yet — memberships are empty until a login is created and linked.
+Deployed on Vercel at `ats.coreit.com.au`. All 11 migrations applied; demo tenant seeded
+(`Harbour Commercial Laundry`); two `super_admin` logins, one also linked to the seeded driver.
+Sign-in verified end to end 2026-08-05.
 
 Two things the hosted project does differently from local Postgres, both handled in the SQL:
 - `storage.objects` belongs to `supabase_storage_admin`, so `alter table … enable row level
@@ -144,6 +165,22 @@ Two things the hosted project does differently from local Postgres, both handled
   endpoint — see the warning under §7.
 
 ## 18. Changelog
+### 2026-08-05 · Adopt the Plantline design language (stages 1–3a of 4)
+- **Theme and typography.** Tokens, IBM Plex, flat square chrome, `--action` split from
+  `--primary` so colour keeps meaning status. See §10a.
+- **Shell.** Near-black 212px rail with grouped flat nav, real count badges (routes today,
+  exceptions, batches, unpaid) and the user block; 52px context bar with a search that
+  actually submits to the customers list.
+- **Dashboard rebuilt as the control tower.** Exception-first: "Needs a decision" merges
+  exception jobs, linen short at collection, invoices past terms and vehicles off the road —
+  no new exceptions table, since a second record of a problem is a second thing to keep in
+  step. Plus a plant-stage strip and a runs-today rail. Money surfaces sit behind
+  `invoices.read`, because the pack states drivers and floor staff see no dollar figures.
+- Not built: the pack's average-turnaround KPI. Nothing records a promised turnaround per
+  customer, so the slot shows ready-to-dispatch instead of an invented number.
+- Still to come: dispatch planner, billing two-pane, then the Phase-1 modules (customer
+  portal, public tracking, Xero, bag scan).
+
 ### 2026-08-05 · Deploy to Supabase; close two REST-surface holes
 - **Live project.** `laundrymart-syd` in Sydney, all migrations applied, demo data seeded.
 - **`next_number()` was a cross-tenant integrity hole (`0010`).** SECURITY DEFINER, tenant id
