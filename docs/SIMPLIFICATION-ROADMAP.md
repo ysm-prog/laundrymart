@@ -95,6 +95,42 @@ first-timer didn't study for — and several role pairs differ by one capability
 - Destructive-ish actions (void an invoice, cancel a run) rely on the user
   already knowing they're safe/final; the UI doesn't say which are reversible.
 
+### F7. The Users screen shows people as truncated UUIDs
+`admin/users` renders each member as `user_id.slice(0, 8)…` — an
+administrator managing access literally cannot tell who anyone is. The page's
+own copy compounds it: the description tells the user that "Row-level
+security in Postgres enforces the same boundary", and the invite notice says
+"Users are created through Supabase Auth" — both meaningless (and mildly
+alarming) to a non-technical owner. This is the single most first-timer-hostile
+screen in the app.
+
+### F8. No confirmation step exists anywhere
+A grep for any confirm dialog across the app returns nothing. Voiding an
+invoice at least demands a written reason (good pattern — keep it), but
+closing a run, cancelling, deleting a holiday, changing someone's role are
+all one click with no "are you sure" and no statement of whether the action
+can be undone. First-timers explore by clicking; the app must make the final
+actions announce themselves.
+
+### F9. The vehicle inspection is pre-ticked
+Every checklist item on the driver's inspection form defaults to *checked*
+(`defaultChecked` in `run/page.tsx`). A driver can legally submit a "pass"
+without reading a single line. For a safety/compliance record this inverts
+the burden: the form attests by default and honesty requires effort.
+
+### F10. Developer voice leaks into user-facing copy
+The Jobs page explains itself as: "One customer stop. Pickups and deliveries
+hang off the job as child transactions." Invoicing is "Generate period" /
+"Generate recurring invoices". These are accurate sentences about the data
+model addressed to the wrong audience.
+
+### F11. Flagging a problem mid-route breaks the driver's context
+"My run" is otherwise the best screen in the app — a guided six-stage
+workflow where exactly one step is actionable at a time. But when something
+goes wrong at a stop (the moment a driver is most stressed, on a phone, maybe
+offline), the capture card says: open the *job page* and record an exception
+there. The one workflow that must never leave the run screen, leaves it.
+
 ## 3. Gap analysis — what's missing outright
 
 Things a BA would expect in this product category that don't exist yet (over
@@ -111,7 +147,7 @@ Xero, bag scan):
 | G6 | **Help & glossary** | No in-product definition of depot/agreement/exception/manifest. |
 | G7 | **Consolidated invoicing is silently wrong** | `generateInvoices` dedupes on customer + period, so a customer with two active agreements gets only the first billed (known, pre-existing). A simplification pass must not paper over a correctness hole. |
 | G8 | **Media retention** | Nothing prunes `run-media`; storage grows forever. Operational, not UX, but it will become an operator-visible bill. |
-| G9 | **User invite flow** | Admin → Users assumes accounts already exist in Supabase Auth; there's no "invite a teammate by email" path an owner could self-serve. |
+| G9 | **User invite flow** | Admin → Users assumes accounts already exist in Supabase Auth; there's no "invite a teammate by email" path an owner could self-serve. Cheaper than it sounds: the login page already has a working magic-link path ("No password? Email me a sign-in link"), so an invite is create-auth-user + membership + that same link. |
 
 ## 4. Design principles for the redesign
 
@@ -161,6 +197,17 @@ requires a migration.
   contract → set up a weekly run → plan today) with live done/not-done ticks
   driven by row counts — the same pattern as the existing nav badges. Replaces
   the dead-end "Nothing needs a decision" on an empty tenant.
+- **A6. Names on the Users screen (F7).** Resolve each membership's email and
+  name via the admin client (service-role lookup of `auth.users`, tenant-
+  filtered as always) instead of a truncated UUID, and rewrite the page copy
+  for an owner, not a DBA. No migration needed.
+- **A7. Final actions announce themselves (F8).** A shared confirm affordance
+  (the void-invoice "give a reason" pattern generalised) on every action that
+  cannot be undone — close run, void, cancel, role change — each stating
+  plainly whether it is reversible.
+- **A8. Un-tick the inspection (F9).** Checklist items default unchecked, with
+  a single deliberate "All checks OK" tap as the fast path — an affirmative
+  act instead of a pre-signed form.
 
 ### Phase B — Guided workflows (forms become conversations)
 *Goal: the big forms stop front-loading expert decisions. ~2–3 weeks.*
@@ -181,6 +228,13 @@ requires a migration.
 - **B4. Order-of-operations errors become redirects.** Where an action fails
   because a prerequisite is missing ("no active template runs on that
   weekday"), the error links straight to the screen that fixes it.
+- **B5. Exceptions recorded from "My run" (F11).** Inline "something's wrong
+  at this stop" on the capture card — same reasons, same action as the job
+  page, but the driver never leaves the run screen, and it works through the
+  offline outbox like every other capture.
+- **B6. Invoicing in operator words (F10, F12).** "Generate period" becomes
+  "Create this month's invoices" with the period pre-filled to the obvious
+  one; the Jobs page description written for the person, not the schema.
 
 ### Phase C — Correct notifications (the event layer; first migration)
 *Goal: the app speaks up on its own. ~2–3 weeks.*
@@ -225,7 +279,9 @@ portal are consumers of the same events.
 ## 6. What "done" looks like (acceptance, per phase)
 
 - **A:** A brand-new user on an empty tenant always has exactly one obvious
-  next action on screen; no success message ever reappears on refresh.
+  next action on screen; no success message ever reappears on refresh; the
+  Users screen shows names, not UUIDs; no final action fires without an
+  explicit confirmation; an inspection cannot be submitted un-read.
 - **B:** A first-timer creates a customer + contract + first day's routes
   unaided in under 10 minutes (test with someone outside the project).
 - **C:** An invoice going overdue and a run not starting each produce a
