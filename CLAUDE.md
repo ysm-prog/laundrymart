@@ -179,6 +179,15 @@ Two things the hosted project does differently from local Postgres, both handled
   endpoint — see the warning under §7.
 
 ## 18. Changelog
+### 2026-08-05 · Three broken embeds fixed; the design is now reviewable
+- **`/routes/daily`, the run sheet and the vehicle report were broken.** All three embedded
+  `vehicles(registration)` from `daily_routes`, which has two FKs to vehicles — ambiguous, so
+  PostgREST rejects it with PGRST201 at request time. Compile-clean, test-clean, dead in
+  production. Disambiguated by constraint name; see the warning under §10a. Pre-existing.
+- **`/design-preview`** — a static component gallery, no data, 404s in production. Rendering
+  it found a doubled hairline in the KPI row (`Stat` gained a `flush` variant) and a sidebar
+  with no edge in dark mode (the rail gained a `border-r`). Neither was catchable by `verify`.
+
 ### 2026-08-05 · Adopt the Plantline design language (stages 1–3a of 4)
 - **Theme and typography.** Tokens, IBM Plex, flat square chrome, `--action` split from
   `--primary` so colour keeps meaning status. See §10a.
