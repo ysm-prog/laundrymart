@@ -1,5 +1,26 @@
 import type { Metadata, Viewport } from "next";
+import { IBM_Plex_Mono, IBM_Plex_Sans } from "next/font/google";
 import "./globals.css";
+
+/* The pack's typography. Self-hosted by next/font rather than a <link> to
+   Google: the driver app has to render on a loading dock with no signal, and a
+   render-blocking font fetch is the last thing that should decide whether a
+   stop can be recorded. `display: swap` keeps text visible regardless. */
+const plexSans = IBM_Plex_Sans({
+  subsets: ["latin"],
+  weight: ["400", "500", "600", "700"],
+  variable: "--font-plex-sans",
+  display: "swap",
+});
+
+/* Mono carries every number, identifier, date and uppercase label — in this
+   design it is structural, not decorative. */
+const plexMono = IBM_Plex_Mono({
+  subsets: ["latin"],
+  weight: ["400", "500", "600"],
+  variable: "--font-plex-mono",
+  display: "swap",
+});
 
 export const metadata: Metadata = {
   title: { default: "LaundryMart", template: "%s · LaundryMart" },
@@ -16,8 +37,8 @@ export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#ffffff" },
-    { media: "(prefers-color-scheme: dark)", color: "#0b1120" },
+    { media: "(prefers-color-scheme: light)", color: "#eceff1" },
+    { media: "(prefers-color-scheme: dark)", color: "#14171a" },
   ],
 };
 
@@ -32,14 +53,14 @@ try {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en-AU" suppressHydrationWarning>
+    <html lang="en-AU" className={`${plexSans.variable} ${plexMono.variable}`} suppressHydrationWarning>
       <head>
         <script dangerouslySetInnerHTML={{ __html: THEME_BOOTSTRAP }} />
       </head>
       <body>
         <a href="#main"
            className="sr-only focus:not-sr-only focus:absolute focus:left-2 focus:top-2 focus:z-50
-                      focus:rounded focus:bg-primary focus:px-3 focus:py-2 focus:text-primary-foreground">
+                      focus:bg-action focus:px-3 focus:py-2 focus:text-action-foreground">
           Skip to content
         </a>
         {children}

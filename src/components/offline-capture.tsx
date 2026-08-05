@@ -218,7 +218,7 @@ export function OfflineCapture({
 
       <div className="flex flex-wrap items-center gap-2">
         <button type="submit" disabled={isPending}
-                className="rounded-md bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground
+                className="rounded-md bg-action px-4 py-2.5 text-sm font-medium text-action-foreground
                            transition hover:opacity-90 disabled:opacity-60">
           Save {kind}
         </button>
