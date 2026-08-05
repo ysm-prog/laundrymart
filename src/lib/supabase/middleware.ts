@@ -3,7 +3,10 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { env } from "@/lib/env";
-const PUBLIC = ["/", "/login", "/auth"];
+// `/design-preview` is the static component gallery. It holds no data and 404s
+// in production, so it does not need the auth gate — and gating it would make
+// it unreachable from a build box, which is the only place it is any use.
+const PUBLIC = ["/", "/login", "/auth", "/design-preview"];
 export async function updateSession(request: NextRequest) {
   let response = NextResponse.next({ request });
   const supabase = createServerClient(

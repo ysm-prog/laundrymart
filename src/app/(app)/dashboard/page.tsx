@@ -122,19 +122,22 @@ async function Kpis({ date, seesMoney }: { date: string; seesMoney: boolean }) {
       seesMoney ? "sm:grid-cols-3 lg:grid-cols-5" : "sm:grid-cols-2 lg:grid-cols-4",
     )}>
       <Stat
+        flush
         label="Stops today"
         value={<>{done}<span className="text-sm font-normal text-muted-foreground"> / {total}</span></>}
         hint={total === 0 ? "nothing scheduled" : `${remaining} remaining`}
         tone={total > 0 && remaining === 0 ? "success" : "default"}
       />
-      <Stat label="In the plant" value={number(inPlant)} hint="washing through to ready" />
+      <Stat flush label="In the plant" value={number(inPlant)} hint="washing through to ready" />
       <Stat
+        flush
         label="Ready to dispatch"
         value={number(ready)}
         hint={ready > 0 ? "waiting on a truck" : "nothing staged"}
         tone={ready > 0 ? "success" : "default"}
       />
       <Stat
+        flush
         label="Exceptions"
         value={String(late)}
         hint={late === 0 ? "none open" : "need a decision"}
@@ -142,6 +145,7 @@ async function Kpis({ date, seesMoney }: { date: string; seesMoney: boolean }) {
       />
       {seesMoney ? (
         <Stat
+          flush
           label="Overdue"
           value={money(overdueTotal)}
           hint={`${overdueRows.length} invoice(s) past terms`}

@@ -148,7 +148,21 @@ is the label voice; `text-3xs`/`text-2xs` are the 9px/10px steps.
 would spell `border-border-strong` and silently do nothing.
 
 The sidebar rail keeps literal hex colours: it is the one surface that stays near-black in
-both themes, so it must not follow the surface tokens.
+both themes, so it must not follow the surface tokens — and it needs its own `border-r`,
+because in dark mode the page background is that same near-black and the edge vanishes.
+
+`/design-preview` is a static component gallery: no data, 404s in production, outside the auth
+gate so it can be rendered from a build box. It exists because every real screen is an async
+server component reading Supabase, so none render without a live project — which is how a
+doubled hairline and an invisible dark-mode sidebar edge both survived a green `verify`.
+Screenshot it with Playwright (`/opt/pw-browsers/chromium`) against `next start`.
+
+**PostgREST embeds fail at runtime, not compile time.** Where two tables have more than one FK
+between them the embed is ambiguous and errors with PGRST201. `daily_routes` has two to
+`vehicles` (`vehicle_id`, `trailer_id`), so those must be written
+`vehicles!daily_routes_vehicle_id_fkey(...)`. Current ambiguous pairs: daily_routes→vehicles,
+daily_routes→auth.users, drivers→auth.users, inventory_movements→inventory_pools,
+production_batches→auth.users.
 
 ## 11. Hosted project
 `laundrymart-syd` · ref `xujhwljrmogenhvqpkrf` · ap-southeast-2 (Sydney) · org `ysm-prog`.

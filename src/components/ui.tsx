@@ -66,10 +66,16 @@ export function Card({
  * colours the number when the number itself is the exception (late, overdue).
  */
 export function Stat({
-  label, value, hint, tone = "default", href,
+  label, value, hint, tone = "default", href, flush = false,
 }: {
   label: string; value: ReactNode; hint?: string;
   tone?: "default" | "success" | "warning" | "danger"; href?: string;
+  /**
+   * Drop the cell's own border. The pack's KPI row is one joined strip divided
+   * by hairlines, not a row of separate boxes — without this the cell border
+   * and the strip's divider stack into a doubled rule.
+   */
+  flush?: boolean;
 }) {
   const tones = {
     default: "text-muted-foreground",
@@ -91,7 +97,10 @@ export function Stat({
     </>
   );
 
-  const className = "block border bg-surface px-4 py-3 transition hover:border-strong";
+  const className = cx(
+    "block bg-surface px-4 py-3 transition",
+    flush ? "" : "border hover:border-strong",
+  );
   return href ? <Link href={href} className={className}>{body}</Link> : <div className={className}>{body}</div>;
 }
 

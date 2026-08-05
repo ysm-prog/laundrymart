@@ -53,7 +53,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   return (
     <div className="min-h-screen lg:grid lg:grid-cols-[212px_1fr]">
       {/* The rail keeps its own near-black surface in both themes, as designed. */}
-      <aside className="hidden bg-[#14171a] pb-3 pt-3.5 lg:flex lg:flex-col">
+      {/* The right border matters in dark mode, where the page background is the
+          same near-black as the rail and the edge would otherwise vanish. */}
+      <aside className="hidden border-r border-[#262c31] bg-[#14171a] pb-3 pt-3.5 lg:flex lg:flex-col">
         <div className="border-b border-[#262c31] px-4 pb-3.5">
           <Link href="/dashboard" className="block text-sm font-semibold tracking-[-0.01em] text-white">
             LaundryMart
