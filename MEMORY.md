@@ -4,8 +4,8 @@
 **Status:** Deployed to a live Sydney Supabase project, on the upgraded stack (Next 16,
 Tailwind 4, Zod 4, vitest 4). All 11 migrations are applied to `laundrymart-syd` (ref
 `xujhwljrmogenhvqpkrf`) and the demo tenant is seeded. `npm run verify` passes (68 unit
-tests) and `npm run db:test` passes (47 pgTAP assertions). Everything is merged into `Prod`;
-`Dev` trails it.
+tests) and `npm run db:test` passes (47 pgTAP assertions). Everything is merged into `Prod`
+and `Dev`, which are identical; no feature branch carries unmerged work.
 
 CI's DB job runs Postgres on the runner, not in a `services:` container — pgTAP is a
 server-side extension, so its `.control` file has to sit in the postmaster's own filesystem
