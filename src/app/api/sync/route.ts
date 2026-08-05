@@ -7,6 +7,8 @@ import { recordAudit } from "@/lib/audit";
 import { packExceptionNotes } from "@/lib/exceptions";
 import { MAX_PHOTOS, isTenantPath } from "@/lib/media";
 import { EXCEPTION_REASON_VALUES } from "@/app/(app)/jobs/exception-reasons";
+import { notify } from "@/lib/notifications/notify";
+import { sendDeliveryConfirmation } from "@/lib/notifications/delivery-confirmation";
 
 /**
  * Offline sync endpoint for the driver app.
@@ -250,6 +252,14 @@ export async function POST(request: NextRequest) {
       })
       .eq("id", job.id).eq("tenant_id", session.tenantId);
 
+    // Same courtesy as a delivery typed at a desk: the customer hears about it
+    // when the phone syncs, not when someone remembers. A replayed batch takes
+    // the `duplicate` branch above and never reaches here, so a queue flushed
+    // twice does not email twice.
+    if (record.kind === "delivery") {
+      await sendDeliveryConfirmation(session, parent.id);
+    }
+
     outcomes.push({ clientRef: record.clientRef, status: "accepted" });
   }
 
@@ -259,6 +269,24 @@ export async function POST(request: NextRequest) {
       entity: "offline_sync", action: "sync",
       summary: `${accepted} of ${outcomes.length} records synced`,
       metadata: { outcomes },
+    });
+  }
+
+  // A rejected record is proof of service that never landed: the driver's phone
+  // shows the stop done, the office sees nothing, and the queue will keep
+  // retrying a batch that will keep failing. `duplicate` is not a failure — it
+  // is the replay path working as designed — so only outright rejections raise
+  // anything. One notification per batch, not per record, because a stale token
+  // or a bad deploy rejects every stop a driver has and the useful signal is
+  // "this driver's day is not coming in", said once.
+  const rejected = outcomes.filter((outcome) => outcome.status === "rejected");
+  if (rejected.length > 0) {
+    await notify(session, {
+      kind: "sync_failed",
+      subjectId: session.userId,
+      title: `${rejected.length} stop(s) captured on a driver's phone could not be saved.`
+        + " The paperwork is still on the device — check the stops before the run closes.",
+      href: "/operations/exceptions",
     });
   }
 
