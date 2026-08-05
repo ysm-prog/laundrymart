@@ -4,7 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { can } from "@/lib/roles";
 import { date, today } from "@/lib/format";
 import {
-  Card, DataTable, EmptyState, FlashMessages, PageHeader, SkeletonRows, StatusBadge,
+  ButtonLink, Card, DataTable, EmptyState, FlashMessages, PageHeader, SkeletonRows, StatusBadge,
 } from "@/components/ui";
 import { Field, Input, SubmitButton } from "@/components/form";
 import { generateDailyRoutes } from "./actions";
@@ -35,6 +35,9 @@ export default async function DailyRoutesPage({ searchParams }: { searchParams: 
       <PageHeader
         title="Daily routes"
         description="Execution for a specific day: driver, vehicle, stops and run progress."
+        actions={can(session.role, "routes.write")
+          ? <ButtonLink href={`/routes/planner?date=${routeDate}`}>Dispatch planner</ButtonLink>
+          : null}
       />
 
       <form method="get" action="/routes/daily" className="flex flex-wrap items-end gap-2">
