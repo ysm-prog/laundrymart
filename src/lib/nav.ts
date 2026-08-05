@@ -1,54 +1,75 @@
 import { can, type Capability, type Role } from "@/lib/roles";
 
+/**
+ * Navigation map from spec §13, filtered per role at render time.
+ *
+ * Grouped into sections to match the design pack's sidebar: a mono uppercase
+ * heading over a flat list, rather than the expand-on-active tree this used to
+ * be. Nothing is nested now — every destination is one click, which is the
+ * point of the pack's layout language. All hrefs are unchanged.
+ */
+
+/** Counts the sidebar can surface. Resolved once per request in the layout. */
+export type NavCountKey = "routesToday" | "exceptions" | "batches" | "unpaidInvoices";
+
 export type NavItem = {
   label: string;
   href: string;
   capability: Capability;
-  children?: NavItem[];
+  count?: NavCountKey;
 };
 
-/** Navigation map from spec §13, filtered per role at render time. */
-export const NAVIGATION: NavItem[] = [
-  { label: "Dashboard", href: "/dashboard", capability: "reports.read" },
+export type NavSection = {
+  label: string;
+  items: NavItem[];
+};
+
+export const NAVIGATION: NavSection[] = [
   {
-    label: "Customers", href: "/customers", capability: "customers.read",
-    children: [
-      { label: "All customers", href: "/customers", capability: "customers.read" },
-      { label: "Service agreements", href: "/agreements", capability: "agreements.read" },
-      { label: "Items", href: "/items", capability: "items.read" },
-    ],
-  },
-  {
-    label: "Fleet", href: "/drivers", capability: "fleet.read",
-    children: [
-      { label: "Drivers", href: "/drivers", capability: "fleet.read" },
-      { label: "Vehicles", href: "/vehicles", capability: "fleet.read" },
-    ],
-  },
-  {
-    label: "Routes", href: "/routes/templates", capability: "routes.read",
-    children: [
-      { label: "Templates", href: "/routes/templates", capability: "routes.read" },
-      { label: "Daily routes", href: "/routes/daily", capability: "routes.read" },
+    label: "Today",
+    items: [
+      { label: "Dashboard", href: "/dashboard", capability: "reports.read" },
+      { label: "Daily routes", href: "/routes/daily", capability: "routes.read", count: "routesToday" },
       { label: "Jobs", href: "/jobs", capability: "routes.read" },
+      { label: "My run", href: "/run", capability: "run.execute" },
     ],
   },
   {
-    label: "Operations", href: "/operations/pickups", capability: "operations.read",
-    children: [
+    label: "Operations",
+    items: [
       { label: "Pickups", href: "/operations/pickups", capability: "operations.read" },
       { label: "Deliveries", href: "/operations/deliveries", capability: "operations.read" },
-      { label: "Exceptions", href: "/operations/exceptions", capability: "operations.read" },
+      { label: "Exceptions", href: "/operations/exceptions", capability: "operations.read", count: "exceptions" },
     ],
   },
-  { label: "My run", href: "/run", capability: "run.execute" },
-  { label: "Warehouse", href: "/warehouse", capability: "warehouse.read" },
-  { label: "Inventory", href: "/inventory", capability: "inventory.read" },
-  { label: "Invoices", href: "/invoices", capability: "invoices.read" },
-  { label: "Reports", href: "/reports", capability: "reports.read" },
   {
-    label: "Administration", href: "/admin", capability: "admin.read",
-    children: [
+    label: "Plant",
+    items: [
+      { label: "Warehouse", href: "/warehouse", capability: "warehouse.read", count: "batches" },
+      { label: "Inventory", href: "/inventory", capability: "inventory.read" },
+    ],
+  },
+  {
+    label: "Accounts",
+    items: [
+      { label: "Customers", href: "/customers", capability: "customers.read" },
+      { label: "Service agreements", href: "/agreements", capability: "agreements.read" },
+      { label: "Items", href: "/items", capability: "items.read" },
+      { label: "Invoices", href: "/invoices", capability: "invoices.read", count: "unpaidInvoices" },
+      { label: "Reports", href: "/reports", capability: "reports.read" },
+    ],
+  },
+  {
+    label: "Fleet",
+    items: [
+      { label: "Drivers", href: "/drivers", capability: "fleet.read" },
+      { label: "Vehicles", href: "/vehicles", capability: "fleet.read" },
+      { label: "Route templates", href: "/routes/templates", capability: "routes.read" },
+    ],
+  },
+  {
+    label: "Administration",
+    items: [
       { label: "Depots", href: "/admin/depots", capability: "admin.read" },
       { label: "Users", href: "/admin/users", capability: "admin.read" },
       { label: "Public holidays", href: "/admin/holidays", capability: "admin.read" },
@@ -57,13 +78,14 @@ export const NAVIGATION: NavItem[] = [
   },
 ];
 
-export function navigationFor(role: Role): NavItem[] {
+/** Sections the role can reach at all are kept; empty ones disappear entirely. */
+export function navigationFor(role: Role): NavSection[] {
   return NAVIGATION
-    .filter((item) => can(role, item.capability))
-    .map((item) => ({
-      ...item,
-      children: item.children?.filter((child) => can(role, child.capability)),
-    }));
+    .map((section) => ({
+      ...section,
+      items: section.items.filter((item) => can(role, item.capability)),
+    }))
+    .filter((section) => section.items.length > 0);
 }
 
 export function isActive(pathname: string, href: string): boolean {
