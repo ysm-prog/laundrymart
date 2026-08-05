@@ -17,6 +17,12 @@ const schema = z.object({
   INVOICE_FROM_EMAIL: z.string().email().optional(),
   INVOICE_FROM_NAME: z.string().min(1).optional(),
   INVOICE_REPLY_TO: z.string().email().optional(),
+  // Shared secret for the notification sweep, which runs without a session.
+  // Optional for the same reason the mail provider is: a deployment with no
+  // cron configured should boot and work, minus the swept notifications. The
+  // route refuses every request when it is unset rather than running open —
+  // see `/api/notifications/sweep`.
+  CRON_SECRET: z.string().min(16).optional(),
 });
 
 const parsed =

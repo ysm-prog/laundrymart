@@ -39,6 +39,17 @@ export const PHOTO_QUALITY = 0.72;
 /** Signed URLs are minted per request and expire well inside a session. */
 export const MEDIA_URL_TTL_SECONDS = 300;
 
+/**
+ * Proof-of-service links inside a customer email get a week instead.
+ *
+ * Five minutes is right for a page the viewer is already looking at and wrong
+ * for an inbox: a customer opens the mail on Monday evening, or forwards it to
+ * their own accounts team. The trade is deliberate — the link is a bearer token
+ * for the life of the URL, so it is bounded rather than permanent, and it only
+ * ever shows that customer their own delivery.
+ */
+export const MEDIA_EMAIL_TTL_SECONDS = 7 * 24 * 60 * 60;
+
 /** Owner refs are client-generated, so they are constrained to path-safe text. */
 export const OWNER_REF_PATTERN = /^[A-Za-z0-9_-]{8,80}$/;
 

@@ -5,6 +5,8 @@ import {
   PageHeader, Stage, Stat, StatusBadge, cx,
 } from "@/components/ui";
 import { ConfirmSubmit } from "@/components/confirm-submit";
+import { NotificationBell } from "@/components/notification-bell";
+import { NotificationList, type NotificationListItem } from "@/components/notification-list";
 import { InspectionChecklist } from "@/app/(app)/run/inspection-checklist";
 import type { NavSection } from "@/lib/nav";
 import { UNASSIGNED } from "@/app/(app)/routes/planner/plan";
@@ -83,6 +85,28 @@ const STAGES = [
   ["Received", 400], ["Washing", 150], ["Drying", 44], ["Folding", 268],
   ["Packing", 39], ["Ready", 120], ["Dispatched", 32],
 ] as const;
+
+/* ------------------------------------------------------ notification fixture */
+
+/** Two unread and one already read, so both weights are visible side by side. */
+const PREVIEW_NOTIFICATIONS: NotificationListItem[] = [
+  {
+    id: "n1", kind: "invoice_overdue",
+    title: "Invoice INV00042 for Harbourview Hotel has passed its payment terms.",
+    href: "/invoices", created_at: "2026-08-05T21:02:00.000Z", read_at: null,
+  },
+  {
+    id: "n2", kind: "run_not_started",
+    title: "Run R-02 (Inner West morning) has not left the depot and is past its start time.",
+    href: "/routes/daily", created_at: "2026-08-05T20:15:00.000Z", read_at: null,
+  },
+  {
+    id: "n3", kind: "inspection_failed",
+    title: "A driver failed a vehicle inspection and the vehicle is off the road. Reassign the run or clear the vehicle.",
+    href: "/vehicles", created_at: "2026-08-04T19:40:00.000Z",
+    read_at: "2026-08-04T19:55:00.000Z",
+  },
+];
 
 /* ------------------------------------------------- dispatch planner fixture */
 
@@ -178,6 +202,7 @@ export default function DesignPreviewPage() {
                    className="w-full max-w-[420px] border border-strong bg-surface-muted px-2.5 py-1.5 text-[12.5px] placeholder:text-muted-foreground" />
           </div>
           <span className="ml-auto border border-border px-2 py-1 font-mono text-2xs text-muted-foreground">2026-08-05</span>
+          <NotificationBell count={3} />
           <span className="border border-strong px-2 py-1.5 font-mono text-2xs">☾</span>
         </header>
 
@@ -545,6 +570,34 @@ export default function DesignPreviewPage() {
                   </div>
                 </Card>
               </div>
+            </div>
+          </div>
+
+          <div className="border-t pt-5">
+            <PageHeader
+              eyebrow="Notifications"
+              title="The bell, and what is behind it"
+              description="Read/unread is carried by weight and a marker, never by colour — colour still means status and nothing else. Each row is a form, not a link, so Next's prefetch cannot mark things read on hover."
+            />
+            <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_260px]">
+              <Card title="Needs your attention" description="Newest first. Opening one goes where it gets handled.">
+                <NotificationList
+                  items={PREVIEW_NOTIFICATIONS}
+                  action={previewApply}
+                  emptyTitle="You're all caught up."
+                />
+              </Card>
+              <Card title="Bell states" description="Zero renders no badge at all — the badge exists to pull attention.">
+                <div className="flex items-center gap-3">
+                  <NotificationBell />
+                  <NotificationBell count={3} />
+                  <NotificationBell count={128} />
+                </div>
+                <p className="mt-3 text-xs text-muted-foreground">
+                  Resolved once per request beside the nav counts — a head-only count,
+                  no realtime. Past 99 it stops counting and says so.
+                </p>
+              </Card>
             </div>
           </div>
         </main>

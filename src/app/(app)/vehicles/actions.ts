@@ -8,6 +8,7 @@ import { recordAudit } from "@/lib/audit";
 import {
   describeDbError, done, fail, firstIssue, money, optionalDate, optionalText, optionalUuid, toObject,
 } from "@/lib/actions";
+import { notify } from "@/lib/notifications/notify";
 
 const optionalYear = z.preprocess(
   (value) => (value === "" || value === undefined || value === null ? undefined : Number(value)),
@@ -72,10 +73,12 @@ export async function updateVehicleStatus(formData: FormData): Promise<void> {
   if (!parsed.success) return fail("/vehicles", firstIssue(parsed.error));
 
   const supabase = await createClient();
-  const { error } = await supabase
+  const { data: vehicle, error } = await supabase
     .from("vehicles")
     .update({ maintenance_status: parsed.data.maintenance_status })
-    .eq("id", parsed.data.id).eq("tenant_id", session.tenantId);
+    .eq("id", parsed.data.id).eq("tenant_id", session.tenantId)
+    .select("registration")
+    .maybeSingle();
 
   if (error) return fail("/vehicles", describeDbError(error));
 
@@ -83,6 +86,19 @@ export async function updateVehicleStatus(formData: FormData): Promise<void> {
     entity: "vehicle", entityId: parsed.data.id, action: "status_change",
     summary: parsed.data.maintenance_status,
   });
+
+  // Only the off-road transition is worth interrupting someone for. "Back in
+  // service" is good news that can wait for the screen it is shown on.
+  if (parsed.data.maintenance_status === "out_of_service") {
+    await notify(session, {
+      kind: "vehicle_out_of_service",
+      subjectId: parsed.data.id,
+      title: `${vehicle?.registration ?? "A vehicle"} is off the road.`
+        + " Check whether any run today is still assigned to it.",
+      href: "/routes/daily",
+    });
+  }
+
   revalidatePath("/vehicles");
   return done("/vehicles", "Maintenance status updated.");
 }

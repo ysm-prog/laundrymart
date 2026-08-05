@@ -75,6 +75,9 @@ export const NAVIGATION: NavSection[] = [
     items: [
       { label: "Sites", href: "/admin/depots", capability: "admin.read" },
       { label: "People", href: "/admin/users", capability: "admin.read" },
+      // Gated on write, not read: the page is a form and nothing else, so a
+      // read-only role would get a screen it cannot submit.
+      { label: "Notifications", href: "/admin/notifications", capability: "admin.write" },
       { label: "Public holidays", href: "/admin/holidays", capability: "admin.read" },
       { label: "Audit log", href: "/admin/audit", capability: "admin.read" },
     ],
