@@ -5,11 +5,10 @@
 vitest 4). `laundrymart-syd` (ref `xujhwljrmogenhvqpkrf`) has the demo tenant; the app is on
 Vercel at `ats.coreit.com.au`; sign-in verified end to end.
 
-⚠️ **`0012_optional_inspection` is written and green locally but NOT yet applied to the hosted
-project** — it has 0001–0011. Until it is applied, the live database still refuses to start a
-run without an `inspection_id`, so the new "Start route" button on `/routes/daily/:id` will
-surface that P0001 message. Apply it (MCP `apply_migration`) when merging
-`claude/status-update-permissions-qzjuw6`.
+All 12 migrations applied — `0012_optional_inspection` went on 2026-08-05 (verified:
+`search_path=public` still pinned, `anon` still cannot execute the guard, no inspection check
+left in the body). The app code for it is on `claude/status-update-permissions-qzjuw6`, not yet
+merged to `Dev`/`Prod`; 0012 only removes a check, so the currently deployed code is unaffected.
 
 Working through the Plantline design handoff in four stages. **1 (theme), 2 (shell) and the
 dashboard from 3 are done.** Remaining: dispatch planner, billing two-pane, then stage 4 —

@@ -185,7 +185,7 @@ production_batches→auth.users.
 
 ## 11. Hosted project
 `laundrymart-syd` · ref `xujhwljrmogenhvqpkrf` · ap-southeast-2 (Sydney) · org `ysm-prog`.
-Deployed on Vercel at `ats.coreit.com.au`. All 11 migrations applied; demo tenant seeded
+Deployed on Vercel at `ats.coreit.com.au`. All 12 migrations applied; demo tenant seeded
 (`Harbour Commercial Laundry`); two `super_admin` logins, one also linked to the seeded driver.
 Sign-in verified end to end 2026-08-05.
 
