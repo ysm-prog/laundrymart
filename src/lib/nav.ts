@@ -30,6 +30,9 @@ export const NAVIGATION: NavSection[] = [
     items: [
       { label: "Dashboard", href: "/dashboard", capability: "reports.read" },
       { label: "Daily routes", href: "/routes/daily", capability: "routes.read", count: "routesToday" },
+      // Planning is a write action, so the entry only appears for roles that can
+      // actually commit a plan rather than dangling a board they cannot apply.
+      { label: "Dispatch planner", href: "/routes/planner", capability: "routes.write" },
       { label: "Jobs", href: "/jobs", capability: "routes.read" },
       { label: "My run", href: "/run", capability: "run.execute" },
     ],
