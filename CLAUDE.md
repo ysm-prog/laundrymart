@@ -133,6 +133,15 @@ which targets ESLint 9). Next 16 needs `experimental.useTypeScriptCli` and the a
 lives in `src/proxy.ts`, not `src/middleware.ts`.
 
 ## 18. Changelog
+### 2026-08-05 · CI DB job runs Postgres on the runner
+The DB job installed `postgresql-16-pgtap` on the runner while Postgres ran in a `services:`
+container, so `create extension pgtap` failed with "extension pgtap is not available" — a
+server-side extension's `.control` file has to live in the postmaster's own filesystem, and
+apt on the host cannot reach into the container. Dropped the service container and start
+Postgres 16 on the runner instead (cluster port read from `pg_lsclusters`, so a second
+cluster on 5433 does not break it). Migrations, the 45 pgTAP assertions and the seed all
+verified against this layout.
+
 ### 2026-08-05 · Dependency merge into Prod
 Merged every open Dependabot branch: Next 16, Tailwind 4, Zod 4, vitest 4, lefthook 2,
 @supabase/ssr 0.12, @types/node 26, actions/checkout+setup-node v7. Migrated Tailwind to

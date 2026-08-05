@@ -38,18 +38,22 @@ jobs:
     name: DB (migrations + RLS proof + seed)
     runs-on: ubuntu-latest
     timeout-minutes: 12
-    services:
-      postgres:
-        image: postgres:16
-        env: { POSTGRES_PASSWORD: postgres }
-        ports: ["5432:5432"]
-        options: >-
-          --health-cmd "pg_isready -U postgres" --health-interval 5s
-          --health-timeout 5s --health-retries 10
     env: { PGHOST: localhost, PGUSER: postgres, PGPASSWORD: postgres, PGDATABASE: postgres }
     steps:
       - uses: actions/checkout@v7
-      - run: sudo apt-get update && sudo apt-get install -y postgresql-client postgresql-16-pgtap
+      # pgTAP is a server-side extension: pgtap.control has to sit in the
+      # postmaster's own filesystem. apt on the runner cannot reach into a
+      # `services:` container, so Postgres runs on the runner itself.
+      - name: Postgres 16 + pgTAP
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y postgresql-16 postgresql-client-16 postgresql-16-pgtap
+          sudo pg_ctlcluster 16 main start || true
+          PORT=$(pg_lsclusters -h | awk '$1==16 && $2=="main" {print $3}')
+          echo "PGPORT=$PORT" >> "$GITHUB_ENV"
+          pg_isready -h localhost -p "$PORT" -t 30
+          sudo -u postgres psql -p "$PORT" -c "alter user postgres password 'postgres';"
       - run: bash scripts/run-db-tests.sh
       # The demo seed is documentation people actually run — keep it applying cleanly.
       - name: seed applies to a fresh schema
