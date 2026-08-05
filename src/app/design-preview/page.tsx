@@ -5,6 +5,10 @@ import {
   PageHeader, Stat, StatusBadge, cx,
 } from "@/components/ui";
 import type { NavSection } from "@/lib/nav";
+import { UNASSIGNED } from "@/app/(app)/routes/planner/plan";
+import {
+  PlannerBoard, type Option, type PlannerColumn, type PlannerJob,
+} from "@/app/(app)/routes/planner/planner-board";
 
 /**
  * Design review harness — a component gallery, not part of the product.
@@ -77,6 +81,64 @@ const STAGES = [
   ["Received", 400], ["Washing", 150], ["Drying", 44], ["Folding", 268],
   ["Packing", 39], ["Ready", 120], ["Dispatched", 32],
 ] as const;
+
+/* ------------------------------------------------- dispatch planner fixture */
+
+/** The board is interactive here; there is nothing behind it to apply to. */
+async function previewApply(): Promise<void> {
+  "use server";
+}
+
+const PREVIEW_JOBS: Record<string, PlannerJob> = Object.fromEntries(([
+  ["j1", "JOB00031", "Quay Street Bistro", "Main kitchen · Circular Quay", "both", "assigned", null, 96],
+  ["j2", "JOB00032", "Northshore Day Spa", "Treatment rooms · Neutral Bay", "delivery", "assigned", null, 142],
+  ["j3", "JOB00033", "Harbourview Hotel", "Loading dock · The Rocks", "both", "completed", "Completed", 310],
+  ["j4", "JOB00034", "Wentworth Aged Care", "Level 2 linen room · Randwick", "both", "assigned", null, null],
+  ["j5", "JOB00035", "Pier One Function Centre", "Service lane · Walsh Bay", "pickup", "exception", null, 78],
+  ["j6", "JOB00036", "Glebe Point Cafe", "Rear entry · Glebe", "both", "scheduled", null, 41],
+  ["j7", "JOB00037", "Bondi Surf Club", "Kiosk · Bondi Beach", "delivery", "scheduled", null, null],
+] as const).map(([id, jobNumber, customer, site, serviceType, status, lockedBecause, estimateKg]) => [
+  id,
+  { id, jobNumber, customer, site, serviceType, status, lockedBecause, estimateKg } satisfies PlannerJob,
+]));
+
+const PREVIEW_COLUMNS: PlannerColumn[] = [
+  {
+    id: UNASSIGNED, code: "Unassigned", name: "No run yet", status: null, open: true,
+    driverId: "", vehicleId: "", capacityKg: null, jobIds: ["j6", "j7"],
+  },
+  {
+    id: "r1", code: "CITY-AM", name: "City morning", status: "in_progress", open: true,
+    driverId: "d1", vehicleId: "v1", capacityKg: 800, jobIds: ["j3", "j1", "j5"],
+  },
+  {
+    id: "r2", code: "REG-PM", name: "Regional afternoon", status: "planned", open: true,
+    driverId: "", vehicleId: "v2", capacityKg: 250, jobIds: ["j2", "j4"],
+  },
+];
+
+const PREVIEW_DRIVERS: Option[] = [
+  { value: "d1", label: "Sam Okoye" },
+  { value: "d2", label: "Priya Raman" },
+];
+
+const PREVIEW_VEHICLES: Option[] = [
+  { value: "v1", label: "CJ72QM · 800 kg", capacityKg: 800 },
+  { value: "v2", label: "BK09YT · 250 kg", capacityKg: 250 },
+];
+
+/* --------------------------------------------------------- billing fixture */
+
+const PREVIEW_REGISTER = [
+  { number: "INV00009", customer: "Harbourview Hotel", balance: "$0.00", total: "$4,930.00",
+    status: "paid", when: "due 12/08/2026", chasing: false, selected: false },
+  { number: "INV00008", customer: "Northshore Day Spa", balance: "$3,120.00", total: "$3,120.00",
+    status: "issued", when: "14 day(s) past terms", chasing: true, selected: false },
+  { number: "INV00007", customer: "Quay Street Bistro", balance: "$1,284.50", total: "$1,284.50",
+    status: "overdue", when: "72 day(s) past terms", chasing: true, selected: true },
+  { number: "INV00006", customer: "Wentworth Aged Care", balance: "$8,412.00", total: "$8,412.00",
+    status: "draft", when: "issued 01/08/2026", chasing: false, selected: false },
+];
 
 export default function DesignPreviewPage() {
   if (process.env.VERCEL_ENV === "production") notFound();
@@ -255,6 +317,173 @@ export default function DesignPreviewPage() {
                 })}
               </ul>
             </Card>
+          </div>
+          <div className="border-t pt-5">
+            <PageHeader
+              eyebrow="05/08/2026"
+              title="Dispatch planner"
+              description="Arrange the whole day, then apply it in one go."
+            />
+            <div className="grid gap-px border bg-border sm:grid-cols-2 lg:grid-cols-4">
+              <Stat flush label="Runs" value="3" hint="18 stops in total" />
+              <Stat flush label="Unassigned stops" value="2" hint="waiting on a run" tone="warning" />
+              <Stat flush label="Runs without a driver" value="1" hint="assign before the day starts" tone="warning" />
+              <Stat flush label="Exceptions" value="1" hint="may need re-dispatching" tone="danger" />
+            </div>
+            <div className="mt-4 border bg-surface p-3">
+              <PlannerBoard
+                columns={PREVIEW_COLUMNS}
+                jobs={PREVIEW_JOBS}
+                drivers={PREVIEW_DRIVERS}
+                vehicles={PREVIEW_VEHICLES}
+                action={previewApply}
+              />
+            </div>
+          </div>
+
+          <div className="border-t pt-5">
+            <PageHeader
+              eyebrow="Billing"
+              title="Invoices"
+              description="The register is the chase list; the pane is where the chase happens."
+            />
+            <div className="grid gap-px border bg-border sm:grid-cols-2 lg:grid-cols-4">
+              {[
+                ["Current", "$8,412.00", ""],
+                ["1–30 days", "$3,120.00", "text-warning"],
+                ["31–60 days", "$0.00", "text-warning"],
+                ["60+ days", "$1,284.50", "text-danger"],
+              ].map(([label, value, tone]) => (
+                <div key={label} className="bg-surface px-4 py-3">
+                  <Eyebrow>{label}</Eyebrow>
+                  <div className={cx("mt-1 text-2xl font-semibold tabular-nums tracking-[-0.02em]",
+                                     tone === "text-danger" && "text-danger")}>{value}</div>
+                  <div className={cx("mt-0.5 text-[11px]", tone || "text-muted-foreground")}>
+                    {value === "$0.00" ? "nothing outstanding" : "outstanding"}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="mt-4 grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,26rem)]">
+              <Card title="Register" description="4 invoice(s)" className="[&>div]:p-0">
+                <ul>
+                  {PREVIEW_REGISTER.map((row) => (
+                    <li key={row.number} className="border-b last:border-b-0">
+                      <div className={cx(
+                        "block border-l-[3px] px-3 py-2",
+                        row.selected ? "border-l-primary bg-surface-muted"
+                          : row.chasing ? "border-l-warning" : "border-l-transparent",
+                      )}>
+                        <div className="flex items-baseline justify-between gap-2">
+                          <span className="font-mono text-[11.5px] font-medium">{row.number}</span>
+                          <span className="font-mono text-[12.5px] font-semibold tabular-nums">{row.balance}</span>
+                        </div>
+                        <div className="mt-0.5 flex items-baseline justify-between gap-2">
+                          <span className="truncate text-[12.5px] font-semibold">{row.customer}</span>
+                          <span className="shrink-0 font-mono text-[11px] text-muted-foreground">of {row.total}</span>
+                        </div>
+                        <div className="mt-1 flex flex-wrap items-center gap-2">
+                          <StatusBadge status={row.status} />
+                          <span className={cx("font-mono text-[11px]",
+                                              row.chasing ? "text-warning" : "text-muted-foreground")}>
+                            {row.when}
+                          </span>
+                        </div>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </Card>
+
+              <Card
+                title="INV00007"
+                description="Quay Street Bistro"
+                actions={<StatusBadge status="overdue" />}
+                className="[&>div]:p-0"
+              >
+                <div className="space-y-3 p-4">
+                  <Notice tone="warning">72 day(s) past terms · $1,284.50 outstanding.</Notice>
+                  <div className="grid grid-cols-2 gap-px border bg-border">
+                    <div className="bg-surface px-3 py-2">
+                      <Eyebrow>Total</Eyebrow>
+                      <div className="mt-0.5 text-[17px] font-semibold tabular-nums">$1,284.50</div>
+                    </div>
+                    <div className="bg-surface px-3 py-2">
+                      <Eyebrow>Balance</Eyebrow>
+                      <div className="mt-0.5 text-[17px] font-semibold tabular-nums text-warning">$1,284.50</div>
+                    </div>
+                  </div>
+                  <dl className="grid grid-cols-2 gap-x-3 gap-y-2">
+                    {[["Issued", "11/05/2026"], ["Due", "25/05/2026"],
+                      ["Type", "Recurring"], ["Terms", "14 days"]].map(([label, value]) => (
+                      <div key={label}>
+                        <dt><Eyebrow>{label}</Eyebrow></dt>
+                        <dd className="font-mono text-[11.5px]">{value}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                </div>
+
+                <section className="border-t">
+                  <h3 className="bg-surface-muted px-4 py-1.5 font-mono text-3xs uppercase tracking-[0.08em] text-muted-foreground">
+                    Lines · 3
+                  </h3>
+                  <ul className="divide-y">
+                    {[
+                      ["Bath Towel — White — 9 collection(s)", "Linen rental", "108 × $2.40", "$259.20"],
+                      ["Chef Jacket — 9 collection(s)", "Wash only", "54 × $4.10", "$221.40"],
+                      ["Fuel levy", "Fuel levy", "1 × $28.80", "$28.80"],
+                    ].map(([description, charge, qty, amount]) => (
+                      <li key={description} className="flex items-baseline justify-between gap-3 px-4 py-1.5">
+                        <span className="min-w-0">
+                          <span className="block truncate text-[12.5px]">{description}</span>
+                          <Eyebrow>{charge} · {qty}</Eyebrow>
+                        </span>
+                        <span className="shrink-0 font-mono text-[12px] tabular-nums">{amount}</span>
+                      </li>
+                    ))}
+                    <li className="flex items-baseline justify-between gap-3 bg-surface-muted px-4 py-1.5">
+                      <Eyebrow>Subtotal · GST $116.77</Eyebrow>
+                      <span className="font-mono text-[12px] font-semibold tabular-nums">$1,167.73</span>
+                    </li>
+                  </ul>
+                </section>
+
+                <section className="border-t">
+                  <h3 className="bg-surface-muted px-4 py-1.5 font-mono text-3xs uppercase tracking-[0.08em] text-muted-foreground">
+                    Do next
+                  </h3>
+                  <div className="space-y-3 px-4 py-3">
+                    <div>
+                      <div className="flex flex-wrap items-end gap-2">
+                        <Field label="Email to" name="p_to" className="min-w-[12rem] flex-1">
+                          <Input name="p_to" placeholder="accounts@quaybistro.example" />
+                        </Field>
+                        <SubmitButton>Send</SubmitButton>
+                      </div>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Blank uses the customer&rsquo;s billing email.
+                      </p>
+                    </div>
+                    <div className="grid gap-2 border-t pt-3 sm:grid-cols-2">
+                      <Field label="Paid on" name="p_paid"><Input name="p_paid" defaultValue="2026-08-05" /></Field>
+                      <Field label="Amount" name="p_amount"><Input name="p_amount" defaultValue="1284.50" /></Field>
+                      <Field label="Method" name="p_method">
+                        <Select name="p_method" options={[{ value: "a", label: "Bank transfer" }]} />
+                      </Field>
+                      <Field label="Reference" name="p_ref"><Input name="p_ref" /></Field>
+                      <div className="sm:col-span-2"><SubmitButton>Record payment</SubmitButton></div>
+                    </div>
+                  </div>
+                </section>
+
+                <div className="flex flex-wrap items-center gap-3 border-t px-4 py-2.5">
+                  <span className="text-[12.5px] font-medium text-primary">Open full invoice →</span>
+                  <span className="text-[12.5px] font-medium text-primary">Download PDF</span>
+                </div>
+              </Card>
+            </div>
           </div>
         </main>
       </div>

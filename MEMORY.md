@@ -5,10 +5,25 @@
 vitest 4). `laundrymart-syd` (ref `xujhwljrmogenhvqpkrf`) has all 11 migrations and the demo
 tenant; the app is on Vercel at `ats.coreit.com.au`; sign-in verified end to end.
 
-Working through the Plantline design handoff in four stages. **1 (theme), 2 (shell) and the
-dashboard from 3 are done.** Remaining: dispatch planner, billing two-pane, then stage 4 —
-customer portal, public tracking, Xero push, bag scan. The handoff bundle lives in the
-scratchpad, not the repo; re-upload it in a new session.
+Working through the Plantline design handoff in four stages. **Stages 1–3 are done** — theme,
+shell, dashboard, and now the dispatch planner and the billing two-pane (branch
+`claude/dispatch-planner-billing-pane-xte9qg`, commit `ab43335`, pushed; no PR opened). The
+handoff bundle lives in the scratchpad, not the repo; re-upload it in a new session.
+
+**Stage 4 is blocked on four decisions, not on code.** Customer portal / public tracking,
+Xero and bag scan each have a fork the user asked to be consulted on rather than guessed:
+1. *Tracking auth* — unguessable per-job link (no login) vs emailed one-time code vs full
+   Supabase Auth portal accounts. Whatever wins, the tracking page shows no dollar figures:
+   §10b already establishes that drivers and floor staff see none, and a link holder is less
+   trusted than either.
+2. *Xero push* — DRAFT (a human approves in Xero before anything reaches a customer) vs
+   AUTHORISED-and-we-still-send vs AUTHORISED-and-Xero-sends (retires the Resend path).
+3. *Xero return path* — pull payments back on a schedule, push-only, or webhook. Push-only
+   leaves the aging strip, the chase queue and the dashboard's overdue KPI permanently stale
+   once Xero starts collecting.
+4. *Bag scan* — durable bag registered to a customer (needs a `bags` table + issue/retire) vs
+   one-time label per collection vs just scanning existing item barcodes to speed up counts.
+Only the first Xero option and the durable-bag option imply new migrations.
 
 The theme was written against Tailwind 3 and ported to 4 during the merge from `Dev`: there is
 no `tailwind.config.ts` any more, everything lives in the `@theme` block of `globals.css`.
@@ -18,7 +33,7 @@ server-side extension, so its `.control` file has to sit in the postmaster's own
 and apt on the runner cannot reach into a container.
 
 **Next up**
-1. Dispatch planner and billing two-pane (stage 3), then stage 4.
+1. Stage 4, once the four decisions above are made.
 2. **Enable asymmetric JWT signing keys** on the project so `getClaims()` verifies locally
    instead of calling the auth server on every navigation (§2 assumes this).
 3. Send one real invoice email end to end — the Resend path is still untested against the
@@ -43,7 +58,19 @@ and apt on the runner cannot reach into a container.
 
 **Gotchas worth remembering**
 - A `"use server"` file may only export async functions — constants live in a sibling module
-  (`items/categories.ts`, `run/checklist.ts`, `inventory/states.ts`, `warehouse/stages.ts`).
+  (`items/categories.ts`, `run/checklist.ts`, `inventory/states.ts`, `warehouse/stages.ts`,
+  `routes/planner/plan.ts`).
+- **`revalidatePath` matches on route and ignores a query string.** Three invoice actions were
+  passing `/invoices/<id>?ok=…`-shaped paths to it and quietly revalidating nothing.
+- Tailwind only emits utilities it can see in the source, so `text-${tone}` compiles to
+  nothing. Tone classes get written out in full (see the aging strip in `invoices/page.tsx`).
+- `/design-preview` renders the real `PlannerBoard`; a no-op inline `"use server"` function
+  satisfies its `action` prop, and a zero-arg function is assignable to `(fd: FormData) => …`.
+- Screenshot loop that worked here: `npm run build && npm start`, Playwright from the
+  scratchpad against `/opt/pw-browsers/chromium-1194/chrome-linux/chrome`, element shots of
+  `main > div.border-t`. `.env.local` needs only the three Supabase vars — copying
+  `.env.example` wholesale fails validation on the *optional* blocks (empty `SENTRY_DSN`,
+  `RESEND_API_KEY`, `INVOICE_FROM_EMAIL`).
 - Supabase's type inference gives up on `.select()` strings built with `+`; use `.returns<T>()`.
 - `tsconfig` sets `jsx: "preserve"`; `vitest.config.ts` must set `esbuild.jsx = "automatic"`
   or a `.tsx` under test renders nothing and react-pdf fails with "props of null".
