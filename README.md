@@ -31,8 +31,13 @@ warehouse states, so that work is additive rather than a rewrite.
 
 ## Stack
 
-Next.js 15 (App Router) · React 19 · TypeScript · TailwindCSS · Zod · Supabase
-(Postgres + RLS + Auth) · Vercel, pinned to `syd1`.
+Next.js 16 (App Router, Turbopack) · React 19 · TypeScript 6 · Tailwind CSS 4 ·
+Zod 4 · Supabase (Postgres + RLS + Auth) · Vercel, pinned to `syd1`.
+
+Two dependency pins are deliberate rather than "latest": **TypeScript 6** because
+typescript-eslint has no TS 7 support yet, and **ESLint 9** because
+`eslint-config-next@16` depends on typescript-eslint 8, which targets ESLint 9.
+Both can move up once the lint stack catches up.
 
 > The master spec names a .NET 9 Web API. This repo is built on the supplied project
 > skeleton, which is Next.js + Supabase end to end. Server Actions and row-level security
@@ -93,6 +98,7 @@ that syncs twice inserts once. A service worker keeps the run screen reachable w
 ## Layout
 
 ```
+src/proxy.ts       session refresh + auth gate (Next 16 renamed this from middleware)
 src/app/(app)/     authenticated screens, one folder per module plus its server actions
 src/app/api/sync/  offline batch sync endpoint
 src/lib/domain/    pure business logic (service calendar, pricing, ABN, dates) + tests
@@ -110,6 +116,8 @@ supabase/          migrations (0001–0006), pgTAP proofs, demo seed
 - `getClaims()` for auth, never `getUser()` per navigation.
 - Every new tenant table ships with an RLS policy **and** a pgTAP proof.
 - Money is `numeric(12,2)`; dates that are calendar facts are handled in UTC.
+- Tailwind is configured in CSS (`src/app/globals.css`), not a JS config file — v4
+  dropped `tailwind.config.ts` in favour of `@theme`.
 
 ## Before going live
 

@@ -2,6 +2,9 @@
 const nextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
+  // TypeScript 7 is the native compiler and no longer exposes the JS compiler
+  // API Next.js used to call; the CLI path is the supported route for it.
+  experimental: { useTypeScriptCli: true },
   // Security headers baked in (matches SECURITY.md posture)
   async headers() {
     return [{

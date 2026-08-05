@@ -1,7 +1,7 @@
 name: CI
 on:
-  push: { branches: [main, dev] }
-  pull_request: { branches: [main, dev] }
+  push: { branches: [Prod, Dev] }
+  pull_request: { branches: [Prod, Dev] }
 concurrency: { group: "${{ github.workflow }}-${{ github.ref }}", cancel-in-progress: true }
 jobs:
   verify:

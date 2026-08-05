@@ -1,7 +1,7 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "regions": ["syd1"],
-  "git": { "deploymentEnabled": { "main": true, "dev": true } },
+  "git": { "deploymentEnabled": { "Prod": true, "Dev": true } },
   "buildCommand": "bash scripts/verify.sh || next build",
   "github": { "silent": true }
 }

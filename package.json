@@ -2,12 +2,14 @@
   "name": "laundrymart",
   "version": "0.1.0",
   "private": true,
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint",
+    "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -24,16 +26,16 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@tailwindcss/postcss": "^4.3.3",
     "@types/node": "^26.1.2",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
-    "autoprefixer": "^10.4.20",
-    "eslint": "^10.8.0",
+    "eslint": "^9.39.5",
     "eslint-config-next": "^16.2.12",
     "lefthook": "^2.1.10",
     "postcss": "^8.4.47",
     "tailwindcss": "^4.3.3",
-    "typescript": "^7.0.2",
+    "typescript": "^6.0.3",
     "vitest": "^4.1.10"
   }
 }

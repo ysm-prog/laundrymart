@@ -7,7 +7,7 @@ below and add a Changelog entry (newest on top). The Stop hook warns on drift.
 
 ## 1. Overview
 Commercial Laundry Management System — customers, service agreements, depot-aware routing,
-an offline driver run, inventory and billing. Next.js 15 (App Router) + Supabase
+an offline driver run, inventory and billing. Next.js 16 (App Router) + Supabase
 (Postgres/RLS/Auth) + Vercel, AU (Sydney).
 
 The master spec names a .NET 9 Web API; this build follows the supplied skeleton instead
@@ -19,6 +19,7 @@ The master spec names a .NET 9 Web API; this build follows the supplied skeleton
 - Auth via `getClaims()` (local JWT verify, no network); `requireSession()` is memoised per
   request. `requireCapability()` guards pages; `assertCapability()` guards actions.
 - Functions pinned to `syd1` to co-locate with the Sydney DB (vercel.json).
+- The session refresh + auth gate is `src/proxy.ts` (Next 16's rename of `middleware`).
 - Server Actions only for writes. They derive `tenant_id` from the session and redirect with
   `?error=` / `?ok=`. The one exception is `/api/sync`, which exists because the offline
   outbox needs a batch endpoint it can replay.
@@ -52,8 +53,9 @@ and action guards.
 - `recalculate_invoice()` keeps invoice totals consistent with lines and payments.
 
 ## 5. Branch & deploy
-Feature branch → PR → main. Vercel build runs the verify gate; CI runs verify, gitleaks and
-the DB job (migrations + pgTAP + seed). Never force-push main.
+Feature branch → `Dev` → `Prod`. CI (`Prod`/`Dev`) runs verify, gitleaks and the DB job
+(migrations + pgTAP + seed); the Vercel build runs the same verify gate and only those two
+branches deploy. Never force-push `Prod`.
 
 ## 6. Routes
 `/` landing · `/login` · `/offline` · `/api/sync`
@@ -90,7 +92,22 @@ keyed on `client_ref`, unique per tenant).
 ## 9. Environment
 See `.env.example`; validated fail-fast in `src/lib/env.ts`.
 
+## 10. Toolchain pins
+Next 16 (Turbopack), React 19, Tailwind 4 (CSS-first — no `tailwind.config.ts`), Zod 4,
+vitest 4. Two pins are held back on purpose: TypeScript **6** (typescript-eslint does not
+support TS 7) and ESLint **9** (`eslint-config-next@16` depends on typescript-eslint 8,
+which targets ESLint 9). Next 16 needs `experimental.useTypeScriptCli` and the auth gate
+lives in `src/proxy.ts`, not `src/middleware.ts`.
+
 ## 18. Changelog
+### 2026-08-05 · Dependency merge into Prod
+Merged every open Dependabot branch: Next 16, Tailwind 4, Zod 4, vitest 4, lefthook 2,
+@supabase/ssr 0.12, @types/node 26, actions/checkout+setup-node v7. Migrated Tailwind to
+CSS-first config, `next lint` to the ESLint CLI with flat config, and `middleware` to the
+`proxy` convention. Held TypeScript at 6 and ESLint at 9 (lint stack does not support 7/10).
+Fixed three real `set-state-in-effect` violations the new react-hooks rules exposed, and
+pointed CI and Vercel at the `Prod`/`Dev` branches they actually use.
+
 ### 2026-08-05 · Initial build
 Full MVP against the master spec: multi-tenant spine with RLS + pgTAP proofs, depots,
 customers, service agreements with pattern/holiday engine, items, fleet, route templates and

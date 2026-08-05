@@ -1,12 +1,21 @@
 "use client";
 
-import { useCallback, useEffect, useState, useTransition } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore, useTransition } from "react";
 import {
   enqueue, flush, newClientRef, pending, type QueuedLine, type QueuedRecord,
 } from "@/lib/offline/queue";
 import { cx } from "./ui";
 
 export type CaptureItem = { id: string; name: string; sku: string };
+
+function subscribeToConnectivity(onChange: () => void) {
+  window.addEventListener("online", onChange);
+  window.addEventListener("offline", onChange);
+  return () => {
+    window.removeEventListener("online", onChange);
+    window.removeEventListener("offline", onChange);
+  };
+}
 
 /**
  * Field capture for pickups and deliveries.
@@ -25,11 +34,19 @@ export function OfflineCapture({
 }) {
   const [queued, setQueued] = useState(0);
   const [status, setStatus] = useState<string | null>(null);
-  const [online, setOnline] = useState(true);
   const [isPending, startTransition] = useTransition();
 
+  // Connectivity lives in the browser, not in React — subscribe to it rather
+  // than copying it into state on mount.
+  const online = useSyncExternalStore(
+    subscribeToConnectivity,
+    () => navigator.onLine,
+    () => true, // Server render: assume online so the UI is not alarming.
+  );
+
   const refresh = useCallback(async () => {
-    setQueued((await pending()).length);
+    const records = await pending();
+    setQueued(records.length);
   }, []);
 
   const drain = useCallback(async () => {
@@ -43,26 +60,32 @@ export function OfflineCapture({
     }
   }, [onSynced]);
 
+  // Drain on mount, whenever signal returns, and when the service worker's
+  // background sync pings us. None of these set state synchronously.
   useEffect(() => {
-    setOnline(navigator.onLine);
-    void refresh();
+    // `drain` already reports what is left in the queue, so a separate refresh
+    // here would only duplicate the read.
+    //
+    // set-state-in-effect guards against cascading synchronous renders; every
+    // setState inside `drain` happens after IndexedDB and network I/O, so it can
+    // never run during this commit. Attempting a sync on mount is the point of
+    // the component — a driver who opens the app in signal must not have to
+    // tap anything for yesterday's queue to go up.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void drain();
 
-    const goOnline = () => { setOnline(true); void drain(); };
-    const goOffline = () => setOnline(false);
+    const onOnline = () => { void drain(); };
     const onMessage = (event: MessageEvent) => {
       if (event.data?.type === "flush-outbox") void drain();
     };
 
-    window.addEventListener("online", goOnline);
-    window.addEventListener("offline", goOffline);
+    window.addEventListener("online", onOnline);
     navigator.serviceWorker?.addEventListener("message", onMessage);
     return () => {
-      window.removeEventListener("online", goOnline);
-      window.removeEventListener("offline", goOffline);
+      window.removeEventListener("online", onOnline);
       navigator.serviceWorker?.removeEventListener("message", onMessage);
     };
-  }, [drain, refresh]);
+  }, [drain]);
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();

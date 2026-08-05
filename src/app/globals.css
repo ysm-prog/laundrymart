@@ -1,10 +1,17 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
 
-/* Design tokens. Light and dark are both first-class (NFR §8: dark mode,
-   WCAG 2.1 AA contrast). Everything is expressed as HSL channels so Tailwind's
-   opacity modifiers keep working. */
+/* Tailwind v4 is configured in CSS rather than a JS config file. */
+@source "../**/*.{ts,tsx}";
+
+/* Dark mode is driven by a class on <html>, set before paint in layout.tsx. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/*
+ * Design tokens. Light and dark are both first-class (NFR §8: dark mode,
+ * WCAG 2.1 AA contrast). Values stay as raw HSL channels so the palette can be
+ * themed from one place; the @theme block below turns them into Tailwind
+ * colours, and v4's color-mix() handles the `/50` opacity modifiers.
+ */
 @layer base {
   :root {
     color-scheme: light;
@@ -40,6 +47,7 @@
     --ring: 213 94% 68%;
   }
 
+  /* v4 defaults the border colour to currentColor; pin it to our token. */
   * {
     border-color: hsl(var(--border));
   }
@@ -55,4 +63,23 @@
     outline: 2px solid hsl(var(--ring));
     outline-offset: 2px;
   }
+}
+
+@theme inline {
+  --color-background: hsl(var(--background));
+  --color-surface: hsl(var(--surface));
+  --color-surface-muted: hsl(var(--surface-muted));
+  --color-foreground: hsl(var(--foreground));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-border: hsl(var(--border));
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-success: hsl(var(--success));
+  --color-warning: hsl(var(--warning));
+  --color-danger: hsl(var(--danger));
+  --color-info: hsl(var(--info));
+  --color-ring: hsl(var(--ring));
+
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
 }
