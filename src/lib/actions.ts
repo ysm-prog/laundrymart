@@ -17,6 +17,22 @@ export function done(path: string, message: string): never {
   redirect(`${path}?ok=${encodeURIComponent(message)}`);
 }
 
+/**
+ * Where an action should redirect back to, when the caller knows better than the
+ * action does — a two-pane screen wants the pane it was working in, not the
+ * record's own page.
+ *
+ * The value arrives in a form field, so it is treated as hostile: anything that
+ * is not a plain same-site path falls back. `//evil.example` is a protocol-
+ * relative URL and would otherwise make every action an open redirect.
+ */
+export function returnTo(formData: FormData, fallback: string): string {
+  const value = formData.get("return_to");
+  if (typeof value !== "string") return fallback;
+  if (!value.startsWith("/") || value.startsWith("//") || value.startsWith("/\\")) return fallback;
+  return value;
+}
+
 /** First validation message, or a generic fallback. */
 export function firstIssue(error: z.ZodError): string {
   const issue = error.issues[0];

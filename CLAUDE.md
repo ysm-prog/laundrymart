@@ -71,7 +71,7 @@ branches deploy. Never force-push `Prod`.
 `/` landing · `/login` · `/offline` · `/api/sync` · `/api/media` · `/api/invoices/:id/pdf`
 `(app)`: `/dashboard` · `/customers[/new|/:id|/:id/edit]` · `/agreements[/new|/:id]` ·
 `/items[/:id]` · `/drivers` · `/vehicles` · `/routes/templates[/:id]` ·
-`/routes/daily[/:id|/:id/sheet]` · `/jobs[/:id]` ·
+`/routes/daily[/:id|/:id/sheet]` · `/routes/planner` · `/jobs[/:id]` ·
 `/operations/{pickups,deliveries,exceptions}` · `/run` · `/warehouse[/:id]` · `/inventory` ·
 `/invoices[/:id]` · `/reports` · `/admin[/depots|/users|/holidays|/audit]`
 
@@ -190,7 +190,39 @@ Two things the hosted project does differently from local Postgres, both handled
 - PostgREST publishes `public` as RPC. Anything executable by `anon` is an unauthenticated
   endpoint — see the warning under §7.
 
+## 17. Dispatch planner and the billing two-pane
+Both are compositions over existing tables — neither added a migration.
+
+- `/routes/planner` arranges a whole day at once: one column per run, a tray for stops with
+  no run, crew pickers in each column header. Nothing commits until **Apply plan**, because
+  dispatching is a sequence of trial moves and a board that saved each drag would leave the
+  run sheet transiently wrong after every one. `plan.ts` holds the rules the board and the
+  action both obey (a stop is frozen once `progress_status` leaves `not_started`; a closed or
+  cancelled run neither gains nor loses stops) — the browser enforces them so a plan is never
+  composed that the action will reject, and the action re-enforces them because the browser is
+  not the boundary. The load meter averages the customer's own recent weighed collections and
+  says how many stops it actually covers; there is no promised weight per stop in the schema,
+  so it never implies one.
+- `/invoices` is the register + working pane. The left list is a chase queue, the right pane
+  is issue / send / take payment, and selection lives in `?selected=` so filters and page
+  survive. Pane actions post a `return_to` and come back to the pane — `returnTo()` in
+  `lib/actions.ts` only honours a plain same-site path, since an absolute one would make every
+  action an open redirect. `/invoices/:id` stays as the printable record and the place lines
+  are edited and invoices voided.
+
 ## 18. Changelog
+### 2026-08-05 · Dispatch planner and the billing two-pane (stage 3 complete)
+- **`/routes/planner`** — the pack's day board. See §17. New nav entry gated on `routes.write`,
+  since a board you cannot apply is worse than no board.
+- **`/invoices` rebuilt as the two-pane.** The old page made you open a detail page and come
+  back for every invoice in a chase list; selection is now a query parameter and the work
+  happens beside the list.
+- `returnTo()` added to `lib/actions.ts`; `issueInvoice`, `recordPayment` and `emailInvoice`
+  honour it. Those three also stopped passing a query string to `revalidatePath`, which
+  matches on route and silently did nothing with one attached.
+- `/design-preview` gained both screens (the planner board is the real client component), and
+  they were rendered in light and dark before this landed.
+
 ### 2026-08-05 · Three broken embeds fixed; the design is now reviewable
 - **`/routes/daily`, the run sheet and the vehicle report were broken.** All three embedded
   `vehicles(registration)` from `daily_routes`, which has two FKs to vehicles — ambiguous, so

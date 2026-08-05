@@ -14,7 +14,7 @@ import {
 } from "@/lib/domain/pricing";
 import {
   count, describeDbError, done, fail, firstIssue, money, optionalText,
-  optionalUuid, requiredDate, toObject,
+  optionalUuid, requiredDate, returnTo, toObject,
 } from "@/lib/actions";
 import { loadInvoiceForPdf } from "@/lib/pdf/invoice-data";
 import { invoiceFileName, renderInvoicePdf } from "@/lib/pdf/render";
@@ -370,7 +370,14 @@ export async function createManualInvoice(formData: FormData): Promise<void> {
     entity: "invoice", entityId: data.id, action: "create", summary: data.invoice_number,
   });
   revalidatePath("/invoices");
-  done(`/invoices/${data.id}`, `Invoice ${data.invoice_number} created.`);
+
+  // Raised from the billing two-pane, the new draft opens in the pane the user
+  // is already working in rather than throwing them onto a full page.
+  const inPane = formData.get("pane") === "1";
+  done(
+    inPane ? `/invoices?selected=${data.id}` : `/invoices/${data.id}`,
+    `Invoice ${data.invoice_number} created.`,
+  );
 }
 
 export async function addInvoiceLine(formData: FormData): Promise<void> {
@@ -438,6 +445,7 @@ export async function issueInvoice(formData: FormData): Promise<void> {
   const id = z.string().uuid().safeParse(formData.get("id"));
   if (!id.success) fail("/invoices", "That invoice could not be found.");
 
+  const backTo = returnTo(formData, `/invoices/${id.data}`);
   const supabase = await createClient();
   await supabase.rpc("recalculate_invoice", { p_invoice: id.data });
 
@@ -445,11 +453,12 @@ export async function issueInvoice(formData: FormData): Promise<void> {
     .from("invoices")
     .update({ status: "issued", issued_at: new Date().toISOString() })
     .eq("id", id.data).eq("tenant_id", session.tenantId).eq("status", "draft");
-  if (error) fail(`/invoices/${id.data}`, describeDbError(error));
+  if (error) fail(backTo, describeDbError(error));
 
   await recordAudit(session, { entity: "invoice", entityId: id.data, action: "status_change", summary: "issued" });
   revalidatePath(`/invoices/${id.data}`);
-  done(`/invoices/${id.data}`, "Invoice issued.");
+  revalidatePath("/invoices");
+  done(backTo, "Invoice issued.");
 }
 
 export async function recordPayment(formData: FormData): Promise<void> {
@@ -464,7 +473,7 @@ export async function recordPayment(formData: FormData): Promise<void> {
   }).safeParse(toObject(formData));
   if (!parsed.success) fail("/invoices", firstIssue(parsed.error));
 
-  const backTo = `/invoices/${parsed.data.invoice_id}`;
+  const backTo = returnTo(formData, `/invoices/${parsed.data.invoice_id}`);
   const supabase = await createClient();
 
   const { error } = await supabase.from("payments").insert({
@@ -491,7 +500,10 @@ export async function recordPayment(formData: FormData): Promise<void> {
     entity: "payment", entityId: parsed.data.invoice_id, action: "create",
     summary: `${parsed.data.amount} via ${parsed.data.method}`,
   });
-  revalidatePath(backTo);
+  // Revalidate the routes, not `backTo` — that may carry a query string, which
+  // `revalidatePath` does not match against.
+  revalidatePath(`/invoices/${parsed.data.invoice_id}`);
+  revalidatePath("/invoices");
   done(backTo, "Payment recorded.");
 }
 
@@ -603,7 +615,7 @@ export async function emailInvoice(formData: FormData): Promise<void> {
   }).safeParse(toObject(formData));
   if (!parsed.success) fail("/invoices", firstIssue(parsed.error));
 
-  const backTo = `/invoices/${parsed.data.id}`;
+  const backTo = returnTo(formData, `/invoices/${parsed.data.id}`);
 
   const data = await loadInvoiceForPdf(parsed.data.id, session.tenantId);
   if (!data) fail(backTo, "That invoice could not be found.");
@@ -654,7 +666,8 @@ export async function emailInvoice(formData: FormData): Promise<void> {
     metadata: { providerId: result.id },
   });
 
-  revalidatePath(backTo);
+  revalidatePath(`/invoices/${parsed.data.id}`);
+  revalidatePath("/invoices");
   done(backTo, `Invoice emailed to ${recipient}.`);
 }
 
