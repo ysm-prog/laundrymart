@@ -1,0 +1,19 @@
+pre-commit:
+  parallel: true
+  commands:
+    # Skips cleanly when gitleaks isn't installed locally — CI always runs it.
+    gitleaks-staged:
+      run: |
+        if command -v gitleaks >/dev/null 2>&1; then
+          gitleaks protect --staged --redact --config=.gitleaks.toml
+        else
+          echo "gitleaks not installed locally — CI will scan this commit"
+        fi
+    # `next lint` takes a directory, not a file list, so lint the whole project.
+    lint:
+      glob: "*.{ts,tsx}"
+      run: npm run lint
+pre-push:
+  commands:
+    typecheck: { run: npm run typecheck }
+    test: { run: npm run test }

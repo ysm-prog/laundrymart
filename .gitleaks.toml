@@ -1,0 +1,11 @@
+title = "secret scan"
+[extend]
+useDefault = true
+[[rules]]
+id = "github-pat"
+description = "GitHub PAT"
+regex = '''(ghp|gho|ghu|ghs|ghr|github_pat)_[0-9A-Za-z_]{20,}'''
+keywords = ["ghp_","github_pat_"]
+[allowlist]
+paths = ['''\.env\.example$''','''(^|/)fixtures?/''','''(^|/)__tests__/''']
+regexes = ['''placeholder''','''example\.com''','''your-.*-key''','''YOUR_PROJECT''','''0000-0000''']

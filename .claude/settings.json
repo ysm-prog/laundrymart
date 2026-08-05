@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": { "allow": [
+    "Bash(npm run build)","Bash(npm run typecheck)","Bash(npm run lint)",
+    "Bash(npm run test)","Bash(npm run db:test)","Bash(git status)","Bash(git diff:*)","Bash(git log:*)"
+  ] },
+  "hooks": {
+    "SessionStart": [{ "hooks": [
+      { "type": "command", "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/session-start.sh\"" },
+      { "type": "command", "command": "f=\"$CLAUDE_PROJECT_DIR/MEMORY.md\"; if [ -f \"$f\" ]; then jq -Rs '{hookSpecificOutput:{hookEventName:\"SessionStart\",additionalContext:(\"Working memory from last session (MEMORY.md is the live delta; CLAUDE.md is canonical):\\n\\n\" + .)}}' \"$f\"; fi; exit 0" }
+    ] }],
+    "Stop": [{ "hooks": [
+      { "type": "command", "command": "{ cd \"$CLAUDE_PROJECT_DIR\" 2>/dev/null || exit 0; c=$(git status --porcelain 2>/dev/null); w=$(echo \"$c\" | grep -E '^.. (src/|supabase/)' || true); if [ -n \"$w\" ] && [ -z \"$(echo \"$c\" | grep -E 'CLAUDE\\.md' || true)\" ]; then echo '{\"systemMessage\":\"CLAUDE.md drift: you changed src/ or supabase/ without updating CLAUDE.md (§0). Use the claudemd-update skill.\"}'; fi; }; exit 0" }
+    ] }]
+  }
+}

@@ -1,0 +1,56 @@
+name: CI
+on:
+  push: { branches: [main, dev] }
+  pull_request: { branches: [main, dev] }
+concurrency: { group: "${{ github.workflow }}-${{ github.ref }}", cancel-in-progress: true }
+jobs:
+  verify:
+    name: Verify (typecheck·lint·test·build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "20", cache: "npm" }
+      - run: npm ci
+      - run: bash scripts/verify.sh
+  security:
+    name: Security (gitleaks·audit)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - name: gitleaks (strict)
+        run: |
+          set -euo pipefail
+          V=8.30.1
+          curl -fsSL -o gl.tgz "https://github.com/gitleaks/gitleaks/releases/download/v${V}/gitleaks_${V}_linux_x64.tar.gz"
+          tar xzf gl.tgz gitleaks
+          ./gitleaks detect --no-banner --redact --config=.gitleaks.toml --source=.
+      - uses: actions/setup-node@v4
+        with: { node-version: "20", cache: "npm" }
+      - run: npm ci
+      - name: dependency audit (advisory)
+        continue-on-error: true
+        run: npm audit --audit-level=high
+  database:
+    name: DB (migrations + RLS proof + seed)
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    services:
+      postgres:
+        image: postgres:16
+        env: { POSTGRES_PASSWORD: postgres }
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s
+          --health-timeout 5s --health-retries 10
+    env: { PGHOST: localhost, PGUSER: postgres, PGPASSWORD: postgres, PGDATABASE: postgres }
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y postgresql-client postgresql-16-pgtap
+      - run: bash scripts/run-db-tests.sh
+      # The demo seed is documentation people actually run — keep it applying cleanly.
+      - name: seed applies to a fresh schema
+        run: psql -v ON_ERROR_STOP=1 -f supabase/seed.sql
