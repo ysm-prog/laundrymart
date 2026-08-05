@@ -4,12 +4,12 @@ import { createClient } from "@/lib/supabase/server";
 import { can } from "@/lib/roles";
 import type { Depot } from "@/lib/db/types";
 import {
-  Card, DataTable, EmptyState, FlashMessages, PageHeader, SkeletonRows, StatusBadge,
+  Card, DataTable, EmptyState, PageHeader, SkeletonRows, StatusBadge,
 } from "@/components/ui";
 import { Field, Input, Select, SubmitButton } from "@/components/form";
 import { createDepot, updateDepotStatus } from "../actions";
 
-export const metadata = { title: "Depots" };
+export const metadata = { title: "Sites" };
 export const dynamic = "force-dynamic";
 
 const AU_STATES = ["NSW", "VIC", "QLD", "WA", "SA", "TAS", "ACT", "NT"]
@@ -20,20 +20,14 @@ const TIMEZONES = [
   "Australia/Adelaide", "Australia/Perth", "Australia/Hobart", "Australia/Darwin",
 ].map((value) => ({ value, label: value.replace("Australia/", "") }));
 
-export default async function DepotsPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ error?: string; ok?: string }>;
-}) {
-  const params = await searchParams;
+export default async function DepotsPage() {
   const session = await requireCapability("admin.read");
   const writable = can(session.role, "admin.write");
 
   return (
     <div className="space-y-6">
-      <FlashMessages error={params.error} ok={params.ok} />
       <PageHeader
-        title="Depots"
+        title="Sites"
         description="Every route, vehicle, driver and stock pool belongs to a depot — the model supports many from day one."
       />
 

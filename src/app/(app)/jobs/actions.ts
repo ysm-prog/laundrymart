@@ -91,15 +91,15 @@ const pickupSchema = z.object({
 export async function recordPickup(formData: FormData): Promise<void> {
   const session = await assertCapability("operations.write");
   const parsed = pickupSchema.safeParse(toObject(formData));
-  if (!parsed.success) fail("/jobs", firstIssue(parsed.error));
+  if (!parsed.success) return fail("/jobs", firstIssue(parsed.error));
 
   const jobId = parsed.data.job_id;
   const backTo = `/jobs/${jobId}`;
   const lines = countedLines(formData);
-  if (lines.length === 0) fail(backTo, "Record at least one item quantity before saving the pickup.");
+  if (lines.length === 0) return fail(backTo, "Record at least one item quantity before saving the pickup.");
 
   const job = await jobContext(jobId);
-  if (!job) fail(backTo, "That job could not be found.");
+  if (!job) return fail(backTo, "That job could not be found.");
 
   const supabase = await createClient();
   const { data: pickup, error } = await supabase
@@ -123,7 +123,7 @@ export async function recordPickup(formData: FormData): Promise<void> {
     .select("id")
     .single();
 
-  if (error) fail(backTo, describeDbError(error));
+  if (error) return fail(backTo, describeDbError(error));
 
   const { error: lineError } = await supabase.from("pickup_lines").insert(
     lines.map((line) => ({
@@ -136,7 +136,7 @@ export async function recordPickup(formData: FormData): Promise<void> {
       missing_quantity: line.missingQuantity,
     })),
   );
-  if (lineError) fail(backTo, describeDbError(lineError));
+  if (lineError) return fail(backTo, describeDbError(lineError));
 
   // Acceptance criterion §10: a pickup reduces customer stock and increases
   // in-transit stock. Damaged and missing quantities are moved to their own
@@ -154,7 +154,7 @@ export async function recordPickup(formData: FormData): Promise<void> {
   });
 
   revalidatePath(backTo);
-  done(backTo, "Pickup recorded.");
+  return done(backTo, "Pickup recorded.");
 }
 
 async function applyPickupMovements(
@@ -198,7 +198,7 @@ async function applyPickupMovements(
         p_delivery: null,
         p_notes: null,
       });
-      if (error) fail(backTo, describeDbError(error));
+      if (error) return fail(backTo, describeDbError(error));
     }
   }
 }
@@ -215,15 +215,15 @@ const deliverySchema = z.object({
 export async function recordDelivery(formData: FormData): Promise<void> {
   const session = await assertCapability("operations.write");
   const parsed = deliverySchema.safeParse(toObject(formData));
-  if (!parsed.success) fail("/jobs", firstIssue(parsed.error));
+  if (!parsed.success) return fail("/jobs", firstIssue(parsed.error));
 
   const jobId = parsed.data.job_id;
   const backTo = `/jobs/${jobId}`;
   const lines = countedLines(formData).filter((line) => line.quantity > 0);
-  if (lines.length === 0) fail(backTo, "Record at least one delivered quantity.");
+  if (lines.length === 0) return fail(backTo, "Record at least one delivered quantity.");
 
   const job = await jobContext(jobId);
-  if (!job) fail(backTo, "That job could not be found.");
+  if (!job) return fail(backTo, "That job could not be found.");
 
   const supabase = await createClient();
   const { data: delivery, error } = await supabase
@@ -245,7 +245,7 @@ export async function recordDelivery(formData: FormData): Promise<void> {
     .select("id")
     .single();
 
-  if (error) fail(backTo, describeDbError(error));
+  if (error) return fail(backTo, describeDbError(error));
 
   const { error: lineError } = await supabase.from("delivery_lines").insert(
     lines.map((line) => ({
@@ -256,7 +256,7 @@ export async function recordDelivery(formData: FormData): Promise<void> {
       quantity: line.quantity,
     })),
   );
-  if (lineError) fail(backTo, describeDbError(lineError));
+  if (lineError) return fail(backTo, describeDbError(lineError));
 
   for (const line of lines) {
     const { error: moveError } = await supabase.rpc("move_inventory", {
@@ -278,7 +278,7 @@ export async function recordDelivery(formData: FormData): Promise<void> {
       p_delivery: delivery.id,
       p_notes: null,
     });
-    if (moveError) fail(backTo, describeDbError(moveError));
+    if (moveError) return fail(backTo, describeDbError(moveError));
   }
 
   await supabase.from("jobs")
@@ -292,7 +292,7 @@ export async function recordDelivery(formData: FormData): Promise<void> {
   });
 
   revalidatePath(backTo);
-  done(backTo, "Delivery recorded.");
+  return done(backTo, "Delivery recorded.");
 }
 
 export async function setJobProgress(formData: FormData): Promise<void> {
@@ -304,7 +304,7 @@ export async function setJobProgress(formData: FormData): Promise<void> {
       "delivery_completed", "completed",
     ]),
   }).safeParse(toObject(formData));
-  if (!parsed.success) fail("/jobs", firstIssue(parsed.error));
+  if (!parsed.success) return fail("/jobs", firstIssue(parsed.error));
 
   const backTo = `/jobs/${parsed.data.id}`;
   const completing = parsed.data.progress_status === "completed";
@@ -320,14 +320,14 @@ export async function setJobProgress(formData: FormData): Promise<void> {
     })
     .eq("id", parsed.data.id).eq("tenant_id", session.tenantId);
 
-  if (error) fail(backTo, describeDbError(error));
+  if (error) return fail(backTo, describeDbError(error));
 
   await recordAudit(session, {
     entity: "job", entityId: parsed.data.id, action: "status_change",
     summary: parsed.data.progress_status,
   });
   revalidatePath(backTo);
-  done(backTo, "Job updated.");
+  return done(backTo, "Job updated.");
 }
 
 export async function flagException(formData: FormData): Promise<void> {
@@ -340,7 +340,7 @@ export async function flagException(formData: FormData): Promise<void> {
     ]),
     exception_notes: optionalText,
   }).safeParse(toObject(formData));
-  if (!parsed.success) fail("/jobs", firstIssue(parsed.error));
+  if (!parsed.success) return fail("/jobs", firstIssue(parsed.error));
 
   const backTo = `/jobs/${parsed.data.id}`;
   const supabase = await createClient();
@@ -353,20 +353,20 @@ export async function flagException(formData: FormData): Promise<void> {
     })
     .eq("id", parsed.data.id).eq("tenant_id", session.tenantId);
 
-  if (error) fail(backTo, describeDbError(error));
+  if (error) return fail(backTo, describeDbError(error));
 
   await recordAudit(session, {
     entity: "job", entityId: parsed.data.id, action: "status_change",
     summary: `exception: ${parsed.data.exception_reason}`,
   });
   revalidatePath(backTo);
-  done(backTo, "Exception recorded.");
+  return done(backTo, "Exception recorded.");
 }
 
 export async function resolveException(formData: FormData): Promise<void> {
   const session = await assertCapability("operations.write");
   const id = z.string().uuid().safeParse(formData.get("id"));
-  if (!id.success) fail("/operations/exceptions", "That job could not be found.");
+  if (!id.success) return fail("/operations/exceptions", "That job could not be found.");
 
   const supabase = await createClient();
   const { error } = await supabase
@@ -374,11 +374,11 @@ export async function resolveException(formData: FormData): Promise<void> {
     .update({ status: "scheduled", exception_reason: null, exception_notes: null })
     .eq("id", id.data).eq("tenant_id", session.tenantId);
 
-  if (error) fail("/operations/exceptions", describeDbError(error));
+  if (error) return fail("/operations/exceptions", describeDbError(error));
 
   await recordAudit(session, {
     entity: "job", entityId: id.data, action: "status_change", summary: "exception resolved",
   });
   revalidatePath("/operations/exceptions");
-  done("/operations/exceptions", "Exception cleared.");
+  return done("/operations/exceptions", "Exception cleared.");
 }

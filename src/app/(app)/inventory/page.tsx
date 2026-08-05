@@ -5,7 +5,7 @@ import { can } from "@/lib/roles";
 import { dateTime, number } from "@/lib/format";
 import type { Depot, Item } from "@/lib/db/types";
 import {
-  Badge, Card, DataTable, EmptyState, FlashMessages, PageHeader, SkeletonRows,
+  Badge, Card, DataTable, EmptyState, PageHeader, SkeletonRows,
   SkeletonStats, Stat, humanise,
 } from "@/components/ui";
 import { Field, Input, Select, SubmitButton } from "@/components/form";
@@ -15,17 +15,11 @@ import { moveStock } from "./actions";
 export const metadata = { title: "Inventory" };
 export const dynamic = "force-dynamic";
 
-export default async function InventoryPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ error?: string; ok?: string }>;
-}) {
-  const params = await searchParams;
+export default async function InventoryPage() {
   const session = await requireCapability("inventory.read");
 
   return (
     <div className="space-y-6">
-      <FlashMessages error={params.error} ok={params.ok} />
       <PageHeader
         title="Inventory"
         description="Where every item is right now, and the ledger of how it got there."
@@ -201,7 +195,7 @@ async function MoveForm() {
   const stateOptions = INVENTORY_STATES.map((value) => ({ value, label: humanise(value) }));
 
   return (
-    <Card title="Record a movement"
+    <Card title="Adjust stock"
           description="Leave the source blank to bring new stock in; leave the destination blank to write stock off.">
       <form action={moveStock} className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Field label="Item" name="item_id" required>

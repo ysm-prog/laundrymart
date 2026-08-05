@@ -5,7 +5,7 @@ import { Card, PageHeader } from "@/components/ui";
 export const metadata = { title: "Administration" };
 
 const SECTIONS = [
-  { href: "/admin/depots", title: "Depots", description: "Branches that own routes, vehicles, drivers and stock." },
+  { href: "/admin/depots", title: "Sites", description: "Branches that own routes, vehicles, drivers and stock." },
   { href: "/admin/users", title: "Users and roles", description: "Who can see and do what inside this laundry." },
   { href: "/admin/holidays", title: "Public holidays", description: "Feeds the holiday rules on every service agreement." },
   { href: "/admin/audit", title: "Audit log", description: "Append-only trail of every write in the system." },

@@ -6,11 +6,11 @@ import { date, money } from "@/lib/format";
 import { HOLIDAY_RULE_LABELS, describePattern, parsePattern } from "@/lib/domain/service-calendar";
 import type { HolidayRule } from "@/lib/domain/service-calendar";
 import {
-  ButtonLink, DataTable, EmptyState, FlashMessages, PageHeader, SkeletonRows, StatusBadge,
+  ButtonLink, DataTable, EmptyState, PageHeader, SkeletonRows, StatusBadge,
 } from "@/components/ui";
 import { ListControls, Pagination, pageFrom, rangeFor } from "@/components/list-controls";
 
-export const metadata = { title: "Service agreements" };
+export const metadata = { title: "Contracts" };
 export const dynamic = "force-dynamic";
 
 type Search = { q?: string; status?: string; page?: string; error?: string; ok?: string };
@@ -34,9 +34,8 @@ export default async function AgreementsPage({ searchParams }: { searchParams: P
 
   return (
     <div>
-      <FlashMessages error={params.error} ok={params.ok} />
       <PageHeader
-        title="Service agreements"
+        title="Contracts" eyebrow="Service agreements"
         description="The contract that decides when a customer is serviced and what they are charged."
         actions={can(session.role, "agreements.write")
           ? <ButtonLink href="/agreements/new" variant="primary">New agreement</ButtonLink>
@@ -91,8 +90,9 @@ async function AgreementList({ params }: { params: Search }) {
         rowHref={(row) => `/agreements/${row.id}`}
         empty={
           <EmptyState
-            title="No agreements yet"
-            description="Every route and every invoice traces back to an agreement — start here."
+            title="No contracts yet"
+            description="Every run and every invoice traces back to a contract — start here."
+            action={<ButtonLink href="/agreements/new" variant="primary">Create a contract</ButtonLink>}
           />
         }
         columns={[

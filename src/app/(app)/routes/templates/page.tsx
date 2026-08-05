@@ -5,29 +5,23 @@ import { can } from "@/lib/roles";
 import { time } from "@/lib/format";
 import type { Depot, Driver, RouteTemplate, Vehicle } from "@/lib/db/types";
 import {
-  Card, DataTable, EmptyState, FlashMessages, PageHeader, SkeletonRows, StatusBadge,
+  Card, DataTable, EmptyState, PageHeader, SkeletonRows, StatusBadge,
 } from "@/components/ui";
 import { Field, Input, Select, SubmitButton, Textarea, WeekdayPicker } from "@/components/form";
 import { createTemplate } from "./actions";
 
-export const metadata = { title: "Route templates" };
+export const metadata = { title: "Weekly runs" };
 export const dynamic = "force-dynamic";
 
 const DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
-export default async function RouteTemplatesPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ error?: string; ok?: string }>;
-}) {
-  const params = await searchParams;
+export default async function RouteTemplatesPage() {
   const session = await requireCapability("routes.read");
 
   return (
     <div className="space-y-6">
-      <FlashMessages error={params.error} ok={params.ok} />
       <PageHeader
-        title="Route templates"
+        title="Weekly runs" eyebrow="Route templates"
         description="The planning model. A daily route is instantiated from a template for a specific date."
       />
 

@@ -72,10 +72,10 @@ export async function generateInvoices(formData: FormData): Promise<void> {
     period_start: requiredDate,
     period_end: requiredDate,
   }).safeParse(toObject(formData));
-  if (!parsed.success) fail("/invoices", firstIssue(parsed.error));
+  if (!parsed.success) return fail("/invoices", firstIssue(parsed.error));
 
   const { period_start: start, period_end: end } = parsed.data;
-  if (start > end) fail("/invoices", "The period start must be on or before the period end.");
+  if (start > end) return fail("/invoices", "The period start must be on or before the period end.");
 
   const supabase = await createClient();
 
@@ -88,10 +88,10 @@ export async function generateInvoices(formData: FormData): Promise<void> {
     .eq("status", "active").is("deleted_at", null)
     .lte("start_date", end)
     .returns<BillableAgreement[]>();
-  if (agreementError) fail("/invoices", describeDbError(agreementError));
+  if (agreementError) return fail("/invoices", describeDbError(agreementError));
 
   const live = (agreements ?? []).filter((a) => !a.end_date || a.end_date >= start);
-  if (live.length === 0) fail("/invoices", "No active agreements cover that period.");
+  if (live.length === 0) return fail("/invoices", "No active agreements cover that period.");
 
   const { data: holidayRows } = await supabase
     .from("public_holidays").select("holiday_date, region")
@@ -273,7 +273,7 @@ export async function generateInvoices(formData: FormData): Promise<void> {
 
     const { data: invoiceNumber, error: numberError } = await supabase
       .rpc("next_number", { t: session.tenantId, k: "invoice", p: "INV" });
-    if (numberError) fail("/invoices", describeDbError(numberError));
+    if (numberError) return fail("/invoices", describeDbError(numberError));
 
     const terms = Number(agreement.payment_terms_days ?? 14);
     const { data: invoice, error } = await supabase
@@ -295,7 +295,7 @@ export async function generateInvoices(formData: FormData): Promise<void> {
       })
       .select("id")
       .single();
-    if (error) fail("/invoices", describeDbError(error));
+    if (error) return fail("/invoices", describeDbError(error));
 
     const { error: lineError } = await supabase.from("invoice_lines").insert(
       draft.map((line, index) => ({
@@ -314,10 +314,10 @@ export async function generateInvoices(formData: FormData): Promise<void> {
         sequence: index + 1,
       })),
     );
-    if (lineError) fail("/invoices", describeDbError(lineError));
+    if (lineError) return fail("/invoices", describeDbError(lineError));
 
     const { error: totalError } = await supabase.rpc("recalculate_invoice", { p_invoice: invoice.id });
-    if (totalError) fail("/invoices", describeDbError(totalError));
+    if (totalError) return fail("/invoices", describeDbError(totalError));
 
     created += 1;
   }
@@ -330,9 +330,9 @@ export async function generateInvoices(formData: FormData): Promise<void> {
   revalidatePath("/invoices");
 
   if (created === 0) {
-    fail("/invoices", `Nothing to invoice — ${skipped} agreement(s) already billed or had no charges.`);
+    return fail("/invoices", `Nothing to invoice — ${skipped} agreement(s) already billed or had no charges.`);
   }
-  done("/invoices", `Generated ${created} draft invoice(s). ${skipped} skipped.`);
+  return done("/invoices", `Generated ${created} draft invoice(s). ${skipped} skipped.`);
 }
 
 export async function createManualInvoice(formData: FormData): Promise<void> {
@@ -344,12 +344,12 @@ export async function createManualInvoice(formData: FormData): Promise<void> {
     purchase_order_number: optionalText,
     notes: optionalText,
   }).safeParse(toObject(formData));
-  if (!parsed.success) fail("/invoices", firstIssue(parsed.error));
+  if (!parsed.success) return fail("/invoices", firstIssue(parsed.error));
 
   const supabase = await createClient();
   const { data: invoiceNumber, error: numberError } = await supabase
     .rpc("next_number", { t: session.tenantId, k: "invoice", p: "INV" });
-  if (numberError) fail("/invoices", describeDbError(numberError));
+  if (numberError) return fail("/invoices", describeDbError(numberError));
 
   const { data, error } = await supabase
     .from("invoices")
@@ -364,7 +364,7 @@ export async function createManualInvoice(formData: FormData): Promise<void> {
     })
     .select("id, invoice_number")
     .single();
-  if (error) fail("/invoices", describeDbError(error));
+  if (error) return fail("/invoices", describeDbError(error));
 
   await recordAudit(session, {
     entity: "invoice", entityId: data.id, action: "create", summary: data.invoice_number,
@@ -374,7 +374,7 @@ export async function createManualInvoice(formData: FormData): Promise<void> {
   // Raised from the billing two-pane, the new draft opens in the pane the user
   // is already working in rather than throwing them onto a full page.
   const inPane = formData.get("pane") === "1";
-  done(
+  return done(
     inPane ? `/invoices?selected=${data.id}` : `/invoices/${data.id}`,
     `Invoice ${data.invoice_number} created.`,
   );
@@ -391,7 +391,7 @@ export async function addInvoiceLine(formData: FormData): Promise<void> {
     unit_price: money,
     taxable: z.preprocess((v) => v === "on", z.boolean()),
   }).safeParse(toObject(formData));
-  if (!parsed.success) fail("/invoices", firstIssue(parsed.error));
+  if (!parsed.success) return fail("/invoices", firstIssue(parsed.error));
 
   const backTo = `/invoices/${parsed.data.invoice_id}`;
   const supabase = await createClient();
@@ -407,18 +407,18 @@ export async function addInvoiceLine(formData: FormData): Promise<void> {
     amount: lineAmount(parsed.data.quantity, parsed.data.unit_price),
     sequence: (existing ?? 0) + 1,
   });
-  if (error) fail(backTo, describeDbError(error));
+  if (error) return fail(backTo, describeDbError(error));
 
   const { error: totalError } = await supabase
     .rpc("recalculate_invoice", { p_invoice: parsed.data.invoice_id });
-  if (totalError) fail(backTo, describeDbError(totalError));
+  if (totalError) return fail(backTo, describeDbError(totalError));
 
   await recordAudit(session, {
     entity: "invoice_line", entityId: parsed.data.invoice_id, action: "create",
     summary: parsed.data.description,
   });
   revalidatePath(backTo);
-  done(backTo, "Line added.");
+  return done(backTo, "Line added.");
 }
 
 export async function removeInvoiceLine(formData: FormData): Promise<void> {
@@ -426,24 +426,24 @@ export async function removeInvoiceLine(formData: FormData): Promise<void> {
   const parsed = z.object({
     id: z.string().uuid(), invoice_id: z.string().uuid(),
   }).safeParse(toObject(formData));
-  if (!parsed.success) fail("/invoices", firstIssue(parsed.error));
+  if (!parsed.success) return fail("/invoices", firstIssue(parsed.error));
 
   const backTo = `/invoices/${parsed.data.invoice_id}`;
   const supabase = await createClient();
   const { error } = await supabase
     .from("invoice_lines").delete()
     .eq("id", parsed.data.id).eq("tenant_id", session.tenantId);
-  if (error) fail(backTo, describeDbError(error));
+  if (error) return fail(backTo, describeDbError(error));
 
   await supabase.rpc("recalculate_invoice", { p_invoice: parsed.data.invoice_id });
   revalidatePath(backTo);
-  done(backTo, "Line removed.");
+  return done(backTo, "Line removed.");
 }
 
 export async function issueInvoice(formData: FormData): Promise<void> {
   const session = await assertCapability("invoices.write");
   const id = z.string().uuid().safeParse(formData.get("id"));
-  if (!id.success) fail("/invoices", "That invoice could not be found.");
+  if (!id.success) return fail("/invoices", "That invoice could not be found.");
 
   const backTo = returnTo(formData, `/invoices/${id.data}`);
   const supabase = await createClient();
@@ -453,12 +453,12 @@ export async function issueInvoice(formData: FormData): Promise<void> {
     .from("invoices")
     .update({ status: "issued", issued_at: new Date().toISOString() })
     .eq("id", id.data).eq("tenant_id", session.tenantId).eq("status", "draft");
-  if (error) fail(backTo, describeDbError(error));
+  if (error) return fail(backTo, describeDbError(error));
 
   await recordAudit(session, { entity: "invoice", entityId: id.data, action: "status_change", summary: "issued" });
   revalidatePath(`/invoices/${id.data}`);
   revalidatePath("/invoices");
-  done(backTo, "Invoice issued.");
+  return done(backTo, "Invoice issued.");
 }
 
 export async function recordPayment(formData: FormData): Promise<void> {
@@ -471,7 +471,7 @@ export async function recordPayment(formData: FormData): Promise<void> {
     method: z.enum(["bank_transfer", "credit_card", "direct_debit", "cash", "cheque", "other"]),
     reference: optionalText,
   }).safeParse(toObject(formData));
-  if (!parsed.success) fail("/invoices", firstIssue(parsed.error));
+  if (!parsed.success) return fail("/invoices", firstIssue(parsed.error));
 
   const backTo = returnTo(formData, `/invoices/${parsed.data.invoice_id}`);
   const supabase = await createClient();
@@ -479,7 +479,7 @@ export async function recordPayment(formData: FormData): Promise<void> {
   const { error } = await supabase.from("payments").insert({
     ...parsed.data, tenant_id: session.tenantId, created_by: session.userId,
   });
-  if (error) fail(backTo, describeDbError(error));
+  if (error) return fail(backTo, describeDbError(error));
 
   await supabase.rpc("recalculate_invoice", { p_invoice: parsed.data.invoice_id });
 
@@ -504,7 +504,7 @@ export async function recordPayment(formData: FormData): Promise<void> {
   // `revalidatePath` does not match against.
   revalidatePath(`/invoices/${parsed.data.invoice_id}`);
   revalidatePath("/invoices");
-  done(backTo, "Payment recorded.");
+  return done(backTo, "Payment recorded.");
 }
 
 export async function voidInvoice(formData: FormData): Promise<void> {
@@ -513,7 +513,7 @@ export async function voidInvoice(formData: FormData): Promise<void> {
     id: z.string().uuid(),
     void_reason: z.string().trim().min(3, "Give a reason for voiding"),
   }).safeParse(toObject(formData));
-  if (!parsed.success) fail("/invoices", firstIssue(parsed.error));
+  if (!parsed.success) return fail("/invoices", firstIssue(parsed.error));
 
   const backTo = `/invoices/${parsed.data.id}`;
   const supabase = await createClient();
@@ -525,14 +525,14 @@ export async function voidInvoice(formData: FormData): Promise<void> {
       void_reason: parsed.data.void_reason,
     })
     .eq("id", parsed.data.id).eq("tenant_id", session.tenantId);
-  if (error) fail(backTo, describeDbError(error));
+  if (error) return fail(backTo, describeDbError(error));
 
   await recordAudit(session, {
     entity: "invoice", entityId: parsed.data.id, action: "status_change",
     summary: `voided: ${parsed.data.void_reason}`,
   });
   revalidatePath(backTo);
-  done(backTo, "Invoice voided.");
+  return done(backTo, "Invoice voided.");
 }
 
 /** Credit notes always reference the original invoice (acceptance criteria §10). */
@@ -544,14 +544,14 @@ export async function createCreditNote(formData: FormData): Promise<void> {
     reason: z.string().trim().min(3, "Give a reason for the credit"),
     amount: money.pipe(z.number().positive("Credit must be greater than zero")),
   }).safeParse(toObject(formData));
-  if (!parsed.success) fail("/invoices", firstIssue(parsed.error));
+  if (!parsed.success) return fail("/invoices", firstIssue(parsed.error));
 
   const backTo = `/invoices/${parsed.data.invoice_id}`;
   const supabase = await createClient();
 
   const { data: creditNumber, error: numberError } = await supabase
     .rpc("next_number", { t: session.tenantId, k: "credit_note", p: "CN" });
-  if (numberError) fail(backTo, describeDbError(numberError));
+  if (numberError) return fail(backTo, describeDbError(numberError));
 
   const { data: tenant } = await supabase
     .from("tenants").select("gst_rate").eq("id", session.tenantId).maybeSingle();
@@ -574,7 +574,7 @@ export async function createCreditNote(formData: FormData): Promise<void> {
     })
     .select("id, credit_note_number")
     .single();
-  if (error) fail(backTo, describeDbError(error));
+  if (error) return fail(backTo, describeDbError(error));
 
   const { error: lineError } = await supabase.from("credit_note_lines").insert({
     tenant_id: session.tenantId,
@@ -585,14 +585,14 @@ export async function createCreditNote(formData: FormData): Promise<void> {
     unit_price: parsed.data.amount,
     amount: parsed.data.amount,
   });
-  if (lineError) fail(backTo, describeDbError(lineError));
+  if (lineError) return fail(backTo, describeDbError(lineError));
 
   await recordAudit(session, {
     entity: "credit_note", entityId: note.id, action: "create",
     summary: `${note.credit_note_number} against invoice`,
   });
   revalidatePath(backTo);
-  done(backTo, `Credit note ${note.credit_note_number} issued.`);
+  return done(backTo, `Credit note ${note.credit_note_number} issued.`);
 }
 
 /**
@@ -613,23 +613,23 @@ export async function emailInvoice(formData: FormData): Promise<void> {
       z.string().email("That is not a valid email address").optional(),
     ),
   }).safeParse(toObject(formData));
-  if (!parsed.success) fail("/invoices", firstIssue(parsed.error));
+  if (!parsed.success) return fail("/invoices", firstIssue(parsed.error));
 
   const backTo = returnTo(formData, `/invoices/${parsed.data.id}`);
 
   const data = await loadInvoiceForPdf(parsed.data.id, session.tenantId);
-  if (!data) fail(backTo, "That invoice could not be found.");
+  if (!data) return fail(backTo, "That invoice could not be found.");
 
   if (data.invoice.status === "draft") {
-    fail(backTo, "Issue the invoice before emailing it — a draft can still change.");
+    return fail(backTo, "Issue the invoice before emailing it — a draft can still change.");
   }
   if (data.invoice.status === "void") {
-    fail(backTo, "This invoice is void and cannot be sent.");
+    return fail(backTo, "This invoice is void and cannot be sent.");
   }
 
   const recipient = parsed.data.to ?? data.customer.billing_email;
   if (!recipient) {
-    fail(backTo, "This customer has no billing email. Add one, or type an address to send to.");
+    return fail(backTo, "This customer has no billing email. Add one, or type an address to send to.");
   }
 
   const pdf = await renderInvoicePdf(data);
@@ -650,7 +650,7 @@ export async function emailInvoice(formData: FormData): Promise<void> {
       entity: "invoice", entityId: parsed.data.id, action: "send_failed",
       summary: `${recipient}: ${result.error}`,
     });
-    fail(backTo, `The invoice could not be sent. ${result.error}`);
+    return fail(backTo, `The invoice could not be sent. ${result.error}`);
   }
 
   const supabase = await createClient();
@@ -658,7 +658,7 @@ export async function emailInvoice(formData: FormData): Promise<void> {
     .from("invoices")
     .update({ emailed_at: new Date().toISOString(), emailed_to: recipient })
     .eq("id", parsed.data.id).eq("tenant_id", session.tenantId);
-  if (error) fail(backTo, describeDbError(error));
+  if (error) return fail(backTo, describeDbError(error));
 
   await recordAudit(session, {
     entity: "invoice", entityId: parsed.data.id, action: "send",
@@ -668,7 +668,7 @@ export async function emailInvoice(formData: FormData): Promise<void> {
 
   revalidatePath(`/invoices/${parsed.data.id}`);
   revalidatePath("/invoices");
-  done(backTo, `Invoice emailed to ${recipient}.`);
+  return done(backTo, `Invoice emailed to ${recipient}.`);
 }
 
 /** Marks overdue anything past its due date that is still unpaid. */

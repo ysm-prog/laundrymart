@@ -5,7 +5,7 @@ import { can } from "@/lib/roles";
 import { date, relativeDays, today } from "@/lib/format";
 import type { Depot, Driver } from "@/lib/db/types";
 import {
-  Badge, Card, DataTable, EmptyState, FlashMessages, PageHeader, SkeletonRows, StatusBadge,
+  Badge, Card, DataTable, EmptyState, PageHeader, SkeletonRows, StatusBadge,
 } from "@/components/ui";
 import { Field, Input, Select, SubmitButton } from "@/components/form";
 import { createDriver } from "./actions";
@@ -13,17 +13,11 @@ import { createDriver } from "./actions";
 export const metadata = { title: "Drivers" };
 export const dynamic = "force-dynamic";
 
-export default async function DriversPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ error?: string; ok?: string }>;
-}) {
-  const params = await searchParams;
+export default async function DriversPage() {
   const session = await requireCapability("fleet.read");
 
   return (
     <div className="space-y-6">
-      <FlashMessages error={params.error} ok={params.ok} />
       <PageHeader
         title="Drivers"
         description="Link a driver to a login so their run — and only their run — appears on their device."

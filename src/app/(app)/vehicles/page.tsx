@@ -5,7 +5,7 @@ import { can } from "@/lib/roles";
 import { date, number } from "@/lib/format";
 import type { Depot, Vehicle } from "@/lib/db/types";
 import {
-  Card, DataTable, EmptyState, FlashMessages, PageHeader, SkeletonRows, StatusBadge, humanise,
+  Card, DataTable, EmptyState, PageHeader, SkeletonRows, StatusBadge, humanise,
 } from "@/components/ui";
 import { Field, Input, Select, SubmitButton } from "@/components/form";
 import { createVehicle } from "./actions";
@@ -16,17 +16,11 @@ export const dynamic = "force-dynamic";
 const VEHICLE_TYPES = ["van", "truck", "ute", "trailer", "prime_mover", "other"] as const;
 const MAINTENANCE = ["ok", "due", "overdue", "in_service", "out_of_service"] as const;
 
-export default async function VehiclesPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ error?: string; ok?: string }>;
-}) {
-  const params = await searchParams;
+export default async function VehiclesPage() {
   const session = await requireCapability("fleet.read");
 
   return (
     <div className="space-y-6">
-      <FlashMessages error={params.error} ok={params.ok} />
       <PageHeader
         title="Vehicles"
         description="Routes need a vehicle, so vehicles are first-class: capacity, maintenance state and trailers."

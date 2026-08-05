@@ -35,11 +35,11 @@ export async function applyDispatchPlan(formData: FormData): Promise<void> {
   try {
     payload = JSON.parse(typeof raw === "string" ? raw : "");
   } catch {
-    fail("/routes/planner", "The plan could not be read. Reload the page and try again.");
+    return fail("/routes/planner", "The plan could not be read. Reload the page and try again.");
   }
 
   const parsed = planSchema.safeParse(payload);
-  if (!parsed.success) fail("/routes/planner", firstIssue(parsed.error));
+  if (!parsed.success) return fail("/routes/planner", firstIssue(parsed.error));
 
   const { date, columns } = parsed.data;
   const backTo = `/routes/planner?date=${date}`;
@@ -55,7 +55,7 @@ export async function applyDispatchPlan(formData: FormData): Promise<void> {
       id: string; code: string; status: string;
       driver_id: string | null; vehicle_id: string | null;
     }>>();
-  if (routeError) fail(backTo, describeDbError(routeError));
+  if (routeError) return fail(backTo, describeDbError(routeError));
 
   const routeById = new Map((routes ?? []).map((route) => [route.id, route]));
 
@@ -68,7 +68,7 @@ export async function applyDispatchPlan(formData: FormData): Promise<void> {
       status: string; progress_status: string;
       driver_id: string | null; vehicle_id: string | null;
     }>>();
-  if (jobError) fail(backTo, describeDbError(jobError));
+  if (jobError) return fail(backTo, describeDbError(jobError));
 
   const jobById = new Map((jobs ?? []).map((job) => [job.id, job]));
 
@@ -81,10 +81,10 @@ export async function applyDispatchPlan(formData: FormData): Promise<void> {
   for (const column of columns) {
     const routeId = column.routeId === UNASSIGNED ? null : column.routeId;
     if (routeId && !routeById.has(routeId)) {
-      fail(backTo, "That plan refers to a run that is not on this date any more. Reload and try again.");
+      return fail(backTo, "That plan refers to a run that is not on this date any more. Reload and try again.");
     }
     column.jobIds.forEach((jobId, index) => {
-      if (placements.has(jobId)) fail(backTo, "That plan lists the same stop twice.");
+      if (placements.has(jobId)) return fail(backTo, "That plan lists the same stop twice.");
       placements.set(jobId, { routeId, sequence: index + 1 });
     });
   }
@@ -92,12 +92,12 @@ export async function applyDispatchPlan(formData: FormData): Promise<void> {
   for (const [jobId, placement] of placements) {
     const job = jobById.get(jobId);
     if (!job) {
-      fail(backTo, "That plan refers to a stop that is no longer scheduled for this date. Reload and try again.");
+      return fail(backTo, "That plan refers to a stop that is no longer scheduled for this date. Reload and try again.");
     }
     if (job.route_id === placement.routeId) continue;
 
     if (!isMovable(job)) {
-      fail(backTo, `${job.job_number} has already been started or finished and cannot be moved to another run.`);
+      return fail(backTo, `${job.job_number} has already been started or finished and cannot be moved to another run.`);
     }
     // Both ends of the move have to be able to take the change: a closed run's
     // paperwork is done, and reopening it through the side door would let a
@@ -105,7 +105,7 @@ export async function applyDispatchPlan(formData: FormData): Promise<void> {
     for (const id of [job.route_id, placement.routeId]) {
       const route = id ? routeById.get(id) : null;
       if (route && !isReceiving(route.status)) {
-        fail(backTo, `Run ${route.code} is ${route.status.replace(/_/g, " ")} and its stops can no longer be changed.`);
+        return fail(backTo, `Run ${route.code} is ${route.status.replace(/_/g, " ")} and its stops can no longer be changed.`);
       }
     }
   }
@@ -130,13 +130,13 @@ export async function applyDispatchPlan(formData: FormData): Promise<void> {
     if (crew.driver_id === route.driver_id && crew.vehicle_id === route.vehicle_id) continue;
 
     if (!isReceiving(route.status)) {
-      fail(backTo, `Run ${route.code} is ${route.status.replace(/_/g, " ")} and its crew can no longer be changed.`);
+      return fail(backTo, `Run ${route.code} is ${route.status.replace(/_/g, " ")} and its crew can no longer be changed.`);
     }
 
     const { error } = await supabase
       .from("daily_routes").update(crew)
       .eq("id", route.id).eq("tenant_id", session.tenantId);
-    if (error) fail(backTo, describeDbError(error));
+    if (error) return fail(backTo, describeDbError(error));
     crewChanges += 1;
   }
 
@@ -178,14 +178,14 @@ export async function applyDispatchPlan(formData: FormData): Promise<void> {
     const { error } = await supabase
       .from("jobs").update(update)
       .eq("id", jobId).eq("tenant_id", session.tenantId);
-    if (error) fail(backTo, describeDbError(error));
+    if (error) return fail(backTo, describeDbError(error));
 
     if (routeChanged) moved += 1;
     else resequenced += 1;
   }
 
   if (moved === 0 && resequenced === 0 && crewChanges === 0) {
-    done(backTo, "Nothing to apply — the plan matches what is already scheduled.");
+    return done(backTo, "Nothing to apply — the plan matches what is already scheduled.");
   }
 
   await recordAudit(session, {
@@ -204,5 +204,5 @@ export async function applyDispatchPlan(formData: FormData): Promise<void> {
     resequenced > 0 && `${resequenced} resequenced`,
     crewChanges > 0 && `${crewChanges} crew change(s)`,
   ].filter(Boolean);
-  done(backTo, `Plan applied — ${parts.join(", ")}.`);
+  return done(backTo, `Plan applied — ${parts.join(", ")}.`);
 }

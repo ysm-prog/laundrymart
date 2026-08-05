@@ -5,10 +5,12 @@ import { createClient } from "@/lib/supabase/server";
 import { date, dateTime, today } from "@/lib/format";
 import type { DailyRoute, Item } from "@/lib/db/types";
 import {
-  Button, Card, EmptyState, FlashMessages, Notice, PageHeader, SkeletonRows,
-  StatusBadge, humanise,
+  Card, EmptyState, Notice, PageHeader, SkeletonRows,
+  Stage, StatusBadge, humanise,
 } from "@/components/ui";
-import { Checkbox, Field, Input, Select, SubmitButton, Textarea } from "@/components/form";
+import { Field, Input, Select, SubmitButton, Textarea } from "@/components/form";
+import { ConfirmSubmit } from "@/components/confirm-submit";
+import { InspectionChecklist } from "./inspection-checklist";
 import { OfflineCapture, ServiceWorkerRegistrar } from "@/components/offline-capture";
 import { MediaUploadField } from "@/components/media-upload-field";
 import { CHECKLIST_KEYS, CHECKLIST_LABELS } from "./checklist";
@@ -61,7 +63,6 @@ export default async function RunPage({
   return (
     <div className="space-y-6">
       <ServiceWorkerRegistrar />
-      <FlashMessages error={params.error} ok={params.ok} />
       <PageHeader
         title={`Today's run · ${date(routeDate)}`}
         description={driver.full_name}
@@ -108,11 +109,9 @@ function RunWorkflow({ route }: { route: DailyRoute }) {
               <form action={submitInspection} className="space-y-3">
                 <input type="hidden" name="route_id" value={route.id} />
                 <input type="hidden" name="vehicle_id" value={route.vehicle_id} />
-                <div className="grid gap-2 sm:grid-cols-2">
-                  {CHECKLIST_KEYS.map((key) => (
-                    <Checkbox key={key} name={`check_${key}`} label={CHECKLIST_LABELS[key]} defaultChecked />
-                  ))}
-                </div>
+                <InspectionChecklist
+                  items={CHECKLIST_KEYS.map((key) => ({ name: `check_${key}`, label: CHECKLIST_LABELS[key] }))}
+                />
                 <div className="grid gap-3 sm:grid-cols-3">
                   <Field label="Odometer (km)" name="odometer_km">
                     <Input name="odometer_km" type="number" min={0} inputMode="numeric" />
@@ -187,35 +186,18 @@ function RunWorkflow({ route }: { route: DailyRoute }) {
           {route.unloaded_at && !route.closed_at ? (
             <form action={closeRun}>
               <input type="hidden" name="route_id" value={route.id} />
-              <Button variant="primary">Close run</Button>
+              <ConfirmSubmit
+                label="Close run"
+                variant="primary"
+                eyebrow="Final step"
+                consequence="This closes the run for the day. A closed run cannot be reopened."
+                pendingLabel="Closing…"
+              />
             </form>
           ) : null}
         </Stage>
       </ol>
     </Card>
-  );
-}
-
-function Stage({
-  index, label, detail, done, children,
-}: {
-  index: number; label: string; detail: string; done: boolean; children?: React.ReactNode;
-}) {
-  return (
-    <li className="rounded-md border p-3">
-      <div className="flex items-start gap-3">
-        <span aria-hidden
-              className={`flex h-6 w-6 shrink-0 items-center justify-center text-xs font-semibold ${
-                done ? "bg-success/15 text-success" : "bg-surface-muted text-muted-foreground"}`}>
-          {done ? "✓" : index}
-        </span>
-        <div className="min-w-0 flex-1">
-          <p className="text-sm font-medium">{label}</p>
-          <p className="text-xs text-muted-foreground">{detail}</p>
-          {children ? <div className="mt-3">{children}</div> : null}
-        </div>
-      </div>
-    </li>
   );
 }
 

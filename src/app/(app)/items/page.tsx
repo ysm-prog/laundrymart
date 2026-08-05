@@ -5,7 +5,7 @@ import { can } from "@/lib/roles";
 import { money, number } from "@/lib/format";
 import type { Item } from "@/lib/db/types";
 import {
-  Card, DataTable, EmptyState, FlashMessages, PageHeader, SkeletonRows, StatusBadge, humanise,
+  Card, DataTable, EmptyState, PageHeader, SkeletonRows, StatusBadge, humanise,
 } from "@/components/ui";
 import { Field, Input, Select, SubmitButton } from "@/components/form";
 import { ListControls } from "@/components/list-controls";
@@ -24,7 +24,6 @@ export default async function ItemsPage({ searchParams }: { searchParams: Promis
 
   return (
     <div className="space-y-6">
-      <FlashMessages error={params.error} ok={params.ok} />
       <PageHeader
         title="Items"
         description="Linen types you rent, wash and replace. Prices here are the default when an agreement does not override them."

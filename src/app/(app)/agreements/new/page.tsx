@@ -1,6 +1,6 @@
 import { requireCapability } from "@/lib/auth/context";
 import { createClient } from "@/lib/supabase/server";
-import { FlashMessages, Notice, PageHeader } from "@/components/ui";
+import { Notice, PageHeader } from "@/components/ui";
 import type { CustomerLocation, Depot } from "@/lib/db/types";
 import { AgreementForm } from "../agreement-form";
 import { createAgreement } from "../actions";
@@ -29,7 +29,6 @@ export default async function NewAgreementPage({
 
   return (
     <div className="max-w-4xl space-y-4">
-      <FlashMessages error={params.error} />
       <PageHeader
         title="New service agreement"
         description="Saved as a draft — activate it once the priced lines are in place."

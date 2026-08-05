@@ -27,7 +27,7 @@ const templateSchema = z.object({
 export async function createTemplate(formData: FormData): Promise<void> {
   const session = await assertCapability("routes.write");
   const parsed = templateSchema.safeParse(toObject(formData));
-  if (!parsed.success) fail("/routes/templates", firstIssue(parsed.error));
+  if (!parsed.success) return fail("/routes/templates", firstIssue(parsed.error));
 
   const supabase = await createClient();
   const { data, error } = await supabase
@@ -41,22 +41,22 @@ export async function createTemplate(formData: FormData): Promise<void> {
     .select("id, code")
     .single();
 
-  if (error) fail("/routes/templates", describeDbError(error));
+  if (error) return fail("/routes/templates", describeDbError(error));
 
   await recordAudit(session, {
     entity: "route_template", entityId: data.id, action: "create", summary: data.code,
   });
   revalidatePath("/routes/templates");
-  done(`/routes/templates/${data.id}`, `Template ${data.code} created.`);
+  return done(`/routes/templates/${data.id}`, `Template ${data.code} created.`);
 }
 
 export async function updateTemplate(formData: FormData): Promise<void> {
   const session = await assertCapability("routes.write");
   const id = z.string().uuid().safeParse(formData.get("id"));
-  if (!id.success) fail("/routes/templates", "That template could not be found.");
+  if (!id.success) return fail("/routes/templates", "That template could not be found.");
 
   const parsed = templateSchema.safeParse(toObject(formData));
-  if (!parsed.success) fail(`/routes/templates/${id.data}`, firstIssue(parsed.error));
+  if (!parsed.success) return fail(`/routes/templates/${id.data}`, firstIssue(parsed.error));
 
   const supabase = await createClient();
   const { error } = await supabase
@@ -64,11 +64,11 @@ export async function updateTemplate(formData: FormData): Promise<void> {
     .update({ ...parsed.data, weekdays: weekdaysFrom(formData, "weekdays") })
     .eq("id", id.data).eq("tenant_id", session.tenantId);
 
-  if (error) fail(`/routes/templates/${id.data}`, describeDbError(error));
+  if (error) return fail(`/routes/templates/${id.data}`, describeDbError(error));
 
   await recordAudit(session, { entity: "route_template", entityId: id.data, action: "update" });
   revalidatePath(`/routes/templates/${id.data}`);
-  done(`/routes/templates/${id.data}`, "Template updated.");
+  return done(`/routes/templates/${id.data}`, "Template updated.");
 }
 
 const stopSchema = z.object({
@@ -87,7 +87,7 @@ const stopSchema = z.object({
 export async function addTemplateStop(formData: FormData): Promise<void> {
   const session = await assertCapability("routes.write");
   const parsed = stopSchema.safeParse(toObject(formData));
-  if (!parsed.success) fail("/routes/templates", firstIssue(parsed.error));
+  if (!parsed.success) return fail("/routes/templates", firstIssue(parsed.error));
   const backTo = `/routes/templates/${parsed.data.template_id}`;
 
   const supabase = await createClient();
@@ -102,13 +102,13 @@ export async function addTemplateStop(formData: FormData): Promise<void> {
     tenant_id: session.tenantId,
     created_by: session.userId,
   });
-  if (error) fail(backTo, describeDbError(error));
+  if (error) return fail(backTo, describeDbError(error));
 
   await recordAudit(session, {
     entity: "route_template_stop", entityId: parsed.data.template_id, action: "create",
   });
   revalidatePath(backTo);
-  done(backTo, "Stop added.");
+  return done(backTo, "Stop added.");
 }
 
 export async function removeTemplateStop(formData: FormData): Promise<void> {
@@ -116,20 +116,20 @@ export async function removeTemplateStop(formData: FormData): Promise<void> {
   const parsed = z.object({
     id: z.string().uuid(), template_id: z.string().uuid(),
   }).safeParse(toObject(formData));
-  if (!parsed.success) fail("/routes/templates", firstIssue(parsed.error));
+  if (!parsed.success) return fail("/routes/templates", firstIssue(parsed.error));
   const backTo = `/routes/templates/${parsed.data.template_id}`;
 
   const supabase = await createClient();
   const { error } = await supabase
     .from("route_template_stops").delete()
     .eq("id", parsed.data.id).eq("tenant_id", session.tenantId);
-  if (error) fail(backTo, describeDbError(error));
+  if (error) return fail(backTo, describeDbError(error));
 
   await recordAudit(session, {
     entity: "route_template_stop", entityId: parsed.data.id, action: "delete",
   });
   revalidatePath(backTo);
-  done(backTo, "Stop removed.");
+  return done(backTo, "Stop removed.");
 }
 
 /**
@@ -140,12 +140,12 @@ export async function removeTemplateStop(formData: FormData): Promise<void> {
 export async function reorderTemplateStops(formData: FormData): Promise<void> {
   const session = await assertCapability("routes.write");
   const templateId = z.string().uuid().safeParse(formData.get("template_id"));
-  if (!templateId.success) fail("/routes/templates", "That template could not be found.");
+  if (!templateId.success) return fail("/routes/templates", "That template could not be found.");
   const backTo = `/routes/templates/${templateId.data}`;
 
   const order = z.array(z.string().uuid())
     .safeParse(String(formData.get("order") ?? "").split(",").filter(Boolean));
-  if (!order.success || order.data.length === 0) fail(backTo, "Could not read the new stop order.");
+  if (!order.success || order.data.length === 0) return fail(backTo, "Could not read the new stop order.");
 
   const supabase = await createClient();
   // Sequence is not unique-constrained, so a straightforward pass is safe.
@@ -156,7 +156,7 @@ export async function reorderTemplateStops(formData: FormData): Promise<void> {
       .eq("id", stopId)
       .eq("template_id", templateId.data)
       .eq("tenant_id", session.tenantId);
-    if (error) fail(backTo, describeDbError(error));
+    if (error) return fail(backTo, describeDbError(error));
   }
 
   await recordAudit(session, {
@@ -164,19 +164,19 @@ export async function reorderTemplateStops(formData: FormData): Promise<void> {
     summary: `resequenced ${order.data.length} stops`,
   });
   revalidatePath(backTo);
-  done(backTo, "Stop order saved.");
+  return done(backTo, "Stop order saved.");
 }
 
 /** Duplicate a template with its stops (§7.7 "support duplicate route"). */
 export async function duplicateTemplate(formData: FormData): Promise<void> {
   const session = await assertCapability("routes.write");
   const id = z.string().uuid().safeParse(formData.get("id"));
-  if (!id.success) fail("/routes/templates", "That template could not be found.");
+  if (!id.success) return fail("/routes/templates", "That template could not be found.");
 
   const supabase = await createClient();
   const { data: source, error: readError } = await supabase
     .from("route_templates").select("*").eq("id", id.data).single();
-  if (readError) fail("/routes/templates", describeDbError(readError));
+  if (readError) return fail("/routes/templates", describeDbError(readError));
 
   const { id: _id, created_at: _c, updated_at: _u, deleted_at: _d, ...rest } =
     source as Record<string, unknown>;
@@ -191,7 +191,7 @@ export async function duplicateTemplate(formData: FormData): Promise<void> {
     })
     .select("id, code")
     .single();
-  if (error) fail("/routes/templates", describeDbError(error));
+  if (error) return fail("/routes/templates", describeDbError(error));
 
   const { data: stops } = await supabase
     .from("route_template_stops").select("*").eq("template_id", id.data).order("sequence");
@@ -202,12 +202,12 @@ export async function duplicateTemplate(formData: FormData): Promise<void> {
       return { ...stopRest, template_id: copy.id, created_by: session.userId };
     });
     const { error: stopError } = await supabase.from("route_template_stops").insert(copies);
-    if (stopError) fail(`/routes/templates/${copy.id}`, describeDbError(stopError));
+    if (stopError) return fail(`/routes/templates/${copy.id}`, describeDbError(stopError));
   }
 
   await recordAudit(session, {
     entity: "route_template", entityId: copy.id, action: "create", summary: `copy of ${source.code}`,
   });
   revalidatePath("/routes/templates");
-  done(`/routes/templates/${copy.id}`, `Duplicated as ${copy.code}.`);
+  return done(`/routes/templates/${copy.id}`, `Duplicated as ${copy.code}.`);
 }
