@@ -3,14 +3,15 @@ import Link from "next/link";
 import { requireCapability } from "@/lib/auth/context";
 import { createClient } from "@/lib/supabase/server";
 import { can } from "@/lib/roles";
-import { dateTime } from "@/lib/format";
+import { date, dateTime } from "@/lib/format";
 import type { Depot } from "@/lib/db/types";
 import {
-  Card, DataTable, EmptyState, FlashMessages, PageHeader, SkeletonRows,
+  ButtonLink, Card, DataTable, EmptyState, FlashMessages, PageHeader, SkeletonRows,
   SkeletonStats, Stat, StatusBadge,
 } from "@/components/ui";
 import { Field, Input, Select, SubmitButton } from "@/components/form";
 import { BATCH_FLOW, BATCH_STAGE_LABELS, type BatchStage } from "./stages";
+import { uncountedRuns } from "./returns";
 import { createBatch } from "./actions";
 
 export const metadata = { title: "Warehouse" };
@@ -41,8 +42,14 @@ export default async function WarehousePage({
       <FlashMessages error={params.error} ok={params.ok} />
       <PageHeader
         title="Warehouse"
-        description="Linen through the plant, batch by batch. Every stage moves real stock."
+        description="Count the vans in, wash, dry, and send it back out."
       />
+
+      {can(session.role, "warehouse.write") ? (
+        <Suspense fallback={<SkeletonRows rows={2} />}>
+          <WaitingToBeCounted />
+        </Suspense>
+      ) : null}
 
       <Suspense fallback={<SkeletonStats />}>
         <OnTheFloor />
@@ -58,6 +65,44 @@ export default async function WarehousePage({
         </Suspense>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * The first thing to do each afternoon: the vans that are back and unloaded but
+ * whose linen nobody has counted onto the floor yet. Top of the page because it
+ * is the step that starts everything else, and one button because the operator
+ * should not have to work out which run they are looking at.
+ */
+async function WaitingToBeCounted() {
+  const runs = await uncountedRuns();
+  if (runs.length === 0) return null;
+
+  return (
+    <Card
+      title="Vans back — count these in"
+      description="The driver's numbers are already filled in. Check them against the trolley."
+    >
+      <ul className="divide-y divide-border">
+        {runs.map((run) => (
+          <li key={run.id} className="flex flex-wrap items-center justify-between gap-3 py-2.5">
+            <div>
+              <p className="text-sm font-medium">
+                {run.code}{run.name ? ` · ${run.name}` : ""}
+              </p>
+              <p className="font-mono text-2xs uppercase tracking-[0.08em] text-muted-foreground">
+                {[run.registration, date(run.route_date),
+                  run.unloaded_at ? `unloaded ${dateTime(run.unloaded_at)}` : null]
+                  .filter(Boolean).join(" · ")}
+              </p>
+            </div>
+            <ButtonLink href={`/warehouse/count/${run.id}`} variant="primary">
+              Count it
+            </ButtonLink>
+          </li>
+        ))}
+      </ul>
+    </Card>
   );
 }
 
@@ -109,7 +154,7 @@ async function Batches() {
         rows={rows}
         empty={<EmptyState
           title="No batches yet"
-          description="Open a batch when linen comes off a run and needs washing."
+          description="A batch is one load of linen going through the plant together. Count a van in above to start one."
         />}
         columns={[
           {
@@ -130,10 +175,10 @@ async function Batches() {
               .reduce((total, line) => total + line.quantity - line.rejected_quantity, 0),
           },
           {
-            header: "Rejects",
+            header: "Set aside",
             align: "right",
             cell: (batch) => (batch.production_batch_lines ?? [])
-              .reduce((total, line) => total + line.rejected_quantity, 0),
+              .reduce((total, line) => total + line.rejected_quantity, 0) || "—",
           },
           {
             header: "Started",
@@ -152,7 +197,10 @@ async function NewBatch() {
     .returns<Pick<Depot, "id" | "name">[]>();
 
   return (
-    <Card title="Open a batch" description="Starts in receiving — add its manifest next.">
+    <Card
+      title="Start a batch by hand"
+      description="Only when the linen did not come off a run — otherwise use “Count it” above, which fills the numbers in for you."
+    >
       <form action={createBatch} className="grid gap-3 sm:grid-cols-4">
         <Field label="Depot" name="depot_id">
           <Select name="depot_id" options={[
@@ -160,14 +208,14 @@ async function NewBatch() {
             ...(depots ?? []).map((depot) => ({ value: depot.id, label: depot.name })),
           ]} />
         </Field>
-        <Field label="Machine" name="machine" hint="Optional washer or line.">
+        <Field label="Washer or line" name="machine" hint="Optional.">
           <Input name="machine" placeholder="Washer 3" />
         </Field>
         <Field label="Notes" name="notes" className="sm:col-span-2">
-          <Input name="notes" placeholder="Off route R2, heavy soiling" />
+          <Input name="notes" placeholder="Walk-in, heavy soiling" />
         </Field>
         <div className="sm:col-span-4">
-          <SubmitButton>Open batch</SubmitButton>
+          <SubmitButton variant="secondary">Start an empty batch</SubmitButton>
         </div>
       </form>
     </Card>

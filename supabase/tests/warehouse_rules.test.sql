@@ -4,7 +4,7 @@
 -- that keep it honest cannot be a client-side convention — a batch edited from
 -- a second tab, a retried request or a psql session has to hit the same wall.
 begin;
-select plan(8);
+select plan(10);
 
 insert into public.tenants (id, name) values
   ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','Laundry A');
@@ -35,10 +35,17 @@ select throws_ok(
   null,
   'customer-owned linen cannot be booked in without a customer');
 
+-- Counted off a run: the driver booked 40, the depot found 38. The shortfall is
+-- posted as a movement by the caller; what the schema has to keep is the pair
+-- of numbers that proves it.
 insert into public.production_batch_lines
-  (id, tenant_id, batch_id, item_id, quantity)
+  (id, tenant_id, batch_id, item_id, quantity, driver_quantity)
 values ('11110000-0000-0000-0000-000000000001','aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
-        'b0000000-0000-0000-0000-000000000001','11111111-1111-1111-1111-111111111111',40);
+        'b0000000-0000-0000-0000-000000000001','11111111-1111-1111-1111-111111111111',38,40);
+
+select is((select driver_quantity from public.production_batch_lines
+            where id = '11110000-0000-0000-0000-000000000001'), 40,
+          'the count keeps what the driver said beside what the depot found');
 
 update public.production_batches set stage = 'washing'
  where id = 'b0000000-0000-0000-0000-000000000001';
@@ -61,6 +68,15 @@ select throws_ok(
   'P0001',
   'a batch manifest can only be changed while the batch is in receiving',
   'a line cannot be removed once the batch has left receiving');
+
+-- "Driver said 40" is evidence of what was claimed at the customer, not a live
+-- figure. An editable one is a variance report that can be made to say anything.
+select throws_ok(
+  $$update public.production_batch_lines set driver_quantity = 38
+     where id = '11110000-0000-0000-0000-000000000001'$$,
+  'P0001',
+  'a batch manifest can only be changed while the batch is in receiving',
+  'the driver''s figure cannot be rewritten after the batch starts');
 
 -- Rejects are the deliberate exception: damage is found during processing.
 update public.production_batch_lines set rejected_quantity = 3

@@ -24,14 +24,28 @@ export const BATCH_STAGES = [...BATCH_FLOW, "completed", "cancelled"] as const;
 export type BatchStage = (typeof BATCH_STAGES)[number];
 
 export const BATCH_STAGE_LABELS: Record<BatchStage, string> = {
-  received: "Received",
+  received: "Counted in",
   washing: "Washing",
   drying: "Drying",
   folding: "Folding",
   packing: "Packing",
-  ready_for_dispatch: "Ready for dispatch",
-  completed: "Completed",
+  ready_for_dispatch: "Ready to go out",
+  completed: "Finished",
   cancelled: "Cancelled",
+};
+
+/**
+ * The button that leaves each stage, written as the thing the operator just
+ * finished doing. "Washing done — start drying" tells you what the press means
+ * without knowing the word for the state you are in; "Move to drying" does not.
+ */
+export const STAGE_ACTION_LABELS: Record<FlowStage, string> = {
+  received: "Start washing",
+  washing: "Washing done — start drying",
+  drying: "Drying done — start folding",
+  folding: "Folding done — start packing",
+  packing: "Packing done — mark ready to go out",
+  ready_for_dispatch: "Finish this batch",
 };
 
 /**

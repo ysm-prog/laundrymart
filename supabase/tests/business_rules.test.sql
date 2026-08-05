@@ -2,7 +2,7 @@
 -- inspection before start, load confirmation before start, unload before close,
 -- inventory conservation, sequential numbering, protected items.
 begin;
-select plan(12);
+select plan(14);
 
 insert into auth.users (id, email) values
   ('11111111-1111-1111-1111-111111111111','ops@example.com');
@@ -81,6 +81,25 @@ select results_eq(
       where item_id = '11100000-0000-0000-0000-00000000000a' order by state $$,
   $$ values ('at_customer', 80), ('in_transit', 20) $$,
   'pickup reduces customer stock and increases in-transit stock');
+
+-- A pool is a count of linen physically sitting somewhere, so minus twelve
+-- towels is not a state the plant can be in. Refusing the movement turns a
+-- mistyped manifest into an error the operator sees, instead of a wrong number
+-- nobody finds until stocktake.
+select throws_ok(
+  $$ select public.move_inventory(
+       'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','11100000-0000-0000-0000-00000000000a',
+       'laundry_owned', 500, 'at_customer', 'in_transit', 'pickup',
+       'c0000000-0000-0000-0000-00000000000a', null, null,
+       null, null, 'fe000000-0000-0000-0000-00000000000a') $$,
+  'P0001', null,
+  'stock cannot be moved out of a pool that does not hold it');
+
+select results_eq(
+  $$ select state, quantity from public.inventory_pools
+      where item_id = '11100000-0000-0000-0000-00000000000a' order by state $$,
+  $$ values ('at_customer', 80), ('in_transit', 20) $$,
+  'the refused movement leaves both pools exactly as they were');
 
 -- ---- sequential numbering ------------------------------------------------
 select is(public.next_number('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','invoice','INV'),

@@ -358,6 +358,8 @@ export type Membership = {
 export type ProductionBatch = {
   id: Uuid;
   depot_id: Uuid | null;
+  /** The run this batch was counted off, when it came from one. */
+  route_id: Uuid | null;
   batch_number: string;
   stage: string;
   machine: string | null;
@@ -376,7 +378,10 @@ export type ProductionBatchLine = {
   item_id: Uuid;
   owner_type: "laundry_owned" | "customer_owned";
   customer_id: Uuid | null;
+  /** What the warehouse counted onto the floor. */
   quantity: number;
+  /** What the driver booked out of the customers, when counted off a run. */
+  driver_quantity: number | null;
   rejected_quantity: number;
   notes: string | null;
 };

@@ -2,8 +2,18 @@
 > Auto-loaded each session. Canonical state is CLAUDE.md; this is the live delta.
 
 **Status:** Live, signed into, and on the upgraded stack (Next 16, Tailwind 4, Zod 4,
-vitest 4). `laundrymart-syd` (ref `xujhwljrmogenhvqpkrf`) has all 11 migrations and the demo
+vitest 4). `laundrymart-syd` (ref `xujhwljrmogenhvqpkrf`) has migrations 0001–0011 and the demo
 tenant; the app is on Vercel at `ats.coreit.com.au`; sign-in verified end to end.
+
+**`0012_return_count` is written and green locally but NOT yet applied to the hosted
+project** — apply it before the branch deploys, or `/warehouse` 500s on the missing
+`route_id` column.
+
+The warehouse flow was rebuilt around the depot count on branch
+`claude/warehouse-inventory-flow-psooyq`: `/warehouse/count/:routeId` pre-fills the driver's
+own numbers, records the difference as a real loss/find movement, and `move_inventory()` now
+refuses to leave a pool negative. See the top changelog entry in CLAUDE.md. Deliberately not
+done: shortening the six plant stages — the user kept all six.
 
 Working through the Plantline design handoff in four stages. **1 (theme), 2 (shell) and the
 dashboard from 3 are done.** Remaining: dispatch planner, billing two-pane, then stage 4 —
@@ -18,6 +28,8 @@ server-side extension, so its `.control` file has to sit in the postmaster's own
 and apt on the runner cannot reach into a container.
 
 **Next up**
+0. Apply `0012_return_count` to `laundrymart-syd`, then walk one run end to end: driver
+   unloads → "Count it" on `/warehouse` → wash through to ready.
 1. Dispatch planner and billing two-pane (stage 3), then stage 4.
 2. **Enable asymmetric JWT signing keys** on the project so `getClaims()` verifies locally
    instead of calling the auth server on every navigation (§2 assumes this).

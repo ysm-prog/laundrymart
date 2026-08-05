@@ -55,12 +55,21 @@ and action guards.
 - Items on an active agreement cannot be soft-deleted (`guard_item_soft_delete`).
 - Customer / agreement / job / invoice / credit-note numbers come from `next_number()`.
 - `move_inventory()` is the single entry point for stock changes: it upserts both pools and
-  writes the ledger row in one transaction.
+  writes the ledger row in one transaction. It refuses to leave a pool below zero — a pool is
+  a count of linen physically sitting somewhere, so a negative one is always an upstream
+  mistake (manifest typed larger than the delivery, a stage advanced twice, an `owner_type`
+  no pickup produces), and failing at the point of the error beats a wrong number found at
+  stocktake.
 - `recalculate_invoice()` keeps invoice totals consistent with lines and payments.
 - A production batch cannot start with an empty manifest, cannot be completed except from
   `ready_for_dispatch`, and cannot be reopened once finished (`guard_batch_transition`). Its
   manifest freezes when it leaves receiving — only `rejected_quantity` and notes stay writable
-  (`guard_batch_line_change`), because everything else drove a stock movement.
+  (`guard_batch_line_change`), because everything else drove a stock movement. That freeze
+  covers `driver_quantity` too: it is evidence of what was claimed at the customer, and an
+  editable one is a variance report that can be made to say anything.
+- A run can be counted into the plant once (`uq_production_batches_route`). Counting the same
+  van twice would book its linen in twice, and the second batch would have nothing at the
+  depot to draw on.
 
 ## 5. Branch & deploy
 Feature branch → `Dev` → `Prod`. CI (`Prod`/`Dev`) runs verify, gitleaks and the DB job
@@ -72,7 +81,8 @@ branches deploy. Never force-push `Prod`.
 `(app)`: `/dashboard` · `/customers[/new|/:id|/:id/edit]` · `/agreements[/new|/:id]` ·
 `/items[/:id]` · `/drivers` · `/vehicles` · `/routes/templates[/:id]` ·
 `/routes/daily[/:id|/:id/sheet]` · `/jobs[/:id]` ·
-`/operations/{pickups,deliveries,exceptions}` · `/run` · `/warehouse[/:id]` · `/inventory` ·
+`/operations/{pickups,deliveries,exceptions}` · `/run` ·
+`/warehouse[/:id|/count/:routeId]` · `/inventory` ·
 `/invoices[/:id]` · `/reports` · `/admin[/depots|/users|/holidays|/audit]`
 
 ## 7. Schema
@@ -94,9 +104,12 @@ branches deploy. Never force-push `Prod`.
 - `0009_warehouse` — production batches and their manifest lines, stage/manifest guards.
 - `0010_function_hardening` — tenant check inside `next_number()`, pinned `search_path`.
 - `0011_revoke_public_execute` — closes the implicit PUBLIC grant on `public` functions.
+- `0012_return_count` — `production_batches.route_id` (one batch per run),
+  `production_batch_lines.driver_quantity`, and the no-negative-pool guard inside
+  `upsert_inventory_pool()`.
 
 Proofs in `supabase/tests/`: `rls_isolation`, `rls_coverage`, `driver_scope`,
-`business_rules`, `media_scope`, `warehouse_rules` (47 assertions). Demo data in
+`business_rules`, `media_scope`, `warehouse_rules` (51 assertions). Demo data in
 `supabase/seed.sql` — not applied by migrations.
 
 **Do not re-add `grant execute on all functions in schema public to anon`.** That
@@ -191,6 +204,31 @@ Two things the hosted project does differently from local Postgres, both handled
   endpoint — see the warning under §7.
 
 ## 18. Changelog
+### 2026-08-05 · The depot count becomes a control instead of a re-typing exercise
+The loop the operator actually runs is: driver collects → van returns → the warehouse counts
+what came off it → wash → dry → ready to go out. Booking a returned van in took ~15 presses
+and 30-odd typed fields, all of it re-keying numbers the driver had already recorded.
+
+- **`/warehouse/count/:routeId`** — one screen per returned van, pre-filled from the driver's
+  own `pickup_lines`, with ±steppers per item and a variance chip. Reached from a "Vans back —
+  count these in" card at the top of `/warehouse`. No item, owner or customer dropdown: the
+  list is what actually came off that run.
+- **Shrinkage is now recorded, not lost.** Driver books 40, depot counts 38 → the 2 were left
+  in `at_depot` forever with no movement row to explain them, and the pools drifted quietly.
+  The difference is now posted as a real `loss` (or `manual` find) movement against the run,
+  and both figures are kept side by side on the line (`0012`).
+- **`move_inventory()` can no longer drive a pool negative** (`0012`). This was reachable
+  three ways: a hand-typed manifest larger than the delivery, and the batch form offering
+  `customer_owned` when `applyPickupMovements` only ever books `laundry_owned` — a question
+  with one wrong answer, now removed from the UI. The column and its constraint stay for the
+  day customer-owned linen is collected too.
+- **Plain-language pass over the warehouse.** Stage buttons say what you just finished
+  ("Washing done — start drying"), "Manifest" → "What's in this batch", "Record reject" →
+  "Found something torn or stained", and cancel-with-reason folded into a `<details>` so a red
+  button no longer sits beside the one pressed every hour.
+- `CountRow` added to `/design-preview`; screenshotted in both themes. pgTAP 47 → 51.
+- Not done: the six plant stages stay six. Folding and packing are still pure click-through.
+
 ### 2026-08-05 · Three broken embeds fixed; the design is now reviewable
 - **`/routes/daily`, the run sheet and the vehicle report were broken.** All three embedded
   `vehicles(registration)` from `daily_routes`, which has two FKs to vehicles — ambiguous, so
