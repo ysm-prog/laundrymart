@@ -1,18 +1,21 @@
 # MEMORY — working session handoff
 > Auto-loaded each session. Canonical state is CLAUDE.md; this is the live delta.
 
-**Status:** Live and signed into. `laundrymart-syd` (ref `xujhwljrmogenhvqpkrf`) has all 11
-migrations and the demo tenant; the app is on Vercel at `ats.coreit.com.au`; sign-in verified
-end to end. `npm run verify` passes (60 unit tests), `npm run db:test` passes (47 pgTAP).
+**Status:** Live, signed into, and on the upgraded stack (Next 16, Tailwind 4, Zod 4,
+vitest 4). `laundrymart-syd` (ref `xujhwljrmogenhvqpkrf`) has all 11 migrations and the demo
+tenant; the app is on Vercel at `ats.coreit.com.au`; sign-in verified end to end.
 
 Working through the Plantline design handoff in four stages. **1 (theme), 2 (shell) and the
-dashboard from 3 are done and pushed.** Remaining: dispatch planner, billing two-pane, then
-stage 4 — customer portal, public tracking, Xero push, bag scan. The handoff bundle is in the
-scratchpad, not the repo; re-upload it if the session is new.
+dashboard from 3 are done.** Remaining: dispatch planner, billing two-pane, then stage 4 —
+customer portal, public tracking, Xero push, bag scan. The handoff bundle lives in the
+scratchpad, not the repo; re-upload it in a new session.
 
-**The restyle has never been looked at.** It is verified structurally only — built stylesheet
-inspected, typecheck, lint, build. This container cannot reach `*.supabase.co`, so the app
-cannot be run here. Eyeball it before building further on top.
+The theme was written against Tailwind 3 and ported to 4 during the merge from `Dev`: there is
+no `tailwind.config.ts` any more, everything lives in the `@theme` block of `globals.css`.
+
+CI's DB job runs Postgres on the runner, not in a `services:` container — pgTAP is a
+server-side extension, so its `.control` file has to sit in the postmaster's own filesystem
+and apt on the runner cannot reach into a container.
 
 **Next up**
 1. Dispatch planner and billing two-pane (stage 3), then stage 4.
@@ -24,6 +27,19 @@ cannot be run here. Eyeball it before building further on top.
    rule straightforward.
 5. Consolidated invoices: `generateInvoices` dedupes on customer + period, so a customer with
    two active agreements only gets the first billed. Pre-existing; confirm intent first.
+
+**Toolchain decisions from the dependency merge**
+- TypeScript is pinned to **6**, not the 7 Dependabot offered: typescript-eslint has no TS 7
+  support, so ESLint dies with "typescript-eslint does not support TS 7.0".
+- ESLint is pinned to **9**, not 10: `eslint-config-next@16` depends on typescript-eslint 8,
+  which targets ESLint 9 — under 10 the parser throws `scopeManager.addGlobals is not a
+  function`. Revisit both when the lint stack catches up.
+- Next 16 needs `experimental.useTypeScriptCli` because TS no longer exposes the JS
+  compiler API Next used to call.
+- Tailwind 4 is CSS-first: there is no `tailwind.config.ts`, the theme lives in `@theme`
+  in `globals.css`, and PostCSS uses `@tailwindcss/postcss`.
+- `npm install eslint@^9.40.0` hangs for minutes before failing — 9.40 does not exist and
+  npm backtracks the whole tree. Check the version exists before pinning.
 
 **Gotchas worth remembering**
 - A `"use server"` file may only export async functions — constants live in a sibling module

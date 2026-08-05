@@ -7,7 +7,7 @@ below and add a Changelog entry (newest on top). The Stop hook warns on drift.
 
 ## 1. Overview
 Commercial Laundry Management System — customers, service agreements, depot-aware routing,
-an offline driver run, inventory and billing. Next.js 15 (App Router) + Supabase
+an offline driver run, inventory and billing. Next.js 16 (App Router) + Supabase
 (Postgres/RLS/Auth) + Vercel, AU (Sydney).
 
 The master spec names a .NET 9 Web API; this build follows the supplied skeleton instead
@@ -19,6 +19,7 @@ The master spec names a .NET 9 Web API; this build follows the supplied skeleton
 - Auth via `getClaims()` (local JWT verify, no network); `requireSession()` is memoised per
   request. `requireCapability()` guards pages; `assertCapability()` guards actions.
 - Functions pinned to `syd1` to co-locate with the Sydney DB (vercel.json).
+- The session refresh + auth gate is `src/proxy.ts` (Next 16's rename of `middleware`).
 - Server Actions only for writes. They derive `tenant_id` from the session and redirect with
   `?error=` / `?ok=`. The one exception is `/api/sync`, which exists because the offline
   outbox needs a batch endpoint it can replay.
@@ -62,8 +63,9 @@ and action guards.
   (`guard_batch_line_change`), because everything else drove a stock movement.
 
 ## 5. Branch & deploy
-Feature branch → PR → main. Vercel build runs the verify gate; CI runs verify, gitleaks and
-the DB job (migrations + pgTAP + seed). Never force-push main.
+Feature branch → `Dev` → `Prod`. CI (`Prod`/`Dev`) runs verify, gitleaks and the DB job
+(migrations + pgTAP + seed); the Vercel build runs the same verify gate and only those two
+branches deploy. Never force-push `Prod`.
 
 ## 6. Routes
 `/` landing · `/login` · `/offline` · `/api/sync` · `/api/media` · `/api/invoices/:id/pdf`
@@ -130,22 +132,32 @@ See `.env.example`; validated fail-fast in `src/lib/env.ts`. Email delivery
 (`RESEND_API_KEY`, `INVOICE_FROM_EMAIL`) is optional — without it the app runs and the send
 action says so rather than the deployment refusing to boot.
 
-## 10a. Design system
+## 10a. Toolchain pins
+Next 16 (Turbopack), React 19, Tailwind 4 (CSS-first — no `tailwind.config.ts`), Zod 4,
+vitest 4. Two pins are held back on purpose: TypeScript **6** (typescript-eslint does not
+support TS 7) and ESLint **9** (`eslint-config-next@16` depends on typescript-eslint 8,
+which targets ESLint 9). Next 16 needs `experimental.useTypeScriptCli` and the auth gate
+lives in `src/proxy.ts`, not `src/middleware.ts`.
+
+## 10b. Design system
 From the Plantline concept pack (`Logistics SaaS Product Design` handoff). Two rules carry it:
 
 - **Colour means status only.** Teal `--primary` = on track, amber = warning, red = late,
   green = resolved. The solid call-to-action is therefore **near-black `--action`**, not teal —
   a teal button would read as a status. Never use `bg-primary` for a button.
-- **Flat.** Hairline `--border` everywhere, `--border-strong` for inputs and frames, one faint
-  shadow, and radius 0. The radius and shadow scales are overridden wholesale in
-  `tailwind.config.ts`, so `rounded-*` classes are inert rather than scattered edits.
+- **Flat.** Hairline `--border` everywhere, `--strong` for inputs and frames, one faint shadow,
+  and radius 0. The whole `--radius-*` and `--shadow-*` scale is zeroed in the `@theme` block
+  of `globals.css`, so `rounded-*` classes are inert rather than scattered edits. Tailwind v4
+  cannot theme `rounded-full` (it is a static utility), so the handful of pills were made
+  square at the call site instead — do not reintroduce it.
 
-IBM Plex Sans + Mono via `next/font` (self-hosted; the driver app must render without signal).
-Mono is structural — every number, identifier, date and uppercase label. `Eyebrow` in `ui.tsx`
-is the label voice; `text-3xs`/`text-2xs` are the 9px/10px steps.
+IBM Plex Sans + Mono via `next/font` (self-hosted; the driver app must render without signal),
+bound to `--font-sans`/`--font-mono` in `@theme`. Mono is structural — every number,
+identifier, date and uppercase label. `Eyebrow` in `ui.tsx` is the label voice;
+`text-3xs`/`text-2xs` are the 9px/10px steps.
 
-`border-strong` is extended onto `borderColor`, not nested under `colors.border` — nested it
-would spell `border-border-strong` and silently do nothing.
+The strong border colour is named `--color-strong`, **not** `--color-border-strong`: the
+latter would spell the utility `border-border-strong` and silently do nothing.
 
 The sidebar rail keeps literal hex colours: it is the one surface that stays near-black in
 both themes, so it must not follow the surface tokens — and it needs its own `border-r`,
@@ -203,6 +215,17 @@ Two things the hosted project does differently from local Postgres, both handled
   customer, so the slot shows ready-to-dispatch instead of an invented number.
 - Still to come: dispatch planner, billing two-pane, then the Phase-1 modules (customer
   portal, public tracking, Xero, bag scan).
+- **Merged Next 16 / Tailwind 4 / Zod 4 from `Dev`.** The theme moved out of the deleted
+  `tailwind.config.ts` into the `@theme` block of `globals.css`.
+
+### 2026-08-05 · CI DB job runs Postgres on the runner
+The DB job installed `postgresql-16-pgtap` on the runner while Postgres ran in a `services:`
+container, so `create extension pgtap` failed with "extension pgtap is not available" — a
+server-side extension's `.control` file has to live in the postmaster's own filesystem, and
+apt on the host cannot reach into the container. Dropped the service container and start
+Postgres 16 on the runner instead (cluster port read from `pg_lsclusters`, so a second
+cluster on 5433 does not break it). Migrations, the pgTAP suite and the seed all verified
+against this layout.
 
 ### 2026-08-05 · Deploy to Supabase; close two REST-surface holes
 - **Live project.** `laundrymart-syd` in Sydney, all migrations applied, demo data seeded.
@@ -219,6 +242,19 @@ Two things the hosted project does differently from local Postgres, both handled
 - `search_path` pinned on the seven functions that lacked it. Security advisors: 18 warnings
   → 5, all remaining ones being SECURITY DEFINER helpers that `authenticated` legitimately
   needs (each is internally scoped to `auth.uid()`, so it only reveals facts about the caller).
+- **Sign-in failures are now readable.** The three Supabase clients read `process.env.X!`
+  directly, so a missing variable built a client against `undefined` and surfaced much later
+  as "credentials not recognised". All three go through the validated `env` object, and the
+  underlying auth error goes to the server log (never the credentials, and the user-facing
+  message stays vague so the form cannot enumerate accounts).
+
+### 2026-08-05 · Dependency merge into Prod
+Merged every open Dependabot branch: Next 16, Tailwind 4, Zod 4, vitest 4, lefthook 2,
+@supabase/ssr 0.12, @types/node 26, actions/checkout+setup-node v7. Migrated Tailwind to
+CSS-first config, `next lint` to the ESLint CLI with flat config, and `middleware` to the
+`proxy` convention. Held TypeScript at 6 and ESLint at 9 (lint stack does not support 7/10).
+Fixed three real `set-state-in-effect` violations the new react-hooks rules exposed, and
+pointed CI and Vercel at the `Prod`/`Dev` branches they actually use.
 
 ### 2026-08-05 · Proof of service, invoice delivery, warehouse, per-kg billing
 - **Per-kg invoicing.** `per_kg` agreement lines billed nothing at all — the generator
@@ -238,7 +274,8 @@ Two things the hosted project does differently from local Postgres, both handled
   ready for dispatch, each stage a real `move_inventory()` call, with mid-process rejects to
   repair or damaged. Manifest freezes when the batch leaves receiving.
 - Added `vitest.config.ts` (the `@/` alias, and `jsx: automatic` — without it a `.tsx` module
-  under test renders nothing at all).
+  under test renders nothing at all). Superseded by `vitest.config.mts` in the
+  dependency merge above.
 
 ### 2026-08-05 · Initial build
 Full MVP against the master spec: multi-tenant spine with RLS + pgTAP proofs, depots,

@@ -122,7 +122,7 @@ export default async function BatchDetailPage({
             return (
               <li
                 key={stage}
-                className={`rounded-full border px-3 py-1 text-xs font-medium ${
+                className={`border px-3 py-1 text-xs font-medium ${
                   active ? "border-primary text-primary"
                     : done ? "border-success/40 bg-success/10 text-success"
                     : "text-muted-foreground"}`}

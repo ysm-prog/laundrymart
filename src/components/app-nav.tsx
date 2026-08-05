@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 import { cx } from "./ui";
 import { isActive, type NavCountKey, type NavSection } from "@/lib/nav";
 
@@ -71,9 +71,15 @@ export function AppNav({
 export function MobileNav({ sections, counts }: { sections: NavSection[]; counts?: NavCounts }) {
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
+  const [lastPathname, setLastPathname] = useState(pathname);
 
-  // Close the drawer whenever a navigation actually lands.
-  useEffect(() => setOpen(false), [pathname]);
+  // Close the drawer whenever a navigation actually lands. Adjusting state
+  // during render (rather than in an effect) means the closed drawer is part of
+  // the same commit as the new route — no flash of the old menu over the new page.
+  if (lastPathname !== pathname) {
+    setLastPathname(pathname);
+    setOpen(false);
+  }
 
   return (
     <div className="lg:hidden">
@@ -96,16 +102,27 @@ export function MobileNav({ sections, counts }: { sections: NavSection[]; counts
   );
 }
 
-export function ThemeToggle() {
-  const [dark, setDark] = useState(false);
+/**
+ * The `dark` class on <html> is the source of truth — it is set before paint by
+ * the bootstrap script in the root layout, so React must read it rather than
+ * own it. Subscribing to the attribute keeps the button label correct even if
+ * something else flips the theme.
+ */
+function subscribeToTheme(onChange: () => void) {
+  const observer = new MutationObserver(onChange);
+  observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
+  return () => observer.disconnect();
+}
 
-  useEffect(() => {
-    setDark(document.documentElement.classList.contains("dark"));
-  }, []);
+export function ThemeToggle() {
+  const dark = useSyncExternalStore(
+    subscribeToTheme,
+    () => document.documentElement.classList.contains("dark"),
+    () => false, // Server render: the bootstrap script has not run yet.
+  );
 
   function toggle() {
     const next = !dark;
-    setDark(next);
     document.documentElement.classList.toggle("dark", next);
     try {
       localStorage.setItem("theme", next ? "dark" : "light");

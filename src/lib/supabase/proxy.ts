@@ -1,5 +1,6 @@
-// Session refresh + auth gate via getClaims() = LOCAL JWT verification (no network
-// round-trip when asymmetric signing keys are enabled — the perf lesson).
+// Session refresh + auth gate for the Next 16 `proxy` convention. getClaims()
+// verifies the JWT locally — no network round-trip per navigation once
+// asymmetric signing keys are enabled on the Supabase project.
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { env } from "@/lib/env";

@@ -2,6 +2,9 @@
 const nextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
+  // TypeScript no longer exposes the JS compiler API Next.js used to call, so
+  // typechecking during the build goes through the CLI.
+  experimental: { useTypeScriptCli: true },
   // @react-pdf/renderer resolves fonts and streams at runtime; bundling it
   // breaks both. It only ever runs on the server (invoice rendering).
   serverExternalPackages: ["@react-pdf/renderer"],

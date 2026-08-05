@@ -9,7 +9,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint",
+    "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -19,25 +19,25 @@
   },
   "dependencies": {
     "@react-pdf/renderer": "^4.5.1",
-    "@supabase/ssr": "^0.7.0",
+    "@supabase/ssr": "^0.12.4",
     "@supabase/supabase-js": "^2.58.0",
-    "next": "^15.5.0",
+    "next": "^16.2.12",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "resend": "^4.8.0",
-    "zod": "^3.25.0"
+    "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@types/node": "^22.0.0",
+    "@tailwindcss/postcss": "^4.3.3",
+    "@types/node": "^26.1.2",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
-    "autoprefixer": "^10.4.20",
-    "eslint": "^9.0.0",
-    "eslint-config-next": "^15.5.0",
-    "lefthook": "^1.7.0",
+    "eslint": "^9.39.5",
+    "eslint-config-next": "^16.2.12",
+    "lefthook": "^2.1.10",
     "postcss": "^8.4.47",
-    "tailwindcss": "^3.4.14",
-    "typescript": "^5.6.0",
-    "vitest": "^2.1.0"
+    "tailwindcss": "^4.3.3",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.10"
   }
 }

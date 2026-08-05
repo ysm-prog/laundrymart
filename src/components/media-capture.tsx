@@ -106,7 +106,7 @@ export function PhotoPicker({
                 type="button"
                 onClick={() => onChange(photos.filter((_, i) => i !== index))}
                 aria-label={`Remove ${label.toLowerCase()} ${index + 1}`}
-                className="absolute -right-1.5 -top-1.5 h-6 w-6 rounded-full border bg-surface
+                className="absolute -right-1.5 -top-1.5 h-6 w-6 border bg-surface
                            text-xs font-semibold leading-none shadow-sm hover:bg-surface-muted"
               >
                 ×
@@ -212,7 +212,7 @@ export function SignaturePad({
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-sm font-medium">{label}</span>
         {value ? (
-          <span className="rounded-full bg-success/10 px-2 py-0.5 text-xs font-medium text-success">
+          <span className="bg-success/10 px-2 py-0.5 text-xs font-medium text-success">
             Captured
           </span>
         ) : (
