@@ -36,7 +36,22 @@ returns uuid language sql immutable as $$
   end;
 $$;
 
-alter table storage.objects enable row level security;
+-- On the hosted project `storage.objects` belongs to `supabase_storage_admin`
+-- and already has RLS on, so this ALTER would fail with "must be owner of table
+-- objects" and take the whole migration with it. Locally the table is the shim
+-- from pg-bootstrap.sql, which we do own and which starts with RLS off — hence
+-- the guard rather than an unconditional statement. Creating policies on the
+-- table is separately granted to `postgres`, so everything below is fine.
+do $$
+begin
+  if not (
+    select c.relrowsecurity from pg_class c
+      join pg_namespace n on n.oid = c.relnamespace
+     where n.nspname = 'storage' and c.relname = 'objects'
+  ) then
+    execute 'alter table storage.objects enable row level security';
+  end if;
+end $$;
 
 drop policy if exists run_media_member_read on storage.objects;
 drop policy if exists run_media_member_write on storage.objects;
