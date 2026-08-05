@@ -5,7 +5,30 @@
 vitest 4). `laundrymart-syd` (ref `xujhwljrmogenhvqpkrf`) has the demo tenant; the app is on
 Vercel at `ats.coreit.com.au`; sign-in verified end to end.
 
-All 12 migrations applied — `0012_optional_inspection` went on 2026-08-05 (verified:
+**Phases A, B and C are all on `Prod`** (`3f59cc6`). `0013_notifications` is applied to
+`laundrymart-syd`, verified there: RLS on, one policy, the `nulls not distinct` idempotency
+index in place, `anon` reading zero rows through a rolled-back probe, and no new security
+advisor (still the same five SECURITY DEFINER warnings §18 records as legitimate).
+
+**Two things must happen on the deployment before Phase C actually does anything:**
+1. **Set `CRON_SECRET`** in Vercel (`openssl rand -hex 32`). Until it is set,
+   `/api/notifications/sweep` refuses every request — closed by default on purpose — so the
+   two swept events (invoice past terms, run not started) never fire. `vercel.json` already
+   carries the cron entry; its schedule is **UTC**, five hits covering 07:00–15:00 Sydney.
+2. **Prove the Resend path — C0 was never completed.** It could not be: this container's
+   network policy answers 403 to `CONNECT api.resend.com`, so no live send was possible at
+   any point. Use the **"Send a test email"** button on `/admin/notifications` (admin.write,
+   sends only to the signed-in user's own address, audited), then email one real invoice for
+   the full path including the PDF. **Do not switch the customer emails on until both have
+   been done** — they are off by default and should stay off until the sender is proven.
+
+Owner's C3 decisions (2026-08-05), already the shipped defaults: overdue chase **7 days past
+terms, weekly, three at most, friendly in tone**. `enabled` is still false.
+
+The remaining Part-4 forks are Phase D's, not C's: simple-mode default for the existing
+tenant, and "Stops" vs "Jobs" as the merged name.
+
+All 12 earlier migrations applied — `0012_optional_inspection` went on 2026-08-05 (verified:
 `search_path=public` still pinned, `anon` still cannot execute the guard, no inspection check
 left in the body). The app code for it is on `Prod` — it rode the Phase A promotion (`6147b06`),
 whose CI was green on all three jobs.
@@ -37,10 +60,35 @@ the auth gate redirects everyone to — the row required `reports.read`. `capabi
 item is now optional (= every signed-in member), because no single capability is held by all
 eleven roles.
 
-Next: Phase C (notifications — the one migration, shared with `tenants.settings`). Three
-owner decisions are queued in Part 4 of the design spec. Open item: the live DB has
-`0012_return_count` applied from unmerged branch `claude/warehouse-inventory-flow-psooyq`;
-merging that branch needs a migration-number reconcile.
+Merged `Prod` (Phase C) through on the way to shipping. The two met in the navigation:
+C's notification settings screen is a tab under Settings, and its `/notifications` list
+stays off the nav map because the bell is its entry point.
+
+**Phase C shipped** on `claude/laundrymart-phase-c-notifications-p90wk1`, merged through `Dev`
+to `Prod`. `0013_notifications` adds `tenants.settings jsonb` and the `notifications` table.
+Writers: server actions (`notify()`, RLS client) for inspection-failed, vehicle off the road,
+stock written off as damaged, and a rejected offline batch; `/api/notifications/sweep` (cron,
+bearer token, service-role client, tenant_id from the iterated row) for invoice-past-terms and
+run-not-started. Idempotency is `(tenant_id, kind, subject_id, occurred_on) nulls not
+distinct`, and `occurred_on` is the day the *event* belongs to — the invoice's due date, the
+run's date — not the day the sweep ran, so five hits a day still notify once.
+Things worth remembering:
+- **Notification rows are forms, not links.** Next prefetches `<Link>` on hover and in the
+  viewport, and the destination marks the row read on the way through — links would empty the
+  bell for anyone who merely scrolled past. Same reason `openNotification` reads the href back
+  from the row instead of the posted form.
+- **`nulls not distinct` needs PG15+** and PostgREST's `on_conflict=` names columns only, so
+  an expression/coalesce index would have been unusable from supabase-js. Hosted is PG17.6.
+- **Supabase's default privileges grant `anon` table-level SELECT on every new public table**,
+  including this one. The local pgTAP box does not, so the local assertion passes while the
+  hosted grant exists. RLS is the boundary and denies it — verified by probe. Consistent with
+  every other table; do not "fix" it in isolation.
+- Overdue-reminder idempotency rides the **audit log**, not the notifications table, because a
+  reminder recurs; the marker is written only on success, so a bounce retries.
+
+Open item: the live DB has `0012_return_count` applied from unmerged branch
+`claude/warehouse-inventory-flow-psooyq`; merging that branch needs a migration-number
+reconcile (0013 is taken — that one gets renumbered, not this one).
 
 **Consolidated invoicing is fixed** (same branch): `generateInvoices` now writes one invoice
 per customer per period carrying every contract's charges. It used to loop per contract while
@@ -89,8 +137,9 @@ and apt on the runner cannot reach into a container.
 1. Stage 4, once the four decisions above are made.
 2. **Enable asymmetric JWT signing keys** on the project so `getClaims()` verifies locally
    instead of calling the auth server on every navigation (§2 assumes this).
-3. Send one real invoice email end to end — the Resend path is still untested against the
-   provider. PDF render and template are unit-tested.
+3. **Set `CRON_SECRET` and prove the Resend path** — see the two blockers at the top. The
+   provider has still never been reached from anywhere; templates and PDF render are
+   unit-tested, the wire is not.
 4. Photo retention: nothing prunes `run-media`. Per-tenant path prefixes make a lifecycle
    rule straightforward.
 5. Consolidated invoices: `generateInvoices` dedupes on customer + period, so a customer with

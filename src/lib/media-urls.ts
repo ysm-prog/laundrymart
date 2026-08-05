@@ -18,10 +18,15 @@ export type SignedMedia = { path: string; url: string };
 /**
  * Sign the paths that belong to this tenant. Anything else is dropped rather
  * than signed — a stray key in the column is a bug, not something to serve.
+ *
+ * `ttlSeconds` defaults to the on-screen lifetime. The one caller that overrides
+ * it is the delivery-confirmation email, which needs a link that survives the
+ * trip to an inbox — see `MEDIA_EMAIL_TTL_SECONDS`.
  */
 export async function signMedia(
   paths: ReadonlyArray<string | null | undefined>,
   tenantId: string,
+  ttlSeconds: number = MEDIA_URL_TTL_SECONDS,
 ): Promise<SignedMedia[]> {
   const wanted = paths.filter(
     (path): path is string => typeof path === "string" && isTenantPath(path, tenantId),
@@ -31,7 +36,7 @@ export async function signMedia(
   const supabase = await createClient();
   const { data, error } = await supabase.storage
     .from(MEDIA_BUCKET)
-    .createSignedUrls(wanted, MEDIA_URL_TTL_SECONDS);
+    .createSignedUrls(wanted, ttlSeconds);
 
   if (error || !data) return [];
 

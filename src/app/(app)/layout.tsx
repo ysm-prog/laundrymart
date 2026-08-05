@@ -5,6 +5,8 @@ import { ROLE_LABELS } from "@/lib/roles";
 import { createClient } from "@/lib/supabase/server";
 import { today } from "@/lib/format";
 import { AppNav, MobileNav, SectionNav, ThemeToggle, type NavCounts } from "@/components/app-nav";
+import { NotificationBell } from "@/components/notification-bell";
+import { unreadNotificationCount } from "@/lib/notifications/query";
 import { signOut } from "@/app/login/actions";
 
 /**
@@ -48,7 +50,12 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   // Gate the whole group once; child pages reuse the memoised session.
   const session = await requireSession();
   const items = navigationFor(session.role);
-  const counts = await navCounts();
+  // Both resolve to head-only counts; issued together so the bell is no slower
+  // than the rail it sits beside.
+  const [counts, unread] = await Promise.all([
+    navCounts(),
+    unreadNotificationCount(session),
+  ]);
 
   return (
     <div className="min-h-screen lg:grid lg:grid-cols-[212px_1fr]">
@@ -121,6 +128,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
                            text-muted-foreground md:inline">
             {today()}
           </span>
+          <NotificationBell count={unread} />
           <ThemeToggle />
         </header>
 

@@ -175,6 +175,12 @@ export const NAVIGATION: NavItem[] = [
         blurb: "Who can sign in, and how much of the app each person sees.",
       },
       {
+        // Gated on write, not read: the page is a form and nothing else, so a
+        // read-only role would get a screen it cannot submit.
+        label: "Notifications", href: "/admin/notifications", capability: "admin.write",
+        blurb: "What the app tells you about, and what it emails your customers.",
+      },
+      {
         label: "Public holidays", href: "/admin/holidays", capability: "admin.read",
         blurb: "Days you do not serve. Contracts decide what happens on each one.",
       },
