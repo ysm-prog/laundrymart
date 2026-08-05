@@ -23,10 +23,28 @@ links (`fail`/`done` take optional `{href,label}`; template re-validates same-si
 No migrations. Verified: typecheck, lint, 88 tests, build, /design-preview screenshotted
 light+dark. Wizard gotcha for later: step fields hide rather than unmount, and none carry
 `required` — a hidden required field fails native validation unfocusable.
+**Simplification audit shipped** on branch `claude/app-simplification-ux-audit-g94ki1`:
+`docs/SIMPLIFICATION-AUDIT.md` is the 13-part deliverable and the record of what changed.
+Navigation rebuilt as data (ten areas + tab strip, `sectionFor` longest-match, capability
+resolved together with href); `/search` (seven capability-gated `ilike` groups) replacing a
+search box that submitted to the customers list; `/help` glossary; `DataTable` stacks to
+labelled cards below `sm` and its scroll box is focusable; dashboard's hand-rolled table
+folded in via `rowClassName`; `COMMON_ROLES`/`ROLE_SUMMARY` on People; `/admin` retired to a
+redirect; 36px tap targets; copy pass. No migrations. Verified: typecheck, lint, 103 tests,
+build, `/design-preview` screenshotted light + dark + 390px.
+**Live bug this pass found and fixed:** a driver had no rail row for `/dashboard`, the page
+the auth gate redirects everyone to — the row required `reports.read`. `capability` on a nav
+item is now optional (= every signed-in member), because no single capability is held by all
+eleven roles.
+
 Next: Phase C (notifications — the one migration, shared with `tenants.settings`). Three
 owner decisions are queued in Part 4 of the design spec. Open item: the live DB has
 `0012_return_count` applied from unmerged branch `claude/warehouse-inventory-flow-psooyq`;
 merging that branch needs a migration-number reconcile.
+
+**Known correctness hole, unfixed and deliberately not buried:** `generateInvoices` dedupes
+on customer + period, so a customer with two active contracts is billed for one. Needs the
+owner's call (one consolidated invoice vs one per contract) before it can be fixed.
 
 Working through the Plantline design handoff in four stages. **Stages 1–3 are done** — theme,
 shell, dashboard, and now the dispatch planner and the billing two-pane (branch

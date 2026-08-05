@@ -5,7 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { can } from "@/lib/roles";
 import { date as formatDate, money, number, relativeDays, today } from "@/lib/format";
 import {
-  ButtonLink, Card, EmptyState, Eyebrow, FlashMessages, PageHeader, SkeletonRows,
+  ButtonLink, Card, DataTable, EmptyState, Eyebrow, FlashMessages, PageHeader, SkeletonRows,
   SkeletonStats, Stage, Stat, StatusBadge, cx, humanise,
 } from "@/components/ui";
 import { SubmitButton } from "@/components/form";
@@ -390,60 +390,64 @@ async function NeedsDecision({ seesMoney }: { seesMoney: boolean }) {
       description={rows.length === 0 ? undefined : `${rows.length} open`}
       className="[&>div]:p-0"
     >
-      {rows.length === 0 ? (
-        <div className="p-4">
-          <EmptyState
-            title="Nothing needs a decision"
-            description="No exceptions, no linen short, nothing past terms."
-          />
-        </div>
-      ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full border-collapse text-[12.5px]">
-            <thead className="bg-surface-muted text-left">
-              <tr>
-                {["Reference", "Customer / issue", "State", "Size", "Since", "Action"].map((header, index) => (
-                  <th key={header} scope="col"
-                      className={cx(
-                        "px-3 py-1.5 font-mono text-3xs font-normal uppercase",
-                        "tracking-[0.08em] text-muted-foreground",
-                        index === 3 && "text-right",
-                      )}>
-                    {header}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((row, index) => (
-                <tr key={`${row.reference}-${row.when}-${index}`}
-                    className={cx(
-                      "border-t border-l-[3px] transition hover:bg-surface-muted",
-                      SEVERITY_RULE[row.severity],
-                    )}>
-                  <td className="px-3 py-2 font-mono text-[11.5px] whitespace-nowrap">{row.reference}</td>
-                  <td className="px-3 py-2">
-                    <span className="font-semibold">{row.customer}</span>
-                    <span className="text-muted-foreground"> — {row.summary}</span>
-                  </td>
-                  <td className={cx("px-3 py-2 text-[11.5px] whitespace-nowrap", SEVERITY_TEXT[row.severity])}>
-                    {row.state}
-                  </td>
-                  <td className="px-3 py-2 text-right font-mono text-[11.5px] tabular-nums whitespace-nowrap">
-                    {row.measure}
-                  </td>
-                  <td className="px-3 py-2 font-mono text-[11.5px] text-muted-foreground whitespace-nowrap">
-                    {formatDate(row.when)}
-                  </td>
-                  <td className="px-3 py-2 whitespace-nowrap">
-                    <Link href={row.href} className="font-medium text-primary hover:underline">{row.action}</Link>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+      {/* Cards need their own gutter on a phone; the table is flush to the card
+          edge on a desktop, and so is the empty state's dashed frame. */}
+      <div className={rows.length ? "p-4 sm:p-0" : "p-4"}>
+        <DataTable
+          rows={rows}
+          label="Things needing a decision"
+          rowClassName={(row) => cx("border-l-[3px]", SEVERITY_RULE[row.severity])}
+          empty={
+            <EmptyState
+              title="Nothing needs a decision"
+              description="No exceptions, no linen short, nothing past terms."
+            />
+          }
+          columns={[
+            {
+              header: "Customer / issue",
+              cell: (row) => (
+                <>
+                  <span className="font-semibold">{row.customer}</span>
+                  <span className="text-muted-foreground"> — {row.summary}</span>
+                </>
+              ),
+            },
+            {
+              header: "State",
+              cell: (row) => (
+                <span className={cx("whitespace-nowrap text-[11.5px]", SEVERITY_TEXT[row.severity])}>
+                  {row.state}
+                </span>
+              ),
+            },
+            { header: "Size", align: "right", cell: (row) => row.measure },
+            {
+              header: "Since", hideBelow: "md",
+              cell: (row) => (
+                <span className="whitespace-nowrap font-mono text-[11.5px] text-muted-foreground">
+                  {formatDate(row.when)}
+                </span>
+              ),
+            },
+            {
+              header: "Reference", hideBelow: "lg",
+              cell: (row) => (
+                <span className="whitespace-nowrap font-mono text-[11.5px]">{row.reference}</span>
+              ),
+            },
+            {
+              header: "",
+              align: "right",
+              cell: (row) => (
+                <Link href={row.href} className="font-medium text-primary hover:underline">
+                  {row.action}
+                </Link>
+              ),
+            },
+          ]}
+        />
+      </div>
     </Card>
   );
 }

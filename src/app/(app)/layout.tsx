@@ -4,7 +4,7 @@ import { navigationFor } from "@/lib/nav";
 import { ROLE_LABELS } from "@/lib/roles";
 import { createClient } from "@/lib/supabase/server";
 import { today } from "@/lib/format";
-import { AppNav, MobileNav, ThemeToggle, type NavCounts } from "@/components/app-nav";
+import { AppNav, MobileNav, SectionNav, ThemeToggle, type NavCounts } from "@/components/app-nav";
 import { signOut } from "@/app/login/actions";
 
 /**
@@ -47,7 +47,7 @@ async function navCounts(): Promise<NavCounts> {
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   // Gate the whole group once; child pages reuse the memoised session.
   const session = await requireSession();
-  const sections = navigationFor(session.role);
+  const items = navigationFor(session.role);
   const counts = await navCounts();
 
   return (
@@ -66,7 +66,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         </div>
 
         <div className="flex-1 overflow-y-auto">
-          <AppNav sections={sections} counts={counts} />
+          <AppNav items={items} counts={counts} />
         </div>
 
         <div className="mt-auto border-t border-[#262c31] px-4 pt-3">
@@ -94,18 +94,28 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         {/* Context bar: what you are looking at, and one search that works. */}
         <header className="sticky top-0 z-30 flex h-[52px] flex-none items-center gap-2.5
                            border-b bg-surface/95 px-3 backdrop-blur sm:px-4">
-          <MobileNav sections={sections} counts={counts} />
+          <MobileNav items={items} counts={counts} />
           <Link href="/dashboard" className="text-sm font-semibold lg:hidden">LaundryMart</Link>
 
-          <form action="/customers" className="hidden min-w-0 flex-1 sm:block">
-            <label htmlFor="global-q" className="sr-only">Search customers</label>
+          {/* One box that finds anything with a name or a number on it. It used
+              to submit to the customers list, which quietly meant an invoice
+              number typed here returned "no customers match". */}
+          <form action="/search" className="hidden min-w-0 flex-1 sm:block">
+            <label htmlFor="global-q" className="sr-only">
+              Search customers, invoices, stops, vehicles
+            </label>
             <input
               id="global-q" name="q" type="search"
-              placeholder="Search customers…"
-              className="w-full max-w-[420px] border border-strong bg-surface-muted px-2.5 py-1.5
+              placeholder="Search a customer, invoice, stop or rego…"
+              className="min-h-9 w-full max-w-[420px] border border-strong bg-surface-muted px-2.5 py-1.5
                          text-[12.5px] placeholder:text-muted-foreground"
             />
           </form>
+
+          <Link href="/search"
+                className="ml-auto min-h-9 border border-strong px-2.5 py-1.5 text-[12.5px] sm:hidden">
+            Search
+          </Link>
 
           <span className="ml-auto hidden border border-border px-2 py-1 font-mono text-2xs
                            text-muted-foreground md:inline">
@@ -113,6 +123,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           </span>
           <ThemeToggle />
         </header>
+
+        <SectionNav items={items} />
 
         <main id="main" className="min-w-0 flex-1 p-4 sm:p-5">{children}</main>
       </div>

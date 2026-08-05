@@ -23,7 +23,7 @@ export default async function NewCustomerPage({
     <div className="max-w-3xl">
       <PageHeader
         title="New customer"
-        description="The customer number is allocated automatically and is sequential per laundry."
+        description="Four things get you started. Everything else can wait until you need it."
       />
       <CustomerForm
         action={createCustomer}

@@ -84,7 +84,17 @@ branches deploy. Never force-push `Prod`.
 `/items[/:id]` · `/drivers` · `/vehicles` · `/routes/templates[/:id]` ·
 `/routes/daily[/:id|/:id/sheet]` · `/routes/planner` · `/jobs[/:id]` ·
 `/operations/{pickups,deliveries,exceptions}` · `/run` · `/warehouse[/:id]` · `/inventory` ·
-`/invoices[/:id]` · `/reports` · `/admin[/depots|/users|/holidays|/audit]`
+`/invoices[/:id]` · `/reports` · `/search` · `/help` ·
+`/admin` (redirects) `[/depots|/users|/holidays|/audit]`
+
+**Navigation is data** (`src/lib/nav.ts`): ten areas, each with optional `children`
+rendered as a tab strip (`SectionNav` in the layout, not per page). An area is visible
+when any screen inside it is, and `navigationFor()` resolves its href *and capability*
+together to the first screen the role can open — so a row never links somewhere the auth
+gate would bounce. `sectionFor()` (longest match wins) decides which rail row highlights
+and which tabs show, so detail routes stay inside their area. `capability` is optional:
+omitted means every signed-in member, which is what `/dashboard` and `/help` need since no
+single capability is held by all eleven roles. Tested in `src/lib/__tests__/nav.test.ts`.
 
 ## 7. Schema
 - `0001_init` — tenants, memberships, RLS helpers, `apply_tenant_policy`, number sequences,
@@ -192,8 +202,16 @@ Guidance idiom: `Stage` in `ui.tsx` (the run screen's numbered-step pattern, als
 dashboard's getting-started checklist — exactly one step actionable at a time);
 `ConfirmSubmit` for final actions (inline consequence strip + optional reason, no modals);
 `FlashToast` for action feedback. UI labels use operator language (Sites, Contracts, Problems,
-Stops, Weekly runs, Today's runs, People) while routes and schema keep the domain names —
-`docs/SIMPLIFICATION-DESIGN.md` holds the rename map and the rest of the redesign spec.
+Stops, Collections, Weekly runs, Today's runs, In the plant, Stock, Item types, People,
+Activity log) while routes and schema keep the domain names —
+`docs/SIMPLIFICATION-DESIGN.md` holds the rename map, `docs/SIMPLIFICATION-AUDIT.md` the
+full audit and what remains open. `/help` is the in-product glossary that maps each label
+back to its trade term.
+
+`CONTROL` in `ui.tsx` is the one input skin — import it, never restyle an input at the call
+site. `DataTable` is the one table: below `sm` it stacks each row into a labelled card, so a
+new screen gets a working phone layout for free and a hand-rolled `<table>` silently does not.
+Anything tappable carries `min-h-9` (36px).
 
 `/design-preview` is a static component gallery: no data, 404s in production, outside the auth
 gate so it can be rendered from a build box. It exists because every real screen is an async
@@ -243,6 +261,39 @@ Both are compositions over existing tables — neither added a migration.
   are edited and invoices voided.
 
 ## 18. Changelog
+### 2026-08-05 · Simplification audit: navigation, search, help, responsive tables
+Full-application UX/code review in `docs/SIMPLIFICATION-AUDIT.md` (13-part deliverable:
+executive summary, UX and code audits, architecture review, navigation and workflow
+redesigns, screen-by-screen, performance, accessibility, mobile, refactoring plan,
+roadmap, priority matrix). No migrations.
+- **The rail was a table of contents for the database** — 22 destinations under six
+  headings named after internal concepts. Now ten areas in the operator's words, no
+  headings, with each area's screens as a tab strip. See §6. **A driver had no rail row
+  for `/dashboard`**, the page the auth gate redirects everyone to: the row required
+  `reports.read`, which drivers do not hold. Rail size by role is now 4–10 (was up to 22).
+- **`/search`** — the context bar's box submitted to the customers list, so an invoice
+  number typed into the only search field in the app returned "no customers match those
+  filters". It now searches customers, contracts, invoices, stops, item types, drivers and
+  vehicles, each group gated exactly like its own screen. Plain `ilike`, no index, no
+  migration; `pg_trgm` is the escape hatch if the row counts grow.
+- **`/help`** — glossary (plain word, trade word, what it means), a four-step walkthrough
+  of a normal day, and two lists: what is safe to try and what cannot be undone. Rail row
+  carries no capability, so no role can be refused a definition.
+- **Every table stacks into labelled cards below `sm`** — one change in `DataTable`, no
+  call site touched. Its scroll box is now focusable and named (WCAG 2.1.1). The dashboard
+  had hand-rolled a *second* table, which is why it had none of this; it is folded in via
+  a new `rowClassName` prop, and now leads with the customer and issue rather than the
+  internal job number.
+- **People**: the four roles a small laundry uses lead the picker (`COMMON_ROLES`), the
+  other seven grouped after them, each described in the owner's words (`ROLE_SUMMARY`
+  moved to `lib/roles.ts`). No schema or capability change.
+- `/admin` was a menu page whose only content was four links — retired to a redirect.
+  Tap targets to 36px throughout; error `Notice`s announce as `alert`, not `status`;
+  `CONTROL` (the input skin) shared from `ui.tsx` so the filter bar stops drifting from
+  every other input. Copy pass over 11 page headers. `/design-preview` now renders the
+  real nav map and the real `DataTable` rather than drifting fixtures. 103 unit tests
+  (was 88; 15 cover the navigation resolver).
+
 ### 2026-08-05 · Simplification Phase B: wizards, one-click planning, in-run problems
 Per `docs/SIMPLIFICATION-ROADMAP.md` Phase B / design spec P-3, P-4, P-5, AD-2. No
 migrations.

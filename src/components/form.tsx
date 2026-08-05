@@ -2,13 +2,7 @@
 
 import { useFormStatus } from "react-dom";
 import type { ReactNode } from "react";
-import { cx } from "./ui";
-
-/* Flat, square, a stronger hairline than the surrounding rules, on the muted
-   fill the pack uses for entry fields. */
-const CONTROL =
-  "w-full border border-strong bg-surface-muted px-2.5 py-1.5 text-[12.5px] text-foreground " +
-  "placeholder:text-muted-foreground disabled:opacity-60";
+import { CONTROL, cx } from "./ui";
 
 export function Field({
   label, name, hint, error, required, children, className,
@@ -18,8 +12,12 @@ export function Field({
 }) {
   return (
     <div className={cx("space-y-1", className)}>
+      {/* 10px rather than the 9px used for chrome labels elsewhere: a field
+          label is the thing being read while typing, not decoration on a panel.
+          The asterisk is decorative — `required` on the control itself is what
+          assistive tech announces. */}
       <label htmlFor={name}
-             className="block font-mono text-3xs uppercase tracking-[0.1em] text-muted-foreground">
+             className="block font-mono text-2xs uppercase tracking-[0.1em] text-muted-foreground">
         {label}
         {required ? <span className="ml-0.5 text-danger" aria-hidden>*</span> : null}
       </label>
@@ -60,31 +58,48 @@ export function Textarea({
   );
 }
 
+export type SelectOption = { value: string; label: string };
+
 export function Select({
-  name, options, defaultValue, required, placeholder,
+  name, options, groups, defaultValue, required, placeholder,
 }: {
   name: string;
-  options: ReadonlyArray<{ value: string; label: string }>;
+  options?: ReadonlyArray<SelectOption>;
+  /**
+   * Grouped choices. Used where a long list has a handful of everyday answers
+   * and a long tail — the everyday ones go in the first group so the common
+   * case is the first thing read, without hiding the rest behind a toggle.
+   */
+  groups?: ReadonlyArray<{ label: string; options: ReadonlyArray<SelectOption> }>;
   defaultValue?: string | null; required?: boolean; placeholder?: string;
 }) {
   return (
     <select id={name} name={name} required={required}
             defaultValue={defaultValue ?? ""} className={CONTROL}>
       {placeholder ? <option value="">{placeholder}</option> : null}
-      {options.map((option) => (
+      {(options ?? []).map((option) => (
         <option key={option.value} value={option.value}>{option.label}</option>
+      ))}
+      {(groups ?? []).map((group) => (
+        <optgroup key={group.label} label={group.label}>
+          {group.options.map((option) => (
+            <option key={option.value} value={option.value}>{option.label}</option>
+          ))}
+        </optgroup>
       ))}
     </select>
   );
 }
 
 export function Checkbox({
-  name, label, defaultChecked,
-}: { name: string; label: string; defaultChecked?: boolean }) {
+  name, label, defaultChecked, value,
+}: { name: string; label: string; defaultChecked?: boolean; value?: string }) {
+  // The padded label is the hit area, not just the 16px box — the whole row is
+  // tappable, which is what makes a checklist usable one-handed in a truck.
   return (
-    <label className="flex items-center gap-2 text-[12.5px]">
-      <input id={name} name={name} type="checkbox" defaultChecked={defaultChecked}
-             className="h-3.5 w-3.5 border border-strong accent-primary" />
+    <label className="flex min-h-9 items-center gap-2 py-1 text-[12.5px]">
+      <input id={name} name={name} type="checkbox" value={value} defaultChecked={defaultChecked}
+             className="h-4 w-4 border border-strong accent-primary" />
       {label}
     </label>
   );
@@ -106,7 +121,7 @@ export function WeekdayPicker({
             <input type="checkbox" id={id} name={name} value={value}
                    defaultChecked={defaultValue.includes(value)} className="peer sr-only" />
             <label htmlFor={id}
-                   className="cursor-pointer rounded-md border px-3 py-1.5 text-sm
+                   className="flex min-h-9 cursor-pointer items-center border px-3 py-1.5 text-sm
                               peer-checked:border-primary peer-checked:bg-primary/10
                               peer-checked:font-medium peer-checked:text-primary
                               peer-focus-visible:outline peer-focus-visible:outline-2">
@@ -133,7 +148,7 @@ export function SubmitButton({
   return (
     <button type="submit" disabled={pending}
             className={cx(
-              "inline-flex items-center justify-center px-3 py-1.5 text-[12.5px] font-medium transition",
+              "inline-flex min-h-9 items-center justify-center px-3 py-1.5 text-[12.5px] font-medium transition",
               "disabled:pointer-events-none disabled:opacity-60", variants[variant],
             )}>
       {pending ? pendingLabel : children}

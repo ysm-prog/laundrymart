@@ -12,7 +12,7 @@ import { ListControls } from "@/components/list-controls";
 import { ITEM_CATEGORIES } from "./categories";
 import { createItem } from "./actions";
 
-export const metadata = { title: "Items" };
+export const metadata = { title: "Item types" };
 export const dynamic = "force-dynamic";
 
 type Search = { q?: string; category?: string; error?: string; ok?: string };
@@ -25,8 +25,8 @@ export default async function ItemsPage({ searchParams }: { searchParams: Promis
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Items"
-        description="Linen types you rent, wash and replace. Prices here are the default when an agreement does not override them."
+        title="Item types" eyebrow="Items"
+        description="The linen you handle. Prices here apply unless a customer’s contract sets its own."
       />
       <ListControls
         action="/items"

@@ -22,7 +22,7 @@ export default async function RouteTemplatesPage() {
     <div className="space-y-6">
       <PageHeader
         title="Weekly runs" eyebrow="Route templates"
-        description="The planning model. A daily route is instantiated from a template for a specific date."
+        description="The repeating week: which customers one driver visits, in what order, on which days. Today’s runs are built from these."
       />
 
       <Suspense fallback={<SkeletonRows rows={5} />}>

@@ -10,7 +10,7 @@ import { ExceptionCapture } from "@/components/offline-capture";
 import { AgreementWizard } from "@/app/(app)/agreements/agreement-wizard";
 import { CustomerEssentials, FormDisclosure } from "@/app/(app)/customers/customer-form";
 import { EXCEPTION_REASONS } from "@/app/(app)/jobs/exception-reasons";
-import type { NavSection } from "@/lib/nav";
+import { navigationFor, type NavItem } from "@/lib/nav";
 import { UNASSIGNED } from "@/app/(app)/routes/planner/plan";
 import {
   PlannerBoard, type Option, type PlannerColumn, type PlannerJob,
@@ -34,41 +34,11 @@ import { notFound } from "next/navigation";
 
 export const metadata = { title: "Design preview" };
 
-const SECTIONS: NavSection[] = [
-  {
-    label: "Today",
-    items: [
-      { label: "Dashboard", href: "/design-preview", capability: "reports.read" },
-      { label: "Today's runs", href: "/x1", capability: "routes.read", count: "routesToday" },
-      { label: "Stops", href: "/x2", capability: "routes.read" },
-      { label: "My run", href: "/x3", capability: "run.execute" },
-    ],
-  },
-  {
-    label: "Operations",
-    items: [
-      { label: "Pickups", href: "/x4", capability: "operations.read" },
-      { label: "Deliveries", href: "/x5", capability: "operations.read" },
-      { label: "Problems", href: "/x6", capability: "operations.read", count: "exceptions" },
-    ],
-  },
-  {
-    label: "Plant",
-    items: [
-      { label: "Warehouse", href: "/x7", capability: "warehouse.read", count: "batches" },
-      { label: "Inventory", href: "/x8", capability: "inventory.read" },
-    ],
-  },
-  {
-    label: "Accounts",
-    items: [
-      { label: "Customers", href: "/x9", capability: "customers.read" },
-      { label: "Contracts", href: "/x10", capability: "agreements.read" },
-      { label: "Invoices", href: "/x11", capability: "invoices.read", count: "unpaidInvoices" },
-      { label: "Reports", href: "/x12", capability: "reports.read" },
-    ],
-  },
-];
+/* The real rail, resolved for an owner. Rendering the production map rather
+   than a fixture means this gallery cannot show a navigation the app no longer
+   has — the previous fixture still showed the six-heading rail for two releases
+   after it was replaced. */
+const ITEMS: NavItem[] = navigationFor("super_admin");
 
 const COUNTS = { routesToday: 3, exceptions: 4, batches: 12, unpaidInvoices: 9 };
 
@@ -177,7 +147,7 @@ export default function DesignPreviewPage() {
           </span>
         </div>
         <div className="flex-1 overflow-y-auto">
-          <AppNav sections={SECTIONS} counts={COUNTS} />
+          <AppNav items={ITEMS} counts={COUNTS} />
         </div>
         <div className="mt-auto border-t border-[#262c31] px-4 pt-3">
           <div className="flex items-center gap-2">
@@ -196,12 +166,30 @@ export default function DesignPreviewPage() {
       <div className="flex min-w-0 flex-col">
         <header className="sticky top-0 z-30 flex h-[52px] flex-none items-center gap-2.5 border-b bg-surface/95 px-4 backdrop-blur">
           <div className="hidden min-w-0 flex-1 sm:block">
-            <input placeholder="Search customers…"
-                   className="w-full max-w-[420px] border border-strong bg-surface-muted px-2.5 py-1.5 text-[12.5px] placeholder:text-muted-foreground" />
+            <input placeholder="Search a customer, invoice, stop or rego…"
+                   className="min-h-9 w-full max-w-[420px] border border-strong bg-surface-muted px-2.5 py-1.5 text-[12.5px] placeholder:text-muted-foreground" />
           </div>
           <span className="ml-auto border border-border px-2 py-1 font-mono text-2xs text-muted-foreground">2026-08-05</span>
           <span className="border border-strong px-2 py-1.5 font-mono text-2xs">☾</span>
         </header>
+
+        {/* The tab strip that replaced the rail's nested groups. Static here —
+            the live one reads the pathname, which this gallery does not have. */}
+        <div className="flex-none border-b bg-surface">
+          <nav className="flex gap-1 overflow-x-auto px-4">
+            {["Today's runs", "Plan the day", "Weekly runs", "Drivers", "Vehicles"].map((tab, index) => (
+              <span key={tab}
+                    className={cx(
+                      "-mb-px flex min-h-10 shrink-0 items-center border-b-2 px-2 text-[13px]",
+                      index === 0
+                        ? "border-b-action font-medium text-foreground"
+                        : "border-b-transparent text-muted-foreground",
+                    )}>
+                {tab}
+              </span>
+            ))}
+          </nav>
+        </div>
 
         <main className="min-w-0 flex-1 space-y-4 p-5">
           <PageHeader
@@ -221,33 +209,49 @@ export default function DesignPreviewPage() {
           <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_300px]">
             <div className="space-y-4">
               <Card title="Needs a decision" description="4 open" className="[&>div]:p-0">
-                <div className="overflow-x-auto">
-                  <table className="w-full border-collapse text-[12.5px]">
-                    <thead className="bg-surface-muted text-left">
-                      <tr>
-                        {["Reference", "Customer / issue", "State", "Size", "Since", "Action"].map((h, i) => (
-                          <th key={h} className={cx(
-                            "px-3 py-1.5 font-mono text-3xs font-normal uppercase tracking-[0.08em] text-muted-foreground",
-                            i === 3 && "text-right")}>{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {DECISIONS.map((d) => (
-                        <tr key={d.ref} className={cx("border-t border-l-[3px]", d.rule)}>
-                          <td className="whitespace-nowrap px-3 py-2 font-mono text-[11.5px]">{d.ref}</td>
-                          <td className="px-3 py-2">
+                {/* The real DataTable, so the gallery shows what a phone gets:
+                    below `sm` these rows become labelled cards. */}
+                <div className="p-4 sm:p-0">
+                  <DataTable
+                    rows={DECISIONS}
+                    label="Things needing a decision"
+                    rowClassName={(d) => cx("border-l-[3px]", d.rule)}
+                    empty={null}
+                    columns={[
+                      {
+                        header: "Customer / issue",
+                        cell: (d) => (
+                          <>
                             <span className="font-semibold">{d.customer}</span>
                             <span className="text-muted-foreground"> — {d.issue}</span>
-                          </td>
-                          <td className={cx("whitespace-nowrap px-3 py-2 text-[11.5px]", d.text)}>{d.state}</td>
-                          <td className="whitespace-nowrap px-3 py-2 text-right font-mono text-[11.5px] tabular-nums">{d.size}</td>
-                          <td className="whitespace-nowrap px-3 py-2 font-mono text-[11.5px] text-muted-foreground">{d.since}</td>
-                          <td className="whitespace-nowrap px-3 py-2"><span className="font-medium text-primary">{d.action}</span></td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                          </>
+                        ),
+                      },
+                      {
+                        header: "State",
+                        cell: (d) => (
+                          <span className={cx("whitespace-nowrap text-[11.5px]", d.text)}>{d.state}</span>
+                        ),
+                      },
+                      { header: "Size", align: "right", cell: (d) => d.size },
+                      {
+                        header: "Since", hideBelow: "md",
+                        cell: (d) => (
+                          <span className="whitespace-nowrap font-mono text-[11.5px] text-muted-foreground">
+                            {d.since}
+                          </span>
+                        ),
+                      },
+                      {
+                        header: "Reference", hideBelow: "lg",
+                        cell: (d) => <span className="whitespace-nowrap font-mono text-[11.5px]">{d.ref}</span>,
+                      },
+                      {
+                        header: "", align: "right",
+                        cell: (d) => <span className="font-medium text-primary">{d.action}</span>,
+                      },
+                    ]}
+                  />
                 </div>
               </Card>
 
