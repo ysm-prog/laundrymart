@@ -18,11 +18,13 @@
     "prepare": "lefthook install || true"
   },
   "dependencies": {
+    "@react-pdf/renderer": "^4.5.1",
     "@supabase/ssr": "^0.12.4",
     "@supabase/supabase-js": "^2.58.0",
     "next": "^16.2.12",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
+    "resend": "^4.8.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {

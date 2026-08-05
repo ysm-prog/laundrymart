@@ -62,6 +62,24 @@ export const count = z.preprocess(
 
 export const checkbox = z.preprocess((value) => value === "on" || value === "true", z.boolean());
 
+/**
+ * Storage keys posted by the media upload field as JSON in a hidden input.
+ *
+ * The files themselves went to `/api/media` before the form was submitted, so a
+ * server action only ever sees the keys. Malformed input degrades to "no media"
+ * rather than failing the whole save — losing the photo of a stop is bad, losing
+ * the record of the stop is worse.
+ */
+export const mediaPaths = z.preprocess((value) => {
+  if (typeof value !== "string" || value.trim() === "") return [];
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed.filter((entry) => typeof entry === "string") : [];
+  } catch {
+    return [];
+  }
+}, z.array(z.string().max(400)).max(8));
+
 /** `formData.getAll(name)` for a multi-checkbox group of ISO weekdays. */
 export function weekdaysFrom(formData: FormData, name: string): number[] {
   return formData

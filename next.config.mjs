@@ -2,9 +2,12 @@
 const nextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
-  // TypeScript 7 is the native compiler and no longer exposes the JS compiler
-  // API Next.js used to call; the CLI path is the supported route for it.
+  // TypeScript no longer exposes the JS compiler API Next.js used to call, so
+  // typechecking during the build goes through the CLI.
   experimental: { useTypeScriptCli: true },
+  // @react-pdf/renderer resolves fonts and streams at runtime; bundling it
+  // breaks both. It only ever runs on the server (invoice rendering).
+  serverExternalPackages: ["@react-pdf/renderer"],
   // Security headers baked in (matches SECURITY.md posture)
   async headers() {
     return [{
@@ -14,7 +17,9 @@ const nextConfig = {
         { key: "X-Content-Type-Options", value: "nosniff" },
         { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
         { key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains; preload" },
-        { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" }
+        // Drivers photograph stops from their own device, so the camera has to
+        // be allowed for our own origin — everything else stays off.
+        { key: "Permissions-Policy", value: "camera=(self), microphone=(), geolocation=()" }
       ]
     }];
   }

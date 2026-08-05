@@ -42,6 +42,7 @@ export const NAVIGATION: NavItem[] = [
     ],
   },
   { label: "My run", href: "/run", capability: "run.execute" },
+  { label: "Warehouse", href: "/warehouse", capability: "warehouse.read" },
   { label: "Inventory", href: "/inventory", capability: "inventory.read" },
   { label: "Invoices", href: "/invoices", capability: "invoices.read" },
   { label: "Reports", href: "/reports", capability: "reports.read" },

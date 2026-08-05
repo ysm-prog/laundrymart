@@ -19,20 +19,22 @@ This is a logistics and operations platform, not a consumer laundry app.
 | Route templates | Stops with drag-and-drop sequencing (keyboard equivalent included), duplicate, archive |
 | Daily routes | Generated from templates per date, driver/vehicle assignment, run states, printable route sheet |
 | Jobs | The operational unit; pickups and deliveries as child transactions, exceptions |
+| Proof of service | Photo capture and on-canvas signatures per stop, stored in a private per-tenant bucket, captured offline |
 | Driver run | Inspection → load → start → stops → return → unload → close, offline-first |
 | Inventory | 12 states, movement ledger, replenishment alerts, manual adjustments |
-| Invoicing | Recurring generation from agreements, manual invoices, payments, credit notes, void, print/PDF |
+| Invoicing | Recurring generation from agreements (per-item, per-collection, monthly and per-kg), manual invoices, payments, credit notes, void, server-rendered PDF, email delivery |
 | Reports | Daily operations, revenue, receivables, driver productivity, vehicle utilisation, inventory, contract compliance |
+| Warehouse | Production batches through washing → drying → folding → packing → ready for dispatch, with rejects to repair or damaged |
 | Administration | Depots, users and roles, public holidays, audit log |
 
-Deliberately **not** built, per the spec's MVP boundary: AI features, GPS tracking, the full
-warehouse production workflow, and the customer portal. The schema already models the
-warehouse states, so that work is additive rather than a rewrite.
+Deliberately **not** built, per the spec's MVP boundary: AI features, GPS tracking and the
+customer portal.
 
 ## Stack
 
 Next.js 16 (App Router, Turbopack) · React 19 · TypeScript 6 · Tailwind CSS 4 ·
-Zod 4 · Supabase (Postgres + RLS + Auth) · Vercel, pinned to `syd1`.
+Zod 4 · Supabase (Postgres + RLS + Auth + Storage) · @react-pdf/renderer · Resend ·
+Vercel, pinned to `syd1`.
 
 Two dependency pins are deliberate rather than "latest": **TypeScript 6** because
 typescript-eslint has no TS 7 support yet, and **ESLint 9** because
@@ -102,9 +104,11 @@ src/proxy.ts       session refresh + auth gate (Next 16 renamed this from middle
 src/app/(app)/     authenticated screens, one folder per module plus its server actions
 src/app/api/sync/  offline batch sync endpoint
 src/lib/domain/    pure business logic (service calendar, pricing, ABN, dates) + tests
+src/lib/pdf/       server-rendered tax invoice
+src/lib/email/     invoice delivery via Resend
 src/lib/           auth context, roles/capabilities, Supabase clients, audit, formatting
 src/components/    UI primitives, forms, nav, drag-and-drop sequencer, offline capture
-supabase/          migrations (0001–0006), pgTAP proofs, demo seed
+supabase/          migrations (0001–0009), pgTAP proofs, demo seed
 ```
 
 ## Conventions
@@ -126,5 +130,6 @@ supabase/          migrations (0001–0006), pgTAP proofs, demo seed
 - Set the security contact in `SECURITY.md` and the owner in `.github/CODEOWNERS`.
 - Load the real public holiday calendar for every state you operate in — an empty calendar
   means every holiday is treated as a normal service day.
-- Invoice PDFs currently use the browser's print dialog on a print-styled page. Swap in
-  server-side rendering if you need attachments emailed automatically.
+- Create the private `run-media` storage bucket for photos and signatures, and set
+  `RESEND_API_KEY` + `INVOICE_FROM_EMAIL` if you want invoices emailed. Both are optional:
+  without them the rest of the app runs and the send action says why it cannot.

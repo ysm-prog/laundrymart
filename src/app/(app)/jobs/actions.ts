@@ -5,7 +5,22 @@ import { z } from "zod";
 import { assertCapability, type Session } from "@/lib/auth/context";
 import { createClient } from "@/lib/supabase/server";
 import { recordAudit } from "@/lib/audit";
-import { describeDbError, done, fail, firstIssue, optionalText, toObject } from "@/lib/actions";
+import {
+  describeDbError, done, fail, firstIssue, mediaPaths, optionalText, toObject,
+} from "@/lib/actions";
+import { isTenantPath } from "@/lib/media";
+
+/**
+ * Proof-of-service media arrives as storage keys the browser already uploaded.
+ * Storage refused a cross-tenant write on the way in; this stops another
+ * tenant's key from being *recorded* against our paperwork.
+ */
+function ownMedia(session: Session, paths: string[], signature?: string) {
+  return {
+    photo_urls: paths.filter((path) => isTenantPath(path, session.tenantId)),
+    signature_url: signature && isTenantPath(signature, session.tenantId) ? signature : null,
+  };
+}
 
 /**
  * Quantities are posted as `qty_<itemId>` / `damaged_<itemId>` / `missing_<itemId>`
@@ -69,6 +84,8 @@ const pickupSchema = z.object({
   signed_by: optionalText,
   notes: optionalText,
   client_ref: optionalText,
+  photo_paths: mediaPaths,
+  signature_path: optionalText,
 });
 
 export async function recordPickup(formData: FormData): Promise<void> {
@@ -99,6 +116,7 @@ export async function recordPickup(formData: FormData): Promise<void> {
       signed_by: parsed.data.signed_by ?? null,
       notes: parsed.data.notes ?? null,
       client_ref: parsed.data.client_ref ?? null,
+      ...ownMedia(session, parsed.data.photo_paths, parsed.data.signature_path),
       completed_at: new Date().toISOString(),
       synced_at: new Date().toISOString(),
     })
@@ -190,6 +208,8 @@ const deliverySchema = z.object({
   signed_by: optionalText,
   notes: optionalText,
   client_ref: optionalText,
+  photo_paths: mediaPaths,
+  signature_path: optionalText,
 });
 
 export async function recordDelivery(formData: FormData): Promise<void> {
@@ -218,6 +238,7 @@ export async function recordDelivery(formData: FormData): Promise<void> {
       signed_by: parsed.data.signed_by ?? null,
       notes: parsed.data.notes ?? null,
       client_ref: parsed.data.client_ref ?? null,
+      ...ownMedia(session, parsed.data.photo_paths, parsed.data.signature_path),
       completed_at: new Date().toISOString(),
       synced_at: new Date().toISOString(),
     })

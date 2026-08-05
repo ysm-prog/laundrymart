@@ -9,6 +9,11 @@
  *
  * Idempotency is the `clientRef`: it is generated here, stored with the record,
  * and unique-constrained server-side, so replaying a queue is always safe.
+ *
+ * Photos and signatures ride along as data URLs and are uploaded one file at a
+ * time before the batch goes out (§7.10). Sending them inside the batch would
+ * make a queue of stops one multi-megabyte request that fails as a unit; this
+ * way a stop that got its media through never has to send it twice.
  */
 
 const DB_NAME = "laundrymart-offline";
@@ -22,8 +27,14 @@ export type QueuedLine = {
   missingQuantity?: number;
 };
 
+/** Captured media, held as data URLs so IndexedDB can round-trip it anywhere. */
+export type QueuedMedia = {
+  photos?: string[];
+  signature?: string | null;
+};
+
 export type QueuedRecord =
-  | {
+  | ({
       kind: "pickup";
       clientRef: string;
       jobId: string;
@@ -33,8 +44,8 @@ export type QueuedRecord =
       signedBy?: string | null;
       notes?: string | null;
       lines: QueuedLine[];
-    }
-  | {
+    } & QueuedMedia)
+  | ({
       kind: "delivery";
       clientRef: string;
       jobId: string;
@@ -42,7 +53,7 @@ export type QueuedRecord =
       signedBy?: string | null;
       notes?: string | null;
       lines: QueuedLine[];
-    };
+    } & QueuedMedia);
 
 export function newClientRef(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
@@ -101,6 +112,71 @@ async function remove(clientRefs: string[]): Promise<void> {
   });
 }
 
+function dataUrlToBlob(dataUrl: string): Blob | null {
+  const match = /^data:([^;,]+)(;base64)?,(.*)$/s.exec(dataUrl);
+  if (!match) return null;
+  const [, contentType = "application/octet-stream", isBase64, payload = ""] = match;
+  try {
+    if (!isBase64) return new Blob([decodeURIComponent(payload)], { type: contentType });
+    const binary = atob(payload);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+    return new Blob([bytes], { type: contentType });
+  } catch {
+    return null;
+  }
+}
+
+async function upload(
+  record: QueuedRecord, kind: "photo" | "signature", index: number, dataUrl: string,
+): Promise<string | null> {
+  const blob = dataUrlToBlob(dataUrl);
+  if (!blob) return null;
+
+  const form = new FormData();
+  form.set("scope", record.kind);
+  form.set("kind", kind);
+  form.set("ownerRef", record.clientRef);
+  form.set("index", String(index));
+  form.set("file", blob, `${kind}-${index}`);
+
+  const response = await fetch("/api/media", { method: "POST", body: form });
+  if (!response.ok) return null;
+  const body = (await response.json()) as { path?: string };
+  return body.path ?? null;
+}
+
+/** What `/api/sync` receives: the record minus its raw media, plus the paths. */
+type SyncPayload = Omit<QueuedRecord, "photos" | "signature"> & {
+  photoPaths?: string[];
+  signaturePath?: string | null;
+};
+
+/**
+ * Upload a record's media and hand back the payload the batch endpoint wants.
+ * Returns null when any file fails, which holds the whole record back for the
+ * next flush — a stop is proof-of-service or it is not, and half of one on the
+ * server is worse than one still sitting in the outbox.
+ */
+async function withMedia(record: QueuedRecord): Promise<SyncPayload | null> {
+  const { photos, signature, ...rest } = record;
+
+  const photoPaths: string[] = [];
+  for (const [index, photo] of (photos ?? []).entries()) {
+    const path = await upload(record, "photo", index, photo);
+    if (!path) return null;
+    photoPaths.push(path);
+  }
+
+  let signaturePath: string | null = null;
+  if (signature) {
+    signaturePath = await upload(record, "signature", 0, signature);
+    if (!signaturePath) return null;
+  }
+
+  return { ...rest, photoPaths, signaturePath } as SyncPayload;
+}
+
 export type FlushResult = { synced: number; remaining: number; offline: boolean };
 
 /**
@@ -115,12 +191,22 @@ export async function flush(): Promise<FlushResult> {
     return { synced: 0, remaining: records.length, offline: true };
   }
 
+  let payloads: SyncPayload[];
+  try {
+    payloads = (await Promise.all(records.map(withMedia))).filter(
+      (payload): payload is SyncPayload => payload !== null,
+    );
+  } catch {
+    return { synced: 0, remaining: records.length, offline: true };
+  }
+  if (payloads.length === 0) return { synced: 0, remaining: records.length, offline: false };
+
   let response: Response;
   try {
     response = await fetch("/api/sync", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ records }),
+      body: JSON.stringify({ records: payloads }),
     });
   } catch {
     return { synced: 0, remaining: records.length, offline: true };

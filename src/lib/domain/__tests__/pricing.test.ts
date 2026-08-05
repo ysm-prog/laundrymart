@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  allocateWeightCharges,
   buildReplacementCharges,
   buildServiceCharges,
   formatMoney,
@@ -98,6 +99,101 @@ describe("buildServiceCharges", () => {
   it("charges the minimum in full when nothing was serviced", () => {
     const lines = buildServiceCharges({ items: [], minimumCharge: 80 });
     expect(summariseInvoice(lines).subtotal).toBe(80);
+  });
+});
+
+describe("allocateWeightCharges", () => {
+  it("bills the whole weight to a single per-kg line", () => {
+    expect(allocateWeightCharges({
+      totalWeightKg: 412.5,
+      collections: 4,
+      lines: [{ key: "a", standardQuantity: 100, includedQuantity: 0 }],
+    })).toEqual([{ key: "a", shareKg: 412.5, allowanceKg: 0, billableKg: 412.5 }]);
+  });
+
+  it("deducts the included allowance for every collection", () => {
+    const [line] = allocateWeightCharges({
+      totalWeightKg: 400,
+      collections: 4,
+      lines: [{ key: "a", includedQuantity: 25 }],
+    });
+    expect(line).toEqual({ key: "a", shareKg: 400, allowanceKg: 100, billableKg: 300 });
+  });
+
+  it("never bills below zero when the allowance covers the weight", () => {
+    const [line] = allocateWeightCharges({
+      totalWeightKg: 40,
+      collections: 4,
+      lines: [{ key: "a", includedQuantity: 25 }],
+    });
+    expect(line?.billableKg).toBe(0);
+  });
+
+  it("splits weight across lines in proportion to standard quantity", () => {
+    const split = allocateWeightCharges({
+      totalWeightKg: 300,
+      collections: 1,
+      lines: [
+        { key: "a", standardQuantity: 100 },
+        { key: "b", standardQuantity: 50 },
+      ],
+    });
+    expect(split.map((line) => line.shareKg)).toEqual([200, 100]);
+  });
+
+  it("splits equally when no line declares a standard quantity", () => {
+    const split = allocateWeightCharges({
+      totalWeightKg: 100,
+      collections: 1,
+      lines: [{ key: "a" }, { key: "b" }],
+    });
+    expect(split.map((line) => line.shareKg)).toEqual([50, 50]);
+  });
+
+  it("never loses or invents a kilogram to rounding", () => {
+    const split = allocateWeightCharges({
+      totalWeightKg: 100,
+      collections: 1,
+      lines: [{ key: "a" }, { key: "b" }, { key: "c" }],
+    });
+    expect(round2(split.reduce((sum, line) => sum + line.shareKg, 0))).toBe(100);
+  });
+
+  it("bills nothing when nothing was weighed", () => {
+    expect(allocateWeightCharges({
+      totalWeightKg: 0, collections: 0, lines: [{ key: "a", includedQuantity: 25 }],
+    })).toEqual([{ key: "a", shareKg: 0, allowanceKg: 0, billableKg: 0 }]);
+  });
+
+  it("has nothing to allocate without per-kg lines", () => {
+    expect(allocateWeightCharges({ totalWeightKg: 500, collections: 2, lines: [] })).toEqual([]);
+  });
+});
+
+describe("percentage lines", () => {
+  const items = [{ description: "Bulk wash", quantity: 100, unitPrice: 1 }];
+
+  it("charges a percentage of the service subtotal", () => {
+    const lines = buildServiceCharges({
+      items,
+      percentageLines: [{ label: "Linen levy", pct: 7.5, chargeType: "other" }],
+    });
+    expect(lines.find((l) => l.description.startsWith("Linen levy"))?.amount).toBe(7.5);
+  });
+
+  it("shares the same base as the fuel levy rather than compounding on it", () => {
+    const lines = buildServiceCharges({
+      items,
+      percentageLines: [{ label: "Linen levy", pct: 10 }],
+      fuelLevyPct: 10,
+    });
+    expect(lines.find((l) => l.chargeType === "fuel_levy")?.amount).toBe(10);
+    expect(lines.find((l) => l.description.startsWith("Linen levy"))?.amount).toBe(10);
+  });
+
+  it("ignores lines with no percentage set", () => {
+    const lines = buildServiceCharges({ items, percentageLines: [{ label: "Nothing", pct: 0 }] });
+    expect(lines).toHaveLength(1);
   });
 });
 

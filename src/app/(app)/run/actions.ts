@@ -5,7 +5,10 @@ import { z } from "zod";
 import { assertCapability, type Session } from "@/lib/auth/context";
 import { createClient } from "@/lib/supabase/server";
 import { recordAudit } from "@/lib/audit";
-import { describeDbError, done, fail, firstIssue, optionalText, toObject } from "@/lib/actions";
+import {
+  describeDbError, done, fail, firstIssue, mediaPaths, optionalText, toObject,
+} from "@/lib/actions";
+import { isTenantPath } from "@/lib/media";
 import { CHECKLIST_KEYS } from "./checklist";
 
 const BACK = "/run";
@@ -26,6 +29,7 @@ const inspectionSchema = z.object({
   ),
   result: z.enum(["pass", "pass_with_defects", "fail"]),
   defects: optionalText,
+  photo_paths: mediaPaths,
 });
 
 export async function submitInspection(formData: FormData): Promise<void> {
@@ -53,6 +57,9 @@ export async function submitInspection(formData: FormData): Promise<void> {
       result: parsed.data.result,
       defects: parsed.data.defects ?? null,
       checklist,
+      // Storage enforced the boundary on upload; this keeps another tenant's
+      // key from being recorded against our inspection.
+      photo_urls: parsed.data.photo_paths.filter((path) => isTenantPath(path, session.tenantId)),
     })
     .select("id")
     .single();

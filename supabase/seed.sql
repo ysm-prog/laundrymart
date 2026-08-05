@@ -141,13 +141,29 @@ values
   ('10000000-0000-4000-8000-000000000001','40000000-0000-4000-8000-000000000001','laundry_owned','at_customer','30000000-0000-4000-8000-000000000002', 120),
   ('10000000-0000-4000-8000-000000000001','40000000-0000-4000-8000-000000000002','laundry_owned','at_customer','30000000-0000-4000-8000-000000000002', 150);
 
+-- ------------------------------------------------------ warehouse batch -----
+-- One batch sitting in receiving, so the plant screens have something to open.
+-- Its stock is already counted in at_depot above; a batch groups linen, it does
+-- not create any.
+insert into public.production_batches
+  (id, tenant_id, depot_id, batch_number, stage, machine, notes)
+values ('b0000000-0000-4000-8000-000000000001','10000000-0000-4000-8000-000000000001',
+        '20000000-0000-4000-8000-000000000001','BATCH00001','received','Washer 3',
+        'Off the City morning run, heavy soiling on the aprons.');
+
+insert into public.production_batch_lines (tenant_id, batch_id, item_id, quantity)
+values
+  ('10000000-0000-4000-8000-000000000001','b0000000-0000-4000-8000-000000000001','40000000-0000-4000-8000-000000000001',120),
+  ('10000000-0000-4000-8000-000000000001','b0000000-0000-4000-8000-000000000001','40000000-0000-4000-8000-000000000002',150);
+
 -- Keep generated numbers ahead of what the seed already used.
 insert into public.number_sequences (tenant_id, kind, prefix, next_value) values
   ('10000000-0000-4000-8000-000000000001','customer','CUST',3),
   ('10000000-0000-4000-8000-000000000001','agreement','SA',3),
   ('10000000-0000-4000-8000-000000000001','job','JOB',1),
   ('10000000-0000-4000-8000-000000000001','invoice','INV',1),
-  ('10000000-0000-4000-8000-000000000001','credit_note','CN',1)
+  ('10000000-0000-4000-8000-000000000001','credit_note','CN',1),
+  ('10000000-0000-4000-8000-000000000001','batch','BATCH',2)
 on conflict (tenant_id, kind) do nothing;
 
 commit;

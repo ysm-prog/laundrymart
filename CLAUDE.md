@@ -26,6 +26,9 @@ The master spec names a .NET 9 Web API; this build follows the supplied skeleton
 - Pure domain logic lives in `src/lib/domain/` with no database access: the service calendar,
   pricing, ABN validation and date helpers. Unit-tested; shared by preview, route generation
   and invoicing so they cannot diverge.
+- Invoice PDFs render server-side with `@react-pdf/renderer` (`src/lib/pdf/`), streamed from
+  `/api/invoices/:id/pdf` and attached to the Resend email. `serverExternalPackages` keeps the
+  renderer out of the client bundle.
 
 ## 3. Multi-tenancy and authorisation
 Tenant key `tenant_id` → `tenants`. RLS helper `is_member(tenant_id)`, wrapped `(select …)`
@@ -39,6 +42,9 @@ Resource-scoped beyond tenancy:
   own RLS, so a driver never reaches another driver's paperwork.
 - `invoices` and friends: readable by any member, writable only by
   super_admin / operations_manager / finance / dispatcher.
+- `storage.objects` in the `run-media` bucket: the object key starts with the tenant id, and
+  the policies read it back through `media_tenant()` → `is_member()`. The path is the boundary,
+  so it is always written from the session and never from the request.
 
 Roles and capabilities are declared once in `src/lib/roles.ts` and drive the nav, page guards
 and action guards.
@@ -51,6 +57,10 @@ and action guards.
 - `move_inventory()` is the single entry point for stock changes: it upserts both pools and
   writes the ledger row in one transaction.
 - `recalculate_invoice()` keeps invoice totals consistent with lines and payments.
+- A production batch cannot start with an empty manifest, cannot be completed except from
+  `ready_for_dispatch`, and cannot be reopened once finished (`guard_batch_transition`). Its
+  manifest freezes when it leaves receiving — only `rejected_quantity` and notes stay writable
+  (`guard_batch_line_change`), because everything else drove a stock movement.
 
 ## 5. Branch & deploy
 Feature branch → `Dev` → `Prod`. CI (`Prod`/`Dev`) runs verify, gitleaks and the DB job
@@ -58,12 +68,12 @@ Feature branch → `Dev` → `Prod`. CI (`Prod`/`Dev`) runs verify, gitleaks and
 branches deploy. Never force-push `Prod`.
 
 ## 6. Routes
-`/` landing · `/login` · `/offline` · `/api/sync`
+`/` landing · `/login` · `/offline` · `/api/sync` · `/api/media` · `/api/invoices/:id/pdf`
 `(app)`: `/dashboard` · `/customers[/new|/:id|/:id/edit]` · `/agreements[/new|/:id]` ·
 `/items[/:id]` · `/drivers` · `/vehicles` · `/routes/templates[/:id]` ·
 `/routes/daily[/:id|/:id/sheet]` · `/jobs[/:id]` ·
-`/operations/{pickups,deliveries,exceptions}` · `/run` · `/inventory` · `/invoices[/:id]` ·
-`/reports` · `/admin[/depots|/users|/holidays|/audit]`
+`/operations/{pickups,deliveries,exceptions}` · `/run` · `/warehouse[/:id]` · `/inventory` ·
+`/invoices[/:id]` · `/reports` · `/admin[/depots|/users|/holidays|/audit]`
 
 ## 7. Schema
 - `0001_init` — tenants, memberships, RLS helpers, `apply_tenant_policy`, number sequences,
@@ -78,10 +88,18 @@ branches deploy. Never force-push `Prod`.
 - `0005_inventory` — pools, movement ledger, `move_inventory()`, stock counts, containers.
 - `0006_billing` — invoices, lines, payments, credit notes, `recalculate_invoice()`,
   role-gated write policies.
+- `0007_media` — the private `run-media` bucket, `media_tenant()`, and tenant-scoped policies
+  on `storage.objects`.
+- `0008_invoice_delivery` — `invoices.emailed_to`, stamped at send time.
+- `0009_warehouse` — production batches and their manifest lines, stage/manifest guards.
 
 Proofs in `supabase/tests/`: `rls_isolation`, `rls_coverage`, `driver_scope`,
-`business_rules` (30 assertions). Demo data in `supabase/seed.sql` — not applied by
-migrations.
+`business_rules`, `media_scope`, `warehouse_rules` (45 assertions). Demo data in
+`supabase/seed.sql` — not applied by migrations.
+
+`scripts/health/pg-bootstrap.sql` shims what Supabase provides outside our migrations: the
+`auth` schema, and the `storage` bucket/object tables plus `foldername()` that 0007 attaches
+policies to.
 
 ## 8. Offline
 `src/lib/offline/queue.ts` (IndexedDB outbox, client-generated refs) +
@@ -89,8 +107,23 @@ migrations.
 `public/sw.js` (shell cache, never intercepts writes) + `/api/sync` (idempotent batch insert
 keyed on `client_ref`, unique per tenant).
 
-## 9. Environment
-See `.env.example`; validated fail-fast in `src/lib/env.ts`.
+Photos and signatures ride in the same record as data URLs and upload one file at a time to
+`/api/media` *before* the batch goes out, so a queue of stops is never one multi-megabyte
+request that fails as a unit. Object keys are deterministic (`clientRef` + index) and the
+upload upserts, so a replay overwrites rather than duplicates. A record whose media fails to
+upload stays queued whole — half a proof-of-service on the server is worse than none.
+
+## 9. Media
+`src/lib/media.ts` (shared constants + path builder, no I/O) · `/api/media` (one file per
+request, tenant segment written from the session) · `src/lib/media-urls.ts` (`signMedia()`,
+short-lived signed URLs, server-only) · `src/components/media-capture.tsx` (camera + canvas
+signature, downscales on device) · `media-upload-field.tsx` (the online forms) ·
+`proof-of-service.tsx` (display). Nothing is public: reads always go through a signed URL.
+
+## 10. Environment
+See `.env.example`; validated fail-fast in `src/lib/env.ts`. Email delivery
+(`RESEND_API_KEY`, `INVOICE_FROM_EMAIL`) is optional — without it the app runs and the send
+action says so rather than the deployment refusing to boot.
 
 ## 10. Toolchain pins
 Next 16 (Turbopack), React 19, Tailwind 4 (CSS-first — no `tailwind.config.ts`), Zod 4,
@@ -107,6 +140,27 @@ CSS-first config, `next lint` to the ESLint CLI with flat config, and `middlewar
 `proxy` convention. Held TypeScript at 6 and ESLint at 9 (lint stack does not support 7/10).
 Fixed three real `set-state-in-effect` violations the new react-hooks rules exposed, and
 pointed CI and Vercel at the `Prod`/`Dev` branches they actually use.
+
+### 2026-08-05 · Proof of service, invoice delivery, warehouse, per-kg billing
+- **Per-kg invoicing.** `per_kg` agreement lines billed nothing at all — the generator
+  returned quantity 0 while the agreement UI happily offered the model, so a configured
+  customer was silently under-billed every period. Weight now comes from the period's actual
+  pickups (`allocateWeightCharges`), with the included allowance applied per collection.
+  Agreement-level `percentage` lines had the same hole and now charge against the same base as
+  the levies, so nothing compounds.
+- **Photos and signatures.** New private `run-media` bucket keyed by tenant, `/api/media`
+  upload endpoint, on-device downscaling, canvas signature capture, and signed-URL display on
+  the job page. Works offline through the existing outbox. `Permissions-Policy` relaxed from
+  `camera=()` to `camera=(self)` — it would otherwise have blocked the feature.
+- **Invoice PDF + email.** Server-rendered tax invoice (`/api/invoices/:id/pdf`) and a Resend
+  send action that attaches it. Drafts and voids refuse to send; the address is stamped on the
+  invoice; failures are audited, not just surfaced.
+- **Warehouse (§7.16).** Production batches through washing → drying → folding → packing →
+  ready for dispatch, each stage a real `move_inventory()` call, with mid-process rejects to
+  repair or damaged. Manifest freezes when the batch leaves receiving.
+- Added `vitest.config.ts` (the `@/` alias, and `jsx: automatic` — without it a `.tsx` module
+  under test renders nothing at all). Superseded by `vitest.config.mts` in the
+  dependency merge above.
 
 ### 2026-08-05 · Initial build
 Full MVP against the master spec: multi-tenant spine with RLS + pgTAP proofs, depots,
