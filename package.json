@@ -16,7 +16,7 @@
     "prepare": "lefthook install || true"
   },
   "dependencies": {
-    "@supabase/ssr": "^0.7.0",
+    "@supabase/ssr": "^0.12.4",
     "@supabase/supabase-js": "^2.58.0",
     "next": "^15.5.0",
     "react": "^19.1.0",
