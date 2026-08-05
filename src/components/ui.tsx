@@ -210,9 +210,23 @@ const BUTTON_VARIANTS = {
   ghost: "text-primary hover:underline",
 } as const;
 
+/* `min-h-9` (36px) is the floor for anything tappable. The pack's chrome is
+   small by design, but a control a thumb misses on a loading dock is not a
+   design decision — it is a defect. */
 const BUTTON_BASE =
-  "inline-flex items-center justify-center gap-1.5 px-3 py-1.5 text-[12.5px] font-medium " +
+  "inline-flex min-h-9 items-center justify-center gap-1.5 px-3 py-1.5 text-[12.5px] font-medium " +
   "transition disabled:pointer-events-none disabled:opacity-60";
+
+/**
+ * The one entry-field skin: flat, square, a stronger hairline than the
+ * surrounding rules, on the muted fill the pack uses for inputs. Lives here
+ * rather than in `form.tsx` so the server-rendered filter bar and the client
+ * form controls cannot drift apart — they did, and the filter bar spent three
+ * releases in a different size and a different border than every other input.
+ */
+export const CONTROL =
+  "min-h-9 w-full border border-strong bg-surface-muted px-2.5 py-1.5 text-[12.5px] text-foreground " +
+  "placeholder:text-muted-foreground disabled:opacity-60";
 
 export function ButtonLink({
   href, children, variant = "secondary",
@@ -248,20 +262,75 @@ export type Column<T> = {
   align?: "left" | "right";
 };
 
+/**
+ * The app's one table.
+ *
+ * Below `sm` it is not a table at all: each row becomes a card with every
+ * column labelled. A grid of eight columns in a sideways-scrolling box on a
+ * phone technically "adapts", but the operator has to discover the scroll and
+ * then hold the header row in their head — so on a phone the columns stack and
+ * nothing is hidden. Above `sm` it is the real table, and the scroll box is
+ * focusable so a keyboard user can reach a wide one (WCAG 2.1.1).
+ */
 export function DataTable<T>({
-  rows, columns, empty, rowHref,
+  rows, columns, empty, rowHref, rowClassName, label = "Results",
 }: {
   rows: readonly T[];
   columns: ReadonlyArray<Column<T>>;
   empty: ReactNode;
   rowHref?: (row: T) => string;
+  /**
+   * Per-row decoration — in practice the leading status rule the dashboard
+   * marks urgency with. Exposed so a screen that needs it does not have to
+   * hand-roll a second table (the dashboard did, and its copy never got the
+   * responsive treatment, the keyboard-reachable scroll box, or the header
+   * styling this one grew).
+   */
+  rowClassName?: (row: T) => string;
+  /** Names the scrollable region for screen readers and keyboard users. */
+  label?: string;
 }) {
   if (!rows.length) return <>{empty}</>;
 
   const hide = { sm: "hidden sm:table-cell", md: "hidden md:table-cell", lg: "hidden lg:table-cell" } as const;
+  const [first, ...rest] = columns;
 
   return (
-    <div className="overflow-x-auto border">
+    <>
+      <ul className="space-y-2 sm:hidden">
+        {rows.map((row, index) => {
+          const href = rowHref?.(row);
+          const heading = first ? first.cell(row) : null;
+          return (
+            <li key={index} className={cx("border bg-surface", rowClassName?.(row))}>
+              <div className="border-b px-3 py-2">
+                {href ? (
+                  <Link href={href} className="block min-h-6 font-medium text-primary hover:underline">
+                    {heading}
+                  </Link>
+                ) : (
+                  <span className="block font-medium">{heading}</span>
+                )}
+              </div>
+              <dl className="divide-y">
+                {rest.filter((column) => column.header).map((column) => (
+                  <div key={column.header} className="flex items-baseline justify-between gap-3 px-3 py-1.5">
+                    <dt><Eyebrow>{column.header}</Eyebrow></dt>
+                    <dd className="min-w-0 text-right text-[12.5px]">{column.cell(row)}</dd>
+                  </div>
+                ))}
+                {/* Action cells carry a blank header; they get the full width. */}
+                {rest.filter((column) => !column.header).map((column, columnIndex) => (
+                  <div key={`action-${columnIndex}`} className="px-3 py-2">{column.cell(row)}</div>
+                ))}
+              </dl>
+            </li>
+          );
+        })}
+      </ul>
+
+      <div className="hidden overflow-x-auto border sm:block"
+           tabIndex={0} role="region" aria-label={label}>
       <table className="w-full border-collapse text-[12.5px]">
         <thead className="bg-surface-muted text-left">
           <tr>
@@ -280,7 +349,8 @@ export function DataTable<T>({
         </thead>
         <tbody>
           {rows.map((row, index) => (
-            <tr key={index} className="border-t transition hover:bg-surface-muted">
+            <tr key={index}
+                className={cx("border-t transition hover:bg-surface-muted", rowClassName?.(row))}>
               {columns.map((column, columnIndex) => {
                 const content = column.cell(row);
                 return (
@@ -302,7 +372,8 @@ export function DataTable<T>({
           ))}
         </tbody>
       </table>
-    </div>
+      </div>
+    </>
   );
 }
 
@@ -324,7 +395,10 @@ export function Notice({
     warning: "border-l-warning", danger: "border-l-danger",
   } as const;
   return (
-    <div role="status"
+    /* A failure interrupts; everything else waits its turn. `status` announces
+       politely, which is right for "invoice emailed" and wrong for "this run
+       cannot start yet" sitting above the control the user is about to press. */
+    <div role={tone === "danger" ? "alert" : "status"}
          className={cx("border border-l-[5px] px-3 py-2 text-[12.5px]", tones[tone], rules[tone])}>
       {title ? <p className="font-semibold">{title}</p> : null}
       {children ? <div className={title ? "mt-0.5" : undefined}>{children}</div> : null}

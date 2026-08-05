@@ -46,6 +46,24 @@ links (`fail`/`done` take optional `{href,label}`; template re-validates same-si
 No migrations. Verified: typecheck, lint, 88 tests, build, /design-preview screenshotted
 light+dark. Wizard gotcha for later: step fields hide rather than unmount, and none carry
 `required` — a hidden required field fails native validation unfocusable.
+**Simplification audit shipped** on branch `claude/app-simplification-ux-audit-g94ki1`:
+`docs/SIMPLIFICATION-AUDIT.md` is the 13-part deliverable and the record of what changed.
+Navigation rebuilt as data (ten areas + tab strip, `sectionFor` longest-match, capability
+resolved together with href); `/search` (seven capability-gated `ilike` groups) replacing a
+search box that submitted to the customers list; `/help` glossary; `DataTable` stacks to
+labelled cards below `sm` and its scroll box is focusable; dashboard's hand-rolled table
+folded in via `rowClassName`; `COMMON_ROLES`/`ROLE_SUMMARY` on People; `/admin` retired to a
+redirect; 36px tap targets; copy pass. No migrations. Verified: typecheck, lint, 103 tests,
+build, `/design-preview` screenshotted light + dark + 390px.
+**Live bug this pass found and fixed:** a driver had no rail row for `/dashboard`, the page
+the auth gate redirects everyone to — the row required `reports.read`. `capability` on a nav
+item is now optional (= every signed-in member), because no single capability is held by all
+eleven roles.
+
+Merged `Prod` (Phase C) through on the way to shipping. The two met in the navigation:
+C's notification settings screen is a tab under Settings, and its `/notifications` list
+stays off the nav map because the bell is its entry point.
+
 **Phase C shipped** on `claude/laundrymart-phase-c-notifications-p90wk1`, merged through `Dev`
 to `Prod`. `0013_notifications` adds `tenants.settings jsonb` and the `notifications` table.
 Writers: server actions (`notify()`, RLS client) for inspection-failed, vehicle off the road,
@@ -71,6 +89,18 @@ Things worth remembering:
 Open item: the live DB has `0012_return_count` applied from unmerged branch
 `claude/warehouse-inventory-flow-psooyq`; merging that branch needs a migration-number
 reconcile (0013 is taken — that one gets renumbered, not this one).
+
+**Consolidated invoicing is fixed** (same branch): `generateInvoices` now writes one invoice
+per customer per period carrying every contract's charges. It used to loop per contract while
+de-duplicating on customer + period, so contract two was skipped as "already billed" — every
+period, silently. Consolidating is the only correct shape, because the weighed collections
+and the damaged/missing linen are recorded against the *customer*: one invoice per contract
+would have billed both twice. Each contract's minimum/levy/surcharges still apply to its own
+services only; lines keep `agreement_id` (null for replacement charges); header fields the
+contracts disagree on fall back via `consolidate()` to the customer's own payment terms, or
+to null for a purchase order. Pure part lives in `src/lib/domain/invoicing.ts` with 12 tests.
+No migration. **Not yet exercised against real data** — worth generating a period on the demo
+tenant for a customer with two contracts before anyone bills a real month.
 
 Working through the Plantline design handoff in four stages. **Stages 1–3 are done** — theme,
 shell, dashboard, and now the dispatch planner and the billing two-pane (branch

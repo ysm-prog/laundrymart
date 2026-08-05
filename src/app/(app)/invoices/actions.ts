@@ -6,12 +6,14 @@ import { assertCapability, type Session } from "@/lib/auth/context";
 import { createClient } from "@/lib/supabase/server";
 import { recordAudit } from "@/lib/audit";
 import { addDays } from "@/lib/domain/dates";
-import { generateServiceDates, parsePattern, type HolidayRule } from "@/lib/domain/service-calendar";
 import {
-  allocateWeightCharges, buildReplacementCharges, buildServiceCharges, lineAmount,
-  resolvePrice, round2,
+  allocateWeightCharges, buildReplacementCharges, lineAmount, round2,
   type DraftLine,
 } from "@/lib/domain/pricing";
+import {
+  consolidate, contractCharges,
+  type BillableAgreement, type BillableLine,
+} from "@/lib/domain/invoicing";
 import {
   count, describeDbError, done, fail, firstIssue, money, optionalText,
   optionalUuid, requiredDate, returnTo, toObject,
@@ -21,47 +23,29 @@ import { invoiceFileName, renderInvoicePdf } from "@/lib/pdf/render";
 import { buildInvoiceEmail } from "@/lib/email/invoice-email";
 import { sendEmail } from "@/lib/email/send";
 
-type BillableAgreement = {
-  id: string;
-  customer_id: string;
-  depot_id: string | null;
-  location_id: string | null;
-  start_date: string;
-  end_date: string | null;
-  pickup_pattern: unknown;
-  minimum_charge: number;
-  holiday_rule: string;
-  holiday_region: string;
-  weekend_surcharge_pct: number;
-  holiday_surcharge_pct: number;
-  fuel_levy_pct: number;
-  payment_terms_days: number;
-  purchase_order_number: string | null;
-  emergency_service: boolean;
-};
-
-type BillableLine = {
-  id: string;
-  agreement_id: string;
-  item_id: string | null;
-  charge_type: string;
-  pricing_model: string;
-  unit_price: number;
-  percentage: number | null;
-  standard_quantity: number;
-  included_quantity: number;
-  taxable: boolean;
-  items: { name: string; sku: string; rental_price: number; wash_only_price: number; replacement_cost: number } | null;
-};
-
 /**
- * Generate recurring invoices for a billing period.
+ * Generate recurring invoices for a billing period — **one invoice per
+ * customer**, carrying the charges from every contract they hold.
  *
- * For each active agreement the generator:
- *  1. expands the service calendar over the period (holiday rules applied);
- *  2. prices the agreement's lines by visit count;
- *  3. tops up to the minimum charge and applies levies/surcharges;
- *  4. adds replacement charges for anything damaged or missing on the run.
+ * This used to loop per agreement while de-duplicating on customer + period, so
+ * a customer with two active contracts had the first billed and the second
+ * silently skipped as "already invoiced". Consolidating is the fix, and it is
+ * also the only shape that can be right: the weighed collections and the
+ * damaged/missing linen are recorded against the *customer*, not the contract,
+ * so two invoices from one customer's pickups would have billed the same
+ * kilograms and the same lost towels twice.
+ *
+ * Per customer the generator:
+ *  1. splits the period's weighed collections across every per-kg line the
+ *     customer holds, across all their contracts, so the weight is allocated
+ *     once;
+ *  2. for each contract, expands its own service calendar (its own holiday
+ *     rule and region), prices its lines by visit count, tops up to *its*
+ *     minimum charge and applies *its* levies and surcharges — a levy on one
+ *     contract must not reach another contract's services;
+ *  3. adds the period's replacement charges once, for the customer;
+ *  4. writes one invoice whose lines each keep their `agreement_id` and
+ *     `location_id`, so every charge still says which contract it came from.
  *
  * Customers that already have a recurring invoice for the exact period are
  * skipped, so re-running after a fix does not double-bill.
@@ -115,37 +99,49 @@ export async function generateInvoices(formData: FormData): Promise<void> {
     linesByAgreement.set(line.agreement_id, bucket);
   }
 
+  // One bill per customer. Grouping happens before anything is priced, because
+  // the weight allocation and the replacement charges below are facts about the
+  // customer's period and have to be computed once, not once per contract.
+  const byCustomer = new Map<string, BillableAgreement[]>();
+  for (const agreement of live) {
+    const bucket = byCustomer.get(agreement.customer_id) ?? [];
+    bucket.push(agreement);
+    byCustomer.set(agreement.customer_id, bucket);
+  }
+
+  // Terms fall back to the customer's own when their contracts disagree — the
+  // one answer that is defensible without picking a winner between contracts.
+  const { data: customerRows } = await supabase
+    .from("customers").select("id, payment_terms_days, depot_id")
+    .in("id", [...byCustomer.keys()])
+    .returns<Array<{ id: string; payment_terms_days: number; depot_id: string | null }>>();
+  const customerById = new Map((customerRows ?? []).map((row) => [row.id, row]));
+
   let created = 0;
   let skipped = 0;
+  let contractsBilled = 0;
 
-  for (const agreement of live) {
+  for (const [customerId, contracts] of byCustomer) {
     const { data: existing } = await supabase
       .from("invoices").select("id")
-      .eq("customer_id", agreement.customer_id)
+      .eq("customer_id", customerId)
       .eq("invoice_type", "recurring")
       .eq("period_start", start).eq("period_end", end)
       .maybeSingle();
     if (existing) { skipped += 1; continue; }
 
-    const holidays = (holidayRows ?? [])
-      .filter((row) => row.region === agreement.holiday_region)
-      .map((row) => row.holiday_date as string);
-
-    const visits = generateServiceDates({
-      pattern: parsePattern(agreement.pickup_pattern),
-      from: start, to: end,
-      holidays,
-      holidayRule: agreement.holiday_rule as HolidayRule,
-      startDate: agreement.start_date,
-      endDate: agreement.end_date,
-    });
-
-    const lines = linesByAgreement.get(agreement.id) ?? [];
+    const contractLines = new Map(
+      contracts.map((agreement) => [agreement.id, linesByAgreement.get(agreement.id) ?? []]),
+    );
 
     // Per-kg lines bill what the run actually weighed, not what the pattern
     // predicted, so the weight comes from the period's pickups rather than from
-    // the service calendar (§11).
-    const weightLines = lines.filter((line) => line.pricing_model === "per_kg");
+    // the service calendar (§11). Allocated across every per-kg line the
+    // customer holds — split by contract, the same kilograms would be billed
+    // once per contract.
+    const weightLines = contracts.flatMap((agreement) =>
+      (contractLines.get(agreement.id) ?? []).filter((line) => line.pricing_model === "per_kg"),
+    );
     const weightByLine = new Map<string, { billableKg: number; allowanceKg: number }>();
     let weighedCollections = 0;
 
@@ -153,7 +149,7 @@ export async function generateInvoices(formData: FormData): Promise<void> {
       const { data: weighed } = await supabase
         .from("pickups")
         .select("total_weight_kg")
-        .eq("customer_id", agreement.customer_id)
+        .eq("customer_id", customerId)
         .gte("pickup_date", start).lte("pickup_date", end)
         .gt("total_weight_kg", 0)
         .returns<Array<{ total_weight_kg: number }>>();
@@ -175,94 +171,42 @@ export async function generateInvoices(formData: FormData): Promise<void> {
       }
     }
 
-    const serviceItems = lines.flatMap((line) => {
-      const item = line.items;
+    // Every line keeps the contract it came from, so a consolidated invoice can
+    // still be read back per contract.
+    const draft: Array<{ line: DraftLine; agreementId: string | null; locationId: string | null }> = [];
 
-      // Pricing precedence §11: agreement line first, then the item default.
-      // A per-kg line is a rate per kilogram, and no item carries one, so it can
-      // only ever be priced by the agreement itself.
-      const { price } = resolvePrice({
-        agreementLinePrice: line.unit_price > 0 ? line.unit_price : null,
-        itemPrice: line.pricing_model === "per_kg"
-          ? null
-          : line.charge_type === "wash_only" ? item?.wash_only_price : item?.rental_price,
-      });
-
-      const quantity = (() => {
-        switch (line.pricing_model) {
-          case "per_item": return Math.max(0, line.standard_quantity - line.included_quantity) * visits.length;
-          case "per_collection": return visits.length;
-          case "per_kg": return weightByLine.get(line.id)?.billableKg ?? 0;
-          case "monthly": return 1;
-          default: return 0; // percentage lines charge off the subtotal below
-        }
-      })();
-
-      if (quantity <= 0 || price <= 0) return [];
-
-      const detail = (() => {
-        switch (line.pricing_model) {
-          case "per_collection":
-            return `${visits.length} collection(s)`;
-          case "per_kg": {
-            const allowance = weightByLine.get(line.id)?.allowanceKg ?? 0;
-            return `${quantity} kg over ${weighedCollections} collection(s)` +
-              (allowance > 0 ? `, ${allowance} kg included` : "");
-          }
-          default:
-            return `${quantity} × ${start} to ${end}`;
-        }
-      })();
-
-      return [{
-        itemId: line.item_id,
-        description: `${item?.name ?? "Service"} — ${detail}`,
-        quantity: round2(quantity),
-        unitPrice: price,
-        chargeType: line.charge_type as DraftLine["chargeType"],
-        taxable: line.taxable,
-      }];
-    });
-
-    // Percentage lines are a rate against the service subtotal, so they are
-    // handed to the pricing engine alongside the levies to share one base.
-    const percentageLines = lines.flatMap((line) =>
-      line.pricing_model === "percentage" && Number(line.percentage ?? 0) > 0
-        ? [{
-            label: line.items?.name ?? "Agreement charge",
-            pct: Number(line.percentage),
-            chargeType: line.charge_type as DraftLine["chargeType"],
-            itemId: line.item_id,
-            taxable: line.taxable,
-          }]
-        : [],
-    );
-
-    const draft = buildServiceCharges({
-      items: serviceItems,
-      percentageLines,
-      minimumCharge: Number(agreement.minimum_charge ?? 0),
-      fuelLevyPct: Number(agreement.fuel_levy_pct ?? 0),
-      weekendSurchargePct: Number(agreement.weekend_surcharge_pct ?? 0),
-      holidaySurchargePct: Number(agreement.holiday_surcharge_pct ?? 0),
-      servicedOnWeekend: visits.some((visit) => visit.isWeekend),
-      servicedOnHoliday: visits.some((visit) => visit.isPublicHoliday),
-    });
+    // Each contract's minimum, levies and surcharges apply to its own services
+    // and nothing else, so each is priced on its own and the results appended.
+    for (const agreement of contracts) {
+      for (const line of contractCharges({
+        agreement,
+        lines: contractLines.get(agreement.id) ?? [],
+        holidays: holidayRows ?? [],
+        weightByLine,
+        weighedCollections,
+        start, end,
+      })) {
+        draft.push({ line, agreementId: agreement.id, locationId: agreement.location_id });
+      }
+    }
 
     // Damaged and missing linen picked up during the period becomes a
-    // replacement charge on the same invoice (§11).
+    // replacement charge on the same invoice (§11). Recorded against the
+    // customer's collections, so it is charged once no matter how many
+    // contracts they hold — and it belongs to no single contract, hence the
+    // null `agreement_id`.
     const { data: damaged } = await supabase
       .from("pickup_lines")
       .select("item_id, damaged_quantity, missing_quantity, " +
               "pickups!inner(customer_id, pickup_date), items(name, replacement_cost)")
-      .eq("pickups.customer_id", agreement.customer_id)
+      .eq("pickups.customer_id", customerId)
       .gte("pickups.pickup_date", start).lte("pickups.pickup_date", end)
       .returns<Array<{
         item_id: string; damaged_quantity: number; missing_quantity: number;
         items: { name: string; replacement_cost: number } | null;
       }>>();
 
-    draft.push(...buildReplacementCharges(
+    for (const line of buildReplacementCharges(
       (damaged ?? []).map((row) => ({
         itemId: row.item_id,
         itemName: row.items?.name ?? "Item",
@@ -270,7 +214,9 @@ export async function generateInvoices(formData: FormData): Promise<void> {
         missingQuantity: row.missing_quantity,
         replacementCost: Number(row.items?.replacement_cost ?? 0),
       })),
-    ));
+    )) {
+      draft.push({ line, agreementId: null, locationId: null });
+    }
 
     if (draft.length === 0) { skipped += 1; continue; }
 
@@ -278,14 +224,28 @@ export async function generateInvoices(formData: FormData): Promise<void> {
       .rpc("next_number", { t: session.tenantId, k: "invoice", p: "INV" });
     if (numberError) return fail("/invoices", describeDbError(numberError));
 
-    const terms = Number(agreement.payment_terms_days ?? 14);
+    const terms = consolidate(
+      contracts.map((agreement) => Number(agreement.payment_terms_days ?? 14)),
+      Number(customerById.get(customerId)?.payment_terms_days ?? 14),
+    );
+    const depotId = contracts.find((agreement) => agreement.depot_id)?.depot_id
+      ?? customerById.get(customerId)?.depot_id
+      ?? null;
+    // A purchase order number belongs to one contract; on a consolidated
+    // invoice it is only stamped when every contract agrees on it, rather than
+    // quoting one customer's PO against another contract's charges.
+    const purchaseOrder = consolidate(
+      contracts.map((agreement) => agreement.purchase_order_number),
+      null,
+    );
+
     const { data: invoice, error } = await supabase
       .from("invoices")
       .insert({
         tenant_id: session.tenantId,
         created_by: session.userId,
-        customer_id: agreement.customer_id,
-        depot_id: agreement.depot_id,
+        customer_id: customerId,
+        depot_id: depotId,
         invoice_number: invoiceNumber as string,
         invoice_type: "recurring",
         status: "draft",
@@ -294,26 +254,26 @@ export async function generateInvoices(formData: FormData): Promise<void> {
         period_start: start,
         period_end: end,
         payment_terms_days: terms,
-        purchase_order_number: agreement.purchase_order_number,
+        purchase_order_number: purchaseOrder,
       })
       .select("id")
       .single();
     if (error) return fail("/invoices", describeDbError(error));
 
     const { error: lineError } = await supabase.from("invoice_lines").insert(
-      draft.map((line, index) => ({
+      draft.map((entry, index) => ({
         tenant_id: session.tenantId,
         created_by: session.userId,
         invoice_id: invoice.id,
-        item_id: line.itemId ?? null,
-        agreement_id: agreement.id,
-        location_id: agreement.location_id,
-        description: line.description,
-        charge_type: line.chargeType,
-        quantity: line.quantity,
-        unit_price: line.unitPrice,
-        amount: line.amount,
-        taxable: line.taxable,
+        item_id: entry.line.itemId ?? null,
+        agreement_id: entry.agreementId,
+        location_id: entry.locationId,
+        description: entry.line.description,
+        charge_type: entry.line.chargeType,
+        quantity: entry.line.quantity,
+        unit_price: entry.line.unitPrice,
+        amount: entry.line.amount,
+        taxable: entry.line.taxable,
         sequence: index + 1,
       })),
     );
@@ -323,19 +283,26 @@ export async function generateInvoices(formData: FormData): Promise<void> {
     if (totalError) return fail("/invoices", describeDbError(totalError));
 
     created += 1;
+    contractsBilled += contracts.length;
   }
 
   await recordAudit(session, {
     entity: "invoice", action: "generate",
     summary: `${created} invoice(s) for ${start} – ${end}`,
-    metadata: { start, end, created, skipped },
+    metadata: { start, end, created, skipped, contracts: contractsBilled },
   });
   revalidatePath("/invoices");
 
   if (created === 0) {
-    return fail("/invoices", `Nothing to invoice — ${skipped} agreement(s) already billed or had no charges.`);
+    return fail("/invoices",
+      `Nothing to invoice — ${skipped} customer(s) were already billed for that period, or had no charges.`);
   }
-  return done("/invoices", `Generated ${created} draft invoice(s). ${skipped} skipped.`);
+  // Said in customers and contracts rather than in rows: the operator's question
+  // is "did everyone get billed", and a consolidated invoice covering two
+  // contracts should say so rather than looking like one contract was missed.
+  const covers = contractsBilled > created ? ` covering ${contractsBilled} contract(s)` : "";
+  const skippedNote = skipped > 0 ? ` ${skipped} customer(s) skipped.` : "";
+  return done("/invoices", `Created ${created} draft invoice(s)${covers}.${skippedNote}`);
 }
 
 export async function createManualInvoice(formData: FormData): Promise<void> {

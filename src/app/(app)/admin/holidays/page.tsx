@@ -24,7 +24,7 @@ export default async function HolidaysPage() {
     <div className="space-y-6">
       <PageHeader
         title="Public holidays"
-        description="Each agreement's holiday rule is applied against this calendar for its region."
+        description="Days you do not normally serve. Each contract decides whether to skip the day, move it, or work it at a surcharge."
       />
 
       <Notice tone="info">

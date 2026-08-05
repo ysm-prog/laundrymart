@@ -31,7 +31,8 @@ export default async function DeliveriesPage({
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Deliveries" description="Clean linen handed over, with the signature captured at the stop." />
+      <PageHeader title="Deliveries"
+                  description="Clean linen handed back, with the signature and photo taken at the door." />
 
       <form method="get" action="/operations/deliveries" className="flex flex-wrap items-end gap-2">
         <label className="text-sm">

@@ -8,7 +8,7 @@ import {
 } from "@/components/ui";
 import { ListControls, Pagination, pageFrom, rangeFor } from "@/components/list-controls";
 
-export const metadata = { title: "Audit log" };
+export const metadata = { title: "Activity log" };
 export const dynamic = "force-dynamic";
 
 type Search = { q?: string; entity?: string; page?: string; error?: string; ok?: string };
@@ -27,14 +27,14 @@ export default async function AuditPage({ searchParams }: { searchParams: Promis
   return (
     <div>
       <PageHeader
-        title="Audit log"
-        description="Append-only record of every write, kept for compliance and incident review."
+        title="Activity log" eyebrow="Audit log"
+        description="Every change anyone has made. Nothing is ever removed from this list."
       />
       <ListControls
         action="/admin/audit"
         q={params.q}
         filters={[{
-          name: "entity", label: "Entity", value: params.entity,
+          name: "entity", label: "record type", value: params.entity,
           options: ENTITIES.map((value) => ({ value, label: humanise(value) })),
         }]}
       />
