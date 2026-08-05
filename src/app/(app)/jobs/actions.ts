@@ -9,6 +9,7 @@ import {
   describeDbError, done, fail, firstIssue, mediaPaths, optionalText, toObject,
 } from "@/lib/actions";
 import { isTenantPath } from "@/lib/media";
+import { sendDeliveryConfirmation } from "@/lib/notifications/delivery-confirmation";
 
 /**
  * Proof-of-service media arrives as storage keys the browser already uploaded.
@@ -290,6 +291,10 @@ export async function recordDelivery(formData: FormData): Promise<void> {
     summary: `${lines.reduce((total, line) => total + line.quantity, 0)} items`,
     metadata: { jobId },
   });
+
+  // Off by default; when the tenant has turned it on the customer gets their
+  // proof of service without anyone remembering to send it.
+  await sendDeliveryConfirmation(session, delivery.id);
 
   revalidatePath(backTo);
   return done(backTo, "Delivery recorded.");

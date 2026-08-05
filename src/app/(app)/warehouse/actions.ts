@@ -8,6 +8,7 @@ import { recordAudit } from "@/lib/audit";
 import {
   count, describeDbError, done, fail, firstIssue, optionalText, optionalUuid, toObject,
 } from "@/lib/actions";
+import { notify } from "@/lib/notifications/notify";
 import {
   REJECT_DESTINATIONS, STAGE_INVENTORY_STATE, STAGE_MOVEMENT_REASON,
   isFlowStage, nextStage,
@@ -277,6 +278,19 @@ export async function rejectFromBatch(formData: FormData): Promise<void> {
     entity: "production_batch", entityId: batch.id, action: "update",
     summary: `${parsed.data.quantity} rejected to ${parsed.data.destination}`,
   });
+
+  // Damaged is a write-off — stock that leaves the business. In-repair comes
+  // back, so it stays a floor matter and raises nothing.
+  if (parsed.data.destination === "damaged") {
+    await notify(session, {
+      kind: "batch_rejected",
+      subjectId: batch.id,
+      title: `${parsed.data.quantity} item(s) were written off as damaged from batch`
+        + ` ${batch.batch_number}. Check whether the customer needs replacements.`,
+      href: backTo,
+    });
+  }
+
   revalidatePath(backTo);
   return done(backTo, `${parsed.data.quantity} item(s) pulled out of the batch.`);
 }

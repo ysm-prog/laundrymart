@@ -9,6 +9,7 @@ import {
   describeDbError, done, fail, firstIssue, mediaPaths, optionalText, toObject,
 } from "@/lib/actions";
 import { isTenantPath } from "@/lib/media";
+import { notify } from "@/lib/notifications/notify";
 import { sweepVehicleToDepot } from "@/lib/routes/unload";
 import { CHECKLIST_KEYS } from "./checklist";
 
@@ -78,6 +79,18 @@ export async function submitInspection(formData: FormData): Promise<void> {
       entity: "vehicle_inspection", entityId: inspection.id, action: "create",
       summary: "inspection failed — vehicle taken out of service",
     });
+
+    // The driver is told on their own screen; this is how the office finds out.
+    // Without it a run goes quiet and the vehicle is off the road with nobody at
+    // a desk any the wiser.
+    await notify(session, {
+      kind: "inspection_failed",
+      subjectId: parsed.data.vehicle_id,
+      title: "A driver failed a vehicle inspection and the vehicle is off the road."
+        + " Reassign the run or clear the vehicle.",
+      href: "/vehicles",
+    });
+
     revalidatePath(BACK);
     return fail(BACK, "Inspection failed. The vehicle is out of service — contact your dispatcher.");
   }

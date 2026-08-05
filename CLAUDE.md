@@ -36,6 +36,16 @@ The master spec names a .NET 9 Web API; this build follows the supplied skeleton
 - Invoice PDFs render server-side with `@react-pdf/renderer` (`src/lib/pdf/`), streamed from
   `/api/invoices/:id/pdf` and attached to the Resend email. `serverExternalPackages` keeps the
   renderer out of the client bundle.
+- Notifications (`src/lib/notifications/`) have two writers and one reader. Server actions call
+  `notify()` at the moment they cause an event, on the caller's RLS-bound client; the swept,
+  time-based checks live in `/api/notifications/sweep`, which has no session and therefore uses
+  the service-role client and filters `tenant_id` from the row it is iterating. Both go through
+  one idempotent upsert keyed on `(tenant_id, kind, subject_id, occurred_on)`, and `occurred_on`
+  is the day the *event* belongs to — the invoice's due date, the run's date — not the day the
+  sweep ran, so a cron that runs five times a day still notifies once. The bell is a server
+  component reading a head-only count in the `(app)` layout beside the nav badges: no realtime,
+  no polling. `tenants.settings` (one jsonb bag, Zod-validated in `settings.ts`) gates every
+  channel; in-app defaults on, customer email defaults off.
 
 ## 3. Multi-tenancy and authorisation
 Tenant key `tenant_id` → `tenants`. RLS helper `is_member(tenant_id)`, wrapped `(select …)`
@@ -52,6 +62,9 @@ Resource-scoped beyond tenancy:
 - `storage.objects` in the `run-media` bucket: the object key starts with the tenant id, and
   the policies read it back through `media_tenant()` → `is_member()`. The path is the boundary,
   so it is always written from the session and never from the request.
+- `notifications`: RLS scopes them to the tenant, as everywhere. The `audience` capability on
+  each row narrows them further to the people who can act on it — but that is a UI filter
+  applied in `src/lib/notifications/query.ts`, layered on top of RLS and never instead of it.
 
 Roles and capabilities are declared once in `src/lib/roles.ts` and drive the nav, page guards
 and action guards. `routes.write` (plan and assign) is separate from `routes.status` (advance
@@ -79,12 +92,14 @@ Feature branch → `Dev` → `Prod`. CI (`Prod`/`Dev`) runs verify, gitleaks and
 branches deploy. Never force-push `Prod`.
 
 ## 6. Routes
-`/` landing · `/login` · `/offline` · `/api/sync` · `/api/media` · `/api/invoices/:id/pdf`
+`/` landing · `/login` · `/offline` · `/api/sync` · `/api/media` · `/api/invoices/:id/pdf` ·
+`/api/notifications/sweep` (cron, bearer-token authed, no session)
 `(app)`: `/dashboard` · `/customers[/new|/:id|/:id/edit]` · `/agreements[/new|/:id]` ·
 `/items[/:id]` · `/drivers` · `/vehicles` · `/routes/templates[/:id]` ·
 `/routes/daily[/:id|/:id/sheet]` · `/routes/planner` · `/jobs[/:id]` ·
 `/operations/{pickups,deliveries,exceptions}` · `/run` · `/warehouse[/:id]` · `/inventory` ·
-`/invoices[/:id]` · `/reports` · `/admin[/depots|/users|/holidays|/audit]`
+`/invoices[/:id]` · `/reports` · `/notifications` ·
+`/admin[/depots|/users|/holidays|/audit|/notifications]`
 
 ## 7. Schema
 - `0001_init` — tenants, memberships, RLS helpers, `apply_tenant_policy`, number sequences,
@@ -108,10 +123,14 @@ branches deploy. Never force-push `Prod`.
 - `0012_optional_inspection` — `guard_route_transition` no longer requires `inspection_id`
   to start a run. Restates the pinned `search_path` (a `create or replace` drops it) and the
   revoke, then asserts `anon` still cannot execute it.
+- `0013_notifications` — `tenants.settings jsonb` (AD-3) and the `notifications` table
+  (AD-4). Beware the numbering drift: the unmerged branch
+  `claude/warehouse-inventory-flow-psooyq` carries its own `0012_return_count.sql`, which
+  has to be renumbered when it lands.
 
 Proofs in `supabase/tests/`: `rls_isolation`, `rls_coverage`, `driver_scope`,
-`business_rules`, `media_scope`, `warehouse_rules` (47 assertions). Demo data in
-`supabase/seed.sql` — not applied by migrations.
+`business_rules`, `media_scope`, `warehouse_rules`, `notifications_scope`
+(56 assertions). Demo data in `supabase/seed.sql` — not applied by migrations.
 
 **Do not re-add `grant execute on all functions in schema public to anon`.** That
 boilerplate in 0002–0009 is what exposed every SECURITY DEFINER helper on
@@ -155,7 +174,12 @@ segment, since the storage policies check only the tenant segment.
 ## 10. Environment
 See `.env.example`; validated fail-fast in `src/lib/env.ts`. Email delivery
 (`RESEND_API_KEY`, `INVOICE_FROM_EMAIL`) is optional — without it the app runs and the send
-action says so rather than the deployment refusing to boot.
+action says so rather than the deployment refusing to boot. `CRON_SECRET` is optional on the
+same principle, with one difference that matters: `/api/notifications/sweep` refuses **every**
+request while it is unset, so an unconfigured deployment loses the swept notifications rather
+than exposing an endpoint that enumerates every tenant's overdue invoices. The Vercel cron
+entry lives in `vercel.json` and its schedule is **UTC** — the five daily hits are 07:00 to
+15:00 Sydney (AEST; an hour later in wall-clock terms under AEDT, still inside the working day).
 
 ## 10a. Toolchain pins
 Next 16 (Turbopack), React 19, Tailwind 4 (CSS-first — no `tailwind.config.ts`), Zod 4,
@@ -243,6 +267,80 @@ Both are compositions over existing tables — neither added a migration.
   are edited and invoices voided.
 
 ## 18. Changelog
+### 2026-08-05 · Simplification Phase C: the app speaks up on its own
+Per `docs/SIMPLIFICATION-ROADMAP.md` Phase C and AD-3/AD-4 of the design spec. Answers F4 —
+*"there is no notification anywhere that the user didn't just cause"*. This is the redesign's
+one migration, and it lands with the code that uses it.
+
+Built against `Prod` (Phase A) while Phase B was in flight, and merged into `Dev` on top of
+it — nothing in C depends on B, because C adds an event layer beside the existing screens
+rather than changing the forms B rewrites. The two met in three files: the `/api/sync`
+imports, the `/design-preview` section list, and this changelog.
+
+**The migration (`0013_notifications`).** AD-3 and AD-4 share one migration on purpose: Phase C
+and Phase D (simple mode) both need a per-tenant switch, and a settings table would be a second
+join on every page render.
+- **`tenants.settings jsonb not null default '{}'`** — notification preferences now,
+  `ui_mode` later. Shape validated by Zod at the read site, not by the database.
+- **`notifications`** — `audience` is a capability string from `src/lib/roles.ts`, so the bell
+  targets by exactly what the nav and page guards already use. No enum and no FK on it: a
+  check constraint listing the capabilities would need migrating every time one is added, and
+  a typo'd capability shows a notification to nobody rather than to the wrong person.
+- **Idempotency is `unique (tenant_id, kind, subject_id, occurred_on) nulls not distinct`.**
+  `subject_id` is nullable, and under a plain unique index every NULL is distinct — the
+  subject-less kinds (`sync_failed`) would be exactly the ones that spam. Chosen over a
+  `coalesce()` sentinel index because PostgREST's `on_conflict=` names columns only, so an
+  expression index is unusable from supabase-js. Needs Postgres 15+.
+- `href` is NOT NULL and constrained to a plain same-site path (mirrors `returnTo()`): every
+  notification links to its fix, and the bell must not become an open redirect.
+- `read_at` is the only state; nothing is deleted. `apply_tenant_policy` supplies RLS, the
+  tenant index and the `updated_at` trigger. No function grants — `anon` stays revoked.
+- Proof: `supabase/tests/notifications_scope.test.sql` (9 assertions — cross-tenant read, the
+  `with check` tenant-hop, both idempotency cases, the href guard, and `anon` proven out by
+  privilege *and* by message, since 42501 alone means nothing here).
+- Numbering: `Prod` is at 0012, but the unmerged `claude/warehouse-inventory-flow-psooyq`
+  branch holds a second `0012_return_count.sql`. That one gets renumbered, not this one.
+
+**The writers (C2).** Server actions raise their own events in the transaction that caused
+them — a failed inspection, a vehicle taken off the road, stock written off as damaged, and a
+rejected offline batch (`duplicate` is the replay path working, so only outright rejections
+count, and it is one notification per batch rather than per stop). The time-based pair —
+invoice past terms, run still at the depot past its window — is a swept check on a Vercel cron.
+A run with no `planned_start_time` is never called late: nothing in the schema promises when it
+should leave, and inventing a cutoff would manufacture an alert out of an absence — the same
+call §10b already records for the turnaround KPI.
+
+**The bell (C3).** Context-bar server component, head-only unread count resolved in the `(app)`
+layout beside the four nav badges; `/notifications` lists them, newest first, with a
+show-read-too view because nothing is ever deleted. Each row is a **form, not a link** —
+Next prefetches links on hover and in the viewport, and the destination marks the row read on
+the way through, so links would empty the bell for anyone who merely scrolled past. The
+destination is read back from the row rather than from the posted form, and 0013 constrains it
+to a same-site path, so the bell cannot become an open redirect. Read/unread is carried by
+weight and a marker, never by colour — colour still means status.
+
+**Customer emails (C3), off until switched on.** Delivery confirmation with the proof of
+service captured at the stop, sent from both delivery writers so a drop-off recorded on a
+phone in a car park behaves like one typed at a desk; and the overdue chase on the owner's
+schedule — **first at 7 days past terms, weekly, three at most, friendly in tone** (their
+decision, 2026-08-05). Signed media URLs get a 7-day life for the inbox rather than the
+on-screen 5 minutes. Reminder idempotency rides the audit log, not the notifications table,
+because a reminder recurs and each occurrence either did or did not leave the building; the
+marker is written only on success, so a bounced reminder is retried rather than counted as
+delivered. No PDF and no payment link on the chase: the invoice was already emailed with one
+attached, and nothing in the schema holds a payment URL to link to.
+
+**Settings (C4).** `/admin/notifications`, `admin.write`, stored in `tenants.settings` and
+merged rather than overwritten so Phase D's `ui_mode` survives a save. In-app on by default,
+customer email off. **Staff email is deliberately not offered** — a switch that looks like it
+sends mail but does not is worse than no switch.
+
+**C0 — the Resend path is still unproven against the provider.** It could not be exercised
+here: this container's network policy answers 403 to `CONNECT api.resend.com`, so no live send
+was possible at any point. What shipped instead is a **"Send a test email" action** on the
+settings page (`admin.write`, sends only to the signed-in user's own address, audited) to be
+run from the deployed app, plus a note pointing at emailing one real invoice for the full path
+including the PDF. **Do not switch the customer emails on until both have been run once.**
 ### 2026-08-05 · Simplification Phase B: wizards, one-click planning, in-run problems
 Per `docs/SIMPLIFICATION-ROADMAP.md` Phase B / design spec P-3, P-4, P-5, AD-2. No
 migrations.
