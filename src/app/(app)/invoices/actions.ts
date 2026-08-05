@@ -91,7 +91,10 @@ export async function generateInvoices(formData: FormData): Promise<void> {
   if (agreementError) return fail("/invoices", describeDbError(agreementError));
 
   const live = (agreements ?? []).filter((a) => !a.end_date || a.end_date >= start);
-  if (live.length === 0) return fail("/invoices", "No active agreements cover that period.");
+  if (live.length === 0) {
+    return fail("/invoices", "No active contracts cover that period.",
+      { href: "/agreements", label: "Open contracts" });
+  }
 
   const { data: holidayRows } = await supabase
     .from("public_holidays").select("holiday_date, region")
@@ -629,7 +632,12 @@ export async function emailInvoice(formData: FormData): Promise<void> {
 
   const recipient = parsed.data.to ?? data.customer.billing_email;
   if (!recipient) {
-    return fail(backTo, "This customer has no billing email. Add one, or type an address to send to.");
+    // The fix is one click away (design B4): the toast links the customer form.
+    const supabase = await createClient();
+    const { data: owner } = await supabase
+      .from("invoices").select("customer_id").eq("id", parsed.data.id).maybeSingle();
+    return fail(backTo, "This customer has no billing email. Add one, or type an address to send to.",
+      owner ? { href: `/customers/${owner.customer_id}/edit`, label: "Add their billing email" } : undefined);
   }
 
   const pdf = await renderInvoicePdf(data);

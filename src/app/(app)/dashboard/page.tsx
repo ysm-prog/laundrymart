@@ -8,6 +8,9 @@ import {
   ButtonLink, Card, EmptyState, Eyebrow, FlashMessages, PageHeader, SkeletonRows,
   SkeletonStats, Stage, Stat, StatusBadge, cx, humanise,
 } from "@/components/ui";
+import { SubmitButton } from "@/components/form";
+import { parseExceptionNotes } from "@/lib/exceptions";
+import { planToday } from "@/app/(app)/routes/daily/actions";
 import {
   PLANT_STAGES, SEVERITY_RULE, SEVERITY_TEXT, sortDecisions, type Decision,
 } from "./decisions";
@@ -67,6 +70,13 @@ export default async function DashboardPage({
         eyebrow={`${session.tenantName} · ${formatDate(date)}`}
         title="Dashboard"
         description="What needs a decision today."
+        actions={can(session.role, "routes.write") ? (
+          // One click from the weekly templates to a planned day (design B3).
+          // The action lands on the planner only when a choice is left to make.
+          <form action={planToday}>
+            <SubmitButton pendingLabel="Planning…">Plan my day</SubmitButton>
+          </form>
+        ) : null}
       />
 
       {setup && !setup.complete ? <GettingStarted steps={setup.steps} /> : null}
@@ -92,7 +102,7 @@ export default async function DashboardPage({
             </Suspense>
           </div>
           <Suspense fallback={<SkeletonRows rows={4} />}>
-            <RunsToday date={date} />
+            <RunsToday date={date} canPlan={can(session.role, "routes.write")} />
           </Suspense>
         </div>
       ) : null}
@@ -319,7 +329,9 @@ async function NeedsDecision({ seesMoney }: { seesMoney: boolean }) {
       reference: job.job_number,
       severity: "late",
       customer: job.customers?.business_name ?? "Unknown customer",
-      summary: job.exception_notes?.trim() || humanise(job.exception_reason).toLowerCase(),
+      // Photo markers ride inside exception_notes; the list shows only the words.
+      summary: parseExceptionNotes(job.exception_notes).note
+        || humanise(job.exception_reason).toLowerCase(),
       state: humanise(job.exception_reason),
       measure: "—",
       when: job.scheduled_date,
@@ -485,7 +497,7 @@ type RunRow = {
   jobs: Array<{ status: string }>;
 };
 
-async function RunsToday({ date }: { date: string }) {
+async function RunsToday({ date, canPlan }: { date: string; canPlan: boolean }) {
   const supabase = await createClient();
   const { data } = await supabase
     .from("daily_routes")
@@ -499,7 +511,15 @@ async function RunsToday({ date }: { date: string }) {
     <Card title="Runs today" className="[&>div]:p-0">
       {runs.length === 0 ? (
         <div className="p-4">
-          <EmptyState title="No runs planned" description="Generate today's routes from a template." />
+          <EmptyState
+            title="No runs planned"
+            description="One click builds today from your weekly runs."
+            action={canPlan ? (
+              <form action={planToday}>
+                <SubmitButton pendingLabel="Planning…">Plan my day</SubmitButton>
+              </form>
+            ) : undefined}
+          />
         </div>
       ) : (
         <ul>

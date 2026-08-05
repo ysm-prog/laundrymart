@@ -10,17 +10,23 @@ All 12 migrations applied — `0012_optional_inspection` went on 2026-08-05 (ver
 left in the body). The app code for it is on `Prod` — it rode the Phase A promotion (`6147b06`),
 whose CI was green on all three jobs.
 
-**Simplification redesign (branch `claude/app-simplify-redesign-ageadz`):** the BA roadmap
-(`docs/SIMPLIFICATION-ROADMAP.md`), the design spec (`docs/SIMPLIFICATION-DESIGN.md`) and the
-**Phase A implementation** are all pushed (through commit `a047d33`; no PR). Phase A shipped:
-cookie-flash toasts (fail/done are now async — always `return fail(...)`; the reader is
-`(app)/template.tsx` because layouts don't re-render on soft nav), operator-language renames
-(labels only), the Stage-based getting-started checklist, emails on the People screen,
-ConfirmSubmit strips, the unchecked inspection checklist, hints/defaults, and empty-state
-actions. Verified: typecheck, lint, 81 tests, production build, and /design-preview
-screenshotted (new Guidance section renders on-system). Next: Phase B (wizards, plan-my-day,
-inline run exceptions) then Phase C (notifications — the one migration, shared with
-`tenants.settings`). Three owner decisions are queued in Part 4 of the design spec.
+**Simplification redesign:** Phase A is merged to `Prod` (6147b06, CI green). **Phase B
+shipped** on branch `claude/laundrymart-phase-b-88p0e4`: the 3-step contract wizard (one post
+to `createAgreement`, which now inserts priced lines and derives the delivery pattern from
+`delivery_follows`), the four-field customer quick-create (site address → first location;
+embedded in wizard step 1 via the HTML `form` attribute; `createCustomer` honours
+`return_to`), dashboard "Plan my day" (shared `instantiateRoutes`, lands on the planner only
+when a run is crewless or a stop is on no run), the in-run "Something's wrong" capture
+(outbox `exception` record kind + `exception` media scope; photo path rides
+`exception_notes` as a `[photo:…]` marker via `src/lib/exceptions.ts`), and flash-toast fix
+links (`fail`/`done` take optional `{href,label}`; template re-validates same-site).
+No migrations. Verified: typecheck, lint, 88 tests, build, /design-preview screenshotted
+light+dark. Wizard gotcha for later: step fields hide rather than unmount, and none carry
+`required` — a hidden required field fails native validation unfocusable.
+Next: Phase C (notifications — the one migration, shared with `tenants.settings`). Three
+owner decisions are queued in Part 4 of the design spec. Open item: the live DB has
+`0012_return_count` applied from unmerged branch `claude/warehouse-inventory-flow-psooyq`;
+merging that branch needs a migration-number reconcile.
 
 Working through the Plantline design handoff in four stages. **Stages 1–3 are done** — theme,
 shell, dashboard, and now the dispatch planner and the billing two-pane (branch

@@ -32,17 +32,20 @@ export function Field({
 
 export function Input({
   name, type = "text", defaultValue, placeholder, required, step, min, max, readOnly, inputMode,
+  formId,
 }: {
   name: string; type?: string; defaultValue?: string | number | null;
   placeholder?: string; required?: boolean; step?: string; min?: string | number;
   max?: string | number; readOnly?: boolean;
   inputMode?: "numeric" | "decimal" | "tel" | "email" | "text";
+  /** Associates the input with a <form id=…> elsewhere, so fields can sit visually inside another form without nesting. */
+  formId?: string;
 }) {
   return (
     <input
       id={name} name={name} type={type} required={required} step={step}
       min={min} max={max} readOnly={readOnly} placeholder={placeholder}
-      inputMode={inputMode}
+      inputMode={inputMode} form={formId}
       defaultValue={defaultValue ?? undefined} className={CONTROL}
     />
   );
