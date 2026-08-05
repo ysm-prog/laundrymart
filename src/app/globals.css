@@ -7,44 +7,65 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 /*
- * Design tokens. Light and dark are both first-class (NFR §8: dark mode,
- * WCAG 2.1 AA contrast). Values stay as raw HSL channels so the palette can be
- * themed from one place; the @theme block below turns them into Tailwind
- * colours, and v4's color-mix() handles the `/50` opacity modifiers.
+ * Design tokens, from the Plantline concept pack.
+ *
+ * Two rules from the pack drive the palette, and both are load-bearing:
+ *
+ *  - "Colour means status only." Teal is on-track, amber is warning, red is
+ *    late, green is resolved. Nothing else is coloured — which is why the solid
+ *    call-to-action is near-black (`--action`) rather than the accent. Reaching
+ *    for teal on a button would make an ordinary control read as a status.
+ *  - Flat, hairline-bordered surfaces: `--border` is the everyday hairline and
+ *    `--strong` frames inputs and panels. No rounding, near-no shadow.
+ *
+ * Light values are lifted from the mockups; dark has no counterpart in the pack,
+ * so it is derived around the same near-black and a lifted teal that still
+ * clears AA on a dark surface (NFR §8).
+ *
+ * Values stay as raw HSL channels so the palette can be themed from one place;
+ * the @theme block below turns them into Tailwind colours, and v4's color-mix()
+ * handles the `/50` opacity modifiers.
  */
 @layer base {
   :root {
     color-scheme: light;
-    --background: 0 0% 100%;
-    --surface: 0 0% 100%;
-    --surface-muted: 220 14% 96%;
-    --foreground: 222 47% 11%;
-    --muted-foreground: 220 9% 40%;
-    --border: 220 13% 89%;
-    --primary: 221 83% 45%;
+    --background: 204 15% 94%;      /* #eceff1 — page behind the chrome       */
+    --surface: 0 0% 100%;           /* #ffffff — panels                       */
+    --surface-muted: 210 17% 98%;   /* #f8f9fa — table headers, search field  */
+    --foreground: 210 13% 9%;       /* #14171a                                */
+    --muted-foreground: 211 10% 40%;/* #5b6570                                */
+    --border: 214 14% 90%;          /* #e2e5e9 — hairline                     */
+    --strong: 207 12% 85%;          /* #d4d9dd — inputs, panel frames         */
+    --primary: 175 77% 26%;         /* #0f766e — accent, links, on track      */
     --primary-foreground: 0 0% 100%;
-    --success: 152 60% 28%;
-    --warning: 32 90% 32%;
-    --danger: 0 72% 42%;
-    --info: 199 89% 32%;
-    --ring: 221 83% 53%;
+    --action: 210 13% 9%;           /* #14171a — the one solid button         */
+    --action-foreground: 0 0% 100%;
+    --success: 142 72% 29%;         /* #15803d — resolved                     */
+    --warning: 26 90% 37%;          /* #b45309 — warning                      */
+    --danger: 0 74% 42%;            /* #b91c1c — late                         */
+    --info: 175 77% 26%;
+    --ring: 175 77% 26%;
   }
 
   .dark {
     color-scheme: dark;
-    --background: 224 39% 8%;
-    --surface: 222 34% 11%;
-    --surface-muted: 222 30% 15%;
-    --foreground: 210 40% 96%;
-    --muted-foreground: 217 15% 68%;
-    --border: 220 20% 22%;
-    --primary: 213 94% 68%;
-    --primary-foreground: 222 47% 11%;
-    --success: 152 55% 62%;
-    --warning: 38 92% 68%;
-    --danger: 0 84% 72%;
-    --info: 199 89% 68%;
-    --ring: 213 94% 68%;
+    --background: 210 13% 9%;
+    --surface: 210 12% 12%;
+    --surface-muted: 210 11% 16%;
+    --foreground: 210 14% 92%;
+    --muted-foreground: 210 9% 68%;
+    --border: 210 11% 20%;
+    --strong: 210 10% 27%;
+    --primary: 174 55% 48%;
+    --primary-foreground: 210 13% 9%;
+    /* Inverted on dark: the solid button stays the highest-contrast surface. */
+    --action: 210 14% 92%;
+    --action-foreground: 210 13% 9%;
+    --success: 142 48% 58%;
+    --warning: 32 85% 62%;
+    --danger: 0 75% 67%;
+    --info: 174 55% 48%;
+    --ring: 174 55% 48%;
   }
 
   /* v4 defaults the border colour to currentColor; pin it to our token. */
@@ -72,14 +93,48 @@
   --color-foreground: hsl(var(--foreground));
   --color-muted-foreground: hsl(var(--muted-foreground));
   --color-border: hsl(var(--border));
+  /* Named `strong`, not `border-strong`: a colour called `border-strong` would
+     spell the utility `border-border-strong`. This keeps it `border-strong`. */
+  --color-strong: hsl(var(--strong));
   --color-primary: hsl(var(--primary));
   --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-action: hsl(var(--action));
+  --color-action-foreground: hsl(var(--action-foreground));
   --color-success: hsl(var(--success));
   --color-warning: hsl(var(--warning));
   --color-danger: hsl(var(--danger));
   --color-info: hsl(var(--info));
   --color-ring: hsl(var(--ring));
 
-  --radius-md: 0.5rem;
-  --radius-lg: 0.75rem;
+  /* IBM Plex, bound by next/font in the root layout. Mono is structural in this
+     design — every number, identifier, date and uppercase label. */
+  --font-sans: var(--font-plex-sans), system-ui, sans-serif;
+  --font-mono: var(--font-plex-mono), ui-monospace, monospace;
+
+  /* The pack's chrome runs smaller than Tailwind's defaults: 9–10px mono labels
+     against 11.5–13.5px body. Added, so existing sizes keep their meaning. */
+  --text-2xs: 0.625rem;   /* 10px — mono labels, count badges */
+  --text-3xs: 0.5625rem;  /*  9px — sidebar section headings  */
+
+  /* Square, not rounded. Zeroing the scale beats editing every `rounded-*` in
+     the codebase — and stops the next rounded corner creeping back in. Note
+     `rounded-full` is a static utility in v4 and cannot be zeroed here, so the
+     few places that wanted a pill were changed at the call site instead. */
+  --radius-xs: 0;
+  --radius-sm: 0;
+  --radius-md: 0;
+  --radius-lg: 0;
+  --radius-xl: 0;
+  --radius-2xl: 0;
+  --radius-3xl: 0;
+  --radius-4xl: 0;
+
+  /* The pack uses exactly one shadow, on the outermost frame. */
+  --shadow-2xs: 0 1px 2px rgb(20 23 26 / 0.06);
+  --shadow-xs: 0 1px 2px rgb(20 23 26 / 0.06);
+  --shadow-sm: 0 1px 2px rgb(20 23 26 / 0.06);
+  --shadow-md: 0 1px 3px rgb(20 23 26 / 0.08);
+  --shadow-lg: 0 2px 6px rgb(20 23 26 / 0.10);
+  --shadow-xl: 0 2px 6px rgb(20 23 26 / 0.10);
+  --shadow-2xl: 0 2px 6px rgb(20 23 26 / 0.10);
 }

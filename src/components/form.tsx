@@ -4,8 +4,10 @@ import { useFormStatus } from "react-dom";
 import type { ReactNode } from "react";
 import { cx } from "./ui";
 
+/* Flat, square, a stronger hairline than the surrounding rules, on the muted
+   fill the pack uses for entry fields. */
 const CONTROL =
-  "w-full rounded-md border bg-surface px-3 py-2 text-sm text-foreground " +
+  "w-full border border-strong bg-surface-muted px-2.5 py-1.5 text-[12.5px] text-foreground " +
   "placeholder:text-muted-foreground disabled:opacity-60";
 
 export function Field({
@@ -16,7 +18,8 @@ export function Field({
 }) {
   return (
     <div className={cx("space-y-1", className)}>
-      <label htmlFor={name} className="block text-sm font-medium">
+      <label htmlFor={name}
+             className="block font-mono text-3xs uppercase tracking-[0.1em] text-muted-foreground">
         {label}
         {required ? <span className="ml-0.5 text-danger" aria-hidden>*</span> : null}
       </label>
@@ -76,9 +79,9 @@ export function Checkbox({
   name, label, defaultChecked,
 }: { name: string; label: string; defaultChecked?: boolean }) {
   return (
-    <label className="flex items-center gap-2 text-sm">
+    <label className="flex items-center gap-2 text-[12.5px]">
       <input id={name} name={name} type="checkbox" defaultChecked={defaultChecked}
-             className="h-4 w-4 rounded border" />
+             className="h-3.5 w-3.5 border border-strong accent-primary" />
       {label}
     </label>
   );
@@ -118,15 +121,16 @@ export function SubmitButton({
   children = "Save", variant = "primary", pendingLabel = "Saving…",
 }: { children?: ReactNode; variant?: "primary" | "danger" | "secondary"; pendingLabel?: string }) {
   const { pending } = useFormStatus();
+  // Mirrors BUTTON_VARIANTS in ui.tsx — near-black action, not the teal accent.
   const variants = {
-    primary: "bg-primary text-primary-foreground hover:opacity-90",
+    primary: "bg-action text-action-foreground hover:opacity-90",
     danger: "bg-danger text-white hover:opacity-90",
-    secondary: "border bg-surface hover:bg-surface-muted",
+    secondary: "border border-strong bg-surface hover:bg-surface-muted",
   } as const;
   return (
     <button type="submit" disabled={pending}
             className={cx(
-              "inline-flex items-center justify-center rounded-md px-3 py-2 text-sm font-medium transition",
+              "inline-flex items-center justify-center px-3 py-1.5 text-[12.5px] font-medium transition",
               "disabled:pointer-events-none disabled:opacity-60", variants[variant],
             )}>
       {pending ? pendingLabel : children}

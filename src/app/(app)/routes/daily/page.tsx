@@ -69,7 +69,7 @@ async function RouteList({ routeDate }: { routeDate: string }) {
   const supabase = await createClient();
   const { data } = await supabase
     .from("daily_routes")
-    .select("id, code, name, status, route_date, drivers(full_name), vehicles(registration)")
+    .select("id, code, name, status, route_date, drivers(full_name), vehicles!daily_routes_vehicle_id_fkey(registration)")
     .eq("route_date", routeDate)
     .is("deleted_at", null)
     .order("code")

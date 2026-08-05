@@ -21,7 +21,7 @@ export default function Home() {
 
       <div className="mt-6 flex flex-wrap gap-3">
         <Link href="/login"
-              className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:opacity-90">
+              className="rounded-md bg-action px-4 py-2 text-sm font-medium text-action-foreground hover:opacity-90">
           Sign in
         </Link>
         <Link href="/dashboard"

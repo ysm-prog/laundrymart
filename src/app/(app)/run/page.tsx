@@ -201,7 +201,7 @@ function Stage({
     <li className="rounded-md border p-3">
       <div className="flex items-start gap-3">
         <span aria-hidden
-              className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-semibold ${
+              className={`flex h-6 w-6 shrink-0 items-center justify-center text-xs font-semibold ${
                 done ? "bg-success/15 text-success" : "bg-surface-muted text-muted-foreground"}`}>
           {done ? "✓" : index}
         </span>

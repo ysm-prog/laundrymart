@@ -4,57 +4,71 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState, useSyncExternalStore } from "react";
 import { cx } from "./ui";
-import { isActive, type NavItem } from "@/lib/nav";
+import { isActive, type NavCountKey, type NavSection } from "@/lib/nav";
 
-export function AppNav({ items, onNavigate }: { items: NavItem[]; onNavigate?: () => void }) {
+export type NavCounts = Partial<Record<NavCountKey, number>>;
+
+/**
+ * The sidebar nav, on the pack's near-black rail.
+ *
+ * Deliberately not themed with the app's surface tokens: the rail is the one
+ * surface that stays dark in both light and dark mode, exactly as the mockups
+ * show, so it needs literal colours rather than `bg-surface`.
+ *
+ * Counts sit right-aligned per item. A zero is not rendered at all — a badge
+ * showing "0" is noise, and the point of the badge is to pull attention.
+ */
+export function AppNav({
+  sections, counts, onNavigate,
+}: {
+  sections: NavSection[];
+  counts?: NavCounts;
+  onNavigate?: () => void;
+}) {
   const pathname = usePathname();
 
   return (
-    <nav aria-label="Main" className="space-y-1 text-sm">
-      {items.map((item) => {
-        const active = isActive(pathname, item.href) ||
-          (item.children?.some((child) => isActive(pathname, child.href)) ?? false);
-        return (
-          <div key={item.label}>
-            <Link
-              href={item.href}
-              onClick={onNavigate}
-              aria-current={active ? "page" : undefined}
-              className={cx(
-                "block rounded-md px-3 py-2 font-medium transition",
-                active ? "bg-primary/10 text-primary" : "text-foreground hover:bg-surface-muted",
-              )}
-            >
-              {item.label}
-            </Link>
-            {active && item.children?.length ? (
-              <div className="ml-3 mt-0.5 space-y-0.5 border-l pl-3">
-                {item.children.map((child) => (
-                  <Link
-                    key={child.href}
-                    href={child.href}
-                    onClick={onNavigate}
-                    aria-current={isActive(pathname, child.href) ? "page" : undefined}
-                    className={cx(
-                      "block rounded-md px-2 py-1.5 transition",
-                      isActive(pathname, child.href)
-                        ? "font-medium text-primary"
-                        : "text-muted-foreground hover:text-foreground",
-                    )}
-                  >
-                    {child.label}
-                  </Link>
-                ))}
-              </div>
-            ) : null}
+    <nav aria-label="Main" className="flex flex-col">
+      {sections.map((section) => (
+        <div key={section.label}>
+          <div className="px-4 pb-1.5 pt-3 font-mono text-3xs uppercase tracking-[0.12em] text-[#6b757f]">
+            {section.label}
           </div>
-        );
-      })}
+          {section.items.map((item) => {
+            const active = isActive(pathname, item.href);
+            const count = item.count ? counts?.[item.count] : undefined;
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                onClick={onNavigate}
+                aria-current={active ? "page" : undefined}
+                className={cx(
+                  "flex items-center justify-between gap-2 px-4 py-1.5 text-[13px] transition",
+                  active
+                    ? "bg-primary font-medium text-white"
+                    : "text-[#c7ced4] hover:bg-white/5 hover:text-white",
+                )}
+              >
+                <span className="truncate">{item.label}</span>
+                {count ? (
+                  <span className={cx(
+                    "font-mono text-2xs tabular-nums",
+                    active ? "text-white" : "text-[#7d8791]",
+                  )}>
+                    {count}
+                  </span>
+                ) : null}
+              </Link>
+            );
+          })}
+        </div>
+      ))}
     </nav>
   );
 }
 
-export function MobileNav({ items }: { items: NavItem[] }) {
+export function MobileNav({ sections, counts }: { sections: NavSection[]; counts?: NavCounts }) {
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
   const [lastPathname, setLastPathname] = useState(pathname);
@@ -74,13 +88,14 @@ export function MobileNav({ items }: { items: NavItem[] }) {
         onClick={() => setOpen((value) => !value)}
         aria-expanded={open}
         aria-controls="mobile-nav"
-        className="rounded-md border px-3 py-2 text-sm font-medium"
+        className="border border-strong px-2.5 py-1.5 text-[12.5px] font-medium"
       >
         {open ? "Close" : "Menu"}
       </button>
       {open ? (
-        <div id="mobile-nav" className="absolute inset-x-0 top-full z-20 border-b bg-surface p-3 shadow-lg">
-          <AppNav items={items} onNavigate={() => setOpen(false)} />
+        <div id="mobile-nav"
+             className="absolute inset-x-0 top-full z-20 max-h-[70vh] overflow-y-auto bg-[#14171a] pb-3 shadow-lg">
+          <AppNav sections={sections} counts={counts} onNavigate={() => setOpen(false)} />
         </div>
       ) : null}
     </div>
@@ -121,7 +136,7 @@ export function ThemeToggle() {
       type="button"
       onClick={toggle}
       aria-pressed={dark}
-      className="rounded-md border px-2.5 py-2 text-sm hover:bg-surface-muted"
+      className="border border-strong px-2 py-1.5 font-mono text-2xs hover:bg-surface-muted"
       title={dark ? "Switch to light mode" : "Switch to dark mode"}
     >
       <span aria-hidden>{dark ? "☀" : "☾"}</span>

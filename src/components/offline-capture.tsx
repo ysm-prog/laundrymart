@@ -144,13 +144,13 @@ export function OfflineCapture({
     <form onSubmit={onSubmit} className="space-y-4">
       <div className="flex flex-wrap items-center gap-2 text-sm">
         <span className={cx(
-          "inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium",
+          "inline-flex items-center gap-1.5 px-2 py-0.5 text-xs font-medium",
           online ? "bg-success/10 text-success" : "bg-warning/10 text-warning",
         )}>
           <span aria-hidden>●</span> {online ? "Online" : "Offline"}
         </span>
         {queued > 0 ? (
-          <span className="rounded-full bg-warning/10 px-2 py-0.5 text-xs font-medium text-warning">
+          <span className="bg-warning/10 px-2 py-0.5 text-xs font-medium text-warning">
             {queued} waiting to sync
           </span>
         ) : null}
@@ -241,7 +241,7 @@ export function OfflineCapture({
 
       <div className="flex flex-wrap items-center gap-2">
         <button type="submit" disabled={isPending}
-                className="rounded-md bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground
+                className="rounded-md bg-action px-4 py-2.5 text-sm font-medium text-action-foreground
                            transition hover:opacity-90 disabled:opacity-60">
           Save {kind}
         </button>
