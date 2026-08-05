@@ -8,13 +8,18 @@ import { recordAudit } from "@/lib/audit";
 import { addDays } from "@/lib/domain/dates";
 import { generateServiceDates, parsePattern, type HolidayRule } from "@/lib/domain/service-calendar";
 import {
-  buildReplacementCharges, buildServiceCharges, lineAmount, resolvePrice, round2,
+  allocateWeightCharges, buildReplacementCharges, buildServiceCharges, lineAmount,
+  resolvePrice, round2,
   type DraftLine,
 } from "@/lib/domain/pricing";
 import {
   count, describeDbError, done, fail, firstIssue, money, optionalText,
   optionalUuid, requiredDate, toObject,
 } from "@/lib/actions";
+import { loadInvoiceForPdf } from "@/lib/pdf/invoice-data";
+import { invoiceFileName, renderInvoicePdf } from "@/lib/pdf/render";
+import { buildInvoiceEmail } from "@/lib/email/invoice-email";
+import { sendEmail } from "@/lib/email/send";
 
 type BillableAgreement = {
   id: string;
@@ -36,11 +41,13 @@ type BillableAgreement = {
 };
 
 type BillableLine = {
+  id: string;
   agreement_id: string;
   item_id: string | null;
   charge_type: string;
   pricing_model: string;
   unit_price: number;
+  percentage: number | null;
   standard_quantity: number;
   included_quantity: number;
   taxable: boolean;
@@ -92,7 +99,8 @@ export async function generateInvoices(formData: FormData): Promise<void> {
 
   const { data: agreementLines } = await supabase
     .from("service_agreement_lines")
-    .select("agreement_id, item_id, charge_type, pricing_model, unit_price, standard_quantity, included_quantity, taxable, " +
+    .select("id, agreement_id, item_id, charge_type, pricing_model, unit_price, percentage, " +
+            "standard_quantity, included_quantity, taxable, " +
             "items(name, sku, rental_price, wash_only_price, replacement_cost)")
     .in("agreement_id", live.map((a) => a.id))
     .returns<BillableLine[]>();
@@ -129,30 +137,83 @@ export async function generateInvoices(formData: FormData): Promise<void> {
       endDate: agreement.end_date,
     });
 
-    const serviceItems = (linesByAgreement.get(agreement.id) ?? []).flatMap((line) => {
+    const lines = linesByAgreement.get(agreement.id) ?? [];
+
+    // Per-kg lines bill what the run actually weighed, not what the pattern
+    // predicted, so the weight comes from the period's pickups rather than from
+    // the service calendar (§11).
+    const weightLines = lines.filter((line) => line.pricing_model === "per_kg");
+    const weightByLine = new Map<string, { billableKg: number; allowanceKg: number }>();
+    let weighedCollections = 0;
+
+    if (weightLines.length > 0) {
+      const { data: weighed } = await supabase
+        .from("pickups")
+        .select("total_weight_kg")
+        .eq("customer_id", agreement.customer_id)
+        .gte("pickup_date", start).lte("pickup_date", end)
+        .gt("total_weight_kg", 0)
+        .returns<Array<{ total_weight_kg: number }>>();
+
+      weighedCollections = (weighed ?? []).length;
+      const totalWeightKg = (weighed ?? [])
+        .reduce((sum, row) => sum + Number(row.total_weight_kg ?? 0), 0);
+
+      for (const allocation of allocateWeightCharges({
+        totalWeightKg,
+        collections: weighedCollections,
+        lines: weightLines.map((line) => ({
+          key: line.id,
+          standardQuantity: Number(line.standard_quantity ?? 0),
+          includedQuantity: Number(line.included_quantity ?? 0),
+        })),
+      })) {
+        weightByLine.set(allocation.key, allocation);
+      }
+    }
+
+    const serviceItems = lines.flatMap((line) => {
       const item = line.items;
 
       // Pricing precedence §11: agreement line first, then the item default.
+      // A per-kg line is a rate per kilogram, and no item carries one, so it can
+      // only ever be priced by the agreement itself.
       const { price } = resolvePrice({
         agreementLinePrice: line.unit_price > 0 ? line.unit_price : null,
-        itemPrice: line.charge_type === "wash_only" ? item?.wash_only_price : item?.rental_price,
+        itemPrice: line.pricing_model === "per_kg"
+          ? null
+          : line.charge_type === "wash_only" ? item?.wash_only_price : item?.rental_price,
       });
 
       const quantity = (() => {
         switch (line.pricing_model) {
           case "per_item": return Math.max(0, line.standard_quantity - line.included_quantity) * visits.length;
           case "per_collection": return visits.length;
+          case "per_kg": return weightByLine.get(line.id)?.billableKg ?? 0;
           case "monthly": return 1;
-          default: return 0; // per_kg and percentage are handled elsewhere
+          default: return 0; // percentage lines charge off the subtotal below
         }
       })();
 
       if (quantity <= 0 || price <= 0) return [];
 
+      const detail = (() => {
+        switch (line.pricing_model) {
+          case "per_collection":
+            return `${visits.length} collection(s)`;
+          case "per_kg": {
+            const allowance = weightByLine.get(line.id)?.allowanceKg ?? 0;
+            return `${quantity} kg over ${weighedCollections} collection(s)` +
+              (allowance > 0 ? `, ${allowance} kg included` : "");
+          }
+          default:
+            return `${quantity} × ${start} to ${end}`;
+        }
+      })();
+
       return [{
         itemId: line.item_id,
-        description: `${item?.name ?? "Service"} — ${line.pricing_model === "per_collection"
-          ? `${visits.length} collection(s)` : `${quantity} × ${start} to ${end}`}`,
+        description: `${item?.name ?? "Service"} — ${detail}`,
         quantity: round2(quantity),
         unitPrice: price,
         chargeType: line.charge_type as DraftLine["chargeType"],
@@ -160,8 +221,23 @@ export async function generateInvoices(formData: FormData): Promise<void> {
       }];
     });
 
+    // Percentage lines are a rate against the service subtotal, so they are
+    // handed to the pricing engine alongside the levies to share one base.
+    const percentageLines = lines.flatMap((line) =>
+      line.pricing_model === "percentage" && Number(line.percentage ?? 0) > 0
+        ? [{
+            label: line.items?.name ?? "Agreement charge",
+            pct: Number(line.percentage),
+            chargeType: line.charge_type as DraftLine["chargeType"],
+            itemId: line.item_id,
+            taxable: line.taxable,
+          }]
+        : [],
+    );
+
     const draft = buildServiceCharges({
       items: serviceItems,
+      percentageLines,
       minimumCharge: Number(agreement.minimum_charge ?? 0),
       fuelLevyPct: Number(agreement.fuel_levy_pct ?? 0),
       weekendSurchargePct: Number(agreement.weekend_surcharge_pct ?? 0),
@@ -505,6 +581,81 @@ export async function createCreditNote(formData: FormData): Promise<void> {
   });
   revalidatePath(backTo);
   done(backTo, `Credit note ${note.credit_note_number} issued.`);
+}
+
+/**
+ * Email the invoice to the customer with the rendered PDF attached (§7.14).
+ *
+ * Two rules the customer's inbox depends on:
+ *  - a draft is never sent. Draft lines are still editable, so sending one
+ *    means a customer holding a document the system may contradict tomorrow;
+ *  - the address the invoice actually went to is stamped on the invoice, not
+ *    inferred later from the customer record, which can change.
+ */
+export async function emailInvoice(formData: FormData): Promise<void> {
+  const session = await assertCapability("invoices.write");
+  const parsed = z.object({
+    id: z.string().uuid(),
+    to: z.preprocess(
+      (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
+      z.string().email("That is not a valid email address").optional(),
+    ),
+  }).safeParse(toObject(formData));
+  if (!parsed.success) fail("/invoices", firstIssue(parsed.error));
+
+  const backTo = `/invoices/${parsed.data.id}`;
+
+  const data = await loadInvoiceForPdf(parsed.data.id, session.tenantId);
+  if (!data) fail(backTo, "That invoice could not be found.");
+
+  if (data.invoice.status === "draft") {
+    fail(backTo, "Issue the invoice before emailing it — a draft can still change.");
+  }
+  if (data.invoice.status === "void") {
+    fail(backTo, "This invoice is void and cannot be sent.");
+  }
+
+  const recipient = parsed.data.to ?? data.customer.billing_email;
+  if (!recipient) {
+    fail(backTo, "This customer has no billing email. Add one, or type an address to send to.");
+  }
+
+  const pdf = await renderInvoicePdf(data);
+  const { subject, html, text } = buildInvoiceEmail(data);
+
+  const result = await sendEmail({
+    to: recipient,
+    subject,
+    html,
+    text,
+    attachments: [{ filename: invoiceFileName(data.invoice.invoice_number), content: pdf }],
+  });
+
+  if (!result.ok) {
+    // Recorded even on failure: "we tried and it bounced" is exactly the thing
+    // someone needs to know when a customer says they never received it.
+    await recordAudit(session, {
+      entity: "invoice", entityId: parsed.data.id, action: "send_failed",
+      summary: `${recipient}: ${result.error}`,
+    });
+    fail(backTo, `The invoice could not be sent. ${result.error}`);
+  }
+
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("invoices")
+    .update({ emailed_at: new Date().toISOString(), emailed_to: recipient })
+    .eq("id", parsed.data.id).eq("tenant_id", session.tenantId);
+  if (error) fail(backTo, describeDbError(error));
+
+  await recordAudit(session, {
+    entity: "invoice", entityId: parsed.data.id, action: "send",
+    summary: `sent to ${recipient}`,
+    metadata: { providerId: result.id },
+  });
+
+  revalidatePath(backTo);
+  done(backTo, `Invoice emailed to ${recipient}.`);
 }
 
 /** Marks overdue anything past its due date that is still unpaid. */

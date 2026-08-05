@@ -12,8 +12,10 @@ import {
 } from "@/components/ui";
 import { Checkbox, Field, Input, Select, SubmitButton } from "@/components/form";
 import { PrintButton } from "@/components/print-button";
+import { emailIsConfigured } from "@/lib/email/send";
 import {
-  addInvoiceLine, createCreditNote, issueInvoice, recordPayment, removeInvoiceLine, voidInvoice,
+  addInvoiceLine, createCreditNote, emailInvoice, issueInvoice, recordPayment,
+  removeInvoiceLine, voidInvoice,
 } from "../actions";
 
 export const dynamic = "force-dynamic";
@@ -43,7 +45,7 @@ export default async function InvoiceDetailPage({
     .from("invoices")
     .select("id, invoice_number, customer_id, invoice_type, status, issue_date, due_date, " +
             "period_start, period_end, purchase_order_number, payment_terms_days, subtotal, " +
-            "tax_amount, total, amount_paid, balance, notes, void_reason, " +
+            "tax_amount, total, amount_paid, balance, notes, void_reason, emailed_at, emailed_to, " +
             "customers(business_name, customer_number, abn, billing_address_line1, billing_suburb, " +
             "billing_state, billing_postcode, billing_email)")
     .eq("id", id)
@@ -52,6 +54,7 @@ export default async function InvoiceDetailPage({
   if (!invoice) notFound();
 
   const editable = writable && invoice.status === "draft";
+  const emailConfigured = emailIsConfigured();
 
   return (
     <div className="space-y-6">
@@ -62,7 +65,14 @@ export default async function InvoiceDetailPage({
         actions={
           <>
             <StatusBadge status={invoice.status} />
-            <PrintButton label="Print / save as PDF" />
+            {/* A route handler, not a page — plain anchor so the browser
+                downloads it rather than client-navigating to a PDF. */}
+            <a href={`/api/invoices/${id}/pdf`} target="_blank" rel="noreferrer"
+               className="inline-flex items-center justify-center rounded-md border px-3 py-2
+                          text-sm font-medium transition hover:bg-surface-muted print:hidden">
+              Download PDF
+            </a>
+            <PrintButton label="Print" />
             <ButtonLink href="/invoices">All invoices</ButtonLink>
           </>
         }
@@ -106,6 +116,36 @@ export default async function InvoiceDetailPage({
 
       {writable ? (
         <div className="grid gap-4 lg:grid-cols-2 print:hidden">
+          <Card
+            title="Send to customer"
+            description={invoice.emailed_at
+              ? `Last sent ${date(invoice.emailed_at)} to ${invoice.emailed_to ?? "the customer"}.`
+              : "Emails the PDF as an attachment."}
+          >
+            {invoice.status === "draft" ? (
+              <Notice tone="info">Issue the invoice before sending — a draft can still change.</Notice>
+            ) : invoice.status === "void" ? (
+              <Notice tone="warning">A void invoice cannot be sent.</Notice>
+            ) : !emailConfigured ? (
+              <Notice tone="warning" title="No email provider configured">
+                Set <code>RESEND_API_KEY</code> and <code>INVOICE_FROM_EMAIL</code> to send from
+                the app. The PDF can still be downloaded and attached by hand.
+              </Notice>
+            ) : (
+              <form action={emailInvoice} className="flex flex-wrap items-end gap-3">
+                <input type="hidden" name="id" value={id} />
+                <Field label="Send to" name="to"
+                       hint={invoice.customers?.billing_email
+                         ? "Leave blank to use the customer's billing email."
+                         : "This customer has no billing email on file."}>
+                  <Input name="to" type="email"
+                         placeholder={invoice.customers?.billing_email ?? "accounts@customer.com.au"} />
+                </Field>
+                <SubmitButton>Email invoice</SubmitButton>
+              </form>
+            )}
+          </Card>
+
           <Card title="Issue and void">
             <div className="flex flex-wrap gap-2">
               {invoice.status === "draft" ? (

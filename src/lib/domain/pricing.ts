@@ -34,6 +34,67 @@ export const CHARGE_TYPE_LABELS: Record<ChargeType, string> = {
   other: "Other",
 };
 
+export type WeightAllocationInput = {
+  /** Weight actually collected over the billing period, in kilograms. */
+  totalWeightKg: number;
+  /** Collections that recorded a weight — each one earns the line's allowance. */
+  collections: number;
+  lines: ReadonlyArray<{
+    key: string;
+    /** Expected kg per collection; used only to weight the split. */
+    standardQuantity?: number;
+    /** Kilograms included free per collection. */
+    includedQuantity?: number;
+  }>;
+};
+
+export type WeightAllocation = {
+  key: string;
+  /** This line's slice of the collected weight, before its allowance. */
+  shareKg: number;
+  /** Free kilograms this line carries across the period. */
+  allowanceKg: number;
+  /** What is actually billed. */
+  billableKg: number;
+};
+
+/**
+ * Split the weight actually collected in a period across an agreement's per_kg
+ * lines (§11).
+ *
+ * A pickup records one total weight, not a weight per item, so the usual case —
+ * a single per_kg line — simply bills the lot. When an agreement carries more
+ * than one per_kg line the weight is shared in proportion to each line's
+ * standard quantity (equally if none is set), which is deterministic and can
+ * never bill the same kilogram twice. Rounding remainder lands on the last line
+ * so the shares always add back up to the weight that was weighed.
+ */
+export function allocateWeightCharges(input: WeightAllocationInput): WeightAllocation[] {
+  const { lines, collections } = input;
+  if (lines.length === 0) return [];
+
+  const total = Math.max(0, input.totalWeightKg);
+  const weights = lines.map((line) => Math.max(0, line.standardQuantity ?? 0));
+  const weightSum = weights.reduce((sum, value) => sum + value, 0);
+
+  let allocated = 0;
+  return lines.map((line, index) => {
+    const isLast = index === lines.length - 1;
+    // The last line absorbs the rounding remainder rather than dropping grams.
+    const share = weightSum > 0 ? (weights[index] ?? 0) / weightSum : 1 / lines.length;
+    const shareKg = isLast ? round2(total - allocated) : round2(total * share);
+    allocated = round2(allocated + shareKg);
+
+    const allowanceKg = round2(Math.max(0, line.includedQuantity ?? 0) * Math.max(0, collections));
+    return {
+      key: line.key,
+      shareKg,
+      allowanceKg,
+      billableKg: round2(Math.max(0, shareKg - allowanceKg)),
+    };
+  });
+}
+
 export type PriceSources = {
   agreementLinePrice?: number | null;
   itemPrice?: number | null;
@@ -102,6 +163,18 @@ export type ServiceChargeInput = {
     chargeType?: ChargeType;
     taxable?: boolean;
   }>;
+  /**
+   * Percentage lines carried on the agreement itself. They bill against the same
+   * base as the levies below, so an agreement's own percentage charge can never
+   * compound on top of the fuel levy (or vice versa).
+   */
+  percentageLines?: ReadonlyArray<{
+    label: string;
+    pct: number;
+    chargeType?: ChargeType;
+    itemId?: string | null;
+    taxable?: boolean;
+  }>;
   minimumCharge?: number;
   fuelLevyPct?: number;
   weekendSurchargePct?: number;
@@ -160,6 +233,21 @@ export function buildServiceCharges(input: ServiceChargeInput): DraftLine[] {
       taxable: true,
     });
   };
+
+  for (const line of input.percentageLines ?? []) {
+    if (!line.pct || line.pct <= 0 || base <= 0) continue;
+    const amount = round2(base * (line.pct / 100));
+    if (amount === 0) continue;
+    lines.push({
+      description: `${line.label} (${line.pct}%)`,
+      chargeType: line.chargeType ?? "other",
+      quantity: 1,
+      unitPrice: amount,
+      amount,
+      taxable: line.taxable ?? true,
+      itemId: line.itemId ?? null,
+    });
+  }
 
   percentage(input.fuelLevyPct, "fuel_levy", "Fuel levy");
   if (input.servicedOnWeekend) percentage(input.weekendSurchargePct, "weekend_surcharge", "Weekend surcharge");

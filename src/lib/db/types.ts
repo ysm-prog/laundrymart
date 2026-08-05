@@ -224,6 +224,9 @@ export type Pickup = {
   total_weight_kg: number | null;
   notes: string | null;
   signed_by: string | null;
+  /** Storage keys in the private `run-media` bucket, not public URLs. */
+  photo_urls: string[];
+  signature_url: string | null;
   completed_at: string | null;
 };
 
@@ -244,6 +247,9 @@ export type Delivery = {
   delivery_date: string;
   notes: string | null;
   signed_by: string | null;
+  /** Storage keys in the private `run-media` bucket, not public URLs. */
+  photo_urls: string[];
+  signature_url: string | null;
   completed_at: string | null;
 };
 
@@ -297,6 +303,9 @@ export type Invoice = {
   amount_paid: number;
   balance: number;
   notes: string | null;
+  emailed_at: string | null;
+  /** Address the PDF was last sent to, stamped at send time. */
+  emailed_to: string | null;
 };
 
 export type InvoiceLine = {
@@ -343,6 +352,33 @@ export type Membership = {
   role: string;
   depot_id: Uuid | null;
   created_at: string;
+};
+
+/** Spec §7.16 — a grouping of linen moving through the plant together. */
+export type ProductionBatch = {
+  id: Uuid;
+  depot_id: Uuid | null;
+  batch_number: string;
+  stage: string;
+  machine: string | null;
+  operator_id: Uuid | null;
+  started_at: string | null;
+  completed_at: string | null;
+  cancelled_at: string | null;
+  cancel_reason: string | null;
+  notes: string | null;
+  created_at: string;
+};
+
+export type ProductionBatchLine = {
+  id: Uuid;
+  batch_id: Uuid;
+  item_id: Uuid;
+  owner_type: "laundry_owned" | "customer_owned";
+  customer_id: Uuid | null;
+  quantity: number;
+  rejected_quantity: number;
+  notes: string | null;
 };
 
 /** `select("id, name")` on a lookup table. */

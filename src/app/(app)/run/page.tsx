@@ -10,6 +10,7 @@ import {
 } from "@/components/ui";
 import { Checkbox, Field, Input, Select, SubmitButton, Textarea } from "@/components/form";
 import { OfflineCapture, ServiceWorkerRegistrar } from "@/components/offline-capture";
+import { MediaUploadField } from "@/components/media-upload-field";
 import { CHECKLIST_KEYS, CHECKLIST_LABELS } from "./checklist";
 import { closeRun, confirmLoad, markReturning, startRun, submitInspection, unloadRun } from "./actions";
 
@@ -123,6 +124,7 @@ function RunWorkflow({ route }: { route: DailyRoute }) {
                     <Input name="defects" placeholder="Nearside indicator intermittent" />
                   </Field>
                 </div>
+                <MediaUploadField scope="inspection" photosName="photo_paths" photoLabel="Defect photos" />
                 <SubmitButton>Submit inspection</SubmitButton>
               </form>
             ) : (

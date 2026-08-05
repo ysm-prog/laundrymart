@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState, useTransition } from "react";
 import {
   enqueue, flush, newClientRef, pending, type QueuedLine, type QueuedRecord,
 } from "@/lib/offline/queue";
+import { PhotoPicker, SignaturePad } from "./media-capture";
 import { cx } from "./ui";
 
 export type CaptureItem = { id: string; name: string; sku: string };
@@ -26,6 +27,8 @@ export function OfflineCapture({
   const [queued, setQueued] = useState(0);
   const [status, setStatus] = useState<string | null>(null);
   const [online, setOnline] = useState(true);
+  const [photos, setPhotos] = useState<string[]>([]);
+  const [signature, setSignature] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
   const refresh = useCallback(async () => {
@@ -94,6 +97,8 @@ export function OfflineCapture({
       signedBy: (data.get("signed_by") as string) || null,
       notes: (data.get("notes") as string) || null,
       lines,
+      photos,
+      signature,
     };
 
     const record: QueuedRecord = kind === "pickup"
@@ -103,6 +108,10 @@ export function OfflineCapture({
 
     await enqueue(record);
     form.reset();
+    // The media lives in React state, so form.reset() cannot clear it — and
+    // leaving it would attach this stop's proof to the next one.
+    setPhotos([]);
+    setSignature(null);
     setStatus("Saved on this device.");
     await refresh();
     startTransition(() => { void drain(); });
@@ -196,6 +205,15 @@ export function OfflineCapture({
           <span className="mb-1 block font-medium">Notes</span>
           <input name="notes" className="w-full rounded-md border bg-surface px-3 py-2 text-sm" />
         </label>
+      </div>
+
+      <div className="grid gap-4 border-t pt-4 sm:grid-cols-2">
+        <PhotoPicker
+          photos={photos}
+          onChange={setPhotos}
+          label={kind === "pickup" ? "Collection photos" : "Delivery photos"}
+        />
+        <SignaturePad value={signature} onChange={setSignature} label="Customer signature" />
       </div>
 
       <div className="flex flex-wrap items-center gap-2">

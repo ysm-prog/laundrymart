@@ -12,7 +12,11 @@ export async function recordAudit(
   entry: {
     entity: string;
     entityId?: string | null;
-    action: "create" | "update" | "delete" | "status_change" | "sync" | "generate";
+    // `send_failed` earns its place next to the successes: when a customer says
+    // they never got the invoice, the useful record is the attempt, not silence.
+    action:
+      | "create" | "update" | "delete" | "status_change" | "sync" | "generate"
+      | "send" | "send_failed";
     summary?: string;
     metadata?: Record<string, unknown>;
   },

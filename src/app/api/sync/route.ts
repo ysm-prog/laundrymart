@@ -4,6 +4,7 @@ import { requireSession } from "@/lib/auth/context";
 import { createClient } from "@/lib/supabase/server";
 import { can } from "@/lib/roles";
 import { recordAudit } from "@/lib/audit";
+import { MAX_PHOTOS, isTenantPath } from "@/lib/media";
 
 /**
  * Offline sync endpoint for the driver app.
@@ -21,6 +22,13 @@ const line = z.object({
   missingQuantity: z.number().int().min(0).optional(),
 });
 
+// Media is uploaded ahead of the batch by /api/media; what arrives here is the
+// storage key it returned, re-checked below against the caller's own tenant.
+const media = {
+  photoPaths: z.array(z.string().max(400)).max(MAX_PHOTOS).optional(),
+  signaturePath: z.string().max(400).nullish(),
+};
+
 const pickup = z.object({
   kind: z.literal("pickup"),
   clientRef: z.string().min(8).max(80),
@@ -31,6 +39,7 @@ const pickup = z.object({
   signedBy: z.string().max(120).nullish(),
   notes: z.string().max(2000).nullish(),
   lines: z.array(line).min(1),
+  ...media,
 });
 
 const delivery = z.object({
@@ -41,6 +50,7 @@ const delivery = z.object({
   signedBy: z.string().max(120).nullish(),
   notes: z.string().max(2000).nullish(),
   lines: z.array(line).min(1),
+  ...media,
 });
 
 const batch = z.object({
@@ -88,6 +98,15 @@ export async function POST(request: NextRequest) {
       continue;
     }
 
+    // Storage already refused a cross-tenant write; this second check stops a
+    // caller from *recording* someone else's key against their own paperwork.
+    const photoUrls = (record.photoPaths ?? [])
+      .filter((path) => isTenantPath(path, session.tenantId));
+    const signatureUrl = record.signaturePath
+      && isTenantPath(record.signaturePath, session.tenantId)
+      ? record.signaturePath
+      : null;
+
     const base = {
       tenant_id: session.tenantId,
       created_by: session.userId,
@@ -98,6 +117,8 @@ export async function POST(request: NextRequest) {
       client_ref: record.clientRef,
       signed_by: record.signedBy ?? null,
       notes: record.notes ?? null,
+      photo_urls: photoUrls,
+      signature_url: signatureUrl,
       completed_at: record.capturedAt,
       synced_at: new Date().toISOString(),
     };

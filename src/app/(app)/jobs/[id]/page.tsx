@@ -10,6 +10,8 @@ import {
   PageHeader, SkeletonRows, StatusBadge, humanise,
 } from "@/components/ui";
 import { Field, Input, Select, SubmitButton, Textarea } from "@/components/form";
+import { MediaUploadField } from "@/components/media-upload-field";
+import { ProofOfService } from "@/components/proof-of-service";
 import { flagException, recordDelivery, recordPickup, setJobProgress } from "../actions";
 
 export const dynamic = "force-dynamic";
@@ -136,13 +138,13 @@ export default async function JobDetailPage({
 
       {doesPickup ? (
         <Suspense fallback={<SkeletonRows rows={4} />}>
-          <PickupSection jobId={id} writable={writable} />
+          <PickupSection jobId={id} writable={writable} tenantId={session.tenantId} />
         </Suspense>
       ) : null}
 
       {doesDelivery ? (
         <Suspense fallback={<SkeletonRows rows={4} />}>
-          <DeliverySection jobId={id} writable={writable} />
+          <DeliverySection jobId={id} writable={writable} tenantId={session.tenantId} />
         </Suspense>
       ) : null}
     </div>
@@ -167,11 +169,16 @@ async function activeItems() {
   return data ?? [];
 }
 
-async function PickupSection({ jobId, writable }: { jobId: string; writable: boolean }) {
+async function PickupSection({
+  jobId, writable, tenantId,
+}: {
+  jobId: string; writable: boolean; tenantId: string;
+}) {
   const supabase = await createClient();
   const [{ data: pickups }, items] = await Promise.all([
     supabase.from("pickups")
       .select("id, job_id, customer_id, pickup_date, bag_count, total_weight_kg, notes, signed_by, completed_at, " +
+              "photo_urls, signature_url, " +
               "pickup_lines(id, item_id, quantity, damaged_quantity, missing_quantity)")
       .eq("job_id", jobId).order("completed_at", { ascending: false })
       .returns<Array<Pickup & { pickup_lines: Array<{ id: string; item_id: string; quantity: number; damaged_quantity: number; missing_quantity: number }> }>>(),
@@ -202,6 +209,12 @@ async function PickupSection({ jobId, writable }: { jobId: string; writable: boo
                 ]}
               />
               {pickup.notes ? <p className="mt-2 text-sm text-muted-foreground">{pickup.notes}</p> : null}
+              <ProofOfService
+                photoPaths={pickup.photo_urls}
+                signaturePath={pickup.signature_url}
+                signedBy={pickup.signed_by}
+                tenantId={tenantId}
+              />
             </div>
           ))}
         </div>
@@ -227,6 +240,13 @@ async function PickupSection({ jobId, writable }: { jobId: string; writable: boo
               <Input name="notes" />
             </Field>
           </div>
+          <MediaUploadField
+            scope="pickup"
+            photosName="photo_paths"
+            signatureName="signature_path"
+            photoLabel="Collection photos"
+            signatureLabel="Customer signature"
+          />
           <SubmitButton>Record pickup</SubmitButton>
         </form>
       ) : null}
@@ -234,11 +254,16 @@ async function PickupSection({ jobId, writable }: { jobId: string; writable: boo
   );
 }
 
-async function DeliverySection({ jobId, writable }: { jobId: string; writable: boolean }) {
+async function DeliverySection({
+  jobId, writable, tenantId,
+}: {
+  jobId: string; writable: boolean; tenantId: string;
+}) {
   const supabase = await createClient();
   const [{ data: deliveries }, items] = await Promise.all([
     supabase.from("deliveries")
       .select("id, job_id, customer_id, delivery_date, notes, signed_by, completed_at, " +
+              "photo_urls, signature_url, " +
               "delivery_lines(id, item_id, quantity)")
       .eq("job_id", jobId).order("completed_at", { ascending: false })
       .returns<Array<Delivery & { delivery_lines: Array<{ id: string; item_id: string; quantity: number }> }>>(),
@@ -266,6 +291,12 @@ async function DeliverySection({ jobId, writable }: { jobId: string; writable: b
                 ]}
               />
               {delivery.notes ? <p className="mt-2 text-sm text-muted-foreground">{delivery.notes}</p> : null}
+              <ProofOfService
+                photoPaths={delivery.photo_urls}
+                signaturePath={delivery.signature_url}
+                signedBy={delivery.signed_by}
+                tenantId={tenantId}
+              />
             </div>
           ))}
         </div>
@@ -285,6 +316,13 @@ async function DeliverySection({ jobId, writable }: { jobId: string; writable: b
               <Textarea name="notes" rows={2} />
             </Field>
           </div>
+          <MediaUploadField
+            scope="delivery"
+            photosName="photo_paths"
+            signatureName="signature_path"
+            photoLabel="Delivery photos"
+            signatureLabel="Customer signature"
+          />
           <SubmitButton>Record delivery</SubmitButton>
         </form>
       ) : null}
