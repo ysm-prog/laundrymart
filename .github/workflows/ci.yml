@@ -10,7 +10,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with: { node-version: "20", cache: "npm" }
       - run: npm ci
       - run: bash scripts/verify.sh
@@ -28,7 +28,7 @@ jobs:
           curl -fsSL -o gl.tgz "https://github.com/gitleaks/gitleaks/releases/download/v${V}/gitleaks_${V}_linux_x64.tar.gz"
           tar xzf gl.tgz gitleaks
           ./gitleaks detect --no-banner --redact --config=.gitleaks.toml --source=.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with: { node-version: "20", cache: "npm" }
       - run: npm ci
       - name: dependency audit (advisory)
