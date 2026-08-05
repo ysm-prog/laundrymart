@@ -2,7 +2,7 @@
 -- inspection before start, load confirmation before start, unload before close,
 -- inventory conservation, sequential numbering, protected items.
 begin;
-select plan(11);
+select plan(12);
 
 insert into auth.users (id, email) values
   ('11111111-1111-1111-1111-111111111111','ops@example.com');
@@ -87,6 +87,15 @@ select is(public.next_number('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','invoice','I
           'INV00001', 'the first invoice number is INV00001');
 select is(public.next_number('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','invoice','INV'),
           'INV00002', 'invoice numbers increment without gaps');
+
+-- next_number runs with definer rights, so its tenant argument is the whole
+-- boundary. Without this check anyone reaching PostgREST could burn another
+-- tenant's sequence and leave permanent gaps in their invoice numbering.
+select throws_ok(
+  $$select public.next_number('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb','invoice','INV')$$,
+  '42501',
+  'not a member of that tenant',
+  'a member of one tenant cannot draw numbers for another');
 
 -- ---- items referenced by an active agreement are protected (§7.5) --------
 insert into public.service_agreements (id, tenant_id, customer_id, agreement_number, status, start_date)

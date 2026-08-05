@@ -92,10 +92,17 @@ branches deploy. Never force-push `Prod`.
   on `storage.objects`.
 - `0008_invoice_delivery` — `invoices.emailed_to`, stamped at send time.
 - `0009_warehouse` — production batches and their manifest lines, stage/manifest guards.
+- `0010_function_hardening` — tenant check inside `next_number()`, pinned `search_path`.
+- `0011_revoke_public_execute` — closes the implicit PUBLIC grant on `public` functions.
 
 Proofs in `supabase/tests/`: `rls_isolation`, `rls_coverage`, `driver_scope`,
-`business_rules`, `media_scope`, `warehouse_rules` (45 assertions). Demo data in
+`business_rules`, `media_scope`, `warehouse_rules` (47 assertions). Demo data in
 `supabase/seed.sql` — not applied by migrations.
+
+**Do not re-add `grant execute on all functions in schema public to anon`.** That
+boilerplate in 0002–0009 is what exposed every SECURITY DEFINER helper on
+`/rest/v1/rpc/…` without a login; 0011 revokes it and `rls_coverage` asserts it stays
+revoked.
 
 `scripts/health/pg-bootstrap.sql` shims what Supabase provides outside our migrations: the
 `auth` schema, and the `storage` bucket/object tables plus `foldername()` that 0007 attaches
@@ -132,6 +139,19 @@ support TS 7) and ESLint **9** (`eslint-config-next@16` depends on typescript-es
 which targets ESLint 9). Next 16 needs `experimental.useTypeScriptCli` and the auth gate
 lives in `src/proxy.ts`, not `src/middleware.ts`.
 
+## 11. Hosted project
+`laundrymart-syd` · ref `xujhwljrmogenhvqpkrf` · ap-southeast-2 (Sydney) · org `ysm-prog`.
+All 11 migrations applied; demo tenant seeded (`Harbour Commercial Laundry`). No Auth users
+yet — memberships are empty until a login is created and linked.
+
+Two things the hosted project does differently from local Postgres, both handled in the SQL:
+- `storage.objects` belongs to `supabase_storage_admin`, so `alter table … enable row level
+  security` fails with "must be owner". RLS is already on there; 0007 guards the ALTER and
+  only runs it against the local shim. Creating *policies* on the table is separately granted
+  to `postgres` and works.
+- PostgREST publishes `public` as RPC. Anything executable by `anon` is an unauthenticated
+  endpoint — see the warning under §7.
+
 ## 18. Changelog
 ### 2026-08-05 · CI DB job runs Postgres on the runner
 The DB job installed `postgresql-16-pgtap` on the runner while Postgres ran in a `services:`
@@ -139,8 +159,29 @@ container, so `create extension pgtap` failed with "extension pgtap is not avail
 server-side extension's `.control` file has to live in the postmaster's own filesystem, and
 apt on the host cannot reach into the container. Dropped the service container and start
 Postgres 16 on the runner instead (cluster port read from `pg_lsclusters`, so a second
-cluster on 5433 does not break it). Migrations, the 45 pgTAP assertions and the seed all
-verified against this layout.
+cluster on 5433 does not break it). Migrations, the pgTAP suite and the seed all verified
+against this layout.
+
+### 2026-08-05 · Deploy to Supabase; close two REST-surface holes
+- **Live project.** `laundrymart-syd` in Sydney, all migrations applied, demo data seeded.
+- **`next_number()` was a cross-tenant integrity hole (`0010`).** SECURITY DEFINER, tenant id
+  as a plain argument, and reachable at `/rest/v1/rpc/next_number` by anyone holding the anon
+  key. No data disclosure, but §11 requires gap-free invoice numbers and this let an outsider
+  punch permanent holes in a finance record. Now checks membership.
+- **Every `public` function was callable without a login (`0011`).** The `grant execute … to
+  anon` boilerplate was only half the story — Postgres also grants EXECUTE to PUBLIC at
+  creation, so revoking the anon grant alone changed nothing. Both are now revoked, default
+  privileges follow, and `rls_coverage` asserts it. Watch the trap: the 0010 membership check
+  raises 42501, the same SQLSTATE as "permission denied", so a probe asserting only on the
+  error code passes while the grant is still open.
+- `search_path` pinned on the seven functions that lacked it. Security advisors: 18 warnings
+  → 5, all remaining ones being SECURITY DEFINER helpers that `authenticated` legitimately
+  needs (each is internally scoped to `auth.uid()`, so it only reveals facts about the caller).
+- **Sign-in failures are now readable.** The three Supabase clients read `process.env.X!`
+  directly, so a missing variable built a client against `undefined` and surfaced much later
+  as "credentials not recognised". All three go through the validated `env` object, and the
+  underlying auth error goes to the server log (never the credentials, and the user-facing
+  message stays vague so the form cannot enumerate accounts).
 
 ### 2026-08-05 · Dependency merge into Prod
 Merged every open Dependabot branch: Next 16, Tailwind 4, Zod 4, vitest 4, lefthook 2,

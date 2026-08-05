@@ -28,8 +28,16 @@ export async function signInWithPassword(formData: FormData): Promise<void> {
 
   const supabase = await createClient();
   const { error } = await supabase.auth.signInWithPassword(parsed.data);
-  // Never echo which half of the credentials was wrong.
-  if (error) back({ error: "That email and password combination was not recognised." });
+  if (error) {
+    // The message stays vague on purpose — never echo which half of the
+    // credentials was wrong. But swallowing the cause entirely makes a
+    // misconfigured deployment look identical to a typo, which cost real time
+    // once. The reason goes to the server log; never the credentials.
+    console.error("password sign-in failed", {
+      code: error.code, status: error.status, message: error.message,
+    });
+    back({ error: "That email and password combination was not recognised." });
+  }
 
   revalidatePath("/", "layout");
   redirect("/dashboard");
