@@ -46,7 +46,8 @@ links (`fail`/`done` take optional `{href,label}`; template re-validates same-si
 No migrations. Verified: typecheck, lint, 88 tests, build, /design-preview screenshotted
 light+dark. Wizard gotcha for later: step fields hide rather than unmount, and none carry
 `required` — a hidden required field fails native validation unfocusable.
-**Simplification audit shipped** on branch `claude/app-simplification-ux-audit-g94ki1`:
+**Simplification audit shipped to `Prod`** (`112fab7`, via `Dev` `d1abc68` with all three CI
+jobs green). Branch `claude/app-simplification-ux-audit-g94ki1`:
 `docs/SIMPLIFICATION-AUDIT.md` is the 13-part deliverable and the record of what changed.
 Navigation rebuilt as data (ten areas + tab strip, `sectionFor` longest-match, capability
 resolved together with href); `/search` (seven capability-gated `ilike` groups) replacing a
