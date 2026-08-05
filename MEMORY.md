@@ -5,9 +5,23 @@
 vitest 4). `laundrymart-syd` (ref `xujhwljrmogenhvqpkrf`) has migrations 0001–0011 and the demo
 tenant; the app is on Vercel at `ats.coreit.com.au`; sign-in verified end to end.
 
-**`0012_return_count` is written and green locally but NOT yet applied to the hosted
-project** — apply it before the branch deploys, or `/warehouse` 500s on the missing
-`route_id` column.
+**`0012_return_count` is applied to `laundrymart-syd`** (2026-08-05). Verified on the hosted
+project: both columns and the unique index exist, anon still has 0 executable functions, and
+the no-negative guard blocks a too-large movement with P0001 while leaving the pool and the
+ledger untouched. Security advisors unchanged at 5 SECURITY DEFINER warnings + leaked-password
+protection (an auth setting, not schema).
+
+**⚠️ Schema drift: the hosted project has a migration the repo does not.**
+`optional_inspection` (version 20260805044019, headed `0012_optional_inspection` in its own
+SQL) replaced `guard_route_transition()` to drop the vehicle-inspection requirement before a
+run can start. It is **not** in `supabase/migrations/`. So:
+- production lets a driver start a run with no inspection; local and CI still refuse.
+- `business_rules.test.sql` asserts "a run cannot start without a vehicle inspection" — that
+  assertion passes on a rebuilt database and is false in production.
+- both the repo's new migration and the hosted one call themselves 0012.
+Unresolved — needs a decision on whether the inspection gate is meant to be gone (commit the
+hosted migration as `0012_optional_inspection`, renumber `return_count` to 0013, drop the
+test assertion) or restored (re-apply the 0004 guard to production).
 
 The warehouse flow was rebuilt around the depot count on branch
 `claude/warehouse-inventory-flow-psooyq`: `/warehouse/count/:routeId` pre-fills the driver's
@@ -28,7 +42,7 @@ server-side extension, so its `.control` file has to sit in the postmaster's own
 and apt on the runner cannot reach into a container.
 
 **Next up**
-0. Apply `0012_return_count` to `laundrymart-syd`, then walk one run end to end: driver
+0. Resolve the `optional_inspection` drift above, then walk one run end to end: driver
    unloads → "Count it" on `/warehouse` → wash through to ready.
 1. Dispatch planner and billing two-pane (stage 3), then stage 4.
 2. **Enable asymmetric JWT signing keys** on the project so `getClaims()` verifies locally
