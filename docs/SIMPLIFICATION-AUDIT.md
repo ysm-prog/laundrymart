@@ -45,10 +45,11 @@ redirected to. Search returns the thing you typed, every screen sits under a
 plain-English area with tabs, and every table stacks into labelled cards on a
 phone.
 
+One correctness hole travelled with the pass and is fixed: **a customer with
+two active contracts was billed for one of them.** Details in §5.
+
 **Highest-value work still open**, in order: the notification layer (Phase C —
-the app never speaks unless spoken to), the consolidated-invoicing correctness
-hole (G7 below — a customer with two contracts is billed for one), and the
-invite-a-teammate flow.
+the app never speaks unless spoken to) and the invite-a-teammate flow.
 
 ---
 
@@ -224,11 +225,49 @@ start on the dashboard.
 
 | Finding | Severity | Recommendation |
 |---|---|---|
-| `invoices/actions.ts` is 692 lines and `invoices/page.tsx` is 622 | Medium | Split the actions file by verb group (issue/void, payments, delivery, generation); split the page's register and working pane into sibling components. Both are over the 300-line guideline and both are single-responsibility violations at the file level, not the function level |
+| `invoices/actions.ts` is 659 lines and `invoices/page.tsx` is 622 | Medium | Split the actions file by verb group (issue/void, payments, delivery, generation); split the page's register and working pane into sibling components. Both are over the 300-line guideline and both are single-responsibility violations at the file level, not the function level |
 | `design-preview/page.tsx` is 622 lines | Low | It is a gallery; length is inherent. Splitting per section would help review |
 | `agreements/agreement-wizard.tsx` is 581 lines | Medium | One component holding three steps. Extract a step per file; the shared form element stays in the parent |
 | Reports page computes seven aggregates in one request | Medium | See §8 |
-| `generateInvoices` dedupes on customer + period | **High (correctness)** | A customer with two active contracts is billed for one. Pre-existing; needs an owner decision (one consolidated invoice, or one per contract) before it can be fixed. **This is a money bug wearing a simplification costume — do not let a tidying pass bury it** |
+| ~~`generateInvoices` dedupes on customer + period~~ | ~~**High (correctness)**~~ | **FIXED — see §5a.** |
+
+### 5a. The consolidated-invoicing fix
+
+`generateInvoices` looped per contract while de-duplicating on customer +
+period, so a customer's second active contract found the first contract's
+invoice and was skipped as "already billed". **Every period, silently, for the
+whole life of the feature.**
+
+The fix is one invoice per customer carrying every contract's charges — and
+consolidating is not merely a preference, it is the only shape that can be
+correct. The weighed collections (`pickups`) and the damaged/missing linen
+(`pickup_lines`) are both recorded against the **customer**, not the contract.
+Issuing one invoice per contract would have run those same queries once per
+contract and billed the same kilograms and the same lost towels twice — trading
+an under-bill for an over-bill, which is the worse of the two.
+
+What the fix preserves:
+
+- **Each contract's money rules stay its own.** The minimum-charge top-up, the
+  fuel levy and the weekend/holiday surcharges are computed per contract and
+  appended, so a 10% levy on contract B never reaches contract A's services.
+  There is a test for exactly this.
+- **Every line still says where it came from.** `invoice_lines.agreement_id` and
+  `location_id` are per line, so a consolidated invoice reads back per contract.
+  Replacement charges belong to no single contract and carry a null
+  `agreement_id`, which the column already allowed.
+- **Header fields that have no single answer fall back rather than guess.**
+  `consolidate()` takes the value when every contract agrees and otherwise falls
+  back to something belonging to the customer — their own payment terms — or to
+  nothing at all, for a purchase order number. Quoting one contract's PO against
+  another contract's charges would be worse than leaving it blank.
+
+Structurally, the pure part moved to `src/lib/domain/invoicing.ts`
+(`contractCharges`, `consolidate`) alongside the service calendar and the
+pricing engine, with 12 unit tests. It reads no database, so the money rules are
+testable in milliseconds — the reason the rest of the domain layer exists.
+
+**No migration.** The schema already supported this; only the loop was wrong.
 
 ### What was deliberately not changed
 
@@ -370,18 +409,16 @@ Still open:
 
 In dependency order; each is independently shippable.
 
-1. **Split `invoices/actions.ts` (692 lines)** into `issue.ts`, `payments.ts`,
+1. **Split `invoices/actions.ts` (659 lines)** into `issue.ts`, `payments.ts`,
    `delivery.ts`, `generate.ts` behind the existing `"use server"` boundary.
    No behaviour change; makes the next invoicing change reviewable.
 2. **Split `invoices/page.tsx` (622 lines)** into `register.tsx` +
    `working-pane.tsx`, colocated.
 3. **Split `agreement-wizard.tsx` (581 lines)** one file per step; the shared
    `<form>` stays in the parent, which is what makes the single-post design work.
-4. **Fix consolidated invoicing (G7)** — needs the owner's answer first. This is
-   the only item on this list that changes what customers are charged.
-5. **Extract the reports page's aggregates** into `lib/domain/reporting.ts`,
+4. **Extract the reports page's aggregates** into `lib/domain/reporting.ts`,
    unit-test them, and stream each table in its own `Suspense`.
-6. **Add `@axe-core/playwright` to the verify job** against `/design-preview`.
+5. **Add `@axe-core/playwright` to the verify job** against `/design-preview`.
 
 ---
 
@@ -416,7 +453,6 @@ In dependency order; each is independently shippable.
 - Phase C: the `notifications` table, the bell, staff event coverage.
 - The invite-a-teammate flow (the magic-link path already exists — an invite is
   create-auth-user + membership + that same link).
-- Decide and fix consolidated invoicing.
 
 **Long term**
 - Customer emails on delivery and overdue, with per-tenant settings.
@@ -444,6 +480,9 @@ src/app/(app)/dashboard/page.tsx      decision table folded into DataTable
 src/app/(app)/admin/page.tsx          retired → redirect
 src/app/(app)/admin/users/page.tsx    role presets, plain copy
 src/app/design-preview/page.tsx       renders the real nav map and the real DataTable
+src/lib/domain/invoicing.ts           new — contractCharges + consolidate (pure)
+src/lib/domain/__tests__/invoicing.test.ts  new — 12 tests over the money rules
+src/app/(app)/invoices/actions.ts     generateInvoices consolidates per customer
 … plus a copy pass over 11 page headers
 ```
 

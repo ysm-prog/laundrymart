@@ -202,7 +202,7 @@ async function Register({ params }: { params: Search }) {
       <Card title="Register">
         <EmptyState
           title="No invoices match"
-          description="Generate a period from your active agreements, or raise a manual invoice."
+          description="Bill a period from your active contracts, or raise a one-off invoice."
         />
       </Card>
     );
@@ -279,7 +279,7 @@ async function WorkPane({ params, writable }: { params: Search; writable: boolea
       <EmptyState
         title="Pick an invoice from the register"
         description={writable
-          ? "Or raise one: generate a period from the active agreements, or start a manual invoice."
+          ? "Or raise one: bill a period from your active contracts, or start a one-off invoice."
           : "Its lines, payments and status will open here."}
         action={writable ? (
           <div className="flex flex-wrap justify-center gap-1.5">
@@ -564,7 +564,7 @@ function GenerateTool({ params }: { params: Search }) {
   return (
     <Card
       title="Create this month's invoices"
-      description="Bills every active contract for the period below. Anything already billed is skipped, so it is safe to run twice."
+      description="One invoice per customer, covering every contract they hold for the period below. Anything already billed is skipped, so it is safe to run twice."
       actions={<ButtonLink href={hrefWith(params, { tool: undefined })}>Close</ButtonLink>}
     >
       <form action={generateInvoices} className="grid gap-3 sm:grid-cols-2">

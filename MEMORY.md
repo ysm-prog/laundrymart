@@ -42,9 +42,17 @@ owner decisions are queued in Part 4 of the design spec. Open item: the live DB 
 `0012_return_count` applied from unmerged branch `claude/warehouse-inventory-flow-psooyq`;
 merging that branch needs a migration-number reconcile.
 
-**Known correctness hole, unfixed and deliberately not buried:** `generateInvoices` dedupes
-on customer + period, so a customer with two active contracts is billed for one. Needs the
-owner's call (one consolidated invoice vs one per contract) before it can be fixed.
+**Consolidated invoicing is fixed** (same branch): `generateInvoices` now writes one invoice
+per customer per period carrying every contract's charges. It used to loop per contract while
+de-duplicating on customer + period, so contract two was skipped as "already billed" — every
+period, silently. Consolidating is the only correct shape, because the weighed collections
+and the damaged/missing linen are recorded against the *customer*: one invoice per contract
+would have billed both twice. Each contract's minimum/levy/surcharges still apply to its own
+services only; lines keep `agreement_id` (null for replacement charges); header fields the
+contracts disagree on fall back via `consolidate()` to the customer's own payment terms, or
+to null for a purchase order. Pure part lives in `src/lib/domain/invoicing.ts` with 12 tests.
+No migration. **Not yet exercised against real data** — worth generating a period on the demo
+tenant for a customer with two contracts before anyone bills a real month.
 
 Working through the Plantline design handoff in four stages. **Stages 1–3 are done** — theme,
 shell, dashboard, and now the dispatch planner and the billing two-pane (branch

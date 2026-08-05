@@ -31,8 +31,10 @@ The master spec names a .NET 9 Web API; this build follows the supplied skeleton
   URL-param survivor is the auth gate's `?error=forbidden`, set during render where a cookie
   cannot be. `/api/sync` stays the one API exception for the offline outbox.
 - Pure domain logic lives in `src/lib/domain/` with no database access: the service calendar,
-  pricing, ABN validation and date helpers. Unit-tested; shared by preview, route generation
-  and invoicing so they cannot diverge.
+  pricing, recurring invoicing (`invoicing.ts` — one contract's charges, and the
+  `consolidate()` rule for header fields two contracts disagree on), ABN validation and date
+  helpers. Unit-tested; shared by preview, route generation and invoicing so they cannot
+  diverge.
 - Invoice PDFs render server-side with `@react-pdf/renderer` (`src/lib/pdf/`), streamed from
   `/api/invoices/:id/pdf` and attached to the Resend email. `serverExternalPackages` keeps the
   renderer out of the client bundle.
@@ -68,6 +70,12 @@ run — and to `customer_service`, so a stuck run is not waiting on a dispatcher
 - `move_inventory()` is the single entry point for stock changes: it upserts both pools and
   writes the ledger row in one transaction.
 - `recalculate_invoice()` keeps invoice totals consistent with lines and payments.
+- **Recurring invoicing is one invoice per customer per period**, carrying every contract
+  they hold. Not a preference: the weighed collections and the damaged/missing linen are
+  recorded against the *customer*, so one invoice per contract would bill the same
+  kilograms and the same lost towels once per contract. Each contract's minimum, levy and
+  surcharges are still computed against its own services only; every line keeps its
+  `agreement_id` (null for replacement charges, which belong to no contract).
 - A production batch cannot start with an empty manifest, cannot be completed except from
   `ready_for_dispatch`, and cannot be reopened once finished (`guard_batch_transition`). Its
   manifest freezes when it leaves receiving — only `rejected_quantity` and notes stay writable
@@ -291,8 +299,18 @@ roadmap, priority matrix). No migrations.
   Tap targets to 36px throughout; error `Notice`s announce as `alert`, not `status`;
   `CONTROL` (the input skin) shared from `ui.tsx` so the filter bar stops drifting from
   every other input. Copy pass over 11 page headers. `/design-preview` now renders the
-  real nav map and the real `DataTable` rather than drifting fixtures. 103 unit tests
-  (was 88; 15 cover the navigation resolver).
+  real nav map and the real `DataTable` rather than drifting fixtures.
+- **A customer with two active contracts was billed for one of them.** `generateInvoices`
+  looped per contract but de-duplicated on customer + period, so contract two found
+  contract one's invoice and was skipped as "already billed" — every period, silently,
+  since the feature shipped. Now one invoice per customer carrying every contract's
+  charges, which is the only correct shape: the weighed collections and the damaged linen
+  are recorded against the customer, so one invoice per contract would have billed both
+  twice. Header fields two contracts disagree on fall back to the customer's own value
+  (payment terms) or to nothing (purchase order) rather than picking a winner. The pure
+  part moved to `src/lib/domain/invoicing.ts`. No migration — the schema already allowed
+  it; only the loop was wrong. 115 unit tests (was 88; 15 for the navigation resolver,
+  12 for the invoicing rules).
 
 ### 2026-08-05 · Simplification Phase B: wizards, one-click planning, in-run problems
 Per `docs/SIMPLIFICATION-ROADMAP.md` Phase B / design spec P-3, P-4, P-5, AD-2. No
