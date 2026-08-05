@@ -3,7 +3,7 @@ import { requireCapability } from "@/lib/auth/context";
 import { createClient } from "@/lib/supabase/server";
 import { date as formatDate, today } from "@/lib/format";
 import {
-  ButtonLink, Card, EmptyState, FlashMessages, PageHeader, SkeletonRows, Stat, cx,
+  ButtonLink, Card, EmptyState, PageHeader, SkeletonRows, Stat, cx,
 } from "@/components/ui";
 import { Field, Input } from "@/components/form";
 import { applyDispatchPlan } from "./actions";
@@ -12,7 +12,7 @@ import {
   PlannerBoard, type Option, type PlannerColumn, type PlannerJob,
 } from "./planner-board";
 
-export const metadata = { title: "Dispatch planner" };
+export const metadata = { title: "Plan the day" };
 export const dynamic = "force-dynamic";
 
 type Search = { date?: string; error?: string; ok?: string };
@@ -31,10 +31,9 @@ export default async function DispatchPlannerPage({ searchParams }: { searchPara
 
   return (
     <div className="space-y-4">
-      <FlashMessages error={params.error} ok={params.ok} />
       <PageHeader
         eyebrow={formatDate(routeDate)}
-        title="Dispatch planner"
+        title="Plan the day"
         description="Arrange the whole day, then apply it in one go."
         actions={<ButtonLink href={`/routes/daily?date=${routeDate}`}>Route list</ButtonLink>}
       />
@@ -198,7 +197,7 @@ async function Board({ routeDate }: { routeDate: string }) {
         <Stat flush label="Runs without a driver" value={String(uncrewed)}
               hint={uncrewed === 0 ? "all crewed" : "assign before the day starts"}
               tone={uncrewed > 0 ? "warning" : "success"} />
-        <Stat flush label="Exceptions" value={String(exceptions)}
+        <Stat flush label="Problems" value={String(exceptions)}
               hint={exceptions === 0 ? "none on the board" : "may need re-dispatching"}
               tone={exceptions > 0 ? "danger" : "success"} />
       </div>

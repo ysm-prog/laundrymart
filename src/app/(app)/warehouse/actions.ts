@@ -31,12 +31,12 @@ export async function createBatch(formData: FormData): Promise<void> {
     machine: optionalText,
     notes: optionalText,
   }).safeParse(toObject(formData));
-  if (!parsed.success) fail(BACK, firstIssue(parsed.error));
+  if (!parsed.success) return fail(BACK, firstIssue(parsed.error));
 
   const supabase = await createClient();
   const { data: batchNumber, error: numberError } = await supabase
     .rpc("next_number", { t: session.tenantId, k: "batch", p: "BATCH" });
-  if (numberError) fail(BACK, describeDbError(numberError));
+  if (numberError) return fail(BACK, describeDbError(numberError));
 
   const { data, error } = await supabase
     .from("production_batches")
@@ -51,13 +51,13 @@ export async function createBatch(formData: FormData): Promise<void> {
     })
     .select("id, batch_number")
     .single();
-  if (error) fail(BACK, describeDbError(error));
+  if (error) return fail(BACK, describeDbError(error));
 
   await recordAudit(session, {
     entity: "production_batch", entityId: data.id, action: "create", summary: data.batch_number,
   });
   revalidatePath(BACK);
-  done(`/warehouse/${data.id}`, `Batch ${data.batch_number} opened.`);
+  return done(`/warehouse/${data.id}`, `Batch ${data.batch_number} opened.`);
 }
 
 export async function addBatchLine(formData: FormData): Promise<void> {
@@ -70,14 +70,14 @@ export async function addBatchLine(formData: FormData): Promise<void> {
     quantity: count.pipe(z.number().positive("Quantity must be at least 1")),
     notes: optionalText,
   }).safeParse(toObject(formData));
-  if (!parsed.success) fail(BACK, firstIssue(parsed.error));
+  if (!parsed.success) return fail(BACK, firstIssue(parsed.error));
 
   const backTo = `/warehouse/${parsed.data.batch_id}`;
 
   // Mirrors the database constraint so the operator gets a sentence rather than
   // a constraint name.
   if (parsed.data.owner_type === "customer_owned" && !parsed.data.customer_id) {
-    fail(backTo, "Customer-owned linen needs a customer, so it can be returned to them.");
+    return fail(backTo, "Customer-owned linen needs a customer, so it can be returned to them.");
   }
 
   const supabase = await createClient();
@@ -91,10 +91,10 @@ export async function addBatchLine(formData: FormData): Promise<void> {
     quantity: parsed.data.quantity,
     notes: parsed.data.notes ?? null,
   });
-  if (error) fail(backTo, describeDbError(error));
+  if (error) return fail(backTo, describeDbError(error));
 
   revalidatePath(backTo);
-  done(backTo, "Line added to the batch.");
+  return done(backTo, "Line added to the batch.");
 }
 
 export async function removeBatchLine(formData: FormData): Promise<void> {
@@ -102,17 +102,17 @@ export async function removeBatchLine(formData: FormData): Promise<void> {
   const parsed = z.object({
     id: z.string().uuid(), batch_id: z.string().uuid(),
   }).safeParse(toObject(formData));
-  if (!parsed.success) fail(BACK, firstIssue(parsed.error));
+  if (!parsed.success) return fail(BACK, firstIssue(parsed.error));
 
   const backTo = `/warehouse/${parsed.data.batch_id}`;
   const supabase = await createClient();
   const { error } = await supabase
     .from("production_batch_lines").delete()
     .eq("id", parsed.data.id).eq("tenant_id", session.tenantId);
-  if (error) fail(backTo, describeDbError(error));
+  if (error) return fail(backTo, describeDbError(error));
 
   revalidatePath(backTo);
-  done(backTo, "Line removed.");
+  return done(backTo, "Line removed.");
 }
 
 /** The batch's manifest, minus anything already pulled out as a reject. */
@@ -137,7 +137,7 @@ async function processableLines(batchId: string): Promise<BatchLine[]> {
 export async function advanceBatch(formData: FormData): Promise<void> {
   const session = await assertCapability("warehouse.write");
   const parsed = z.object({ id: z.string().uuid() }).safeParse(toObject(formData));
-  if (!parsed.success) fail(BACK, firstIssue(parsed.error));
+  if (!parsed.success) return fail(BACK, firstIssue(parsed.error));
 
   const backTo = `/warehouse/${parsed.data.id}`;
   const supabase = await createClient();
@@ -147,19 +147,19 @@ export async function advanceBatch(formData: FormData): Promise<void> {
     .select("id, batch_number, stage, depot_id")
     .eq("id", parsed.data.id)
     .maybeSingle<{ id: string; batch_number: string; stage: string; depot_id: string | null }>();
-  if (!batch) fail(BACK, "That batch could not be found.");
+  if (!batch) return fail(BACK, "That batch could not be found.");
 
   if (!isFlowStage(batch.stage)) {
-    fail(backTo, `A ${batch.stage} batch cannot be advanced.`);
+    return fail(backTo, `A ${batch.stage} batch cannot be advanced.`);
   }
 
   const target = nextStage(batch.stage);
   if (!target) {
-    fail(backTo, "This batch is already ready for dispatch. Complete it instead.");
+    return fail(backTo, "This batch is already ready for dispatch. Complete it instead.");
   }
 
   const lines = await processableLines(batch.id);
-  if (lines.length === 0) fail(backTo, "Add at least one line before starting the batch.");
+  if (lines.length === 0) return fail(backTo, "Add at least one line before starting the batch.");
 
   const from = STAGE_INVENTORY_STATE[batch.stage];
   const to = STAGE_INVENTORY_STATE[target];
@@ -187,21 +187,21 @@ export async function advanceBatch(formData: FormData): Promise<void> {
       p_delivery: null,
       p_notes: `batch ${batch.batch_number}`,
     });
-    if (error) fail(backTo, describeDbError(error));
+    if (error) return fail(backTo, describeDbError(error));
   }
 
   const { error: stageError } = await supabase
     .from("production_batches")
     .update({ stage: target })
     .eq("id", batch.id).eq("tenant_id", session.tenantId);
-  if (stageError) fail(backTo, describeDbError(stageError));
+  if (stageError) return fail(backTo, describeDbError(stageError));
 
   await recordAudit(session, {
     entity: "production_batch", entityId: batch.id, action: "status_change",
     summary: `${batch.stage} → ${target}`,
   });
   revalidatePath(backTo);
-  done(backTo, `Batch moved to ${target.replace(/_/g, " ")}.`);
+  return done(backTo, `Batch moved to ${target.replace(/_/g, " ")}.`);
 }
 
 /**
@@ -220,7 +220,7 @@ export async function rejectFromBatch(formData: FormData): Promise<void> {
     destination: z.enum(["in_repair", "damaged"]),
     notes: optionalText,
   }).safeParse(toObject(formData));
-  if (!parsed.success) fail(BACK, firstIssue(parsed.error));
+  if (!parsed.success) return fail(BACK, firstIssue(parsed.error));
 
   const backTo = `/warehouse/${parsed.data.batch_id}`;
   const supabase = await createClient();
@@ -229,19 +229,19 @@ export async function rejectFromBatch(formData: FormData): Promise<void> {
     .from("production_batches").select("id, batch_number, stage, depot_id")
     .eq("id", parsed.data.batch_id)
     .maybeSingle<{ id: string; batch_number: string; stage: string; depot_id: string | null }>();
-  if (!batch) fail(BACK, "That batch could not be found.");
-  if (!isFlowStage(batch.stage)) fail(backTo, `A ${batch.stage} batch cannot be changed.`);
+  if (!batch) return fail(BACK, "That batch could not be found.");
+  if (!isFlowStage(batch.stage)) return fail(backTo, `A ${batch.stage} batch cannot be changed.`);
 
   const { data: line } = await supabase
     .from("production_batch_lines")
     .select("id, item_id, owner_type, customer_id, quantity, rejected_quantity")
     .eq("id", parsed.data.line_id)
     .maybeSingle<BatchLine>();
-  if (!line) fail(backTo, "That batch line could not be found.");
+  if (!line) return fail(backTo, "That batch line could not be found.");
 
   const remaining = line.quantity - line.rejected_quantity;
   if (parsed.data.quantity > remaining) {
-    fail(backTo, `Only ${remaining} of that line are still in the batch.`);
+    return fail(backTo, `Only ${remaining} of that line are still in the batch.`);
   }
 
   const destination = REJECT_DESTINATIONS.find((d) => d.value === parsed.data.destination);
@@ -265,41 +265,41 @@ export async function rejectFromBatch(formData: FormData): Promise<void> {
     p_delivery: null,
     p_notes: parsed.data.notes ?? `batch ${batch.batch_number}`,
   });
-  if (moveError) fail(backTo, describeDbError(moveError));
+  if (moveError) return fail(backTo, describeDbError(moveError));
 
   const { error } = await supabase
     .from("production_batch_lines")
     .update({ rejected_quantity: line.rejected_quantity + parsed.data.quantity })
     .eq("id", line.id).eq("tenant_id", session.tenantId);
-  if (error) fail(backTo, describeDbError(error));
+  if (error) return fail(backTo, describeDbError(error));
 
   await recordAudit(session, {
     entity: "production_batch", entityId: batch.id, action: "update",
     summary: `${parsed.data.quantity} rejected to ${parsed.data.destination}`,
   });
   revalidatePath(backTo);
-  done(backTo, `${parsed.data.quantity} item(s) pulled out of the batch.`);
+  return done(backTo, `${parsed.data.quantity} item(s) pulled out of the batch.`);
 }
 
 /** Closes a finished batch. The database refuses this before dispatch-ready. */
 export async function completeBatch(formData: FormData): Promise<void> {
   const session = await assertCapability("warehouse.write");
   const parsed = z.object({ id: z.string().uuid() }).safeParse(toObject(formData));
-  if (!parsed.success) fail(BACK, firstIssue(parsed.error));
+  if (!parsed.success) return fail(BACK, firstIssue(parsed.error));
 
   const backTo = `/warehouse/${parsed.data.id}`;
   const supabase = await createClient();
   const { error } = await supabase
     .from("production_batches").update({ stage: "completed" })
     .eq("id", parsed.data.id).eq("tenant_id", session.tenantId);
-  if (error) fail(backTo, describeDbError(error));
+  if (error) return fail(backTo, describeDbError(error));
 
   await recordAudit(session, {
     entity: "production_batch", entityId: parsed.data.id, action: "status_change",
     summary: "completed",
   });
   revalidatePath(backTo);
-  done(backTo, "Batch completed. The linen is staged for dispatch.");
+  return done(backTo, "Batch completed. The linen is staged for dispatch.");
 }
 
 /**
@@ -314,7 +314,7 @@ export async function cancelBatch(formData: FormData): Promise<void> {
     id: z.string().uuid(),
     cancel_reason: z.string().trim().min(3, "Give a reason for cancelling"),
   }).safeParse(toObject(formData));
-  if (!parsed.success) fail(BACK, firstIssue(parsed.error));
+  if (!parsed.success) return fail(BACK, firstIssue(parsed.error));
 
   const backTo = `/warehouse/${parsed.data.id}`;
   const supabase = await createClient();
@@ -323,8 +323,8 @@ export async function cancelBatch(formData: FormData): Promise<void> {
     .from("production_batches").select("id, batch_number, stage, depot_id")
     .eq("id", parsed.data.id)
     .maybeSingle<{ id: string; batch_number: string; stage: string; depot_id: string | null }>();
-  if (!batch) fail(BACK, "That batch could not be found.");
-  if (!isFlowStage(batch.stage)) fail(backTo, `A ${batch.stage} batch cannot be cancelled.`);
+  if (!batch) return fail(BACK, "That batch could not be found.");
+  if (!isFlowStage(batch.stage)) return fail(backTo, `A ${batch.stage} batch cannot be cancelled.`);
 
   const from = STAGE_INVENTORY_STATE[batch.stage];
 
@@ -352,7 +352,7 @@ export async function cancelBatch(formData: FormData): Promise<void> {
         p_delivery: null,
         p_notes: `batch ${batch.batch_number} cancelled`,
       });
-      if (error) fail(backTo, describeDbError(error));
+      if (error) return fail(backTo, describeDbError(error));
     }
   }
 
@@ -360,12 +360,12 @@ export async function cancelBatch(formData: FormData): Promise<void> {
     .from("production_batches")
     .update({ stage: "cancelled", cancel_reason: parsed.data.cancel_reason })
     .eq("id", batch.id).eq("tenant_id", session.tenantId);
-  if (error) fail(backTo, describeDbError(error));
+  if (error) return fail(backTo, describeDbError(error));
 
   await recordAudit(session, {
     entity: "production_batch", entityId: batch.id, action: "status_change",
     summary: `cancelled: ${parsed.data.cancel_reason}`,
   });
   revalidatePath(backTo);
-  done(backTo, "Batch cancelled and its linen returned to the depot.");
+  return done(backTo, "Batch cancelled and its linen returned to the depot.");
 }

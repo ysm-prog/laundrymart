@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import { requireCapability } from "@/lib/auth/context";
 import { createClient } from "@/lib/supabase/server";
 import type { Customer } from "@/lib/db/types";
-import { Button, Card, FlashMessages, PageHeader } from "@/components/ui";
+import { Button, Card, PageHeader } from "@/components/ui";
 import { CustomerForm } from "../../customer-form";
 import { archiveCustomer, updateCustomer } from "../../actions";
 
@@ -10,13 +10,12 @@ export const metadata = { title: "Edit customer" };
 export const dynamic = "force-dynamic";
 
 export default async function EditCustomerPage({
-  params, searchParams,
+  params,
 }: {
   params: Promise<{ id: string }>;
   searchParams: Promise<{ error?: string }>;
 }) {
   const { id } = await params;
-  const flash = await searchParams;
   await requireCapability("customers.write");
 
   const supabase = await createClient();
@@ -36,7 +35,6 @@ export default async function EditCustomerPage({
 
   return (
     <div className="max-w-3xl space-y-6">
-      <FlashMessages error={flash.error} />
       <PageHeader title={`Edit ${customer.business_name}`} description={customer.customer_number} />
       <CustomerForm
         action={updateCustomer}

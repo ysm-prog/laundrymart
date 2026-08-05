@@ -6,7 +6,7 @@ import { can } from "@/lib/roles";
 import { time } from "@/lib/format";
 import type { CustomerLocation, Depot, Driver, RouteTemplate, Vehicle } from "@/lib/db/types";
 import {
-  Button, ButtonLink, Card, EmptyState, FlashMessages, PageHeader, SkeletonRows,
+  Button, ButtonLink, Card, EmptyState, PageHeader, SkeletonRows,
   StatusBadge, humanise,
 } from "@/components/ui";
 import { Field, FormActions, Input, Select, SubmitButton, Textarea, WeekdayPicker } from "@/components/form";
@@ -29,13 +29,11 @@ type StopRow = {
 };
 
 export default async function TemplateDetailPage({
-  params, searchParams,
+  params,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ error?: string; ok?: string }>;
 }) {
   const { id } = await params;
-  const flash = await searchParams;
   const session = await requireCapability("routes.read");
   const writable = can(session.role, "routes.write");
 
@@ -50,14 +48,13 @@ export default async function TemplateDetailPage({
 
   return (
     <div className="space-y-6">
-      <FlashMessages error={flash.error} ok={flash.ok} />
       <PageHeader
         title={`${template.code} · ${template.name}`}
         description={template.description ?? "Stops run in the order below on every generated daily route."}
         actions={
           <>
             <StatusBadge status={template.status} />
-            <ButtonLink href={`/routes/daily?template=${id}`}>Daily routes</ButtonLink>
+            <ButtonLink href={`/routes/daily?template=${id}`}>Today&apos;s runs</ButtonLink>
             {writable ? (
               <form action={duplicateTemplate}>
                 <input type="hidden" name="id" value={id} />

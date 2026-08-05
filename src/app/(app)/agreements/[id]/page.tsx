@@ -13,7 +13,7 @@ import {
 import { CHARGE_TYPE_LABELS, type ChargeType } from "@/lib/domain/pricing";
 import type { CustomerLocation, Depot, Item, ServiceAgreement, ServiceAgreementLine } from "@/lib/db/types";
 import {
-  Badge, Button, ButtonLink, Card, DataTable, EmptyState, FlashMessages,
+  Badge, Button, ButtonLink, Card, DataTable, EmptyState,
   PageHeader, SkeletonRows, StatusBadge, humanise,
 } from "@/components/ui";
 import { Checkbox, Field, Input, Select, SubmitButton } from "@/components/form";
@@ -27,13 +27,11 @@ export const dynamic = "force-dynamic";
 const PREVIEW_DAYS = 56;
 
 export default async function AgreementDetailPage({
-  params, searchParams,
+  params,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ error?: string; ok?: string }>;
 }) {
   const { id } = await params;
-  const flash = await searchParams;
   const session = await requireCapability("agreements.read");
   const writable = can(session.role, "agreements.write");
 
@@ -48,7 +46,6 @@ export default async function AgreementDetailPage({
 
   return (
     <div className="space-y-6">
-      <FlashMessages error={flash.error} ok={flash.ok} />
       <PageHeader
         title={`${agreement.agreement_number} · version ${agreement.version}`}
         description={

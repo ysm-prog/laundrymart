@@ -6,7 +6,7 @@ import { can } from "@/lib/roles";
 import { dateTime } from "@/lib/format";
 import type { Depot } from "@/lib/db/types";
 import {
-  Card, DataTable, EmptyState, FlashMessages, PageHeader, SkeletonRows,
+  Card, DataTable, EmptyState, PageHeader, SkeletonRows,
   SkeletonStats, Stat, StatusBadge,
 } from "@/components/ui";
 import { Field, Input, Select, SubmitButton } from "@/components/form";
@@ -28,17 +28,11 @@ type BatchRow = {
   production_batch_lines: Array<{ quantity: number; rejected_quantity: number }>;
 };
 
-export default async function WarehousePage({
-  searchParams,
-}: {
-  searchParams: Promise<{ error?: string; ok?: string }>;
-}) {
-  const params = await searchParams;
+export default async function WarehousePage() {
   const session = await requireCapability("warehouse.read");
 
   return (
     <div className="space-y-6">
-      <FlashMessages error={params.error} ok={params.ok} />
       <PageHeader
         title="Warehouse"
         description="Linen through the plant, batch by batch. Every stage moves real stock."

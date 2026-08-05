@@ -4,7 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { can } from "@/lib/roles";
 import type { Customer } from "@/lib/db/types";
 import {
-  ButtonLink, DataTable, EmptyState, FlashMessages, PageHeader, SkeletonRows, StatusBadge,
+  ButtonLink, DataTable, EmptyState, PageHeader, SkeletonRows, StatusBadge,
 } from "@/components/ui";
 import { ListControls, Pagination, pageFrom, rangeFor } from "@/components/list-controls";
 
@@ -23,7 +23,6 @@ export default async function CustomersPage({
 
   return (
     <div>
-      <FlashMessages error={params.error} ok={params.ok} />
       <PageHeader
         title="Customers"
         description="Businesses you collect from and deliver to, with their sites and contacts."

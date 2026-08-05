@@ -27,7 +27,7 @@ const driverSchema = z.object({
 export async function createDriver(formData: FormData): Promise<void> {
   const session = await assertCapability("fleet.write");
   const parsed = driverSchema.safeParse(toObject(formData));
-  if (!parsed.success) fail("/drivers", firstIssue(parsed.error));
+  if (!parsed.success) return fail("/drivers", firstIssue(parsed.error));
 
   const supabase = await createClient();
   const { data, error } = await supabase
@@ -36,13 +36,13 @@ export async function createDriver(formData: FormData): Promise<void> {
     .select("id, full_name")
     .single();
 
-  if (error) fail("/drivers", describeDbError(error));
+  if (error) return fail("/drivers", describeDbError(error));
 
   await recordAudit(session, {
     entity: "driver", entityId: data.id, action: "create", summary: data.full_name,
   });
   revalidatePath("/drivers");
-  done("/drivers", `${data.full_name} added.`);
+  return done("/drivers", `${data.full_name} added.`);
 }
 
 export async function updateDriverStatus(formData: FormData): Promise<void> {
@@ -51,20 +51,20 @@ export async function updateDriverStatus(formData: FormData): Promise<void> {
     id: z.string().uuid(),
     status: z.enum(["active", "on_leave", "inactive"]),
   }).safeParse(toObject(formData));
-  if (!parsed.success) fail("/drivers", firstIssue(parsed.error));
+  if (!parsed.success) return fail("/drivers", firstIssue(parsed.error));
 
   const supabase = await createClient();
   const { error } = await supabase
     .from("drivers").update({ status: parsed.data.status })
     .eq("id", parsed.data.id).eq("tenant_id", session.tenantId);
 
-  if (error) fail("/drivers", describeDbError(error));
+  if (error) return fail("/drivers", describeDbError(error));
 
   await recordAudit(session, {
     entity: "driver", entityId: parsed.data.id, action: "status_change", summary: parsed.data.status,
   });
   revalidatePath("/drivers");
-  done("/drivers", "Driver status updated.");
+  return done("/drivers", "Driver status updated.");
 }
 
 /**
@@ -77,18 +77,18 @@ export async function linkDriverLogin(formData: FormData): Promise<void> {
     id: z.string().uuid(),
     user_id: z.string().uuid("Enter the user's ID from Administration → Users"),
   }).safeParse(toObject(formData));
-  if (!parsed.success) fail("/drivers", firstIssue(parsed.error));
+  if (!parsed.success) return fail("/drivers", firstIssue(parsed.error));
 
   const supabase = await createClient();
   const { error } = await supabase
     .from("drivers").update({ user_id: parsed.data.user_id })
     .eq("id", parsed.data.id).eq("tenant_id", session.tenantId);
 
-  if (error) fail("/drivers", describeDbError(error));
+  if (error) return fail("/drivers", describeDbError(error));
 
   await recordAudit(session, {
     entity: "driver", entityId: parsed.data.id, action: "update", summary: "login linked",
   });
   revalidatePath("/drivers");
-  done("/drivers", "Login linked to driver.");
+  return done("/drivers", "Login linked to driver.");
 }

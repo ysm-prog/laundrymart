@@ -4,7 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { dateTime } from "@/lib/format";
 import type { AuditLog } from "@/lib/db/types";
 import {
-  DataTable, EmptyState, FlashMessages, PageHeader, SkeletonRows, humanise,
+  DataTable, EmptyState, PageHeader, SkeletonRows, humanise,
 } from "@/components/ui";
 import { ListControls, Pagination, pageFrom, rangeFor } from "@/components/list-controls";
 
@@ -26,7 +26,6 @@ export default async function AuditPage({ searchParams }: { searchParams: Promis
 
   return (
     <div>
-      <FlashMessages error={params.error} ok={params.ok} />
       <PageHeader
         title="Audit log"
         description="Append-only record of every write, kept for compliance and incident review."

@@ -3,11 +3,12 @@ import { requireCapability } from "@/lib/auth/context";
 import { createClient } from "@/lib/supabase/server";
 import { date, today } from "@/lib/format";
 import {
-  DataTable, EmptyState, FlashMessages, PageHeader, SkeletonRows, StatusBadge, humanise,
+  ButtonLink,
+  DataTable, EmptyState, PageHeader, SkeletonRows, StatusBadge, humanise,
 } from "@/components/ui";
 import { ListControls, Pagination, pageFrom, rangeFor } from "@/components/list-controls";
 
-export const metadata = { title: "Jobs" };
+export const metadata = { title: "Stops" };
 export const dynamic = "force-dynamic";
 
 type Search = { q?: string; status?: string; date?: string; page?: string; error?: string; ok?: string };
@@ -31,10 +32,9 @@ export default async function JobsPage({ searchParams }: { searchParams: Promise
 
   return (
     <div>
-      <FlashMessages error={params.error} ok={params.ok} />
       <PageHeader
-        title="Jobs"
-        description="One customer stop. Pickups and deliveries hang off the job as child transactions."
+        title="Stops"
+        description="Every stop on a run: what was collected, what was delivered, and anything that went wrong."
       />
       <ListControls
         action="/jobs"
@@ -105,8 +105,9 @@ async function JobList({ params }: { params: Search }) {
         rowHref={(row) => `/jobs/${row.id}`}
         empty={
           <EmptyState
-            title="No jobs for this date"
-            description="Generate daily routes to create the day's jobs."
+            title="No stops for this date"
+            description="Plan the day's runs and each customer visit appears here as a stop."
+            action={<ButtonLink href="/routes/daily">Go to today&apos;s runs</ButtonLink>}
           />
         }
         columns={[

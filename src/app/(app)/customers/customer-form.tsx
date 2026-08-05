@@ -30,20 +30,20 @@ export function CustomerForm({
           <Field label="Business name" name="business_name" required className="sm:col-span-2">
             <Input name="business_name" required defaultValue={customer?.business_name} />
           </Field>
-          <Field label="Trading name" name="trading_name">
+          <Field label="Trading name" name="trading_name" hint="Only if it differs from the business name">
             <Input name="trading_name" defaultValue={customer?.trading_name} />
           </Field>
           <Field label="ABN" name="abn" hint="11 digits — validated before saving">
             <Input name="abn" defaultValue={customer?.abn} placeholder="51 824 753 556" />
           </Field>
-          <Field label="Depot" name="depot_id" hint="Which depot services this customer">
+          <Field label="Servicing site" name="depot_id" hint="Which of your sites collects and delivers for them">
             <Select
               name="depot_id" placeholder="Unassigned"
               defaultValue={customer?.depot_id}
               options={depots.map((depot) => ({ value: depot.id, label: depot.name }))}
             />
           </Field>
-          <Field label="Status" name="status">
+          <Field label="Status" name="status" hint="Doesn't block anything — service is driven by their contract">
             <Select name="status" options={STATUSES} defaultValue={customer?.status ?? "prospect"} />
           </Field>
         </div>
@@ -63,7 +63,7 @@ export function CustomerForm({
           <Field label="Postcode" name="billing_postcode">
             <Input name="billing_postcode" defaultValue={customer?.billing_postcode} />
           </Field>
-          <Field label="Billing email" name="billing_email">
+          <Field label="Billing email" name="billing_email" hint="Where their invoices are emailed">
             <Input name="billing_email" type="email" defaultValue={customer?.billing_email} />
           </Field>
           <Field label="Phone" name="phone">
@@ -72,7 +72,8 @@ export function CustomerForm({
           <Field label="Payment terms (days)" name="payment_terms_days">
             <Input name="payment_terms_days" type="number" min={0} defaultValue={customer?.payment_terms_days ?? 14} />
           </Field>
-          <Field label="Purchase order number" name="purchase_order_number">
+          <Field label="Purchase order number" name="purchase_order_number"
+                 hint="Printed on their invoices, if their accounts team needs one">
             <Input name="purchase_order_number" defaultValue={customer?.purchase_order_number} />
           </Field>
         </div>

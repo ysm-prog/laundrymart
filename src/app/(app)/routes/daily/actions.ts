@@ -20,7 +20,7 @@ import {
 export async function generateDailyRoutes(formData: FormData): Promise<void> {
   const session = await assertCapability("routes.write");
   const parsed = z.object({ route_date: requiredDate }).safeParse(toObject(formData));
-  if (!parsed.success) fail("/routes/daily", firstIssue(parsed.error));
+  if (!parsed.success) return fail("/routes/daily", firstIssue(parsed.error));
 
   const routeDate = parsed.data.route_date;
   const backTo = `/routes/daily?date=${routeDate}`;
@@ -32,13 +32,13 @@ export async function generateDailyRoutes(formData: FormData): Promise<void> {
     .from("route_templates")
     .select("id, code, name, depot_id, default_driver_id, default_vehicle_id, weekdays")
     .eq("status", "active").is("deleted_at", null);
-  if (templateError) fail(backTo, describeDbError(templateError));
+  if (templateError) return fail(backTo, describeDbError(templateError));
 
   const due = (templates ?? []).filter((template) =>
     Array.isArray(template.weekdays) && template.weekdays.includes(weekday));
 
   if (due.length === 0) {
-    fail(backTo, "No active template runs on that weekday.");
+    return fail(backTo, "No active template runs on that weekday.");
   }
 
   const { data: existing } = await supabase
@@ -67,7 +67,7 @@ export async function generateDailyRoutes(formData: FormData): Promise<void> {
       })
       .select("id")
       .single();
-    if (routeError) fail(backTo, describeDbError(routeError));
+    if (routeError) return fail(backTo, describeDbError(routeError));
     routesCreated += 1;
 
     const { data: stops } = await supabase
@@ -78,7 +78,7 @@ export async function generateDailyRoutes(formData: FormData): Promise<void> {
     for (const stop of stops ?? []) {
       const { data: jobNumber, error: numberError } = await supabase
         .rpc("next_number", { t: session.tenantId, k: "job", p: "JOB" });
-      if (numberError) fail(backTo, describeDbError(numberError));
+      if (numberError) return fail(backTo, describeDbError(numberError));
 
       // A stop's agreement supplies pricing later; link it now while we know it.
       const { data: agreement } = await supabase
@@ -104,13 +104,13 @@ export async function generateDailyRoutes(formData: FormData): Promise<void> {
         status: template.default_driver_id ? "assigned" : "scheduled",
         notes: stop.notes,
       });
-      if (jobError) fail(backTo, describeDbError(jobError));
+      if (jobError) return fail(backTo, describeDbError(jobError));
       jobsCreated += 1;
     }
   }
 
   if (routesCreated === 0) {
-    fail(backTo, "Every template for that weekday already has a route on that date.");
+    return fail(backTo, "Every template for that weekday already has a route on that date.");
   }
 
   await recordAudit(session, {
@@ -119,7 +119,7 @@ export async function generateDailyRoutes(formData: FormData): Promise<void> {
     metadata: { routeDate, routesCreated, jobsCreated },
   });
   revalidatePath("/routes/daily");
-  done(backTo, `Generated ${routesCreated} route(s) and ${jobsCreated} job(s).`);
+  return done(backTo, `Generated ${routesCreated} route(s) and ${jobsCreated} job(s).`);
 }
 
 export async function assignRoute(formData: FormData): Promise<void> {
@@ -131,7 +131,7 @@ export async function assignRoute(formData: FormData): Promise<void> {
     trailer_id: optionalUuid,
     notes: optionalText,
   }).safeParse(toObject(formData));
-  if (!parsed.success) fail("/routes/daily", firstIssue(parsed.error));
+  if (!parsed.success) return fail("/routes/daily", firstIssue(parsed.error));
 
   const backTo = `/routes/daily/${parsed.data.id}`;
   const { id, ...assignment } = parsed.data;
@@ -140,7 +140,7 @@ export async function assignRoute(formData: FormData): Promise<void> {
   const { error } = await supabase
     .from("daily_routes").update(assignment)
     .eq("id", id).eq("tenant_id", session.tenantId);
-  if (error) fail(backTo, describeDbError(error));
+  if (error) return fail(backTo, describeDbError(error));
 
   // Keep the route's jobs in step so drivers see their work on their device.
   if (assignment.driver_id || assignment.vehicle_id) {
@@ -153,12 +153,12 @@ export async function assignRoute(formData: FormData): Promise<void> {
       })
       .eq("route_id", id).eq("tenant_id", session.tenantId)
       .in("status", ["scheduled", "assigned"]);
-    if (jobError) fail(backTo, describeDbError(jobError));
+    if (jobError) return fail(backTo, describeDbError(jobError));
   }
 
   await recordAudit(session, { entity: "daily_route", entityId: id, action: "update", summary: "assignment" });
   revalidatePath(backTo);
-  done(backTo, "Route assignment saved.");
+  return done(backTo, "Route assignment saved.");
 }
 
 export async function setRouteStatus(formData: FormData): Promise<void> {
@@ -170,7 +170,7 @@ export async function setRouteStatus(formData: FormData): Promise<void> {
       "in_progress", "returning", "unloading", "closed", "cancelled",
     ]),
   }).safeParse(toObject(formData));
-  if (!parsed.success) fail("/routes/daily", firstIssue(parsed.error));
+  if (!parsed.success) return fail("/routes/daily", firstIssue(parsed.error));
 
   const backTo = `/routes/daily/${parsed.data.id}`;
   const supabase = await createClient();
@@ -179,12 +179,12 @@ export async function setRouteStatus(formData: FormData): Promise<void> {
   const { error } = await supabase
     .from("daily_routes").update({ status: parsed.data.status })
     .eq("id", parsed.data.id).eq("tenant_id", session.tenantId);
-  if (error) fail(backTo, describeDbError(error));
+  if (error) return fail(backTo, describeDbError(error));
 
   await recordAudit(session, {
     entity: "daily_route", entityId: parsed.data.id, action: "status_change",
     summary: parsed.data.status,
   });
   revalidatePath(backTo);
-  done(backTo, `Route marked ${parsed.data.status.replace(/_/g, " ")}.`);
+  return done(backTo, `Route marked ${parsed.data.status.replace(/_/g, " ")}.`);
 }

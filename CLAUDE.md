@@ -20,9 +20,13 @@ The master spec names a .NET 9 Web API; this build follows the supplied skeleton
   request. `requireCapability()` guards pages; `assertCapability()` guards actions.
 - Functions pinned to `syd1` to co-locate with the Sydney DB (vercel.json).
 - The session refresh + auth gate is `src/proxy.ts` (Next 16's rename of `middleware`).
-- Server Actions only for writes. They derive `tenant_id` from the session and redirect with
-  `?error=` / `?ok=`. The one exception is `/api/sync`, which exists because the offline
-  outbox needs a batch endpoint it can replay.
+- Server Actions only for writes. They derive `tenant_id` from the session; `fail()`/`done()`
+  set a one-shot flash cookie and redirect clean (always `return fail(...)` — the `return` is
+  what lets TS narrow). `(app)/template.tsx` reads the cookie — a template, not the layout,
+  because templates re-render on every navigation including a same-path action redirect — and
+  `FlashToast` shows it (success auto-dismisses, errors stick) then deletes it. The one
+  URL-param survivor is the auth gate's `?error=forbidden`, set during render where a cookie
+  cannot be. `/api/sync` stays the one API exception for the offline outbox.
 - Pure domain logic lives in `src/lib/domain/` with no database access: the service calendar,
   pricing, ABN validation and date helpers. Unit-tested; shared by preview, route generation
   and invoicing so they cannot diverge.
@@ -163,6 +167,13 @@ The sidebar rail keeps literal hex colours: it is the one surface that stays nea
 both themes, so it must not follow the surface tokens — and it needs its own `border-r`,
 because in dark mode the page background is that same near-black and the edge vanishes.
 
+Guidance idiom: `Stage` in `ui.tsx` (the run screen's numbered-step pattern, also the
+dashboard's getting-started checklist — exactly one step actionable at a time);
+`ConfirmSubmit` for final actions (inline consequence strip + optional reason, no modals);
+`FlashToast` for action feedback. UI labels use operator language (Sites, Contracts, Problems,
+Stops, Weekly runs, Today's runs, People) while routes and schema keep the domain names —
+`docs/SIMPLIFICATION-DESIGN.md` holds the rename map and the rest of the redesign spec.
+
 `/design-preview` is a static component gallery: no data, 404s in production, outside the auth
 gate so it can be rendered from a build box. It exists because every real screen is an async
 server component reading Supabase, so none render without a live project — which is how a
@@ -211,6 +222,30 @@ Both are compositions over existing tables — neither added a migration.
   are edited and invoices voided.
 
 ## 18. Changelog
+### 2026-08-05 · Simplification Phase A: flash toasts, operator language, guided setup
+Per `docs/SIMPLIFICATION-ROADMAP.md` / `docs/SIMPLIFICATION-DESIGN.md` (the BA + design
+review of first-time operability). No migrations.
+- **Flash messages moved out of the URL.** `fail()`/`done()` now set a one-shot cookie and
+  redirect clean; a new `(app)/template.tsx` + `FlashToast` render it (success auto-dismisses
+  in 5 s, errors stick). Kills the stale-message-on-refresh/bookmark class, and incidentally
+  the broken `?selected=…?error=…` double-query URLs the old string-append produced. All 267
+  call sites became `return fail(...)`; the dead `<FlashMessages>` plumbing came out of every
+  `(app)` page (the dashboard keeps one for the auth gate's render-time `?error=forbidden`).
+- **Operator language.** Nav and titles: Sites, Contracts, Problems, Stops, Weekly runs,
+  Today's runs, Plan the day, People, "Create this month's invoices", "Adjust stock". Routes
+  and schema unchanged; trade terms kept as eyebrows where useful.
+- **Getting-started checklist on the dashboard** (site → customer → contract → weekly run →
+  plan today), row-count driven, using `Stage` — extracted from the run screen into `ui.tsx`
+  as the app-wide guidance idiom. A tenant with no customers sees only the checklist.
+- **People screen shows emails, not UUID prefixes** — resolved per-membership via the admin
+  client (tenant's membership rows first, never list-and-filter); degrades to short ids
+  without a service key. Supabase/RLS jargon rewritten out of the page copy.
+- **`ConfirmSubmit`** inline confirm strip (consequence sentence + optional required reason)
+  on void invoice and close run. **Inspection checklist now starts unchecked** with a
+  deliberate "All checks OK" fast path — an attestation, not a pre-signed form.
+- Hints/defaults pass on the customer and contract forms (start date defaults to today);
+  empty states gained next-step actions; `/design-preview` gained a Guidance section.
+
 ### 2026-08-05 · Dispatch planner and the billing two-pane (stage 3 complete)
 - **`/routes/planner`** — the pack's day board. See §17. New nav entry gated on `routes.write`,
   since a board you cannot apply is worse than no board.

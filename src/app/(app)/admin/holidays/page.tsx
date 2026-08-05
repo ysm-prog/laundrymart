@@ -5,7 +5,7 @@ import { can } from "@/lib/roles";
 import { date, today } from "@/lib/format";
 import type { PublicHoliday } from "@/lib/db/types";
 import {
-  Card, DataTable, EmptyState, FlashMessages, Notice, PageHeader, SkeletonRows,
+  Card, DataTable, EmptyState, Notice, PageHeader, SkeletonRows,
 } from "@/components/ui";
 import { Field, Input, Select, SubmitButton } from "@/components/form";
 import { addHoliday, removeHoliday } from "../actions";
@@ -16,18 +16,12 @@ export const dynamic = "force-dynamic";
 const REGIONS = ["NSW", "VIC", "QLD", "WA", "SA", "TAS", "ACT", "NT"]
   .map((value) => ({ value, label: value }));
 
-export default async function HolidaysPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ error?: string; ok?: string }>;
-}) {
-  const params = await searchParams;
+export default async function HolidaysPage() {
   const session = await requireCapability("admin.read");
   const writable = can(session.role, "admin.write");
 
   return (
     <div className="space-y-6">
-      <FlashMessages error={params.error} ok={params.ok} />
       <PageHeader
         title="Public holidays"
         description="Each agreement's holiday rule is applied against this calendar for its region."

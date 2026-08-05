@@ -2,7 +2,7 @@ import { Suspense } from "react";
 import { requireCapability } from "@/lib/auth/context";
 import { createClient } from "@/lib/supabase/server";
 import { date, dateTime, number, today } from "@/lib/format";
-import { DataTable, EmptyState, FlashMessages, PageHeader, SkeletonRows } from "@/components/ui";
+import { DataTable, EmptyState, PageHeader, SkeletonRows } from "@/components/ui";
 
 export const metadata = { title: "Deliveries" };
 export const dynamic = "force-dynamic";
@@ -31,7 +31,6 @@ export default async function DeliveriesPage({
 
   return (
     <div className="space-y-6">
-      <FlashMessages error={params.error} ok={params.ok} />
       <PageHeader title="Deliveries" description="Clean linen handed over, with the signature captured at the stop." />
 
       <form method="get" action="/operations/deliveries" className="flex flex-wrap items-end gap-2">

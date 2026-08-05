@@ -6,7 +6,7 @@ import { date, money, number, relativeDays, today } from "@/lib/format";
 import { addDays } from "@/lib/domain/dates";
 import { generateServiceDates, parsePattern, type HolidayRule } from "@/lib/domain/service-calendar";
 import {
-  Card, DataTable, EmptyState, FlashMessages, PageHeader, SkeletonRows,
+  Card, DataTable, EmptyState, PageHeader, SkeletonRows,
   Stat, cx, humanise,
 } from "@/components/ui";
 import { PrintButton } from "@/components/print-button";
@@ -37,7 +37,6 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
 
   return (
     <div className="space-y-6">
-      <FlashMessages />
       <PageHeader
         title="Reports"
         description={`${date(from)} – ${date(to)}`}
@@ -167,7 +166,7 @@ async function Operations({ from, to }: { from: string; to: string }) {
             { header: "Day", cell: (row) => date(row.day) },
             { header: "Jobs", cell: (row) => number(row.jobs), align: "right" },
             { header: "Completed", cell: (row) => number(row.completed), align: "right" },
-            { header: "Exceptions", cell: (row) => number(row.exceptions), align: "right", hideBelow: "sm" },
+            { header: "Problems", cell: (row) => number(row.exceptions), align: "right", hideBelow: "sm" },
             { header: "Collected", cell: (row) => number(row.pickedUp), align: "right" },
             { header: "Delivered", cell: (row) => number(row.delivered), align: "right" },
             { header: "Damaged", cell: (row) => number(row.damaged), align: "right", hideBelow: "lg" },
@@ -290,7 +289,7 @@ async function DriverProductivity({ from, to }: { from: string; to: string }) {
           { header: "Driver", cell: (row) => row.driver },
           { header: "Jobs", cell: (row) => number(row.jobs), align: "right" },
           { header: "Completed", cell: (row) => number(row.completed), align: "right" },
-          { header: "Exceptions", cell: (row) => number(row.exceptions), align: "right" },
+          { header: "Problems", cell: (row) => number(row.exceptions), align: "right" },
           {
             header: "Completion",
             cell: (row) => (row.jobs ? `${Math.round((row.completed / row.jobs) * 100)}%` : "—"),

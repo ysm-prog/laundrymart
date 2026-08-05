@@ -6,7 +6,7 @@ import { can } from "@/lib/roles";
 import { date, dateTime, time } from "@/lib/format";
 import type { DailyRoute, Driver, Vehicle } from "@/lib/db/types";
 import {
-  Button, ButtonLink, Card, DataTable, EmptyState, FlashMessages, Notice,
+  Button, ButtonLink, Card, DataTable, EmptyState, Notice,
   PageHeader, SkeletonRows, StatusBadge, humanise,
 } from "@/components/ui";
 import { Field, FormActions, Select, SubmitButton, Textarea } from "@/components/form";
@@ -36,13 +36,11 @@ const NEXT_STATUS: Array<{ from: string[]; to: string; label: string }> = [
 ];
 
 export default async function DailyRouteDetailPage({
-  params, searchParams,
+  params,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ error?: string; ok?: string }>;
 }) {
   const { id } = await params;
-  const flash = await searchParams;
   const session = await requireCapability("routes.read");
   const writable = can(session.role, "routes.write");
 
@@ -62,7 +60,6 @@ export default async function DailyRouteDetailPage({
 
   return (
     <div className="space-y-6">
-      <FlashMessages error={flash.error} ok={flash.ok} />
       <PageHeader
         title={`${route.code} · ${date(route.route_date)}`}
         description={route.name}

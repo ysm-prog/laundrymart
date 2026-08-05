@@ -3,7 +3,7 @@ import { requireCapability } from "@/lib/auth/context";
 import { createClient } from "@/lib/supabase/server";
 import { date, dateTime, number, today } from "@/lib/format";
 import {
-  DataTable, EmptyState, FlashMessages, PageHeader, SkeletonRows,
+  DataTable, EmptyState, PageHeader, SkeletonRows,
 } from "@/components/ui";
 
 export const metadata = { title: "Pickups" };
@@ -35,7 +35,6 @@ export default async function PickupsPage({
 
   return (
     <div className="space-y-6">
-      <FlashMessages error={params.error} ok={params.ok} />
       <PageHeader title="Pickups" description="Every collection recorded in the field, with damage and shortfalls." />
 
       <form method="get" action="/operations/pickups" className="flex flex-wrap items-end gap-2">

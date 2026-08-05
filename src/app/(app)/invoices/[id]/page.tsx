@@ -7,9 +7,10 @@ import { date, money, today } from "@/lib/format";
 import { CHARGE_TYPE_LABELS, type ChargeType } from "@/lib/domain/pricing";
 import type { Invoice, InvoiceLine, Payment } from "@/lib/db/types";
 import {
-  Button, ButtonLink, Card, DataTable, EmptyState, FlashMessages, Notice,
+  Button, ButtonLink, Card, DataTable, EmptyState, Notice,
   PageHeader, SkeletonRows, Stat, StatusBadge, humanise,
 } from "@/components/ui";
+import { ConfirmSubmit } from "@/components/confirm-submit";
 import { Checkbox, Field, Input, Select, SubmitButton } from "@/components/form";
 import { PrintButton } from "@/components/print-button";
 import { emailIsConfigured } from "@/lib/email/send";
@@ -30,13 +31,11 @@ type InvoiceDetail = Invoice & {
 };
 
 export default async function InvoiceDetailPage({
-  params, searchParams,
+  params,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ error?: string; ok?: string }>;
 }) {
   const { id } = await params;
-  const flash = await searchParams;
   const session = await requireCapability("invoices.read");
   const writable = can(session.role, "invoices.write");
 
@@ -58,7 +57,6 @@ export default async function InvoiceDetailPage({
 
   return (
     <div className="space-y-6">
-      <FlashMessages error={flash.error} ok={flash.ok} />
       <PageHeader
         title={`Tax invoice ${invoice.invoice_number}`}
         description={`${invoice.customers?.business_name ?? "Unknown customer"} · ${humanise(invoice.invoice_type)}`}
@@ -156,12 +154,15 @@ export default async function InvoiceDetailPage({
               ) : null}
             </div>
             {invoice.status !== "void" ? (
-              <form action={voidInvoice} className="mt-4 flex flex-wrap items-end gap-3 border-t pt-4">
+              <form action={voidInvoice} className="mt-4 border-t pt-4">
                 <input type="hidden" name="id" value={id} />
-                <Field label="Reason" name="void_reason" required>
-                  <Input name="void_reason" required placeholder="Raised against the wrong site" />
-                </Field>
-                <SubmitButton variant="danger">Void invoice</SubmitButton>
+                <ConfirmSubmit
+                  label="Void invoice"
+                  consequence={`Voiding cancels ${invoice.invoice_number} permanently. The number is kept for the audit trail and a replacement gets a new one.`}
+                  reasonName="void_reason"
+                  reasonLabel="Why is it being voided?"
+                  pendingLabel="Voiding…"
+                />
               </form>
             ) : null}
           </Card>
