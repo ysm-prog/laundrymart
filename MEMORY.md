@@ -7,8 +7,8 @@ Vercel at `ats.coreit.com.au`; sign-in verified end to end.
 
 All 12 migrations applied — `0012_optional_inspection` went on 2026-08-05 (verified:
 `search_path=public` still pinned, `anon` still cannot execute the guard, no inspection check
-left in the body). The app code for it is merged to `Dev` and not yet promoted to `Prod`; 0012
-only removes a check, so `Prod`'s currently deployed code is unaffected by it.
+left in the body). The app code for it is on `Prod` — it rode the Phase A promotion (`6147b06`),
+whose CI was green on all three jobs.
 
 **Simplification redesign (branch `claude/app-simplify-redesign-ageadz`):** the BA roadmap
 (`docs/SIMPLIFICATION-ROADMAP.md`), the design spec (`docs/SIMPLIFICATION-DESIGN.md`) and the
