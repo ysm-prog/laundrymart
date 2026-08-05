@@ -1,6 +1,9 @@
 -- Proof of the operational business rules the spec calls non-negotiable (§11):
--- inspection before start, load confirmation before start, unload before close,
--- inventory conservation, sequential numbering, protected items.
+-- load confirmation before start, unload before close, inventory conservation,
+-- sequential numbering, protected items.
+--
+-- The inspection is deliberately NOT one of them any more (migration 0012): it
+-- is recorded and surfaced, but a run that has none can still start.
 begin;
 select plan(12);
 
@@ -28,28 +31,22 @@ set local "request.jwt.claim.sub" = '11111111-1111-1111-1111-111111111111';
 select throws_ok(
   $$ update public.daily_routes set status = 'in_progress'
       where id = '50000000-0000-0000-0000-000000000001' $$,
-  'P0001', 'vehicle inspection is required before starting the run',
-  'a run cannot start without a vehicle inspection');
-
-insert into public.vehicle_inspections (id, tenant_id, vehicle_id, route_id, result)
-values ('a1000000-0000-0000-0000-000000000001','aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
-        'fe000000-0000-0000-0000-00000000000a','50000000-0000-0000-0000-000000000001','pass');
-update public.daily_routes set inspection_id = 'a1000000-0000-0000-0000-000000000001'
- where id = '50000000-0000-0000-0000-000000000001';
-
-select throws_ok(
-  $$ update public.daily_routes set status = 'in_progress'
-      where id = '50000000-0000-0000-0000-000000000001' $$,
   'P0001', 'load must be confirmed before starting the route',
   'a run cannot start before the load is confirmed');
 
 update public.daily_routes set load_confirmed_at = now()
  where id = '50000000-0000-0000-0000-000000000001';
 
+-- Guards the point of 0012: the run below has no inspection_id, and starts
+-- anyway. If a future migration reinstates the gate, this pair fails.
+select is((select inspection_id from public.daily_routes
+            where id = '50000000-0000-0000-0000-000000000001'), null::uuid,
+          'the run under test has no inspection recorded');
+
 select lives_ok(
   $$ update public.daily_routes set status = 'in_progress'
       where id = '50000000-0000-0000-0000-000000000001' $$,
-  'a run starts once inspection and load confirmation exist');
+  'a run starts on load confirmation alone — the inspection is not a gate');
 
 select isnt((select started_at from public.daily_routes
               where id = '50000000-0000-0000-0000-000000000001'), null,

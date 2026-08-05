@@ -2,8 +2,14 @@
 > Auto-loaded each session. Canonical state is CLAUDE.md; this is the live delta.
 
 **Status:** Live, signed into, and on the upgraded stack (Next 16, Tailwind 4, Zod 4,
-vitest 4). `laundrymart-syd` (ref `xujhwljrmogenhvqpkrf`) has all 11 migrations and the demo
-tenant; the app is on Vercel at `ats.coreit.com.au`; sign-in verified end to end.
+vitest 4). `laundrymart-syd` (ref `xujhwljrmogenhvqpkrf`) has the demo tenant; the app is on
+Vercel at `ats.coreit.com.au`; sign-in verified end to end.
+
+⚠️ **`0012_optional_inspection` is written and green locally but NOT yet applied to the hosted
+project** — it has 0001–0011. Until it is applied, the live database still refuses to start a
+run without an `inspection_id`, so the new "Start route" button on `/routes/daily/:id` will
+surface that P0001 message. Apply it (MCP `apply_migration`) when merging
+`claude/status-update-permissions-qzjuw6`.
 
 Working through the Plantline design handoff in four stages. **1 (theme), 2 (shell) and the
 dashboard from 3 are done.** Remaining: dispatch planner, billing two-pane, then stage 4 —
@@ -12,6 +18,10 @@ scratchpad, not the repo; re-upload it in a new session.
 
 The theme was written against Tailwind 3 and ported to 4 during the merge from `Dev`: there is
 no `tailwind.config.ts` any more, everything lives in the `@theme` block of `globals.css`.
+
+Run workflow: the inspection is no longer a database gate (0012) and `routes.status` is now a
+capability separate from `routes.write`, held by dispatchers/managers plus `driver` and
+`customer_service`. Office and driver unload share `src/lib/routes/unload.ts`.
 
 CI's DB job runs Postgres on the runner, not in a `services:` container — pgTAP is a
 server-side extension, so its `.control` file has to sit in the postmaster's own filesystem

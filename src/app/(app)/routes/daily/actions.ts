@@ -6,6 +6,7 @@ import { assertCapability } from "@/lib/auth/context";
 import { createClient } from "@/lib/supabase/server";
 import { recordAudit } from "@/lib/audit";
 import { isoWeekday } from "@/lib/domain/dates";
+import { sweepVehicleToDepot } from "@/lib/routes/unload";
 import {
   describeDbError, done, fail, firstIssue, optionalText, optionalUuid, requiredDate, toObject,
 } from "@/lib/actions";
@@ -161,8 +162,21 @@ export async function assignRoute(formData: FormData): Promise<void> {
   done(backTo, "Route assignment saved.");
 }
 
+/**
+ * Move a run to another workflow state from the office.
+ *
+ * Gated on `routes.status` rather than `routes.write`: advancing a run that is
+ * already out on the road is a floor decision, and restricting it to the roles
+ * that also plan and assign left runs stranded whenever the driver could not
+ * drive their own workflow (see ROUTE_TRANSITIONS on the detail page).
+ *
+ * The state machine's ordering rules live in the database. What this action
+ * adds is the bookkeeping each state implies — the timestamps the driver's own
+ * /run flow would have stamped — because a state reached without them is a run
+ * the guard will refuse to move again later.
+ */
 export async function setRouteStatus(formData: FormData): Promise<void> {
-  const session = await assertCapability("routes.write");
+  const session = await assertCapability("routes.status");
   const parsed = z.object({
     id: z.string().uuid(),
     status: z.enum([
@@ -172,19 +186,49 @@ export async function setRouteStatus(formData: FormData): Promise<void> {
   }).safeParse(toObject(formData));
   if (!parsed.success) fail("/routes/daily", firstIssue(parsed.error));
 
-  const backTo = `/routes/daily/${parsed.data.id}`;
+  const { id, status } = parsed.data;
+  const backTo = `/routes/daily/${id}`;
   const supabase = await createClient();
+
+  const { data: route } = await supabase
+    .from("daily_routes")
+    .select("id, status, load_confirmed_at, returned_at, unloaded_at")
+    .eq("id", id).eq("tenant_id", session.tenantId)
+    .maybeSingle();
+  if (!route) fail(backTo, "That run could not be found.");
+  if (route.status === status) fail(backTo, `This run is already ${humanStatus(status)}.`);
+
+  const now = new Date().toISOString();
+  const patch: Record<string, unknown> = { status };
+
+  // Only stamp what is still unset — re-entering a state must not rewrite the
+  // time it first happened.
+  if (status === "load_confirmed" && !route.load_confirmed_at) {
+    patch.load_confirmed_at = now;
+    patch.load_confirmed_by = session.userId;
+  }
+  if (status === "returning" && !route.returned_at) patch.returned_at = now;
+  if (status === "unloading" && !route.unloaded_at) {
+    // Same sweep the driver's own unload performs, so stock does not stay
+    // stranded in `in_transit` on a vehicle that is back at the depot.
+    const sweepError = await sweepVehicleToDepot(session.tenantId, id);
+    if (sweepError) fail(backTo, sweepError);
+    patch.unloaded_at = now;
+  }
 
   // The database enforces the ordering rules; we just surface its message.
   const { error } = await supabase
-    .from("daily_routes").update({ status: parsed.data.status })
-    .eq("id", parsed.data.id).eq("tenant_id", session.tenantId);
+    .from("daily_routes").update(patch)
+    .eq("id", id).eq("tenant_id", session.tenantId);
   if (error) fail(backTo, describeDbError(error));
 
   await recordAudit(session, {
-    entity: "daily_route", entityId: parsed.data.id, action: "status_change",
-    summary: parsed.data.status,
+    entity: "daily_route", entityId: id, action: "status_change", summary: status,
   });
   revalidatePath(backTo);
-  done(backTo, `Route marked ${parsed.data.status.replace(/_/g, " ")}.`);
+  done(backTo, `Route marked ${humanStatus(status)}.`);
+}
+
+function humanStatus(status: string): string {
+  return status.replace(/_/g, " ");
 }
