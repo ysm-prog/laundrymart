@@ -1,12 +1,20 @@
 import Link from "next/link";
-import { cx } from "./ui";
+import { CONTROL, cx } from "./ui";
 
-/** GET form — filters live in the URL so a filtered list is shareable. */
+/**
+ * The filter bar over a list. A GET form, so the filtered list lives in the URL
+ * and can be bookmarked or sent to someone.
+ *
+ * Uses the shared `CONTROL` skin: this bar was written before the design system
+ * and kept its own sizes and borders, so on every list page the search box was
+ * visibly a different control than every other input on screen.
+ */
 export function ListControls({
-  action, q, filters,
+  action, q, filters, placeholder = "Search this list…",
 }: {
   action: string;
   q?: string;
+  placeholder?: string;
   filters?: ReadonlyArray<{
     name: string;
     label: string;
@@ -17,28 +25,26 @@ export function ListControls({
   return (
     <form method="get" action={action} className="mb-4 flex flex-wrap items-end gap-2">
       <div className="min-w-[12rem] flex-1">
-        <label htmlFor="q" className="sr-only">Search</label>
-        <input
-          id="q" name="q" type="search" defaultValue={q} placeholder="Search…"
-          className="w-full rounded-md border bg-surface px-3 py-2 text-sm"
-        />
+        <label htmlFor="q" className="sr-only">Search this list</label>
+        <input id="q" name="q" type="search" defaultValue={q} placeholder={placeholder}
+               className={CONTROL} />
       </div>
       {filters?.map((filter) => (
         <div key={filter.name}>
           <label htmlFor={filter.name} className="sr-only">{filter.label}</label>
-          <select
-            id={filter.name} name={filter.name} defaultValue={filter.value ?? ""}
-            className="rounded-md border bg-surface px-3 py-2 text-sm"
-          >
-            <option value="">{filter.label}: any</option>
+          <select id={filter.name} name={filter.name} defaultValue={filter.value ?? ""}
+                  className={cx(CONTROL, "w-auto")}>
+            <option value="">Any {filter.label.toLowerCase()}</option>
             {filter.options.map((option) => (
               <option key={option.value} value={option.value}>{option.label}</option>
             ))}
           </select>
         </div>
       ))}
-      <button type="submit" className="rounded-md border bg-surface px-3 py-2 text-sm font-medium hover:bg-surface-muted">
-        Apply
+      <button type="submit"
+              className="inline-flex min-h-9 items-center border border-strong bg-surface px-3 py-1.5
+                         text-[12.5px] font-medium transition hover:bg-surface-muted">
+        Search
       </button>
     </form>
   );
@@ -67,11 +73,13 @@ export function Pagination({
     return `${basePath}?${search.toString()}`;
   };
 
-  const link = "rounded-md border px-3 py-1.5 text-sm";
+  const link = "inline-flex min-h-9 items-center border border-strong px-3 py-1.5 text-[12.5px]";
   return (
-    <nav aria-label="Pagination" className="mt-3 flex items-center justify-between gap-2">
-      <p className="text-sm text-muted-foreground">
-        Page {page} of {pages} · {total} record{total === 1 ? "" : "s"}
+    <nav aria-label="Pagination" className="mt-3 flex flex-wrap items-center justify-between gap-2">
+      {/* "record" is the developer's word for it. The operator is looking at
+          customers, or invoices, or stops — so the caller names them. */}
+      <p className="text-xs text-muted-foreground">
+        Showing page {page} of {pages} · {total} in total
       </p>
       <div className="flex gap-2">
         {page > 1 ? (

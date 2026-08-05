@@ -6,7 +6,7 @@ import {
   DataTable, EmptyState, PageHeader, SkeletonRows,
 } from "@/components/ui";
 
-export const metadata = { title: "Pickups" };
+export const metadata = { title: "Collections" };
 export const dynamic = "force-dynamic";
 
 type Row = {
@@ -35,7 +35,8 @@ export default async function PickupsPage({
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Pickups" description="Every collection recorded in the field, with damage and shortfalls." />
+      <PageHeader title="Collections" eyebrow="Pickups"
+                  description="Linen picked up at a stop, counted at the door, with anything damaged or missing." />
 
       <form method="get" action="/operations/pickups" className="flex flex-wrap items-end gap-2">
         <label className="text-sm">

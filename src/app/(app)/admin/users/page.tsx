@@ -2,7 +2,7 @@ import { Suspense } from "react";
 import { requireCapability } from "@/lib/auth/context";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { can, ROLES, ROLE_LABELS, type Role } from "@/lib/roles";
+import { can, COMMON_ROLES, ROLES, ROLE_LABELS, ROLE_SUMMARY, type Role } from "@/lib/roles";
 import { date } from "@/lib/format";
 import type { Depot } from "@/lib/db/types";
 import {
@@ -36,12 +36,16 @@ export default async function UsersPage() {
         <MembershipList canWrite={can(session.role, "admin.write")} currentUserId={session.userId} />
       </Suspense>
 
-      <Card title="Role reference">
-        <dl className="grid gap-2 text-sm sm:grid-cols-2">
-          {ROLES.map((role) => (
-            <div key={role} className="flex items-baseline justify-between gap-3 border-b py-1">
-              <dt className="font-medium">{ROLE_LABELS[role]}</dt>
-              <dd className="text-right text-xs text-muted-foreground">{ROLE_SUMMARY[role]}</dd>
+      <Card
+        title="What each role can do"
+        description="Most laundries only ever need the first four."
+      >
+        <dl className="divide-y">
+          {ROLE_ORDER.map((role) => (
+            <div key={role}
+                 className="grid gap-0.5 py-2 sm:grid-cols-[200px_minmax(0,1fr)] sm:gap-4">
+              <dt className="text-[13px] font-medium">{ROLE_LABELS[role]}</dt>
+              <dd className="text-xs text-muted-foreground">{ROLE_SUMMARY[role]}</dd>
             </div>
           ))}
         </dl>
@@ -50,19 +54,29 @@ export default async function UsersPage() {
   );
 }
 
-const ROLE_SUMMARY: Record<Role, string> = {
-  super_admin: "Everything, including settings",
-  operations_manager: "Everything except system settings",
-  dispatcher: "Customers, routes, jobs, fleet, invoices",
-  driver: "Their own run only",
-  finance: "Invoices, payments, reports",
-  warehouse_operator: "Warehouse workflow and inventory",
-  customer_service: "Customers and day-to-day operations",
-  sales: "Customers and service agreements",
-  branch_manager: "Full depot operations",
-  regional_manager: "Everything except system settings",
-  auditor: "Read-only across the platform",
-};
+/** Everyday roles first, the specialist seven after them, in one list. */
+const ROLE_ORDER: readonly Role[] = [
+  ...COMMON_ROLES,
+  ...ROLES.filter((role) => !(COMMON_ROLES as readonly string[]).includes(role)),
+];
+
+/**
+ * The same split inside the picker. An `<optgroup>` rather than an "advanced"
+ * toggle: the four everyday answers are read first, and the other seven are one
+ * scroll away instead of behind a control the user has to discover.
+ */
+const ROLE_GROUPS = [
+  {
+    label: "Common",
+    options: COMMON_ROLES.map((role) => ({ value: role, label: ROLE_LABELS[role] })),
+  },
+  {
+    label: "Specialist",
+    options: ROLES
+      .filter((role) => !(COMMON_ROLES as readonly string[]).includes(role))
+      .map((role) => ({ value: role, label: ROLE_LABELS[role] })),
+  },
+];
 
 /**
  * Emails for the tenant's members, from the service-role auth API. The lookup
@@ -133,17 +147,20 @@ async function MembershipList({
             ),
           },
           { header: "Role", cell: (row) => ROLE_LABELS[row.role as Role] ?? row.role },
-          { header: "Depot", cell: (row) => (row.depot_id ? depotName.get(row.depot_id) ?? "—" : "—"), hideBelow: "sm" },
-          { header: "Since", cell: (row) => date(row.created_at), hideBelow: "md" },
+          {
+            header: "Site",
+            cell: (row) => (row.depot_id ? depotName.get(row.depot_id) ?? "—" : "Every site"),
+            hideBelow: "sm",
+          },
+          { header: "Added", cell: (row) => date(row.created_at), hideBelow: "md" },
           {
             header: "",
             align: "right",
             cell: (row) => (canWrite && row.user_id !== currentUserId ? (
               <form action={updateMembership} className="flex items-center justify-end gap-2">
                 <input type="hidden" name="user_id" value={row.user_id} />
-                <Select name="role" defaultValue={row.role}
-                        options={ROLES.map((role) => ({ value: role, label: ROLE_LABELS[role] }))} />
-                <Select name="depot_id" placeholder="No depot" defaultValue={row.depot_id}
+                <Select name="role" defaultValue={row.role} groups={ROLE_GROUPS} />
+                <Select name="depot_id" placeholder="Every site" defaultValue={row.depot_id}
                         options={(depots ?? []).map((depot) => ({ value: depot.id, label: depot.name }))} />
                 <SubmitButton variant="secondary" pendingLabel="Saving…">Save</SubmitButton>
               </form>

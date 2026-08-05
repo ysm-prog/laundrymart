@@ -12,7 +12,7 @@ import { Field, Input, Select, SubmitButton } from "@/components/form";
 import { CIRCULATING_STATES, INVENTORY_STATES, MOVEMENT_REASONS } from "./states";
 import { moveStock } from "./actions";
 
-export const metadata = { title: "Inventory" };
+export const metadata = { title: "Stock" };
 export const dynamic = "force-dynamic";
 
 export default async function InventoryPage() {
@@ -21,8 +21,8 @@ export default async function InventoryPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Inventory"
-        description="Where every item is right now, and the ledger of how it got there."
+        title="Stock" eyebrow="Inventory"
+        description="How much of each item you have, where it is, and every movement that put it there."
       />
 
       <Suspense fallback={<SkeletonStats />}>

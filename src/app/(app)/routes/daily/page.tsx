@@ -33,7 +33,7 @@ export default async function DailyRoutesPage({ searchParams }: { searchParams: 
     <div className="space-y-6">
       <PageHeader
         title="Today's runs"
-        description="Execution for a specific day: driver, vehicle, stops and run progress."
+        description="One day’s work: who is driving, in which truck, and how far through their stops they are."
         actions={can(session.role, "routes.write")
           ? <ButtonLink href={`/routes/planner?date=${routeDate}`}>Dispatch planner</ButtonLink>
           : null}

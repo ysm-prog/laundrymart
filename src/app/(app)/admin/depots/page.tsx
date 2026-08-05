@@ -27,8 +27,8 @@ export default async function DepotsPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Sites"
-        description="Every route, vehicle, driver and stock pool belongs to a depot — the model supports many from day one."
+        title="Sites" eyebrow="Depots"
+        description="Each place you operate from. Runs, trucks, drivers and stock all belong to one site — most laundries only ever need one."
       />
 
       <Suspense fallback={<SkeletonRows rows={4} />}>

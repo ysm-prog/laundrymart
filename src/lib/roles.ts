@@ -112,6 +112,33 @@ export const ROLE_CAPABILITIES: Record<Role, readonly Capability[]> = {
   auditor: READ_ONLY,
 };
 
+/**
+ * The four answers that fit a small laundry, in the order an owner would think
+ * of them. Eleven job titles is a test a first-timer did not study for — and
+ * several of the eleven differ by one capability, so choosing badly between
+ * them is easy and the consequence is invisible.
+ *
+ * These are presets over the existing roles, not a new model: nothing in the
+ * database, the RLS policies or the guards changes. The remaining seven roles
+ * stay available for the multi-depot operator they were designed for.
+ */
+export const COMMON_ROLES = ["super_admin", "operations_manager", "dispatcher", "driver"] as const;
+
+/** What each role can do, said the way an owner would say it. */
+export const ROLE_SUMMARY: Record<Role, string> = {
+  super_admin: "Everything, including settings and who can sign in",
+  operations_manager: "Everything day to day, but not the settings",
+  dispatcher: "Customers, runs, stops, drivers, trucks and invoices",
+  driver: "Their own run, on their phone, and nothing else",
+  finance: "Invoices, payments and reports",
+  warehouse_operator: "The plant floor and stock",
+  customer_service: "Customers and the day's stops",
+  sales: "Customers and their contracts",
+  branch_manager: "Everything at one site",
+  regional_manager: "Everything day to day across sites",
+  auditor: "Can look at everything, can change nothing",
+};
+
 export function can(role: Role, capability: Capability): boolean {
   return ROLE_CAPABILITIES[role]?.includes(capability) ?? false;
 }

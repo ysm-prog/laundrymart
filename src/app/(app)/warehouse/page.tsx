@@ -13,7 +13,7 @@ import { Field, Input, Select, SubmitButton } from "@/components/form";
 import { BATCH_FLOW, BATCH_STAGE_LABELS, type BatchStage } from "./stages";
 import { createBatch } from "./actions";
 
-export const metadata = { title: "Warehouse" };
+export const metadata = { title: "In the plant" };
 export const dynamic = "force-dynamic";
 
 type BatchRow = {
@@ -34,8 +34,8 @@ export default async function WarehousePage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Warehouse"
-        description="Linen through the plant, batch by batch. Every stage moves real stock."
+        title="In the plant" eyebrow="Production batches"
+        description="Loads of linen moving through washing, drying, folding and packing. Each stage moves real stock."
       />
 
       <Suspense fallback={<SkeletonStats />}>
