@@ -4,7 +4,9 @@ import { requireSession } from "@/lib/auth/context";
 import { createClient } from "@/lib/supabase/server";
 import { can } from "@/lib/roles";
 import { recordAudit } from "@/lib/audit";
+import { packExceptionNotes } from "@/lib/exceptions";
 import { MAX_PHOTOS, isTenantPath } from "@/lib/media";
+import { EXCEPTION_REASON_VALUES } from "@/app/(app)/jobs/exception-reasons";
 
 /**
  * Offline sync endpoint for the driver app.
@@ -53,8 +55,20 @@ const delivery = z.object({
   ...media,
 });
 
+// "Something's wrong at this stop", flagged from the run screen (P-5). Updates
+// the job rather than inserting a row, so replaying it is naturally idempotent.
+const exception = z.object({
+  kind: z.literal("exception"),
+  clientRef: z.string().min(8).max(80),
+  jobId: z.string().uuid(),
+  capturedAt: z.string().datetime(),
+  reason: z.enum(EXCEPTION_REASON_VALUES),
+  notes: z.string().max(2000).nullish(),
+  ...media,
+});
+
 const batch = z.object({
-  records: z.array(z.discriminatedUnion("kind", [pickup, delivery])).min(1).max(100),
+  records: z.array(z.discriminatedUnion("kind", [pickup, delivery, exception])).min(1).max(100),
 });
 
 type Outcome = { clientRef: string; status: "accepted" | "duplicate" | "rejected"; reason?: string };
@@ -77,6 +91,35 @@ export async function POST(request: NextRequest) {
   const outcomes: Outcome[] = [];
 
   for (const record of parsed.data.records) {
+    if (record.kind === "exception") {
+      // RLS scopes the read: a driver can only reach their own jobs.
+      const { data: job } = await supabase
+        .from("jobs").select("id").eq("id", record.jobId).maybeSingle();
+      if (!job) {
+        outcomes.push({ clientRef: record.clientRef, status: "rejected", reason: "Job not found" });
+        continue;
+      }
+
+      const photoUrls = (record.photoPaths ?? [])
+        .filter((path) => isTenantPath(path, session.tenantId));
+
+      const { error } = await supabase
+        .from("jobs")
+        .update({
+          status: "exception",
+          exception_reason: record.reason,
+          exception_notes: packExceptionNotes(record.notes, photoUrls),
+        })
+        .eq("id", job.id).eq("tenant_id", session.tenantId);
+
+      if (error) {
+        outcomes.push({ clientRef: record.clientRef, status: "rejected", reason: error.message });
+        continue;
+      }
+      outcomes.push({ clientRef: record.clientRef, status: "accepted" });
+      continue;
+    }
+
     const table = record.kind === "pickup" ? "pickups" : "deliveries";
 
     const { data: existing } = await supabase

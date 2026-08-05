@@ -69,6 +69,37 @@ const agreementSchema = z.object({
   notes: optionalText,
 });
 
+/**
+ * Priced lines posted by the wizard as JSON in one hidden field — the same
+ * compose-locally-commit-once shape the dispatch planner uses. Malformed JSON
+ * degrades to "no lines" rather than losing the agreement: billing then falls
+ * back to item defaults, which the detail page says out loud.
+ */
+const wizardLinesSchema = z.array(z.object({
+  item_id: optionalUuid,
+  charge_type: z.enum([
+    "rental", "wash_only", "replacement", "minimum_service_fee", "fuel_levy",
+    "emergency_delivery", "weekend_surcharge", "holiday_surcharge", "bag_charge",
+    "weight_charge", "monthly_fee", "other",
+  ]),
+  pricing_model: z.enum(["per_item", "per_kg", "per_collection", "monthly", "percentage"]),
+  unit_price: z.number().finite().min(0),
+  standard_quantity: z.number().finite().min(0),
+  included_quantity: z.number().finite().min(0),
+  taxable: z.boolean(),
+})).max(50);
+
+function wizardLines(formData: FormData): z.infer<typeof wizardLinesSchema> | null {
+  const raw = formData.get("lines");
+  if (typeof raw !== "string" || raw.trim() === "") return [];
+  try {
+    const parsed = wizardLinesSchema.safeParse(JSON.parse(raw));
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function createAgreement(formData: FormData): Promise<void> {
   const session = await assertCapability("agreements.write");
   const backTo = "/agreements/new";
@@ -77,9 +108,18 @@ export async function createAgreement(formData: FormData): Promise<void> {
   if (!parsed.success) return fail(backTo, firstIssue(parsed.error));
 
   const pickup = patternFrom(formData, "pickup");
-  const delivery = patternFrom(formData, "delivery");
+  // The wizard's common case: clean linen comes back on the next service day,
+  // so the delivery pattern is the pickup pattern — one checkbox, not a second
+  // pattern editor.
+  const followsPickup = formData.get("delivery_follows") === "on";
+  const delivery = followsPickup ? pickup : patternFrom(formData, "delivery");
   if (!pickup) return fail(backTo, "The pickup pattern is incomplete — pick at least one service day.");
   if (!delivery) return fail(backTo, "The delivery pattern is incomplete — pick at least one service day.");
+
+  const lines = wizardLines(formData);
+  if (lines === null) {
+    return fail(backTo, "The priced items could not be read. Check step 3 and try again.");
+  }
 
   const supabase = await createClient();
   const { data: agreementNumber, error: numberError } = await supabase
@@ -102,12 +142,29 @@ export async function createAgreement(formData: FormData): Promise<void> {
 
   if (error) return fail(backTo, describeDbError(error));
 
+  if (lines.length > 0) {
+    const { error: lineError } = await supabase.from("service_agreement_lines").insert(
+      lines.map((line) => ({
+        ...line,
+        agreement_id: data.id,
+        tenant_id: session.tenantId,
+        created_by: session.userId,
+      })),
+    );
+    if (lineError) {
+      // The agreement exists; land on it so the lines can be re-added there.
+      return fail(`/agreements/${data.id}`,
+        `${data.agreement_number} was created, but its priced items could not be saved: ${describeDbError(lineError)}`);
+    }
+  }
+
   await recordAudit(session, {
     entity: "service_agreement", entityId: data.id, action: "create",
     summary: data.agreement_number,
   });
   revalidatePath("/agreements");
-  return done(`/agreements/${data.id}`, `Agreement ${data.agreement_number} created as a draft.`);
+  return done(`/agreements/${data.id}`,
+    `Contract ${data.agreement_number} created as a draft. Activate it and it starts appearing on runs.`);
 }
 
 export async function updateAgreement(formData: FormData): Promise<void> {

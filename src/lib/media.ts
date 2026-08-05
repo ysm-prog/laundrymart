@@ -17,7 +17,9 @@
 
 export const MEDIA_BUCKET = "run-media";
 
-export const MEDIA_SCOPES = ["pickup", "delivery", "inspection"] as const;
+// "exception" needs no storage change: the policies check only the tenant
+// segment of the key, so a new scope segment is just a new folder.
+export const MEDIA_SCOPES = ["pickup", "delivery", "inspection", "exception"] as const;
 export type MediaScope = (typeof MEDIA_SCOPES)[number];
 
 export const MEDIA_KINDS = ["photo", "signature"] as const;

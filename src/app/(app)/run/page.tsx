@@ -11,7 +11,8 @@ import {
 import { Field, Input, Select, SubmitButton, Textarea } from "@/components/form";
 import { ConfirmSubmit } from "@/components/confirm-submit";
 import { InspectionChecklist } from "./inspection-checklist";
-import { OfflineCapture, ServiceWorkerRegistrar } from "@/components/offline-capture";
+import { ExceptionCapture, OfflineCapture, ServiceWorkerRegistrar } from "@/components/offline-capture";
+import { EXCEPTION_REASONS } from "@/app/(app)/jobs/exception-reasons";
 import { MediaUploadField } from "@/components/media-upload-field";
 import { CHECKLIST_KEYS, CHECKLIST_LABELS } from "./checklist";
 import { closeRun, confirmLoad, markReturning, startRun, submitInspection, unloadRun } from "./actions";
@@ -280,11 +281,7 @@ async function Stops({
                   <OfflineCapture jobId={active.id} kind="delivery" items={items ?? []} />
                 </section>
               ) : null}
-              <p className="text-xs text-muted-foreground">
-                Need to flag a problem? Open the{" "}
-                <Link href={`/jobs/${active.id}`} className="text-primary hover:underline">job</Link>{" "}
-                and record an exception.
-              </p>
+              <ExceptionCapture jobId={active.id} reasons={EXCEPTION_REASONS} />
             </div>
           )}
         </Card>

@@ -6,6 +6,10 @@ import {
 } from "@/components/ui";
 import { ConfirmSubmit } from "@/components/confirm-submit";
 import { InspectionChecklist } from "@/app/(app)/run/inspection-checklist";
+import { ExceptionCapture } from "@/components/offline-capture";
+import { AgreementWizard } from "@/app/(app)/agreements/agreement-wizard";
+import { CustomerEssentials, FormDisclosure } from "@/app/(app)/customers/customer-form";
+import { EXCEPTION_REASONS } from "@/app/(app)/jobs/exception-reasons";
 import type { NavSection } from "@/lib/nav";
 import { UNASSIGNED } from "@/app/(app)/routes/planner/plan";
 import {
@@ -127,6 +131,24 @@ const PREVIEW_DRIVERS: Option[] = [
 const PREVIEW_VEHICLES: Option[] = [
   { value: "v1", label: "CJ72QM · 800 kg", capacityKg: 800 },
   { value: "v2", label: "BK09YT · 250 kg", capacityKg: 250 },
+];
+
+/* ---------------------------------------------------------- wizard fixture */
+
+const PREVIEW_WIZARD_CUSTOMERS = [
+  { id: "c1", business_name: "Quay Street Bistro", customer_number: "CUST00001" },
+  { id: "c2", business_name: "Northshore Day Spa", customer_number: "CUST00002" },
+];
+
+const PREVIEW_WIZARD_LOCATIONS = [
+  { id: "l1", name: "Main kitchen", customer_id: "c1" },
+  { id: "l2", name: "Treatment rooms", customer_id: "c2" },
+];
+
+const PREVIEW_WIZARD_ITEMS = [
+  { id: "i1", name: "Bath Towel — White", sku: "TWL-W", rental_price: 2.4 },
+  { id: "i2", name: "Chef Jacket", sku: "CHF-J", rental_price: 4.1 },
+  { id: "i3", name: "Queen Sheet", sku: "SHT-Q", rental_price: 3.2 },
 ];
 
 /* --------------------------------------------------------- billing fixture */
@@ -532,17 +554,63 @@ export default function DesignPreviewPage() {
                     ]} />
                   </form>
                 </Card>
-                <Card title="Flash toast" description="Success dismisses itself in 5 s; an error stays until closed. Shown bottom-right in the app.">
+                <Card title="Flash toast" description="Success dismisses itself in 5 s; an error stays until closed. A prerequisite failure links the screen that fixes it.">
                   <div className="space-y-2">
                     <div className="flex max-w-[440px] items-start gap-2.5 border border-l-[5px] border-success/40 border-l-success bg-surface px-3 py-2 text-[12.5px] text-success shadow-sm">
                       <p className="min-w-0 flex-1">Invoice INV00008 emailed to accounts@dayspa.example.</p>
                       <span aria-hidden className="shrink-0 px-1 leading-none">×</span>
                     </div>
                     <div className="flex max-w-[440px] items-start gap-2.5 border border-l-[5px] border-danger/40 border-l-danger bg-surface px-3 py-2 text-[12.5px] text-danger shadow-sm">
-                      <p className="min-w-0 flex-1">This customer has no billing email. Add one, or type an address to send to.</p>
+                      <div className="min-w-0 flex-1">
+                        <p>This customer has no billing email. Add one, or type an address to send to.</p>
+                        <span className="mt-0.5 inline-block font-medium underline underline-offset-2">
+                          Add their billing email →
+                        </span>
+                      </div>
                       <span aria-hidden className="shrink-0 px-1 leading-none">×</span>
                     </div>
                   </div>
+                </Card>
+              </div>
+            </div>
+          </div>
+
+          <div className="border-t pt-5">
+            <PageHeader
+              eyebrow="Phase B"
+              title="Wizards, quick-create and in-run problems"
+              description="The contract wizard's three steps, the four-field customer quick-create, and the driver's exception capture."
+            />
+            <div className="space-y-4">
+              <AgreementWizard
+                action={previewApply}
+                customerAction={previewApply}
+                customers={PREVIEW_WIZARD_CUSTOMERS}
+                locations={PREVIEW_WIZARD_LOCATIONS}
+                depots={[{ id: "d1", name: "Alexandria plant" }]}
+                items={PREVIEW_WIZARD_ITEMS}
+              />
+              <div className="grid items-start gap-4 lg:grid-cols-2">
+                <Card title="Customer quick-create"
+                      description="Four fields create a routable customer; everything else is a default behind a disclosure.">
+                  <form action={previewApply} className="space-y-4">
+                    <CustomerEssentials />
+                    <FormDisclosure summary="Billing details" hint="ABN, billing address, payment terms">
+                      <div className="grid gap-4 sm:grid-cols-2">
+                        <Field label="ABN" name="pv_abn" hint="11 digits — validated before saving, optional">
+                          <Input name="pv_abn" placeholder="51 824 753 556" />
+                        </Field>
+                        <Field label="Payment terms (days)" name="pv_terms">
+                          <Input name="pv_terms" type="number" defaultValue={14} />
+                        </Field>
+                      </div>
+                    </FormDisclosure>
+                    <SubmitButton>Create customer</SubmitButton>
+                  </form>
+                </Card>
+                <Card title="Something's wrong at this stop"
+                      description="Inline on the run screen's capture card, through the offline outbox — the driver never leaves the run.">
+                  <ExceptionCapture jobId="preview" reasons={EXCEPTION_REASONS} preview />
                 </Card>
               </div>
             </div>
