@@ -285,7 +285,12 @@ production_batches→auth.users, **laundry_orders→auth.users** (four FKs: `ass
 
 ## 11. Hosted project
 `laundrymart-syd` · ref `xujhwljrmogenhvqpkrf` · ap-southeast-2 (Sydney) · org `ysm-prog`.
-Deployed on Vercel at `ats.coreit.com.au`. All 12 migrations applied; demo tenant seeded
+Deployed on Vercel at `ats.coreit.com.au`. All migrations through `0014_laundry_orders`
+applied (0014 on 2026-08-13, verified by rolled-back probe: the full workflow, the three
+guards, `anon` reading nothing, and no new security advisor). Note the live project also
+carries `0012_return_count`, `purchases`, `supplier_payments` and `import_helpers` from
+branches not yet merged here, so `supabase/migrations/` is not a complete picture of it.
+Demo tenant seeded
 (`Harbour Commercial Laundry`); two `super_admin` logins, one also linked to the seeded driver.
 Sign-in verified end to end 2026-08-05.
 

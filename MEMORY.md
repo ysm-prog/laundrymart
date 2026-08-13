@@ -10,12 +10,33 @@ Vercel at `ats.coreit.com.au`; sign-in verified end to end.
 index in place, `anon` reading zero rows through a rolled-back probe, and no new security
 advisor (still the same five SECURITY DEFINER warnings §18 records as legitimate).
 
-**Jobs / laundry order management shipped** on `claude/jobs-laundry-order-management-p4fu8k`
-(this session). Migration `0014_laundry_orders` — `laundry_orders` + `laundry_order_items` +
-`laundry_order_activity`, the transition guard, and `save_laundry_order_items()`.
-**Applied locally and proven (27 pgTAP assertions); NOT yet applied to `laundrymart-syd`** —
-push it with the branch's CI, or apply it before the code deploys, or every jobs screen 404s
-its table. Things worth carrying forward:
+**Jobs / laundry order management is on `Prod`** (merge `ee351ad`, via `Dev` `875d2ae`;
+feature branch `claude/jobs-laundry-order-management-p4fu8k`, commit `39a1f0e`).
+**`0014_laundry_orders` is applied to `laundrymart-syd`** and verified there:
+- all three tables have RLS on with one policy each; `laundry_orders` carries 9 indexes and
+  2 triggers, `laundry_order_items` 2 triggers, `laundry_order_activity` none (no
+  `updated_at` column, so `apply_tenant_policy` correctly skips the trigger);
+- `search_path=public` pinned on all three functions and **`anon` can execute none of them**;
+- **a rolled-back end-to-end probe passed on the live project**: `next_number` issued
+  `LJ00001`, `save_laundry_order_items` wrote 2 items, all four transitions ran, `due_date`
+  generated as the delivery date, `completed_at` stamped by the trigger;
+- a second rolled-back probe confirmed the guards refuse on the live project — the pickup
+  going out for delivery, the backwards move, and emptying the laundry list;
+- `anon` reads 0 rows (it holds table-level SELECT, as it does on every table here — see the
+  Supabase default-privileges note below; RLS is the boundary);
+- **no new security advisor.** Still 7 warnings, none from 0014 — `save_laundry_order_items`
+  is SECURITY INVOKER so it does not trip the SECURITY DEFINER lint at all. The set is the 5
+  documented helpers plus `park_number_sequence` (from another branch's migration) and the
+  auth leaked-password toggle.
+
+**The live DB is ahead of `Prod`'s migrations folder.** `list_migrations` shows
+`0012_return_count`, `purchases`, `supplier_payments` and `import_helpers` applied to
+`laundrymart-syd` with no matching file on `Prod`. They came from unmerged branches (the
+first is `claude/warehouse-inventory-flow-psooyq`; the last three were applied 2026-08-13).
+Nothing in 0014 touches them, but a fresh `db:test` run does **not** reproduce the live
+schema, and whoever merges those branches has a numbering reconcile to do.
+
+Carrying forward from the build:
 - **`/jobs` is Stops, `/orders` is Jobs.** `public.jobs` was already the routing module's stop.
   The new module is `laundry_orders` in the schema, `/orders` as a route, and **Job** on screen.
   Do not "tidy" one into the other; `/help` now defines both words and the rail carries both.
@@ -162,10 +183,9 @@ server-side extension, so its `.control` file has to sit in the postmaster's own
 and apt on the runner cannot reach into a container.
 
 **Next up**
-0. **Apply `0014_laundry_orders` to `laundrymart-syd`** and re-run the security advisors — the
-   module is code-complete and DB-proven locally, but nothing has touched the hosted project.
-   Then take one job end to end on the demo tenant: create → in progress → ready → out for
-   delivery → delivered, and one customer-pickup job through to collected.
+0. **Click through `/orders` on the deployed app** once Vercel has built `Prod`. The schema
+   and the workflow are proven on the live project by SQL probe; the screens themselves have
+   never been rendered against real data from anywhere.
 1. Stage 4, once the four decisions above are made.
 2. **Enable asymmetric JWT signing keys** on the project so `getClaims()` verifies locally
    instead of calling the auth server on every navigation (§2 assumes this).
