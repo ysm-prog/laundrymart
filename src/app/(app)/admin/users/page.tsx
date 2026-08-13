@@ -8,8 +8,9 @@ import type { Depot } from "@/lib/db/types";
 import {
   Badge, Card, DataTable, EmptyState, Notice, PageHeader, SkeletonRows,
 } from "@/components/ui";
-import { Select, SubmitButton } from "@/components/form";
-import { updateMembership } from "../actions";
+import { emailIsConfigured } from "@/lib/email/send";
+import { Field, FormActions, Input, Select, SubmitButton } from "@/components/form";
+import { inviteMember, updateMembership } from "../actions";
 
 export const metadata = { title: "People" };
 export const dynamic = "force-dynamic";
@@ -25,12 +26,6 @@ export default async function UsersPage() {
         title="People"
         description="Who can sign in, and which parts of the app each person sees."
       />
-
-      <Notice tone="info" title="Adding someone new">
-        Accounts are set up by your system administrator for now. Once a person has
-        signed in for the first time, they appear here — give them a role, and link
-        drivers to their driver record (on the Drivers page) so their run shows up.
-      </Notice>
 
       <Suspense fallback={<SkeletonRows rows={5} />}>
         <MembershipList canWrite={can(session.role, "admin.write")} currentUserId={session.userId} />
@@ -120,9 +115,13 @@ async function MembershipList({
 
   const depotName = new Map((depots ?? []).map((depot) => [depot.id, depot.name]));
   const emails = await memberEmails((memberships ?? []).map((row) => row.user_id));
+  const depotOptions = (depots ?? []).map((depot) => ({ value: depot.id, label: depot.name }));
 
   return (
-    <Card title="Members" description="Only administrators can see and change this list.">
+    <div className="space-y-6">
+      {canWrite ? <InviteForm depots={depotOptions} /> : null}
+
+      <Card title="Members" description="Only administrators can see and change this list.">
       <DataTable
         rows={memberships ?? []}
         empty={<EmptyState title="No memberships visible"
@@ -161,13 +160,74 @@ async function MembershipList({
                 <input type="hidden" name="user_id" value={row.user_id} />
                 <Select name="role" defaultValue={row.role} groups={ROLE_GROUPS} />
                 <Select name="depot_id" placeholder="Every site" defaultValue={row.depot_id}
-                        options={(depots ?? []).map((depot) => ({ value: depot.id, label: depot.name }))} />
+                        options={depotOptions} />
                 <SubmitButton variant="secondary" pendingLabel="Saving…">Save</SubmitButton>
               </form>
             ) : null),
           },
         ]}
       />
+      </Card>
+    </div>
+  );
+}
+
+/**
+ * Invite a teammate (roadmap D5).
+ *
+ * Three fields, because that is the whole decision: who, what they can do, and
+ * which site they belong to. What happens next depends on whether this
+ * deployment has an email provider, and the form says which it is rather than
+ * leaving the administrator to find out from the person not arriving.
+ */
+function InviteForm({ depots }: { depots: Array<{ value: string; label: string }> }) {
+  const mailReady = emailIsConfigured();
+
+  return (
+    <Card
+      title="Invite someone"
+      description="Creates their sign-in and puts them on your team. You can change the role afterwards."
+    >
+      <form action={inviteMember} className="space-y-4">
+        <div className="grid gap-3 sm:grid-cols-3">
+          <Field label="Email" name="email" required
+                 hint="The address they will sign in with.">
+            <Input name="email" type="email" inputMode="email" required
+                   placeholder="name@business.com.au" />
+          </Field>
+          <Field label="What they can do" name="role" required
+                 hint="Most laundries only need the first four.">
+            <Select name="role" required placeholder="Choose a role" groups={ROLE_GROUPS} />
+          </Field>
+          <Field label="Site" name="depot_id" hint="Leave blank for every site.">
+            <Select name="depot_id" placeholder="Every site" options={depots} />
+          </Field>
+        </div>
+
+        <Notice tone="info" title={mailReady ? "What they will get" : "There is no email provider yet"}>
+          {mailReady ? (
+            <>
+              An email with a sign-in link that works once. If it expires before they
+              use it, they can get another from the sign-in page at any time.
+            </>
+          ) : (
+            <>
+              Their sign-in will be created, but nothing will be emailed — tell them to
+              go to the sign-in page, type this address and choose &ldquo;Email me a
+              sign-in link&rdquo;. That works today and needs nothing configured.
+            </>
+          )}
+        </Notice>
+
+        <FormActions>
+          <SubmitButton pendingLabel="Inviting…">Invite</SubmitButton>
+        </FormActions>
+      </form>
+
+      <p className="mt-3 text-xs text-muted-foreground">
+        Drivers need one more step: link them to their driver record on the Drivers
+        screen, or their run will not show up on their phone.
+      </p>
     </Card>
   );
 }

@@ -70,6 +70,64 @@ describe("navigationFor", () => {
   });
 });
 
+describe("navigationFor in simple mode", () => {
+  it("shows a small laundry eight areas of work", () => {
+    // The roadmap's D2 target. Help carries no capability and is the glossary
+    // rather than a place work happens, so it is not one of the eight.
+    for (const role of ROLES) {
+      const areas = navigationFor(role, "simple").filter((item) => item.href !== "/help");
+      expect(areas.length, role).toBeLessThanOrEqual(8);
+    }
+  });
+
+  it("never shows more than the full app does", () => {
+    for (const role of ROLES) {
+      const simple = navigationFor(role, "simple");
+      const full = navigationFor(role, "full");
+      expect(simple.length, role).toBeLessThanOrEqual(full.length);
+
+      const fullHrefs = full.flatMap((item) => [item, ...(item.children ?? [])])
+        .map((entry) => entry.href);
+      for (const item of simple.flatMap((entry) => [entry, ...(entry.children ?? [])])) {
+        expect(fullHrefs, `${role} → ${item.href}`).toContain(item.href);
+      }
+    }
+  });
+
+  it("drops the planning board, the plant, the report pack and the audit log", () => {
+    const hrefs = navigationFor("super_admin", "simple")
+      .flatMap((item) => [item, ...(item.children ?? [])]).map((entry) => entry.href);
+    for (const href of ["/routes/planner", "/warehouse", "/reports", "/admin/audit"]) {
+      expect(hrefs).not.toContain(href);
+    }
+  });
+
+  it("keeps the day's work, and the way back to the full app", () => {
+    const hrefs = navigationFor("super_admin", "simple")
+      .flatMap((item) => [item, ...(item.children ?? [])]).map((entry) => entry.href);
+    for (const href of [
+      "/dashboard", "/routes/daily", "/routes/templates", "/jobs",
+      "/operations/exceptions", "/customers", "/agreements", "/invoices",
+      "/inventory", "/items", "/admin/users", "/admin/display", "/help",
+    ]) {
+      expect(hrefs).toContain(href);
+    }
+  });
+
+  it("takes no rail row away from a driver", () => {
+    // Simple mode shortens a menu built for a whole business. A driver's rail
+    // is already the four rows their day has in it — the mode must not reach
+    // into the one screen they work from.
+    const rows = (mode: "simple" | "full") =>
+      navigationFor("driver", mode).map((item) => `${item.label} ${item.href}`);
+    expect(rows("simple")).toEqual(rows("full"));
+  });
+
+  it("defaults to the full app when no mode is given", () => {
+    expect(navigationFor("super_admin")).toEqual(navigationFor("super_admin", "full"));
+  });
+});
+
 describe("sectionFor", () => {
   const owner = navigationFor("super_admin");
   const label = (pathname: string) => sectionFor(pathname, owner)?.label;
@@ -96,6 +154,36 @@ describe("sectionFor", () => {
 
   it("returns nothing for a path off the map", () => {
     expect(label("/design-preview")).toBeUndefined();
+  });
+
+  describe("on a screen simple mode hides", () => {
+    const simple = navigationFor("super_admin", "simple");
+
+    it("still says which area you are in", () => {
+      // Reached from the dashboard, a bookmark or an action redirect. The rail
+      // row has to light up, or the page is context-free.
+      expect(sectionFor("/warehouse/batch-1", simple)?.label).toBe("Linen");
+      expect(sectionFor("/routes/planner", simple)?.label).toBe("Runs");
+    });
+
+    it("adds the screen you are on to the tabs", () => {
+      const tabs = sectionFor("/warehouse", simple)?.children?.map((child) => child.label);
+      expect(tabs).toContain("In the plant");
+      // And only that one — the rest of simple mode stays simple.
+      expect(tabs).not.toContain("Plan the day");
+    });
+
+    it("leaves an area that is hidden whole with no section at all", () => {
+      // Reports is not a tab inside something else; there is no row to light.
+      expect(sectionFor("/reports", simple)).toBeUndefined();
+    });
+
+    it("does not offer a tab the role could not open", () => {
+      // Finance holds no warehouse.read. The tab must stay gone even though the
+      // path resolves, which is the trap the mode filter could have reopened.
+      const finance = navigationFor("finance", "simple");
+      expect(sectionFor("/warehouse", finance)).toBeUndefined();
+    });
   });
 });
 

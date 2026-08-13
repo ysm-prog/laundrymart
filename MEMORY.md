@@ -5,6 +5,20 @@
 vitest 4). `laundrymart-syd` (ref `xujhwljrmogenhvqpkrf`) has the demo tenant; the app is on
 Vercel at `ats.coreit.com.au`; sign-in verified end to end.
 
+**Phase D shipped** on `claude/phase-6-build-0yybvq` (this session, 2026-08-13) — simple mode
+and the invite flow. **No migration**: 0013's `tenants.settings` is where `ui_mode` lives, and
+both settings screens read-modify-write that column so neither resets the other. Verified:
+typecheck, lint, 161 tests, build, `/design-preview` screenshotted light + dark. Not yet merged
+to `Dev`/`Prod`, and not yet exercised against the live project — the container cannot reach
+`*.supabase.co`, so **the invite flow has never touched a real auth provider**. Two things to
+try on the deployment before trusting it: invite a throwaway address (with no
+`RESEND_API_KEY` set it creates the login and tells you to use the sign-in page — that path
+needs no provider), and confirm `generateLink` is permitted by the project's auth settings.
+Worth knowing: `ui_mode` defaults to `full`, so nothing changes for the existing tenant until
+someone chooses simple on `/admin/display`. The nav trap that cost a rewrite mid-session:
+`sectionFor` must learn the hidden screens from `navigationFor` (which has the role) rather
+than re-deriving them from the full map, or a role gets offered a tab it cannot open.
+
 **Phases A, B and C are all on `Prod`** (`3f59cc6`). `0013_notifications` is applied to
 `laundrymart-syd`, verified there: RLS on, one policy, the `nulls not distinct` idempotency
 index in place, `anon` reading zero rows through a rolled-back probe, and no new security
@@ -25,8 +39,9 @@ advisor (still the same five SECURITY DEFINER warnings §18 records as legitimat
 Owner's C3 decisions (2026-08-05), already the shipped defaults: overdue chase **7 days past
 terms, weekly, three at most, friendly in tone**. `enabled` is still false.
 
-The remaining Part-4 forks are Phase D's, not C's: simple-mode default for the existing
-tenant, and "Stops" vs "Jobs" as the merged name.
+Of the two Part-4 forks left to Phase D, one is now answered: the **simple-mode default for
+the existing tenant is `full`** — nobody's menu shrinks without them choosing it on
+`/admin/display`. Still open: "Stops" vs "Jobs" as the merged name.
 
 All 12 earlier migrations applied — `0012_optional_inspection` went on 2026-08-05 (verified:
 `search_path=public` still pinned, `anon` still cannot execute the guard, no inspection check
@@ -135,6 +150,10 @@ server-side extension, so its `.control` file has to sit in the postmaster's own
 and apt on the runner cannot reach into a container.
 
 **Next up**
+0. Merge Phase D through `Dev` to `Prod`, and try the invite once on the deployment.
+   Still open from Phase D and deliberately not attempted: the reports rework
+   (`lib/domain/reporting.ts` + per-table `Suspense`) and the four file splits in the
+   audit's §11 refactor plan.
 1. Stage 4, once the four decisions above are made.
 2. **Enable asymmetric JWT signing keys** on the project so `getClaims()` verifies locally
    instead of calling the auth server on every navigation (§2 assumes this).

@@ -2,6 +2,7 @@ import { cache } from "react";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { can, isRole, type Capability, type Role } from "@/lib/roles";
+import { parseUiMode, type UiMode } from "@/lib/ui-mode";
 
 export type Session = {
   userId: string;
@@ -10,6 +11,13 @@ export type Session = {
   tenantName: string;
   role: Role;
   depotId: string | null;
+  /**
+   * How much of the app this tenant shows in the rail. It rides the session
+   * because the query that resolves the membership already joins `tenants` —
+   * reading it here costs one more column, and reading it in the layout would
+   * cost a second round trip on every navigation.
+   */
+  uiMode: UiMode;
 };
 
 /**
@@ -24,15 +32,17 @@ export const requireSession = cache(async (): Promise<Session> => {
 
   const { data: membership } = await supabase
     .from("memberships")
-    .select("tenant_id, role, depot_id, tenants(name)")
+    .select("tenant_id, role, depot_id, tenants(name, settings)")
     .eq("user_id", claims.sub)
     .limit(1)
     .maybeSingle();
 
   if (!membership) redirect("/login?error=no-membership");
 
-  const tenant = membership.tenants as { name: string } | { name: string }[] | null;
-  const tenantName = Array.isArray(tenant) ? (tenant[0]?.name ?? "") : (tenant?.name ?? "");
+  type TenantRow = { name: string; settings: unknown };
+  const tenant = membership.tenants as TenantRow | TenantRow[] | null;
+  const row = Array.isArray(tenant) ? (tenant[0] ?? null) : tenant;
+  const tenantName = row?.name ?? "";
 
   return {
     userId: claims.sub as string,
@@ -41,6 +51,7 @@ export const requireSession = cache(async (): Promise<Session> => {
     tenantName,
     role: isRole(membership.role) ? membership.role : "auditor",
     depotId: (membership.depot_id as string | null) ?? null,
+    uiMode: parseUiMode(row?.settings),
   };
 });
 

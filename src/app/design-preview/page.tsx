@@ -1,5 +1,5 @@
 import { AppNav } from "@/components/app-nav";
-import { Checkbox, Field, Input, Select, SubmitButton } from "@/components/form";
+import { Checkbox, Field, Input, RadioCards, Select, SubmitButton } from "@/components/form";
 import {
   Badge, Button, ButtonLink, Card, DataTable, EmptyState, Eyebrow, Notice,
   PageHeader, Stage, Stat, StatusBadge, cx,
@@ -13,6 +13,7 @@ import { AgreementWizard } from "@/app/(app)/agreements/agreement-wizard";
 import { CustomerEssentials, FormDisclosure } from "@/app/(app)/customers/customer-form";
 import { EXCEPTION_REASONS } from "@/app/(app)/jobs/exception-reasons";
 import { navigationFor, type NavItem } from "@/lib/nav";
+import { UI_MODES, UI_MODE_LABELS, UI_MODE_SUMMARY } from "@/lib/ui-mode";
 import { UNASSIGNED } from "@/app/(app)/routes/planner/plan";
 import {
   PlannerBoard, type Option, type PlannerColumn, type PlannerJob,
@@ -41,6 +42,12 @@ export const metadata = { title: "Design preview" };
    has — the previous fixture still showed the six-heading rail for two releases
    after it was replaced. */
 const ITEMS: NavItem[] = navigationFor("super_admin");
+
+/* The same owner's rail under each mode, so the two can be read side by side —
+   the only honest way to review a change whose entire content is what is
+   missing. Both come from the production map for the reason above. */
+const FULL_ITEMS: NavItem[] = navigationFor("super_admin", "full");
+const SIMPLE_ITEMS: NavItem[] = navigationFor("super_admin", "simple");
 
 const COUNTS = { routesToday: 3, exceptions: 4, batches: 12, unpaidInvoices: 9 };
 
@@ -669,6 +676,43 @@ export default function DesignPreviewPage() {
                   Resolved once per request beside the nav counts — a head-only count,
                   no realtime. Past 99 it stops counting and says so.
                 </p>
+              </Card>
+            </div>
+          </div>
+
+          <div className="border-t pt-5">
+            <PageHeader
+              eyebrow="Phase D"
+              title="Simple mode"
+              description="The same rail, resolved for the same owner, under each mode. The short one is a menu, not a permission — every screen it leaves out still opens and still checks the same role."
+            />
+            <div className="grid items-start gap-4 lg:grid-cols-[212px_212px_minmax(0,1fr)]">
+              {([
+                ["The whole app", FULL_ITEMS],
+                ["Just the everyday screens", SIMPLE_ITEMS],
+              ] as const).map(([label, items]) => (
+                <div key={label}>
+                  <p className="mb-1.5"><Eyebrow>{label} · {items.length} rows</Eyebrow></p>
+                  {/* The border is not decoration: in dark mode the page
+                      background is this same near-black and the rail would
+                      have no edge at all — the bug §10b records from the
+                      first design pass. */}
+                  <div className="border border-[#262c31] bg-[#14171a] py-2">
+                    <AppNav items={items} counts={COUNTS} />
+                  </div>
+                </div>
+              ))}
+              <Card title="The choice itself"
+                    description="Radio cards rather than a select: the consequence of each answer is the thing being decided, so it stays on screen.">
+                <RadioCards
+                  name="pv_ui_mode"
+                  defaultValue="full"
+                  options={UI_MODES.map((mode) => ({
+                    value: mode,
+                    label: UI_MODE_LABELS[mode],
+                    description: UI_MODE_SUMMARY[mode],
+                  }))}
+                />
               </Card>
             </div>
           </div>

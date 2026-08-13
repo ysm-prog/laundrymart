@@ -49,7 +49,10 @@ async function navCounts(): Promise<NavCounts> {
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   // Gate the whole group once; child pages reuse the memoised session.
   const session = await requireSession();
-  const items = navigationFor(session.role);
+  // Two filters, in this order: what the role may open, then how much of it this
+  // tenant chose to show. See `lib/ui-mode.ts` — the second one hides nothing
+  // the first one allows, it only shortens the menu.
+  const items = navigationFor(session.role, session.uiMode);
   // Both resolve to head-only counts; issued together so the bell is no slower
   // than the rail it sits beside.
   const [counts, unread] = await Promise.all([

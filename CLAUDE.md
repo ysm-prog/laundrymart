@@ -73,6 +73,21 @@ and action guards. `routes.write` (plan and assign) is separate from `routes.sta
 a run that is already out): the latter also goes to `driver` — RLS confines them to their own
 run — and to `customer_service`, so a stuck run is not waiting on a dispatcher.
 
+**Simple mode is not one of these layers.** `tenants.settings.ui_mode` (`src/lib/ui-mode.ts`)
+shortens the *menu* for a tenant that wants the small-laundry app; every screen it leaves out
+keeps its capability, its guard and its URL, and every existing link to it still opens it. A
+second thing able to deny access would be one more than a reader can hold, so this one denies
+nothing. `advanced: true` on a nav destination is the whole mechanism.
+
+**Inviting a teammate** (`inviteMember` in `admin/actions.ts`) is the one flow that reaches the
+auth provider. It writes the `memberships` row with the **RLS-bound** client — `memberships_admin`
+from 0001 permits exactly that insert for exactly those roles, so the database check runs rather
+than being bypassed by a service-role client that happens to be in scope. The admin client is
+used for two things only: creating the auth user (nothing else can), and one deliberate
+non-`tenant_id` query — "does this user already belong to another tenant" — because
+`requireSession()` resolves a person to *one* membership and a second would make which business
+they sign into arbitrary. It reads one column for one user id and never names the other tenant.
+
 ## 4. Business rules enforced in the database
 - Run cannot start without `load_confirmed_at`; cannot close before `unloaded_at`
   (`guard_route_transition`). The vehicle inspection is recorded and surfaced but is **not**
@@ -107,7 +122,7 @@ branches deploy. Never force-push `Prod`.
 `/routes/daily[/:id|/:id/sheet]` · `/routes/planner` · `/jobs[/:id]` ·
 `/operations/{pickups,deliveries,exceptions}` · `/run` · `/warehouse[/:id]` · `/inventory` ·
 `/invoices[/:id]` · `/reports` · `/search` · `/help` · `/notifications` ·
-`/admin` (redirects) `[/depots|/users|/holidays|/audit|/notifications]`
+`/admin` (redirects) `[/depots|/users|/display|/holidays|/audit|/notifications]`
 
 **Navigation is data** (`src/lib/nav.ts`): ten areas, each with optional `children`
 rendered as a tab strip (`SectionNav` in the layout, not per page). An area is visible
@@ -119,6 +134,15 @@ omitted means every signed-in member, which is what `/dashboard` and `/help` nee
 single capability is held by all eleven roles. `/notifications` (the bell's list) is
 deliberately off the map — the bell is its entry point, so it needs no rail row and
 renders no tab strip. Tested in `src/lib/__tests__/nav.test.ts`.
+
+`advanced: true` marks a destination **simple mode** leaves out (§3): `navigationFor(role,
+mode)` applies the mode filter first, so an area left with nothing but advanced screens
+disappears instead of resolving its link to one. The ones it keeps back — for the role that
+could otherwise open them — travel on `hidden`, which nothing renders; `sectionFor()` reads
+it so a tenant who lands on a hidden screen anyway still gets their rail row lit and that one
+screen added to the tabs. Carrying the role through `hidden` rather than re-deriving it is
+what stops the tab strip offering finance a plant screen it cannot open. `/admin/display` is
+never advanced: it is the way back.
 
 ## 7. Schema
 - `0001_init` — tenants, memberships, RLS helpers, `apply_tenant_policy`, number sequences,
@@ -294,6 +318,54 @@ Both are compositions over existing tables — neither added a migration.
   are edited and invoices voided.
 
 ## 18. Changelog
+### 2026-08-13 · Simplification Phase D: simple mode, and a way to add a teammate
+Per `docs/SIMPLIFICATION-ROADMAP.md` Phase D. **No migration** — 0013 put `tenants.settings`
+in place for exactly this, and Phase C's read-modify-write contract on that column is what
+lets both screens write it without either resetting the other.
+
+- **Simple mode (D2).** `tenants.settings.ui_mode`, parsed in `src/lib/ui-mode.ts` and carried
+  on the session (the membership query already joins `tenants`, so it costs one column, not a
+  round trip). `advanced: true` on a nav destination is the whole mechanism; the rail drops the
+  planning board, the plant floor, the report pack, the activity log, and Collections and
+  Deliveries — both of which are one slice of the stop above them. An owner's rail goes from 10
+  rows to 9 (8 excluding Help) and its tabs from 24 destinations to 18; a **driver's rail does
+  not change at all**, which is the point: their menu was already the size of their day.
+- **Hiding is not a permission, and the code has to keep saying so.** The capability model is
+  untouched: a hidden screen keeps its guard, its URL, and every link that already reached it.
+  The settings screen names each hidden screen — read from the nav map, so the list cannot drift
+  from the code — and says plainly that none of them are switched off.
+- **The trap this design walks past:** a screen hidden from the rail is still reachable, so
+  `sectionFor()` would have left it with no rail row lit and no tabs. It now falls back to the
+  screens the mode held back — but only the ones **this role** could open, carried on `hidden`
+  by `navigationFor` rather than re-derived from the full map. The first attempt matched areas
+  by label and would have offered finance a tab to the plant floor; the test that now asserts
+  it does not is the one that caught it.
+- **Default is `full`, deliberately.** Every tenant alive has a settings blob written before
+  this existed, so whichever way it defaults they get it at the next render with nobody having
+  chosen. Simple mode takes rows out of a working operator's menu; that is a decision someone
+  makes on a screen that says what it hides, not one a deploy makes for them.
+- **Invite a teammate (D5 / audit G9).** Until now the People screen's own advice was "ask your
+  system administrator" — there was no way to create a `memberships` row from the app, so a new
+  person needed database access. Now three fields on People: email, role, site. See §3 for why
+  the membership insert uses the RLS client and the service-role client is confined to creating
+  the auth user and one cross-tenant safety check.
+- **No sign-in link is put in front of a browser.** It is emailed when a provider is configured
+  and otherwise dropped: the login page's "Email me a sign-in link" is the same door and already
+  worked, so the invite never needs to carry a one-time credential through a flash cookie, a
+  screen, or someone's shared display. The form says which of the two will happen rather than
+  leaving an administrator to find out from the person not arriving.
+- **D1 (role presets) was already shipped** by the audit pass — `COMMON_ROLES` leads the picker
+  and `ROLE_SUMMARY` describes each role in the owner's words. The invite form reuses both.
+  **D4 (consolidated invoicing) shipped with the audit pass** too. Not done, and called out
+  rather than quietly dropped: the reports rework and the file splits from the audit's §11
+  refactor plan.
+- `RadioCards` added to `form.tsx` (the consequence of each answer stays on screen, which a
+  `<select>` cannot do) and shown in `/design-preview` beside the two rails rendered side by
+  side — the only honest way to review a change whose entire content is what is missing.
+  Screenshotted light and dark; the dark pass caught the preview rails having no edge against
+  the near-black page, which is the §10b bug from the first design pass, reappearing in a new
+  frame. 161 unit tests (was 145; 6 for the settings bag, 10 for the mode-aware nav).
+
 ### 2026-08-05 · Simplification audit: navigation, search, help, responsive tables
 Full-application UX/code review in `docs/SIMPLIFICATION-AUDIT.md` (13-part deliverable:
 executive summary, UX and code audits, architecture review, navigation and workflow

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { requireSession } from "@/lib/auth/context";
 import { navigationFor } from "@/lib/nav";
+import { can } from "@/lib/roles";
 import { Card, Eyebrow, PageHeader } from "@/components/ui";
 
 export const metadata = { title: "Help" };
@@ -120,7 +121,10 @@ const FINAL = [
 
 export default async function HelpPage() {
   const session = await requireSession();
-  const areas = navigationFor(session.role).filter((item) => item.href !== "/help");
+  // The tenant's own mode, so this card describes the menu they actually have
+  // rather than the one the code could show them.
+  const areas = navigationFor(session.role, session.uiMode)
+    .filter((item) => item.href !== "/help");
 
   return (
     <div className="space-y-4">
@@ -175,6 +179,21 @@ export default async function HelpPage() {
             </div>
           ))}
         </dl>
+
+        {session.uiMode === "simple" ? (
+          <p className="mt-4 border-t pt-3 text-xs text-muted-foreground">
+            Your menu is set to the short one, so a few screens — the planning board,
+            the plant floor, the reports and the activity log — are not in it. They
+            still work, and anything that links to them still opens them.{" "}
+            {can(session.role, "admin.write") ? (
+              <Link href="/admin/display" className="font-medium text-primary hover:underline">
+                Show the whole app
+              </Link>
+            ) : (
+              "An administrator can turn the whole menu back on under Settings."
+            )}
+          </p>
+        ) : null}
       </Card>
 
       <Card

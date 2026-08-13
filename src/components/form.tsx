@@ -105,6 +105,47 @@ export function Checkbox({
   );
 }
 
+/**
+ * A choice between a few options that each need a sentence of explanation.
+ *
+ * A `<select>` shows one line and hides the rest, which is wrong when the
+ * consequence of each answer is the thing being decided. Radios, with the whole
+ * card as the hit area and the explanation always visible.
+ */
+export function RadioCards({
+  name, options, defaultValue,
+}: {
+  name: string;
+  options: ReadonlyArray<{ value: string; label: string; description: string }>;
+  defaultValue?: string;
+}) {
+  return (
+    <fieldset className="grid gap-2 sm:grid-cols-2">
+      <legend className="sr-only">{name}</legend>
+      {options.map((option) => {
+        const id = `${name}-${option.value}`;
+        return (
+          <div key={option.value}>
+            <input type="radio" id={id} name={name} value={option.value}
+                   defaultChecked={option.value === defaultValue} className="peer sr-only" />
+            <label htmlFor={id}
+                   className="flex h-full cursor-pointer flex-col gap-1 border border-strong p-3
+                              peer-checked:border-primary peer-checked:bg-primary/5
+                              peer-focus-visible:outline peer-focus-visible:outline-2">
+              {/* Selection is carried by the label's own border and tint. A
+                  `peer-checked:` class in here would generate a sibling
+                  selector against an element that is a descendant, and do
+                  nothing at all. */}
+              <span className="text-[13px] font-medium">{option.label}</span>
+              <span className="text-xs text-muted-foreground">{option.description}</span>
+            </label>
+          </div>
+        );
+      })}
+    </fieldset>
+  );
+}
+
 /** Weekday picker for service patterns — ISO 1=Mon … 7=Sun. */
 export function WeekdayPicker({
   name, defaultValue = [],
