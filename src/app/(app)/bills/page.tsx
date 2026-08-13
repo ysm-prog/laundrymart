@@ -2,7 +2,7 @@ import { Suspense } from "react";
 import { requireCapability } from "@/lib/auth/context";
 import { createClient } from "@/lib/supabase/server";
 import { date, money, today } from "@/lib/format";
-import type { SupplierBill } from "@/lib/db/types";
+import type { SupplierBill, SupplierPayment } from "@/lib/db/types";
 import {
   Card, DataTable, EmptyState, PageHeader, SkeletonRows, SkeletonStats, Stat, StatusBadge,
 } from "@/components/ui";
@@ -53,7 +53,58 @@ export default async function BillsPage({ searchParams }: { searchParams: Promis
       <Suspense key={JSON.stringify(params)} fallback={<SkeletonRows rows={8} />}>
         <BillList params={params} />
       </Suspense>
+
+      <Suspense fallback={<SkeletonRows rows={4} />}>
+        <RecentPayments />
+      </Suspense>
     </div>
+  );
+}
+
+/**
+ * What has actually gone out, newest first.
+ *
+ * Deliberately not shown as an allocation against particular bills: the
+ * remittance advices these come from name a supplier, a date and an amount, and
+ * nothing about which bills were settled. Presenting them beside the bills as a
+ * separate list says exactly what is known — money left, to whom, on what day —
+ * without implying a reconciliation nobody performed.
+ */
+async function RecentPayments() {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("supplier_payments")
+    .select("id, supplier_id, reference, paid_on, amount, remittance_email, suppliers(name)")
+    .is("deleted_at", null)
+    .order("paid_on", { ascending: false })
+    .limit(12)
+    .returns<SupplierPayment[]>();
+
+  const rows = data ?? [];
+  if (rows.length === 0) return null;
+
+  return (
+    <Card
+      title="Recent payments"
+      description="Money already sent, from the remittance advices. Not matched to individual bills — the advice does not say which."
+    >
+      <DataTable
+        rows={rows}
+        label="Recent supplier payments"
+        empty={<EmptyState title="No payments recorded" description="" />}
+        columns={[
+          { header: "Supplier", cell: (row) => row.suppliers?.name ?? "—" },
+          { header: "Paid", cell: (row) => date(row.paid_on), hideBelow: "sm" },
+          {
+            header: "Reference",
+            cell: (row) => <span className="font-mono">{row.reference}</span>,
+            hideBelow: "md",
+          },
+          { header: "Sent to", cell: (row) => row.remittance_email ?? "—", hideBelow: "lg" },
+          { header: "Amount", cell: (row) => money(row.amount), align: "right" },
+        ]}
+      />
+    </Card>
   );
 }
 

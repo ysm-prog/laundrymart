@@ -155,10 +155,14 @@ renders no tab strip. Tested in `src/lib/__tests__/nav.test.ts`.
 - `0014_purchases` — the payable side: `suppliers`, `gl_accounts`, `supplier_bills`,
   `purchase_orders`. Plus three columns on `customers` the previous books carried:
   `opening_balance`, `opening_balance_overdue` and `reminders_enabled`.
+- `0015_supplier_payments` — `supplier_payments` (one row per remittance advice, not
+  allocated to bills because the advice does not say which), and the end of the
+  opening-balance double count: an opening is cleared once a document carries the same
+  money. Column comments say so, since the name invites the addition.
 
 Proofs in `supabase/tests/`: `rls_isolation`, `rls_coverage`, `driver_scope`,
 `business_rules`, `media_scope`, `warehouse_rules`, `notifications_scope`,
-`purchases_scope` (67 assertions). Demo data in `supabase/seed.sql` — not applied by
+`purchases_scope`, `supplier_payments_scope` (76 assertions). Demo data in `supabase/seed.sql` — not applied by
 migrations. Carrying a set of books in from MYOB: `docs/IMPORT-MYOB.md` and
 `scripts/import/myob-import.py`.
 
@@ -274,9 +278,9 @@ production_batches→auth.users.
 `laundrymart-syd` · ref `xujhwljrmogenhvqpkrf` · ap-southeast-2 (Sydney) · org `ysm-prog`.
 Deployed on Vercel at `ats.coreit.com.au`. **Two tenants**: the seeded demo, and
 `Adelaide Towel Service` (`20000000-…-0001`, Australia/Adelaide, depot `ADL`) carrying the
-real books imported from MYOB — 459 customers, 192 suppliers, 268 accounts, 1,515 bills,
-1 purchase order, 46 credit invoices. Both super_admin logins are members of both.
-All 14 migrations applied; demo tenant seeded
+real books imported from MYOB — 508 customers, 192 suppliers, 268 accounts, 1,515 bills,
+1 purchase order, 646 outstanding invoices, 62 supplier payments. Both super_admin logins are members of both.
+All 15 migrations applied; demo tenant seeded
 (`Harbour Commercial Laundry`); two `super_admin` logins, one also linked to the seeded driver.
 Sign-in verified end to end 2026-08-05.
 
@@ -309,6 +313,44 @@ Both are compositions over existing tables — neither added a migration.
   are edited and invoices voided.
 
 ## 18. Changelog
+### 2026-08-13 · The receivable side, the money going out, and a reconciliation that was wrong
+A second round of MYOB reports: the sales history, the remittance advices, and a contacts
+report that turns out to be the authoritative one. Three of the five files were genuinely
+new; two were subsets of what 0014 already imported, checked row by row rather than assumed.
+- **`0015_supplier_payments`.** 62 remittance advices — the only record of money actually
+  leaving. Not modelled as allocations against bills: the advice names a supplier, a date,
+  a reference and an amount, and nothing about which bills it settled. Inventing the
+  allocation would be a bookkeeping claim the source never made. Shown as its own list on
+  `/bills` for the same reason.
+- **The opening-balance double count is closed.** `opening_balance` was right while it was
+  the only record of the money; it is not now that the documents carrying the same money
+  are in. 0015 clears an opening wherever a document accounts for it, the importer repeats
+  that after every later run, and the column comments say never to add the two. Both totals
+  in this tenant are now zero. `supplier_payments_scope.test.sql` asserts the rule both ways
+  — cleared where a document exists, kept where none does (9 assertions, 76 in total).
+- **646 outstanding invoices**, of 17,183. They sum to 131,061.24 against Trade Debtors of
+  131,061.74: fifty cents, one customer, in the source. The other 16,537 are fully paid
+  history and are a `--invoices all` run away — around 825 KB of SQL, which matters only
+  because this deployment can be reached solely through a statement-capped tool.
+- **The 5,466.06 gap recorded last time was my error, not the data's.**
+  `customers_contacts.csv` is not the balance-bearing list: it omits 60 customers, nearly
+  all closed accounts that still owe, and those 60 are 5,464.06 of it. `ContactsReport.xlsx`
+  ties to the ledger exactly. Corrected in `docs/IMPORT-MYOB.md` rather than quietly
+  amended. An export is not authoritative for being the longest.
+- **Two parties were about to import twice** — `Salute Better Solutions P/L  - Pak-Rite`
+  and `Barber Boys x Anthony  Pty Ltd` are written with a doubled space in one report and
+  a single space in another, and a party's identity here is its name. One record would
+  have held the documents and the other the balance those documents explain. The importer
+  now collapses runs of whitespace in every cell; that is what takes the residual openings
+  to zero.
+- **60 customers arrive inactive** with the status the report states — the first import had
+  no status column at all and made everything active.
+- Importer gained `--sections` (which datasets to emit) and `--invoices outstanding|all`,
+  plus a stdlib `.xlsx` reader so it still needs nothing installed. New parties are
+  appended *after* the first round's numbering rather than merged into its sort, because
+  the loaded bills join to suppliers by number and a re-sort would silently match nothing.
+- Not done: `/design-preview` still has no section for the money screens.
+
 ### 2026-08-13 · The books came across: suppliers, bills, purchase orders, accounts
 The MYOB export for **Adelaide Towel Service** is now in the app, in a tenant of its own
 (`Adelaide Towel Service`, Australia/Adelaide) beside the untouched demo tenant. The app

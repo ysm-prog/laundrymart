@@ -5,8 +5,9 @@ again — for a re-import, a second tenant, or a fresh environment.
 
 ## What the export contains
 
-Five CSVs, downloaded from MYOB. The importer matches them by filename suffix,
-so the download's hashed prefix does not matter:
+Eight files across two rounds, matched by filename suffix so the download's
+hashed prefix does not matter. The first five came together; the last three
+arrived afterwards and are opt-in via `--sections`.
 
 | File | Rows | Lands in |
 |---|---|---|
@@ -15,6 +16,14 @@ so the download's hashed prefix does not matter:
 | `…purchase_orders.csv` | 1 | `purchase_orders` |
 | `…sale_returns_and_credits.csv` | 46 | `invoices`, `invoice_type = 'credit'` |
 | `…categories_chart_of_accounts.csv` | 268 | `gl_accounts` |
+| `…ContactsReport.xlsx` | 315 | statuses and authoritative balances on `customers` / `suppliers` |
+| `…invoices.csv` | 17,183 | `invoices` (646 outstanding loaded; see below) |
+| `…remittance_advice.csv` | 62 | `supplier_payments` |
+
+Two further files add nothing: `…purchase_returns_and_debits.csv` is 12 rows
+already present in `bills.csv`, and `…SalesRegisterReport.xlsx` is 24 rows
+already present in `invoices.csv`. Both were checked row by row rather than
+assumed.
 
 **The CSVs are not in this repository, and should not be.** They are a real
 customer and supplier list with contact details; a git history is a bad place
@@ -37,6 +46,11 @@ values ('<tenant-uuid>', 'Adelaide Towel Service', 'Australia/Adelaide');
 insert into public.memberships (user_id, tenant_id, role)
 values ('<auth-user-uuid>', '<tenant-uuid>', 'super_admin');
 ```
+
+`--sections` picks what to emit: the six the first round filled (the default),
+or any of `contacts`, `invoices`, `payments` from the second. `--invoices`
+takes `outstanding` (the default — the 646 that still carry a balance) or
+`all` (every one of the 17,183, which is roughly 825 KB of SQL).
 
 Two flags matter when the database can only be reached through a tool that caps
 a single statement — a Supabase project behind an egress policy, for one:
@@ -75,14 +89,42 @@ silently.
 
 Two figures in the chart of accounts are the check on the rest:
 
-| Chart of accounts | Should equal |
+| Chart of accounts | Ties to |
 |---|---|
-| `2-1200` Trade Creditors — 65,724.25 | `sum(balance_due)` over `supplier_bills` |
-| `1-1200` Trade Debtors — 131,061.74 | `sum(opening_balance)` over `customers` |
+| `2-1200` Trade Creditors — 65,724.25 | `sum(balance_due)` over `supplier_bills` — **exact** |
+| `1-1200` Trade Debtors — 131,061.74 | `sum(total - amount_paid)` over `invoices` — **50c out** |
 
-The first ties exactly. **The second does not**: the contact export's customer
-balances total 125,595.68, which is 5,466.06 short of the ledger. The difference
-is in the source data, not the import — the contact list and the GL disagree, as
-they commonly do when credits and unallocated receipts sit in between. It is
-recorded here rather than reconciled away, because guessing an adjustment would
-put a number in the books that nobody in the business decided on.
+The remaining fifty cents is one customer, Price Attack - Colonnades, whose
+contact balance is 50c more than their own invoices add up to. It is in the
+source, not the import, and it is left alone: guessing an adjustment puts a
+number in the books that nobody in the business decided on.
+
+### A correction to what this file used to say
+
+An earlier version of this document recorded a 5,466.06 gap on the receivable
+side and attributed it to the source data. That was wrong, and the second round
+of exports is what showed it. `customers_contacts.csv` is not the balance-bearing
+list — it omits 60 customers, nearly all closed accounts that still owe money,
+and those 60 account for 5,464.06 of the 5,466.06. `ContactsReport.xlsx` is the
+list that ties to the ledger, and the invoices tie to it in turn. The lesson is
+worth keeping: an export that looks complete because it is the longest one is
+not thereby the authoritative one.
+
+### The whitespace duplicates
+
+Two parties are written with a doubled space in one export and a single space in
+another — `Salute Better Solutions P/L  - Pak-Rite` and `Barber Boys x Anthony
+Pty Ltd`. A party's identity here is its name, so unrepaired they import as two
+records: one holding the documents, the other holding the balance those
+documents are supposed to explain. The importer collapses runs of whitespace in
+every cell it reads, which is why the residual openings come out at zero
+instead of at 3,668.57 and 78.00.
+
+### Opening balances are not a running total
+
+`customers.opening_balance` and `suppliers.opening_balance` hold what a party
+arrived with **that no imported document accounts for**. Once the invoice or
+bill carrying that money is imported, the opening goes to zero — otherwise any
+query that added the two would count the same debt twice. `0015` does this for
+what is already loaded and the importer repeats it after every later run. In
+this tenant both totals are now zero, because every outstanding document is in.

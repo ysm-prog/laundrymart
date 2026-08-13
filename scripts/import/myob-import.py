@@ -82,7 +82,17 @@ def day(value: str | None) -> str | None:
 
 
 def text(value: str | None) -> str | None:
-    return (value or "").strip() or None
+    """A trimmed cell, with runs of whitespace inside it collapsed to one space.
+
+    The collapsing is not cosmetic. Two of these exports write a party's name
+    with a doubled space where the others use one — "Salute Better Solutions
+    P/L  - Pak-Rite" against "…P/L - Pak-Rite" — and since a party's identity
+    here is its name, the pair would import as two suppliers: one holding the
+    bills, the other holding the balance those bills are supposed to explain.
+    That is exactly how a set of books stops reconciling, and it is invisible
+    on screen, because the second space renders as almost nothing.
+    """
+    return re.sub(r"\s+", " ", value or "").strip() or None
 
 
 def q(value) -> str:
@@ -100,8 +110,27 @@ def ident(tenant: str, table: str, key: str) -> str:
     return str(uuid.uuid5(NS, f"{tenant}:{table}:{key}"))
 
 
+def terms_days(issue: str | None, due: str | None) -> int:
+    """Payment terms as the two dates state them, not as the app assumes."""
+    if not issue or not due:
+        return 0
+    from datetime import date
+    a, b = (date(*map(int, d.split("-"))) for d in (issue, due))
+    return max((b - a).days, 0)
+
+
 def number(prefix: str, index: int) -> str:
     return f"{prefix}{index:05d}"
+
+
+#: Emittable sections, in dependency order — a document's parties have to exist
+#: before the document that names them.
+SECTIONS = ("customers", "suppliers", "accounts", "bills", "orders", "credits",
+            "contacts", "invoices", "payments")
+#: What the first round of MYOB exports could fill. The last three come from a
+#: second round of reports and are opt-in, so re-running the original import
+#: does not silently start writing tables it never used to touch.
+FIRST_IMPORT = SECTIONS[:6]
 
 
 class Emitter:
@@ -124,8 +153,10 @@ class Emitter:
     MAX_BYTES = 100_000
 
     def __init__(self, tenant: str, compact: bool = False,
-                 batch: int = BATCH, max_bytes: int = MAX_BYTES) -> None:
+                 batch: int = BATCH, max_bytes: int = MAX_BYTES,
+                 sections: frozenset[str] | set[str] = frozenset(SECTIONS)) -> None:
         self.tenant = tenant
+        self.sections = set(sections)
         self.BATCH = batch
         self.MAX_BYTES = max_bytes
         #: Emit each batch as one tab-separated blob parsed by the server rather
@@ -143,11 +174,16 @@ class Emitter:
 
     def rows(self, table: str, signature: str, values: list[tuple],
              conflict: str, update: list[str],
-             lookup: tuple[str, str, str] | None = None) -> None:
+             lookup: tuple[str, str, str] | None = None,
+             section: str | None = None) -> None:
         """Emit `values` as batched upserts into `table`.
 
         `signature` is "name type, name type, …", one pair per column, in the
         order the tuples carry.
+
+        `section` names the section this belongs to; the call is a no-op unless
+        that section was asked for, which keeps the selection in one place
+        instead of wrapping every emit in a conditional.
 
         `lookup` is (parent table, its number column, the FK to fill). When
         given, the row's **first** column holds the parent's number rather than
@@ -156,7 +192,7 @@ class Emitter:
         on this export is a third of the whole import — and the join fails loudly
         if a document names a party that was never inserted.
         """
-        if not values:
+        if not values or (section and section not in self.sections):
             return
         pairs = [part.strip().split() for part in signature.split(",")]
         assignments = ", ".join(f"{c} = excluded.{c}" for c in update)
@@ -339,6 +375,126 @@ def read_accounts(directory):
     return out
 
 
+
+# ---------------------------------------------------------- xlsx (stdlib) ---
+
+def read_xlsx(path: str) -> list[list[str]]:
+    """Read the first sheet of an .xlsx as rows of strings.
+
+    Hand-rolled on zipfile + ElementTree so this importer still needs nothing
+    but the standard library: a one-off data script that cannot run until
+    somebody installs a package is a script that stops being run. Only what
+    these reports actually use is supported — shared strings, inline strings
+    and plain numbers.
+    """
+    import xml.etree.ElementTree as ET
+    from zipfile import ZipFile
+
+    ns = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
+    with ZipFile(path) as book:
+        shared: list[str] = []
+        if "xl/sharedStrings.xml" in book.namelist():
+            for si in ET.fromstring(book.read("xl/sharedStrings.xml")):
+                shared.append("".join(t.text or "" for t in si.iter(f"{ns}t")))
+        sheet = ET.fromstring(book.read("xl/worksheets/sheet1.xml"))
+
+    rows = []
+    for row in sheet.iter(f"{ns}row"):
+        cells = []
+        for cell in row.iter(f"{ns}c"):
+            value = cell.find(f"{ns}v")
+            raw = "" if value is None or value.text is None else value.text
+            if cell.get("t") == "s" and raw:
+                raw = shared[int(raw)]
+            elif cell.get("t") == "inlineStr":
+                raw = "".join(t.text or "" for t in cell.iter(f"{ns}t"))
+            cells.append(raw)
+        rows.append(cells)
+    return rows
+
+
+def read_contacts_report(directory):
+    """The balance-bearing contact list: every party that owes or is owed.
+
+    A different slice from `customers_contacts.csv` — shorter, since it lists
+    only non-zero balances, but wider where it counts. It carries an explicit
+    Active/Inactive status, and it names parties the other export drops
+    altogether: closed accounts that still owe money. Leaving those out is what
+    put the receivable ledger out by five thousand dollars.
+    """
+    rows = read_xlsx(find(directory, "ContactsReport.xlsx"))
+    header = next((i for i, r in enumerate(rows) if r and r[0] == "Contact ID"), None)
+    if header is None:
+        die("the contacts report has no 'Contact ID' header row")
+    keys = rows[header]
+    out = []
+    for row in rows[header + 1:]:
+        record = dict(zip(keys, row))
+        name = text(record.get("Name"))
+        if not name:
+            continue
+        out.append({
+            "name": name,
+            "kind": (record.get("Type") or "").strip().lower(),
+            "phone": text(record.get("Phone")),
+            "email": text(record.get("Email")),
+            "balance": money(record.get("Balance ($)")),
+            "status": "active" if (record.get("Status") or "").strip() == "Active"
+                      else "inactive",
+        })
+    return out
+
+
+#: MYOB's invoice states, in the app's vocabulary. A credit is not a state
+#: there — it is a document type — so it keeps `issued` and is typed below.
+INVOICE_STATUS = {"paid": "paid", "open": "issued", "overdue": "overdue",
+                  "partially paid": "part_paid", "credit": "issued"}
+
+
+def read_invoices(directory):
+    """Every sale ever raised."""
+    out = []
+    for row in load(directory, "invoices.csv"):
+        amount, balance = money(row["Amount"]), money(row["Balance Due"])
+        terms = (row["Terms/Due Date"] or "").strip()
+        issue = day(row["Issue Date"])
+        # COD is a term, not a date: due the day it was issued. Anything else in
+        # that column *is* the due date, which is why payment terms are derived
+        # from the two dates rather than assumed to be the app's default.
+        due = issue if terms.upper() == "COD" else day(terms)
+        status = (row["Status"] or "").strip().lower()
+        if status not in INVOICE_STATUS:
+            die(f"invoice {row['Invoice No']} has unknown status {row['Status']!r}")
+        # MYOB writes a bare dash where there is no customer order number.
+        purchase_order = text(row["PO Number"])
+        out.append({
+            "issue_date": issue, "due_date": due,
+            "number": text(row["Invoice No"]), "customer": text(row["Customer"]),
+            "po": None if purchase_order == "-" else purchase_order,
+            "amount": amount, "balance": balance, "paid": round(amount - balance, 2),
+            "status": INVOICE_STATUS[status],
+            "kind": "credit" if status == "credit" else "manual",
+            "outstanding": abs(balance) > 0.005,
+        })
+    return out
+
+
+def read_remittances(directory):
+    """Payments that actually left the business, one per remittance advice.
+
+    There is no bill number anywhere in this export, so a payment is recorded
+    against the supplier and the date and nothing finer. Allocating them across
+    bills would be a bookkeeping claim the source never made.
+    """
+    return [{
+        "paid_on": text(row["Payment Date"]),
+        "reference": text(row["Reference No"]),
+        "supplier": text(row["Supplier"]),
+        "email": text(row["Email"]),
+        "amount": money(row["Amount Paid"]),
+    } for row in load(directory, "remittance_advice.csv")]
+
+
 # ------------------------------------------------------------------ emit ---
 
 def main() -> None:
@@ -351,9 +507,27 @@ def main() -> None:
             value = int(argv[at + 1])
             batch, max_bytes = (value, max_bytes) if setter == "batch" else (batch, value)
             del argv[at:at + 2]
+    sections, invoice_scope = set(FIRST_IMPORT), "outstanding"
+    if "--sections" in argv:
+        at = argv.index("--sections")
+        sections = {part.strip() for part in argv[at + 1].split(",") if part.strip()}
+        del argv[at:at + 2]
+        if sections == {"all"}:
+            sections = set(SECTIONS)
+        unknown = sections - set(SECTIONS)
+        if unknown:
+            die(f"unknown section(s) {', '.join(sorted(unknown))}; "
+                f"known: {', '.join(SECTIONS)}, or 'all'")
+    if "--invoices" in argv:
+        at = argv.index("--invoices")
+        invoice_scope = argv[at + 1]
+        del argv[at:at + 2]
+        if invoice_scope not in ("outstanding", "all"):
+            die("--invoices takes 'outstanding' or 'all'")
     args = [a for a in argv if a != "--compact"]
     if len(args) != 2:
         die("usage: myob-import.py [--compact] [--batch N] [--max-bytes N] "
+            "[--sections a,b,c|all] [--invoices outstanding|all] "
             "<export-dir> <tenant-uuid>")
     directory, tenant = args
     try:
@@ -366,6 +540,11 @@ def main() -> None:
     orders = read_orders(directory)
     credits = read_credits(directory)
     accounts = read_accounts(directory)
+    report = read_contacts_report(directory) if "contacts" in sections else []
+    invoices = read_invoices(directory) if "invoices" in sections else []
+    remittances = read_remittances(directory) if "payments" in sections else []
+    if invoice_scope == "outstanding":
+        invoices = [i for i in invoices if i["outstanding"]]
 
     known = {c["name"] for c in contacts}
     # A document can name a party the contact export no longer lists — an
@@ -388,13 +567,33 @@ def main() -> None:
     customers.sort(key=lambda c: c["name"].lower())
     suppliers.sort(key=lambda c: c["name"].lower())
 
+    # Parties only the *second* round of reports names are appended after the
+    # first round's, never merged into its sort. A party's number is its
+    # position in this list, and the bills already loaded join to suppliers by
+    # number — re-sorting the whole list to slot a new name in would renumber
+    # parties the database already holds, and every one of those joins would
+    # then quietly match nothing at all.
+    def appended(existing, names):
+        fresh = sorted(names - {e["name"] for e in existing}, key=str.lower)
+        return [{"name": n, "phone": None, "email": None, "extra_emails": [],
+                 "reminders": False, "balance": 0.0, "overdue": 0.0, "lapsed": True}
+                for n in fresh]
+
+    customers += appended(customers,
+                          {r["name"] for r in report if r["kind"] == "customer"}
+                          | {i["customer"] for i in invoices})
+    suppliers += appended(suppliers,
+                          {r["name"] for r in report if r["kind"] == "supplier"}
+                          | {r["supplier"] for r in remittances})
+
     customer_id = {c["name"]: ident(tenant, "customers", c["name"]) for c in customers}
     supplier_id = {s["name"]: ident(tenant, "suppliers", s["name"]) for s in suppliers}
     # Documents quote these rather than the uuid; see Emitter.rows(lookup=…).
     supplier_no = {s["name"]: number("SUP", i) for i, s in enumerate(suppliers, start=1)}
     customer_no = {c["name"]: number("CUST", i) for i, c in enumerate(customers, start=1)}
 
-    out = Emitter(tenant, compact=compact, batch=batch, max_bytes=max_bytes)
+    out = Emitter(tenant, compact=compact, batch=batch, max_bytes=max_bytes,
+                  sections=sections)
 
     def note(party) -> str | None:
         bits = []
@@ -421,6 +620,7 @@ def main() -> None:
         conflict="(id)",
         update=["business_name", "billing_email", "phone", "opening_balance",
                 "opening_balance_overdue", "reminders_enabled"],
+        section="customers",
     )
 
     # ------------------------------------------------------------ suppliers ---
@@ -433,6 +633,7 @@ def main() -> None:
          for s in suppliers],
         conflict="(id)",
         update=["name", "email", "phone", "opening_balance"],
+        section="suppliers",
     )
 
     # ------------------------------------------------------------- accounts ---
@@ -446,6 +647,7 @@ def main() -> None:
           a["level"], a["balance"]) for a in accounts],
         conflict="(tenant_id, code)",
         update=["name", "account_type", "tax_code", "current_balance"],
+        section="accounts",
     )
 
     # ---------------------------------------------------------------- bills ---
@@ -473,6 +675,7 @@ def main() -> None:
         conflict="(tenant_id, bill_number)",
         update=["amount", "balance_due", "status", "due_date", "supplier_invoice_no"],
         lookup=("suppliers", "supplier_number", "supplier_id"),
+        section="bills",
     )
 
     # ------------------------------------------------------- purchase orders ---
@@ -489,6 +692,7 @@ def main() -> None:
         conflict="(tenant_id, po_number)",
         update=["amount", "balance_due", "status"],
         lookup=("suppliers", "supplier_number", "supplier_id"),
+        section="orders",
     )
 
     # -------------------------------------------------------------- credits ---
@@ -517,7 +721,101 @@ def main() -> None:
         conflict="(tenant_id, invoice_number)",
         update=["total", "subtotal", "amount_paid", "status"],
         lookup=("customers", "customer_number", "customer_id"),
+        section="credits",
     )
+
+    # ---------------------------------------------------- the contacts report ---
+    # Two things this list has that the first export did not: an explicit
+    # active/inactive status, and the parties that only appear here. Its
+    # balances are the authoritative ones — they sum to Trade Debtors and Trade
+    # Creditors exactly, which the first export's did not.
+    if "contacts" in sections:
+        out.rows(
+            "customers",
+            "id uuid, customer_number text, business_name text, billing_email text, "
+            "phone text, status text, opening_balance numeric",
+            [(customer_id[r["name"]], customer_no[r["name"]], r["name"], r["email"],
+              r["phone"], r["status"], r["balance"])
+             for r in report if r["kind"] == "customer"],
+            conflict="(id)",
+            update=["billing_email", "phone", "status", "opening_balance"],
+            section="contacts",
+        )
+        out.rows(
+            "suppliers",
+            "id uuid, supplier_number text, name text, email text, phone text, "
+            "status text, opening_balance numeric",
+            [(supplier_id[r["name"]], supplier_no[r["name"]], r["name"], r["email"],
+              r["phone"], r["status"], r["balance"])
+             for r in report if r["kind"] == "supplier"],
+            conflict="(id)",
+            update=["email", "phone", "status", "opening_balance"],
+            section="contacts",
+        )
+
+    # ------------------------------------------------------------- invoices ---
+    # The sales history. Like the credits, these arrive as document totals with
+    # no lines, so `tax_amount` stays zero rather than being invented from a GST
+    # rate the export never states — and `recalculate_invoice()` would zero one.
+    #
+    # Payment terms are the gap between the two dates the export gives, not the
+    # app's default: a COD customer is not on 14 days, and saying so would put
+    # every one of their invoices in the overdue chase a fortnight late.
+    for i in invoices:
+        if i["customer"] not in customer_id:
+            die(f"invoice {i['number']} names unknown customer {i['customer']}")
+    out.rows(
+        "invoices",
+        "customer_id uuid, invoice_number text, invoice_type text, status text, "
+        "issue_date date, due_date date, payment_terms_days integer, "
+        "purchase_order_number text, subtotal numeric, total numeric, "
+        "amount_paid numeric, notes text",
+        [(customer_id[i["customer"]], i["number"], i["kind"], i["status"],
+          i["issue_date"], i["due_date"], terms_days(i["issue_date"], i["due_date"]),
+          i["po"], i["amount"], i["amount"], i["paid"],
+          "Imported from the MYOB invoices export.") for i in invoices],
+        conflict="(tenant_id, invoice_number)",
+        update=["total", "subtotal", "amount_paid", "status", "due_date",
+                "payment_terms_days", "invoice_type"],
+        section="invoices",
+    )
+
+    # ------------------------------------------------------ supplier payments ---
+    for r in remittances:
+        if r["supplier"] not in supplier_id:
+            die(f"remittance {r['reference']} names unknown supplier {r['supplier']}")
+    out.rows(
+        "supplier_payments",
+        "supplier_id uuid, reference text, paid_on date, amount numeric, "
+        "remittance_email text, notes text",
+        [(supplier_id[r["supplier"]], r["reference"], r["paid_on"], r["amount"],
+          r["email"], "Imported from the MYOB remittance advice export.")
+         for r in remittances],
+        conflict="(tenant_id, reference)",
+        update=["amount", "paid_on", "remittance_email"],
+        section="payments",
+    )
+
+    # ------------------------------------------- openings, once documents exist ---
+    # The same rule 0015 states, applied again after this run: an opening
+    # balance is what a party arrived with that no document accounts for, so it
+    # goes to zero the moment a document does. Emitted here rather than left to
+    # the migration because a later import can bring in the very document that
+    # supersedes an opening the migration had already seen and kept.
+    if sections & {"invoices", "payments", "contacts"}:
+        out.write(
+            "-- openings superseded by the documents that carry the same money\n"
+            "update public.customers c set opening_balance = 0, "
+            "opening_balance_overdue = 0\n"
+            f" where c.tenant_id = {q(tenant)} and (c.opening_balance <> 0 "
+            "or c.opening_balance_overdue <> 0)\n"
+            "   and exists (select 1 from public.invoices i where i.customer_id = c.id\n"
+            "                and i.deleted_at is null and i.total - i.amount_paid <> 0);\n"
+            "update public.suppliers s set opening_balance = 0\n"
+            f" where s.tenant_id = {q(tenant)} and s.opening_balance <> 0\n"
+            "   and exists (select 1 from public.supplier_bills b "
+            "where b.supplier_id = s.id\n"
+            "                and b.deleted_at is null and b.balance_due <> 0);\n\n")
 
     # -------------------------------------------------------------- numbers ---
     # Park each sequence past what the import used, so the first number the app

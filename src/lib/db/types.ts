@@ -439,5 +439,16 @@ export type GlAccount = {
   current_balance: number;
 };
 
+/** 0015 — a payment that left the business, one per remittance advice. */
+export type SupplierPayment = {
+  id: Uuid;
+  supplier_id: Uuid;
+  reference: string;
+  paid_on: string;
+  amount: number;
+  remittance_email: string | null;
+  suppliers: { name: string } | null;
+};
+
 /** `select("id, name")` on a lookup table. */
 export type Option = { id: Uuid; name: string };
