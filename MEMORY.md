@@ -1,30 +1,51 @@
 # MEMORY — working session handoff
 > Auto-loaded each session. Canonical state is CLAUDE.md; this is the live delta.
 
-**Done (2026-08-13): the MYOB books for Adelaide Towel Service are in.**
-Branch `claude/data-database-import-19ijkz`, pushed. `0014_purchases` is applied to
-`laundrymart-syd`, and the tenant `Adelaide Towel Service`
-(`20000000-0000-4000-8000-000000000001`, Australia/Adelaide) holds the data with both
-super_admin logins as members and one depot (`ADL`). The demo tenant is untouched.
+**Done (2026-08-13): both sides of the MYOB books for Adelaide Towel Service are in.**
+Branch `claude/data-database-import-19ijkz`, pushed. `0014_purchases` and
+`0015_supplier_payments` are applied to `laundrymart-syd`, and the tenant
+`Adelaide Towel Service` (`20000000-0000-4000-8000-000000000001`, Australia/Adelaide)
+holds the data with both super_admin logins as members and one depot (`ADL`). The demo
+tenant is untouched — still 2 customers, 1 invoice, no suppliers.
 
-Loaded and verified against the local run, row for row: **customers 459, suppliers 192,
-chart of accounts 268, supplier bills 1515, purchase order 1, credit invoices 46.**
-Bills outstanding sums to **65,724.25**, exactly Trade Creditors (`2-1200`) in the imported
-chart of accounts; no bill is orphaned from its supplier; the 12 supplier debit notes keep
-their negative balances. The customer side is knowingly 5,466.06 short of Trade Debtors —
-that gap is in the source export, not the import (`docs/IMPORT-MYOB.md`).
+Loaded and verified against the local dry run, figure for figure: **customers 508 (60 of
+them inactive, existing only in document history), suppliers 192, chart of accounts 268,
+supplier bills 1515, purchase order 1, invoices 646 (46 of them credits), supplier
+payments 62.** No orphan invoice or payment. AP outstanding **65,724.25** — exactly Trade
+Creditors (`2-1200`). AR outstanding **131,061.24** against Trade Debtors of 131,061.74:
+**50 cents**, all of it one customer (Price Attack - Colonnades) whose contact balance
+exceeds their own invoices. It is in the source, and it is left alone.
 
-Security advisors after the migration: the same five SECURITY DEFINER warnings §18 records
-as legitimate, plus a pre-existing `auth_leaked_password_protection` notice that has nothing
-to do with this work. No new lint from 0014.
+**Both opening-balance totals are now 0.00** — deliberately. `opening_balance` holds only
+what no imported document accounts for, so once the invoice or bill arrives the opening is
+cleared; adding the two would double-count. 0015 does this for what was already loaded and
+the importer repeats it after every later run. `supplier_payments_scope.test.sql` asserts
+the rule both ways. Suite is **76 assertions, 0 failures**.
+
+**A correction carried into `docs/IMPORT-MYOB.md`:** the 5,466.06 receivable gap recorded
+last session as "in the source data" was wrong. `customers_contacts.csv` omits 60 customers
+who still owe, and those account for 5,464.06 of it. `ContactsReport.xlsx` is the list that
+ties to the ledger.
+
+Security advisors after 0015: the same five SECURITY DEFINER warnings §18 records as
+legitimate, plus the pre-existing `auth_leaked_password_protection` notice. No new lint.
 
 **How to re-run or extend it.** The export is not in the repo (real contact details);
-`scripts/import/myob-import.py` is, and `docs/IMPORT-MYOB.md` explains both the run and the
-two flags that matter when the database can only be reached through a statement-capped tool
-— which was the case here, since this container's egress policy answers 403 to
-`CONNECT xujhwljrmogenhvqpkrf.supabase.co` and the Supabase MCP was the only channel.
+`scripts/import/myob-import.py` is, and `docs/IMPORT-MYOB.md` explains the run, the
+`--sections`/`--invoices` selectors, and the two flags that matter when the database can
+only be reached through a statement-capped tool — which was the case here, since this
+container's egress policy answers 403 to `CONNECT xujhwljrmogenhvqpkrf.supabase.co` and the
+Supabase MCP was the only channel. Two importer traps worth keeping in mind: the bills
+export **silently drops a column** when Supplier Invoice No is blank (667 of 1,515 rows,
+detected by an empty Status and repaired), and two parties are written with a doubled space
+in one file and a single space in another — hence `text()` collapses whitespace, without
+which the residual openings come out at 3,668.57 and 78.00 instead of zero.
 
-**Still open, unchanged from before:** `/design-preview` has no section for the three new
+**Deferred by the user, tooling already in place:** the remaining **16,537 fully-paid
+historical invoices**. Load them with `--invoices all` (~825 KB of SQL); the outstanding 646
+are what this session put in.
+
+**Still open, unchanged from before:** `/design-preview` has no section for the money
 screens (`/bills`, `/suppliers`, `/accounts`).
 
 ---
@@ -171,8 +192,10 @@ and apt on the runner cannot reach into a container.
    unit-tested, the wire is not.
 4. Photo retention: nothing prunes `run-media`. Per-tenant path prefixes make a lifecycle
    rule straightforward.
-5. Consolidated invoices: `generateInvoices` dedupes on customer + period, so a customer with
-   two active agreements only gets the first billed. Pre-existing; confirm intent first.
+5. Consolidated invoices are fixed in code but **never exercised against real data** —
+   generate a period for a customer holding two contracts before anyone bills a real month.
+6. Load the remaining 16,537 paid historical invoices (`--invoices all`) when the business
+   wants the full sales history in the app rather than just the open items.
 
 **Toolchain decisions from the dependency merge**
 - TypeScript is pinned to **6**, not the 7 Dependabot offered: typescript-eslint has no TS 7
