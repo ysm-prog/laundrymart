@@ -1,0 +1,238 @@
+import { describe, expect, it } from "vitest";
+import {
+  ORDER_ACTIONS, ORDER_STATUSES, TERMINAL_STATUSES,
+  actionsFor, checkTransition, describeItem, isBlankItem, isOrderStatus,
+  isOverdue, nextStatuses, summariseItems, validateItem,
+  type OrderStatus,
+} from "@/lib/domain/laundry-orders";
+
+const DELIVERY = true;
+const PICKUP = false;
+
+describe("the status list", () => {
+  it("is exactly the six the workflow allows", () => {
+    // Named individually rather than snapshotted: the point of the test is that
+    // a seventh ("processing", "awaiting pickup", "overdue") cannot be added
+    // without someone deliberately editing this line.
+    expect([...ORDER_STATUSES]).toEqual([
+      "new", "in_progress", "ready_for_delivery", "out_for_delivery",
+      "completed", "cancelled",
+    ]);
+  });
+
+  it("recognises its own members and nothing else", () => {
+    expect(isOrderStatus("in_progress")).toBe(true);
+    expect(isOrderStatus("overdue")).toBe(false);
+    expect(isOrderStatus("pending")).toBe(false);
+  });
+});
+
+describe("nextStatuses", () => {
+  it("walks a delivery job out on a van before it is finished", () => {
+    expect(nextStatuses("new", DELIVERY)).toEqual(["in_progress", "cancelled"]);
+    expect(nextStatuses("in_progress", DELIVERY)).toEqual(["ready_for_delivery", "cancelled"]);
+    expect(nextStatuses("ready_for_delivery", DELIVERY)).toEqual(["out_for_delivery", "cancelled"]);
+    expect(nextStatuses("out_for_delivery", DELIVERY)).toEqual(["completed", "cancelled"]);
+  });
+
+  it("finishes a customer pickup straight off the shelf", () => {
+    expect(nextStatuses("ready_for_delivery", PICKUP)).toEqual(["completed", "cancelled"]);
+    // A job nobody is delivering never has an out-for-delivery step at all.
+    expect(nextStatuses("in_progress", PICKUP)).not.toContain("out_for_delivery");
+  });
+
+  it("leaves the two terminal statuses with nowhere to go", () => {
+    for (const terminal of TERMINAL_STATUSES) {
+      expect(nextStatuses(terminal, DELIVERY), terminal).toEqual([]);
+      expect(nextStatuses(terminal, PICKUP), terminal).toEqual([]);
+    }
+  });
+});
+
+describe("checkTransition", () => {
+  it("allows the moves the workflow defines", () => {
+    expect(checkTransition("new", "in_progress", DELIVERY).ok).toBe(true);
+    expect(checkTransition("in_progress", "ready_for_delivery", PICKUP).ok).toBe(true);
+    expect(checkTransition("ready_for_delivery", "out_for_delivery", DELIVERY).ok).toBe(true);
+    expect(checkTransition("out_for_delivery", "completed", DELIVERY).ok).toBe(true);
+    expect(checkTransition("ready_for_delivery", "completed", PICKUP).ok).toBe(true);
+  });
+
+  it("refuses to skip the middle of the workflow", () => {
+    const skipped = checkTransition("new", "completed", DELIVERY);
+    expect(skipped.ok).toBe(false);
+    expect(skipped.ok === false && skipped.reason).toMatch(/cannot go from new/i);
+  });
+
+  it("refuses to go backwards", () => {
+    expect(checkTransition("ready_for_delivery", "in_progress", DELIVERY).ok).toBe(false);
+    expect(checkTransition("out_for_delivery", "ready_for_delivery", DELIVERY).ok).toBe(false);
+  });
+
+  it("will not send a customer pickup out on a van", () => {
+    const wrong = checkTransition("ready_for_delivery", "out_for_delivery", PICKUP);
+    expect(wrong.ok).toBe(false);
+    expect(wrong.ok === false && wrong.reason).toMatch(/collecting/i);
+  });
+
+  it("will not complete a delivery job that never left", () => {
+    const wrong = checkTransition("ready_for_delivery", "completed", DELIVERY);
+    expect(wrong.ok).toBe(false);
+    expect(wrong.ok === false && wrong.reason).toMatch(/out for delivery/i);
+  });
+
+  it("treats completed and cancelled as final", () => {
+    for (const target of ORDER_STATUSES) {
+      expect(checkTransition("completed", target, DELIVERY).ok, `completed → ${target}`).toBe(false);
+      expect(checkTransition("cancelled", target, PICKUP).ok, `cancelled → ${target}`).toBe(false);
+    }
+  });
+
+  it("cancels from every live status", () => {
+    for (const from of ["new", "in_progress", "ready_for_delivery", "out_for_delivery"] as OrderStatus[]) {
+      expect(checkTransition(from, "cancelled", DELIVERY).ok, from).toBe(true);
+    }
+  });
+
+  it("says so plainly when nothing would change", () => {
+    const same = checkTransition("in_progress", "in_progress", DELIVERY);
+    expect(same.ok).toBe(false);
+    expect(same.ok === false && same.reason).toMatch(/already/i);
+  });
+});
+
+describe("actionsFor", () => {
+  it("offers delivery and pickup jobs their own last step", () => {
+    const delivery = actionsFor("ready_for_delivery", DELIVERY).map((action) => action.key);
+    expect(delivery).toContain("dispatch");
+    expect(delivery).not.toContain("collect");
+
+    const pickup = actionsFor("ready_for_delivery", PICKUP).map((action) => action.key);
+    expect(pickup).toContain("collect");
+    expect(pickup).not.toContain("dispatch");
+    expect(pickup).not.toContain("deliver");
+  });
+
+  it("offers nothing on a finished job", () => {
+    expect(actionsFor("completed", DELIVERY)).toEqual([]);
+    expect(actionsFor("cancelled", PICKUP)).toEqual([]);
+  });
+
+  it("puts cancelling behind the wider capability", () => {
+    const cancel = ORDER_ACTIONS.find((action) => action.key === "cancel");
+    expect(cancel?.capability).toBe("orders.manage");
+    // Everything else a counter hand does day to day sits on orders.status.
+    for (const action of ORDER_ACTIONS.filter((entry) => entry.key !== "cancel")) {
+      expect(action.capability, action.key).toBe("orders.status");
+    }
+  });
+});
+
+describe("item validation", () => {
+  const exact = { item_type: "towels", quantity_type: "exact", exact_quantity: 12 };
+
+  it("accepts a counted item", () => {
+    expect(validateItem(exact, 1)).toBeNull();
+  });
+
+  it("wants a whole positive number when the laundry was counted", () => {
+    expect(validateItem({ ...exact, exact_quantity: 0 }, 1)).toMatch(/valid quantity/i);
+    expect(validateItem({ ...exact, exact_quantity: -3 }, 1)).toMatch(/valid quantity/i);
+    expect(validateItem({ ...exact, exact_quantity: 2.5 }, 1)).toMatch(/valid quantity/i);
+    expect(validateItem({ ...exact, exact_quantity: null }, 1)).toMatch(/valid quantity/i);
+  });
+
+  it("wants a description when the type is Other", () => {
+    expect(validateItem({ ...exact, item_type: "other" }, 1)).toMatch(/describe/i);
+    expect(validateItem({ ...exact, item_type: "other", custom_description: "  " }, 1))
+      .toMatch(/describe/i);
+    expect(validateItem({ ...exact, item_type: "other", custom_description: "Curtains" }, 1))
+      .toBeNull();
+  });
+
+  it("wants something measurable on a bulk lot", () => {
+    const bulk = { item_type: "sheets", quantity_type: "bulk_lot" };
+    expect(validateItem(bulk, 2)).toMatch(/how many bags/i);
+    expect(validateItem({ ...bulk, bag_count: 3 }, 2)).toBeNull();
+    expect(validateItem({ ...bulk, estimated_quantity: 40 }, 2)).toBeNull();
+    expect(validateItem({ ...bulk, notes: "Two red bags" }, 2)).toBeNull();
+  });
+
+  it("names the row it is complaining about", () => {
+    expect(validateItem({ item_type: "", quantity_type: "exact" }, 3)).toMatch(/^Laundry item 3/);
+  });
+
+  it("rejects an invented item type or quantity type", () => {
+    expect(validateItem({ ...exact, item_type: "duvets" }, 1)).toMatch(/what kind/i);
+    expect(validateItem({ ...exact, quantity_type: "approximate" }, 1)).toMatch(/exact quantity or a bulk lot/i);
+  });
+});
+
+describe("isBlankItem", () => {
+  it("treats an untouched row as an abandoned thought, not an error", () => {
+    expect(isBlankItem({ item_type: "", quantity_type: "exact" })).toBe(true);
+    expect(isBlankItem({ item_type: "towels", quantity_type: "exact" })).toBe(false);
+    expect(isBlankItem({ item_type: "", quantity_type: "exact", notes: "check pockets" })).toBe(false);
+  });
+});
+
+describe("describeItem / summariseItems", () => {
+  it("says a counted item the way the counter would", () => {
+    expect(describeItem({ item_type: "bath_towels", quantity_type: "exact", exact_quantity: 24 }))
+      .toBe("24 × Bath towels");
+  });
+
+  it("uses the typed description for Other", () => {
+    expect(describeItem({
+      item_type: "other", custom_description: "Chef whites",
+      quantity_type: "exact", exact_quantity: 6,
+    })).toBe("6 × Chef whites");
+  });
+
+  it("describes a bulk lot without inventing a count", () => {
+    expect(describeItem({ item_type: "sheets", quantity_type: "bulk_lot", bag_count: 1 }))
+      .toBe("1 bag of Sheets");
+    expect(describeItem({ item_type: "sheets", quantity_type: "bulk_lot", bag_count: 3, estimated_quantity: 40 }))
+      .toBe("3 bags of Sheets (about 40)");
+    expect(describeItem({ item_type: "linen", quantity_type: "bulk_lot", notes: "one trolley" }))
+      .toBe("bulk lot of Linen");
+  });
+
+  it("summarises a long list without listing all of it", () => {
+    const items = [
+      { item_type: "towels", quantity_type: "exact", exact_quantity: 10 },
+      { item_type: "sheets", quantity_type: "exact", exact_quantity: 4 },
+      { item_type: "bath_mats", quantity_type: "exact", exact_quantity: 2 },
+      { item_type: "uniforms", quantity_type: "exact", exact_quantity: 1 },
+    ];
+    expect(summariseItems(items)).toBe("10 × Towels, 4 × Sheets +2 more");
+    expect(summariseItems([])).toBe("No items");
+  });
+});
+
+describe("isOverdue", () => {
+  const today = "2026-08-13";
+
+  it("is late when the due date has gone by and the job is still live", () => {
+    expect(isOverdue({ status: "in_progress", due_date: "2026-08-12" }, today)).toBe(true);
+    expect(isOverdue({ status: "new", due_date: "2026-08-12" }, today)).toBe(true);
+  });
+
+  it("is not late on the day itself", () => {
+    expect(isOverdue({ status: "in_progress", due_date: today }, today)).toBe(false);
+    expect(isOverdue({ status: "in_progress", due_date: "2026-08-14" }, today)).toBe(false);
+  });
+
+  it("never calls a finished or cancelled job late", () => {
+    // The rule the summary strip and the badge both depend on: closing a job
+    // clears the flag, without anything having to write to the row.
+    expect(isOverdue({ status: "completed", due_date: "2026-01-01" }, today)).toBe(false);
+    expect(isOverdue({ status: "cancelled", due_date: "2026-01-01" }, today)).toBe(false);
+  });
+
+  it("never calls a job with no date late", () => {
+    // A customer pickup with no promised collection date is not late; it is
+    // simply undated, and inventing a deadline would manufacture an alert.
+    expect(isOverdue({ status: "ready_for_delivery", due_date: null }, today)).toBe(false);
+  });
+});

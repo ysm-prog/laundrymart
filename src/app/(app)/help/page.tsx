@@ -68,8 +68,20 @@ const GLOSSARY: Array<{ term: string; also?: string; meaning: string }> = [
     meaning: "One driver's actual work for one day, built from a weekly run. It has a driver, a truck, and a list of stops.",
   },
   {
-    term: "Stop", also: "job",
-    meaning: "One visit to one customer on one day. A stop can be a collection, a delivery, or both.",
+    term: "Stop",
+    meaning: "One visit to one customer on one day, on a driver's run. A stop can be a collection, a delivery, or both. A stop is not a Job — see below.",
+  },
+  {
+    term: "Job", also: "laundry order, ticket, docket",
+    meaning: "One customer's laundry, from the moment it lands on the counter to the moment it goes back: what they brought in, when they get it back, and where it is up to. A Job is the work; a Stop is a visit a driver makes. A job can be delivered on a stop, or the customer can collect it themselves.",
+  },
+  {
+    term: "Overdue",
+    meaning: "A job whose date has gone by and is not finished or cancelled. It is worked out from today's date every time you look — nobody sets it, and it clears itself the moment the job is done.",
+  },
+  {
+    term: "Bulk lot",
+    meaning: "Laundry taken in by the bag rather than counted piece by piece. A bulk lot still needs a number of bags, a rough count or a note, so there is something to check it back against.",
   },
   {
     term: "Collection", also: "pickup",
@@ -109,6 +121,7 @@ const SAFE = [
   "Creating anything — a customer, a contract, a weekly run. Nothing is charged or sent to anyone until you issue an invoice.",
   "Planning a day. Runs can be replanned, and stops moved between runs, right up until a driver starts.",
   "Archiving a customer. They drop out of lists; their history, stops and invoices are all kept.",
+  "Creating a job and moving it along. Every step is recorded on the job with your name and the time.",
 ];
 
 const FINAL = [
@@ -116,6 +129,8 @@ const FINAL = [
   "Emailing an invoice. The email leaves immediately.",
   "Closing a run. It stops accepting stop updates from the driver.",
   "Voiding an invoice. The number is kept forever so your books have no gaps.",
+  "Completing a job — marking it delivered or collected. A finished job cannot be moved again.",
+  "Cancelling a job. It stops appearing in the day's work. Nothing is deleted, but it cannot be reopened.",
 ];
 
 export default async function HelpPage() {

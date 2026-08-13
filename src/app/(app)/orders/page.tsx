@@ -1,0 +1,378 @@
+import { Suspense } from "react";
+import Link from "next/link";
+import { requireCapability } from "@/lib/auth/context";
+import { createClient } from "@/lib/supabase/server";
+import { can } from "@/lib/roles";
+import { date as formatDate, dateTime } from "@/lib/format";
+import { listStaff, staffNames } from "@/lib/staff";
+import {
+  ORDER_PRIORITIES, ORDER_STATUSES, ORDER_STATUS_LABELS, PRIORITY_LABELS,
+  isOverdue, summariseItems,
+} from "@/lib/domain/laundry-orders";
+import { addDays, businessToday, toInstant, weekBounds } from "@/lib/domain/timezone";
+import {
+  Badge, ButtonLink, CONTROL, DataTable, EmptyState, Notice,
+  PageHeader, SkeletonRows, SkeletonStats, Stat, StatusBadge, cx,
+} from "@/components/ui";
+import { Pagination, pageFrom, rangeFor } from "@/components/list-controls";
+
+export const metadata = { title: "Jobs" };
+export const dynamic = "force-dynamic";
+
+type Search = {
+  q?: string;
+  status?: string;
+  priority?: string;
+  customer?: string;
+  when?: string;
+  date?: string;
+  page?: string;
+};
+
+type Row = {
+  id: string;
+  order_number: string;
+  status: string;
+  priority: string;
+  received_at: string;
+  due_date: string | null;
+  delivery_required: boolean;
+  assigned_to: string | null;
+  customers: { id: string; business_name: string; trading_name: string | null } | null;
+  laundry_order_items: Array<{
+    item_type: string;
+    custom_description: string | null;
+    quantity_type: string;
+    exact_quantity: number | null;
+    bag_count: number | null;
+    estimated_quantity: number | null;
+  }>;
+};
+
+export default async function JobsPage({ searchParams }: { searchParams: Promise<Search> }) {
+  const params = await searchParams;
+  const session = await requireCapability("orders.read");
+
+  return (
+    <div>
+      <PageHeader
+        title="Jobs"
+        description="Laundry taken in at the counter, from drop-off through to delivery or collection."
+        actions={can(session.role, "orders.write")
+          ? <ButtonLink href="/orders/new" variant="primary">Create new job</ButtonLink>
+          : null}
+      />
+
+      <Suspense fallback={<div className="mb-4"><SkeletonStats count={6} /></div>}>
+        <SummaryStrip />
+      </Suspense>
+
+      <Filters params={params} />
+
+      <Suspense key={JSON.stringify(params)} fallback={<SkeletonRows rows={8} />}>
+        <JobList params={params} canCreate={can(session.role, "orders.write")} />
+      </Suspense>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ cards */
+
+/**
+ * Six head-only counts. Every one is a query against the database rather than a
+ * tally of the page's rows — a summary computed from the current page would
+ * quietly mean "on this page", which is the sort of number people make decisions
+ * on and should not.
+ *
+ * Each card is a link that applies its own filter to the list below, so the
+ * number and the rows behind it can never disagree.
+ */
+async function SummaryStrip() {
+  const supabase = await createClient();
+  const today = businessToday();
+  const head = { count: "exact" as const, head: true };
+  const notFinished = ["status", "in", "(completed,cancelled)"] as const;
+
+  const [fresh, working, ready, out, completedToday, overdue] = await Promise.all([
+    supabase.from("laundry_orders").select("id", head).eq("status", "new"),
+    supabase.from("laundry_orders").select("id", head).eq("status", "in_progress"),
+    supabase.from("laundry_orders").select("id", head).eq("status", "ready_for_delivery"),
+    supabase.from("laundry_orders").select("id", head).eq("status", "out_for_delivery"),
+    supabase.from("laundry_orders").select("id", head)
+      .eq("status", "completed")
+      // "Today" is the laundry's day, not UTC's: the boundary is midnight in the
+      // business timezone, converted to the instant the column is stored in.
+      .gte("completed_at", toInstant(today, "00:00"))
+      .lt("completed_at", toInstant(addDays(today, 1), "00:00")),
+    supabase.from("laundry_orders").select("id", head)
+      .lt("due_date", today).not(...notFinished),
+  ]);
+
+  const cards = [
+    { label: "New", value: fresh.count, href: "/orders?status=new" },
+    { label: "In progress", value: working.count, href: "/orders?status=in_progress" },
+    { label: "Ready", value: ready.count, href: "/orders?status=ready_for_delivery" },
+    { label: "Out for delivery", value: out.count, href: "/orders?status=out_for_delivery" },
+    { label: "Completed today", value: completedToday.count, href: "/orders?status=completed" },
+    { label: "Overdue", value: overdue.count, href: "/orders?when=overdue", danger: true },
+  ];
+
+  // The pack's KPI row: one joined strip divided by hairlines, so each cell is
+  // `flush` (its own border would double the divider) and the grid gap is the rule.
+  return (
+    <div className="mb-4 grid grid-cols-2 gap-px border bg-border sm:grid-cols-3 lg:grid-cols-6">
+      {cards.map((card) => (
+        <Stat
+          key={card.label}
+          flush
+          label={card.label}
+          value={card.value ?? 0}
+          href={card.href}
+          tone={card.danger && (card.value ?? 0) > 0 ? "danger" : "default"}
+        />
+      ))}
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------------- filters */
+
+const WHEN_OPTIONS = [
+  { value: "", label: "Any date" },
+  { value: "today", label: "Due today" },
+  { value: "tomorrow", label: "Due tomorrow" },
+  { value: "week", label: "Due this week" },
+  { value: "overdue", label: "Overdue" },
+];
+
+/**
+ * One GET form carrying every filter, so the filtered list lives in the URL and
+ * survives a bookmark, a share and a page of results.
+ *
+ * Written here rather than through `ListControls` for one reason: the custom
+ * date filter needs a date picker, and that component only renders selects. It
+ * uses the same shared `CONTROL` skin, so it is the same control as every other
+ * input in the app — which is the drift `ListControls` exists to prevent.
+ */
+async function Filters({ params }: { params: Search }) {
+  const supabase = await createClient();
+  const { data: customers } = await supabase
+    .from("customers")
+    .select("id, business_name")
+    .is("deleted_at", null)
+    .order("business_name")
+    .limit(200)
+    .returns<{ id: string; business_name: string }[]>();
+
+  return (
+    <form method="get" action="/orders" className="mb-4 flex flex-wrap items-end gap-2">
+      <div className="min-w-[14rem] flex-1">
+        <label htmlFor="q" className="sr-only">Search jobs</label>
+        <input id="q" name="q" type="search" defaultValue={params.q} className={CONTROL}
+               placeholder="Job number, customer, phone or email…" />
+      </div>
+
+      <div>
+        <label htmlFor="status" className="sr-only">Status</label>
+        <select id="status" name="status" defaultValue={params.status ?? ""}
+                className={cx(CONTROL, "w-auto")}>
+          <option value="">Any status</option>
+          {ORDER_STATUSES.map((value) => (
+            <option key={value} value={value}>{ORDER_STATUS_LABELS[value]}</option>
+          ))}
+        </select>
+      </div>
+
+      <div>
+        <label htmlFor="priority" className="sr-only">Priority</label>
+        <select id="priority" name="priority" defaultValue={params.priority ?? ""}
+                className={cx(CONTROL, "w-auto")}>
+          <option value="">Any priority</option>
+          {ORDER_PRIORITIES.map((value) => (
+            <option key={value} value={value}>{PRIORITY_LABELS[value]}</option>
+          ))}
+        </select>
+      </div>
+
+      <div>
+        <label htmlFor="customer" className="sr-only">Customer</label>
+        <select id="customer" name="customer" defaultValue={params.customer ?? ""}
+                className={cx(CONTROL, "w-auto max-w-[14rem]")}>
+          <option value="">Any customer</option>
+          {(customers ?? []).map((customer) => (
+            <option key={customer.id} value={customer.id}>{customer.business_name}</option>
+          ))}
+        </select>
+      </div>
+
+      <div>
+        <label htmlFor="when" className="sr-only">Due</label>
+        <select id="when" name="when" defaultValue={params.when ?? ""}
+                className={cx(CONTROL, "w-auto")}>
+          {WHEN_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>{option.label}</option>
+          ))}
+        </select>
+      </div>
+
+      <div>
+        <label htmlFor="date" className="sr-only">Due on a specific date</label>
+        <input id="date" name="date" type="date" defaultValue={params.date}
+               className={cx(CONTROL, "w-auto")} />
+      </div>
+
+      <button type="submit"
+              className="inline-flex min-h-9 items-center border border-strong bg-surface px-3 py-1.5
+                         text-[12.5px] font-medium transition hover:bg-surface-muted">
+        Search
+      </button>
+      {params.q || params.status || params.priority || params.customer || params.when || params.date ? (
+        <Link href="/orders"
+              className="inline-flex min-h-9 items-center px-2 text-[12.5px] text-primary hover:underline">
+          Clear
+        </Link>
+      ) : null}
+    </form>
+  );
+}
+
+/* ------------------------------------------------------------------- list */
+
+async function JobList({ params, canCreate }: { params: Search; canCreate: boolean }) {
+  const supabase = await createClient();
+  const today = businessToday();
+  const page = pageFrom(params.page);
+  const [from, to] = rangeFor(page);
+
+  let query = supabase
+    .from("laundry_orders")
+    .select(
+      "id, order_number, status, priority, received_at, due_date, delivery_required, " +
+      "assigned_to, customers(id, business_name, trading_name), " +
+      "laundry_order_items(item_type, custom_description, quantity_type, exact_quantity, " +
+      "bag_count, estimated_quantity)",
+      { count: "exact" },
+    )
+    .order("received_at", { ascending: false })
+    .range(from, to);
+
+  if (params.status) query = query.eq("status", params.status);
+  if (params.priority) query = query.eq("priority", params.priority);
+  if (params.customer) query = query.eq("customer_id", params.customer);
+
+  // The date filters all read the generated `due_date`, which is already the
+  // delivery date or the collection date depending on the job's workflow — so
+  // "due tomorrow" means the same thing on both kinds of job.
+  if (params.when === "today") query = query.eq("due_date", today);
+  else if (params.when === "tomorrow") query = query.eq("due_date", addDays(today, 1));
+  else if (params.when === "week") {
+    const { start, end } = weekBounds(today);
+    query = query.gte("due_date", start).lte("due_date", end);
+  } else if (params.when === "overdue") {
+    query = query.lt("due_date", today).not("status", "in", "(completed,cancelled)");
+  }
+  if (params.date && /^\d{4}-\d{2}-\d{2}$/.test(params.date)) {
+    query = query.eq("due_date", params.date);
+  }
+
+  if (params.q) {
+    const term = `%${params.q.trim()}%`;
+    // Customer details live on the customer row, so they are resolved to ids
+    // first and folded into one `or` — the alternative, filtering the embedded
+    // resource, narrows the embed rather than the list of jobs.
+    const { data: matches } = await supabase
+      .from("customers")
+      .select("id")
+      .is("deleted_at", null)
+      .or(
+        `business_name.ilike.${term},trading_name.ilike.${term},` +
+        `phone.ilike.${term},billing_email.ilike.${term},customer_number.ilike.${term}`,
+      )
+      .limit(100)
+      .returns<{ id: string }[]>();
+
+    const ids = (matches ?? []).map((row) => row.id);
+    query = ids.length
+      ? query.or(`order_number.ilike.${term},customer_id.in.(${ids.join(",")})`)
+      : query.ilike("order_number", term);
+  }
+
+  const { data, count, error } = await query.returns<Row[]>();
+  if (error) {
+    // Never the driver's SQL: the operator gets a sentence, the log gets the rest.
+    console.error("job list query failed", error.message);
+    return (
+      <Notice tone="danger" title="That list could not be loaded">
+        Something went wrong fetching your jobs. Try again, or narrow the filters.
+      </Notice>
+    );
+  }
+
+  const staff = await listStaff();
+  const names = staffNames(staff);
+  const filtered = Boolean(
+    params.q || params.status || params.priority || params.customer || params.when || params.date,
+  );
+
+  return (
+    <>
+      <DataTable
+        label="Jobs"
+        rows={data ?? []}
+        rowHref={(row) => `/orders/${row.id}`}
+        rowClassName={(row) => (isOverdue(row, today) ? "border-l-[3px] border-l-danger" : "")}
+        empty={
+          <EmptyState
+            title={filtered ? "No jobs match those filters" : "No jobs yet"}
+            description={filtered
+              ? "Try a broader search, or clear the filters."
+              : "Take in a customer's laundry and it appears here, with its own job number."}
+            action={canCreate && !filtered
+              ? <ButtonLink href="/orders/new" variant="primary">Create new job</ButtonLink>
+              : null}
+          />
+        }
+        columns={[
+          { header: "Job", cell: (row) => row.order_number },
+          {
+            header: "Customer",
+            cell: (row) => row.customers?.business_name ?? "—",
+          },
+          {
+            header: "Laundry",
+            cell: (row) => summariseItems(row.laundry_order_items ?? []),
+            hideBelow: "lg",
+          },
+          { header: "Received", cell: (row) => dateTime(row.received_at), hideBelow: "lg" },
+          {
+            // One column for both workflows, because a job has exactly one date
+            // that matters and which column it comes from is an implementation
+            // detail the counter should never have to hold in their head.
+            header: "Due",
+            cell: (row) => (
+              <span className="flex flex-wrap items-center gap-1.5">
+                <span>{row.due_date ? formatDate(row.due_date) : "Not set"}</span>
+                {isOverdue(row, today) ? <Badge tone="danger">Late</Badge> : null}
+                {!row.delivery_required ? <Badge>Pickup</Badge> : null}
+              </span>
+            ),
+          },
+          {
+            header: "Priority",
+            cell: (row) => (row.priority === "urgent"
+              ? <Badge tone="warning">Urgent</Badge>
+              : <span className="text-muted-foreground">Normal</span>),
+            hideBelow: "md",
+          },
+          { header: "Status", cell: (row) => <StatusBadge status={row.status} /> },
+          {
+            header: "Assigned",
+            cell: (row) => (row.assigned_to ? names.get(row.assigned_to) ?? "—" : "—"),
+            hideBelow: "lg",
+          },
+        ]}
+      />
+      <Pagination page={page} total={count ?? 0} params={params} basePath="/orders" />
+    </>
+  );
+}

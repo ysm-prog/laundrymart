@@ -381,5 +381,71 @@ export type ProductionBatchLine = {
   notes: string | null;
 };
 
+/**
+ * A laundry job (migration 0014) — the counter's order, not the routing module's
+ * stop. `Job` above is the stop; this is the customer's laundry from drop-off to
+ * hand-back. The schema calls it a laundry order, the UI calls it a Job.
+ */
+export type LaundryOrder = {
+  id: Uuid;
+  tenant_id: Uuid;
+  depot_id: Uuid | null;
+  customer_id: Uuid;
+  order_number: string;
+  status: string;
+  priority: string;
+  received_at: string;
+  received_via: string;
+  pickup_date: string | null;
+  pickup_time: string | null;
+  pickup_driver_id: Uuid | null;
+  delivery_required: boolean;
+  expected_delivery_date: string | null;
+  expected_collection_date: string | null;
+  delivery_window: string | null;
+  expected_delivery_time: string | null;
+  delivery_address_source: string;
+  /** Snapshot taken when the job was written. Never refreshed from the customer. */
+  delivery_address: string | null;
+  delivery_instructions: string | null;
+  special_instructions: string | null;
+  assigned_to: Uuid | null;
+  created_by: Uuid | null;
+  delivered_at: string | null;
+  delivered_by: Uuid | null;
+  collected_at: string | null;
+  collected_by: Uuid | null;
+  completed_at: string | null;
+  cancelled_at: string | null;
+  cancellation_reason: string | null;
+  created_at: string;
+  updated_at: string | null;
+  /** Generated: the delivery date, or the collection date for a pickup job. */
+  due_date: string | null;
+};
+
+export type LaundryOrderItem = {
+  id: Uuid;
+  order_id: Uuid;
+  item_type: string;
+  custom_description: string | null;
+  quantity_type: string;
+  exact_quantity: number | null;
+  bag_count: number | null;
+  estimated_quantity: number | null;
+  notes: string | null;
+};
+
+export type LaundryOrderActivity = {
+  id: Uuid;
+  order_id: Uuid;
+  actor_id: Uuid | null;
+  activity_type: string;
+  previous_value: Record<string, unknown> | null;
+  new_value: Record<string, unknown> | null;
+  note: string | null;
+  created_at: string;
+};
+
 /** `select("id, name")` on a lookup table. */
 export type Option = { id: Uuid; name: string };

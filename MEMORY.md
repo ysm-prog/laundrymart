@@ -10,6 +10,33 @@ Vercel at `ats.coreit.com.au`; sign-in verified end to end.
 index in place, `anon` reading zero rows through a rolled-back probe, and no new security
 advisor (still the same five SECURITY DEFINER warnings §18 records as legitimate).
 
+**Jobs / laundry order management shipped** on `claude/jobs-laundry-order-management-p4fu8k`
+(this session). Migration `0014_laundry_orders` — `laundry_orders` + `laundry_order_items` +
+`laundry_order_activity`, the transition guard, and `save_laundry_order_items()`.
+**Applied locally and proven (27 pgTAP assertions); NOT yet applied to `laundrymart-syd`** —
+push it with the branch's CI, or apply it before the code deploys, or every jobs screen 404s
+its table. Things worth carrying forward:
+- **`/jobs` is Stops, `/orders` is Jobs.** `public.jobs` was already the routing module's stop.
+  The new module is `laundry_orders` in the schema, `/orders` as a route, and **Job** on screen.
+  Do not "tidy" one into the other; `/help` now defines both words and the rail carries both.
+- **The status list is closed.** Six values, mirrored in `src/lib/domain/laundry-orders.ts`,
+  the check constraint and `guard_laundry_order_transition`. Adding a seventh means editing
+  three places and a unit test that names all six deliberately.
+- **Overdue is never stored** — `due_date` (generated: delivery date, else collection date)
+  `< today` and status not terminal. The rail badge, the summary card and the row rule all
+  read the same predicate, and the partial index in 0014 covers it.
+- **`toInstant()` in `src/lib/domain/timezone.ts` is the only place a date picker + time
+  picker become a `timestamptz`.** Two-pass offset lookup through `Intl`; do not swap it for
+  `new Date("<date>T<time>")`, which is parsed in the host's zone (UTC on Vercel) and puts
+  every late-evening receipt on the wrong day.
+- **`orders.manage` is the supervisor gate**: cancel, backdate a receipt, edit a completed
+  job. `orders.status` is the floor's. `driver` deliberately holds none.
+- Staff pickers resolve through `src/lib/staff.ts` (memberships + service-role email lookup,
+  degrades to short ids) because `laundry_orders` has four FKs to `auth.users` and any embed
+  would be PGRST201.
+- Local pgTAP needs a superuser role matching `$USER`: `su postgres -c "psql -c 'create role
+  root superuser login'"` then `createdb root`, and `apt-get install postgresql-16-pgtap`.
+
 **Two things must happen on the deployment before Phase C actually does anything:**
 1. **Set `CRON_SECRET`** in Vercel (`openssl rand -hex 32`). Until it is set,
    `/api/notifications/sweep` refuses every request — closed by default on purpose — so the
@@ -135,6 +162,10 @@ server-side extension, so its `.control` file has to sit in the postmaster's own
 and apt on the runner cannot reach into a container.
 
 **Next up**
+0. **Apply `0014_laundry_orders` to `laundrymart-syd`** and re-run the security advisors — the
+   module is code-complete and DB-proven locally, but nothing has touched the hosted project.
+   Then take one job end to end on the demo tenant: create → in progress → ready → out for
+   delivery → delivered, and one customer-pickup job through to collected.
 1. Stage 4, once the four decisions above are made.
 2. **Enable asymmetric JWT signing keys** on the project so `getClaims()` verifies locally
    instead of calling the auth server on every navigation (§2 assumes this).
@@ -143,8 +174,8 @@ and apt on the runner cannot reach into a container.
    unit-tested, the wire is not.
 4. Photo retention: nothing prunes `run-media`. Per-tenant path prefixes make a lifecycle
    rule straightforward.
-5. Consolidated invoices: `generateInvoices` dedupes on customer + period, so a customer with
-   two active agreements only gets the first billed. Pre-existing; confirm intent first.
+5. Consolidated invoices: fixed (see above), but still never exercised against real data —
+   generate a period for a demo customer holding two contracts before anyone bills a real month.
 
 **Toolchain decisions from the dependency merge**
 - TypeScript is pinned to **6**, not the 7 Dependabot offered: typescript-eslint has no TS 7

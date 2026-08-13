@@ -5,6 +5,7 @@ import {
   PageHeader, Stage, Stat, StatusBadge, cx,
 } from "@/components/ui";
 import { ConfirmSubmit } from "@/components/confirm-submit";
+import { CompleteJob } from "@/app/(app)/orders/complete-job";
 import { NotificationBell } from "@/components/notification-bell";
 import { NotificationList, type NotificationListItem } from "@/components/notification-list";
 import { InspectionChecklist } from "@/app/(app)/run/inspection-checklist";
@@ -13,6 +14,9 @@ import { AgreementWizard } from "@/app/(app)/agreements/agreement-wizard";
 import { CustomerEssentials, FormDisclosure } from "@/app/(app)/customers/customer-form";
 import { EXCEPTION_REASONS } from "@/app/(app)/jobs/exception-reasons";
 import { navigationFor, type NavItem } from "@/lib/nav";
+import {
+  ORDER_STATUSES, isOverdue, summariseItems,
+} from "@/lib/domain/laundry-orders";
 import { UNASSIGNED } from "@/app/(app)/routes/planner/plan";
 import {
   PlannerBoard, type Option, type PlannerColumn, type PlannerJob,
@@ -42,7 +46,41 @@ export const metadata = { title: "Design preview" };
    after it was replaced. */
 const ITEMS: NavItem[] = navigationFor("super_admin");
 
-const COUNTS = { routesToday: 3, exceptions: 4, batches: 12, unpaidInvoices: 9 };
+const COUNTS = {
+  routesToday: 3, exceptions: 4, batches: 12, unpaidInvoices: 9, overdueJobs: 2,
+};
+
+/* ---------------------------------------------------- laundry jobs fixture */
+
+/** "Today" is fixed here so the overdue rule renders the same on every build. */
+const JOBS_TODAY = "2026-08-13";
+
+const PREVIEW_LAUNDRY = [
+  {
+    id: "1", order_number: "LJ00118", customer: "Quay Street Bistro",
+    status: "in_progress", priority: "urgent", due_date: "2026-08-11",
+    delivery_required: true,
+    items: [{ item_type: "linen" as string, quantity_type: "exact", exact_quantity: 40 },
+            { item_type: "pillowcases", quantity_type: "bulk_lot", bag_count: 2 }],
+  },
+  {
+    id: "2", order_number: "LJ00121", customer: "Northshore Day Spa",
+    status: "ready_for_delivery", priority: "normal", due_date: "2026-08-13",
+    delivery_required: false,
+    items: [{ item_type: "bath_towels", quantity_type: "exact", exact_quantity: 60 }],
+  },
+  {
+    id: "3", order_number: "LJ00122", customer: "Harbourview Hotel",
+    status: "out_for_delivery", priority: "normal", due_date: "2026-08-14",
+    delivery_required: true,
+    items: [{ item_type: "sheets", quantity_type: "bulk_lot", bag_count: 6, estimated_quantity: 90 }],
+  },
+] as const;
+
+const PREVIEW_STAFF = [
+  { id: "u1", label: "counter@harbourlaundry.com.au", role: "Customer Service" },
+  { id: "u2", label: "kim@harbourlaundry.com.au", role: "Dispatcher" },
+];
 
 const DECISIONS = [
   { ref: "JOB00042", customer: "Quay Street Bistro", issue: "no access — gate locked, no answer on the intercom",
@@ -670,6 +708,83 @@ export default function DesignPreviewPage() {
                   no realtime. Past 99 it stops counting and says so.
                 </p>
               </Card>
+            </div>
+          </div>
+          <div className="border-t pt-5">
+            <PageHeader
+              eyebrow="Laundry jobs"
+              title="The counter's job, drop-off to hand-back"
+              description="Six statuses and no more — overdue is worked out from today's date, never stored, so a job clears the flag by being finished rather than by anyone editing it."
+            />
+
+            <div className="mb-4 grid grid-cols-2 gap-px border bg-border sm:grid-cols-3 lg:grid-cols-6">
+              {([["New", 6, false], ["In progress", 11, false], ["Ready", 4, false],
+                 ["Out for delivery", 2, false], ["Completed today", 9, false],
+                 ["Overdue", 2, true]] as const).map(([label, value, danger]) => (
+                <Stat key={label} flush label={label} value={value}
+                      tone={danger ? "danger" : "default"} />
+              ))}
+            </div>
+
+            <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_300px]">
+              <Card title="Jobs" description="The overdue row carries a leading rule as well as a badge — colour is never the only signal.">
+                <DataTable
+                  label="Jobs"
+                  rows={PREVIEW_LAUNDRY}
+                  rowClassName={(row) => (isOverdue(row, JOBS_TODAY) ? "border-l-[3px] border-l-danger" : "")}
+                  empty={<EmptyState title="No jobs yet" />}
+                  columns={[
+                    { header: "Job", cell: (row) => row.order_number },
+                    { header: "Customer", cell: (row) => row.customer },
+                    { header: "Laundry", cell: (row) => summariseItems([...row.items]), hideBelow: "lg" },
+                    {
+                      header: "Due",
+                      cell: (row) => (
+                        <span className="flex flex-wrap items-center gap-1.5">
+                          <span>{row.due_date}</span>
+                          {isOverdue(row, JOBS_TODAY) ? <Badge tone="danger">Late</Badge> : null}
+                          {!row.delivery_required ? <Badge>Pickup</Badge> : null}
+                        </span>
+                      ),
+                    },
+                    {
+                      header: "Priority",
+                      cell: (row) => (row.priority === "urgent"
+                        ? <Badge tone="warning">Urgent</Badge>
+                        : <span className="text-muted-foreground">Normal</span>),
+                      hideBelow: "md",
+                    },
+                    { header: "Status", cell: (row) => <StatusBadge status={row.status} /> },
+                  ]}
+                />
+              </Card>
+
+              <div className="space-y-4">
+                <Card title="The six statuses" description="Nothing else is allowed anywhere in the stack.">
+                  <div className="flex flex-wrap gap-1.5">
+                    {ORDER_STATUSES.map((status) => <StatusBadge key={status} status={status} />)}
+                  </div>
+                </Card>
+
+                <Card title="Handing it back"
+                      description="Inline rather than a modal: date, time and who did it, defaulted to now.">
+                  <CompleteJob action={previewApply} orderId="preview" delivered
+                               staff={PREVIEW_STAFF} defaultStaffId="u1" />
+                </Card>
+
+                <Card title="Cancelling"
+                      description="The one action with an optional reason — demanding one only teaches people to type n/a.">
+                  <form action={previewApply}>
+                    <ConfirmSubmit
+                      label="Cancel job"
+                      eyebrow="Are you sure?"
+                      consequence="Are you sure you want to cancel this job? Nothing is deleted — the job, its laundry list and its history all stay."
+                      reasonName="cancellation_reason"
+                      reasonRequired={false}
+                    />
+                  </form>
+                </Card>
+              </div>
             </div>
           </div>
         </main>
