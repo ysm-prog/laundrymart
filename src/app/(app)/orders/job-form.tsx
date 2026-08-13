@@ -3,14 +3,15 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { Field, FormActions, Input, Select, SubmitButton, Textarea } from "@/components/form";
-import { Badge, ButtonLink, Card, CONTROL, Eyebrow, Notice, cx } from "@/components/ui";
+import { Badge, ButtonLink, Card, CONTROL, Eyebrow, Notice, cx, humanise } from "@/components/ui";
 import { CustomerEssentials } from "@/app/(app)/customers/customer-form";
 import {
   DELIVERY_WINDOWS, DELIVERY_WINDOW_LABELS, ITEM_TYPES, ITEM_TYPE_LABELS,
   ORDER_PRIORITIES, PRIORITY_LABELS, QUANTITY_TYPES, QUANTITY_TYPE_LABELS,
-  RECEIVED_VIA, RECEIVED_VIA_LABELS, describeItem,
+  RECEIVED_VIA_LABELS, describeItem, initialDeliveryRequired, receivedViaOptions,
+  type ReceivedVia,
 } from "@/lib/domain/laundry-orders";
-import { businessNowTime, businessToday, toZonedDate, toZonedTime } from "@/lib/domain/timezone";
+import { businessToday, toZonedDate } from "@/lib/domain/timezone";
 import type { LaundryOrder, LaundryOrderItem } from "@/lib/db/types";
 
 /**
@@ -22,9 +23,11 @@ import type { LaundryOrder, LaundryOrderItem } from "@/lib/db/types";
  * conversation at the counter: who is this, what did they bring, when do they
  * want it, anything unusual.
  *
- * Everything that can be a default is one: today's date, the time now, a
- * customer drop-off, normal priority, one empty laundry row ready to fill. The
- * two branching questions — how it arrived, and whether we deliver it back —
+ * Everything that can be a default is one: today's date, a customer drop-off,
+ * re-delivery, normal priority, one empty laundry row ready to fill. The time of
+ * receipt is not asked for at all — it is the moment the job is being taken in,
+ * so the server stamps it. The two branching questions — how it arrived, and
+ * whether we deliver it back —
  * *render* their extra fields rather than hiding them, so nothing that is out of
  * play is still in the post.
  *
@@ -109,7 +112,7 @@ export function JobForm({
   const [query, setQuery] = useState("");
   const [quickCreate, setQuickCreate] = useState(false);
   const [receivedVia, setReceivedVia] = useState<string>(order?.received_via ?? "customer_dropoff");
-  const [deliveryRequired, setDeliveryRequired] = useState(order?.delivery_required ?? false);
+  const [deliveryRequired, setDeliveryRequired] = useState(() => initialDeliveryRequired(order));
   const [deliveryWindow, setDeliveryWindow] = useState<string>(
     order?.delivery_window ?? "no_specific_time",
   );
@@ -167,11 +170,15 @@ export function JobForm({
     setNextKey((key) => key + 1);
   }
 
-  // Both read back through the business timezone, not the device's: the counter
-  // in Sydney and a laptop set to UTC must see the same received date on the
-  // same job.
+  // Read back through the business timezone, not the device's: the counter in
+  // Sydney and a laptop set to UTC must see the same received date on the same
+  // job. Only the date is asked for — the time of day is the moment the job is
+  // taken in, which the server stamps (see `receivedInstant`).
   const receivedDate = order ? toZonedDate(order.received_at) : businessToday();
-  const receivedTime = order ? toZonedTime(order.received_at) : businessNowTime();
+
+  // The two real answers, plus whatever an older job already holds, so editing
+  // one taken in under a retired option cannot rewrite how it arrived.
+  const receivedViaChoices = receivedViaOptions(order?.received_via);
 
   return (
     <>
@@ -281,14 +288,13 @@ export function JobForm({
               <Input name="received_date" type="date" required defaultValue={receivedDate}
                      max={canBackdate ? undefined : businessToday()} />
             </Field>
-            <Field label="Received time" name="received_time" required>
-              <Input name="received_time" type="time" required defaultValue={receivedTime} />
-            </Field>
-            <Field label="Received via" name="received_via" className="sm:col-span-2">
+            <Field label="Received via" name="received_via">
               <select id="received_via" name="received_via" className={CONTROL}
                       value={receivedVia} onChange={(event) => setReceivedVia(event.target.value)}>
-                {RECEIVED_VIA.map((value) => (
-                  <option key={value} value={value}>{RECEIVED_VIA_LABELS[value]}</option>
+                {receivedViaChoices.map((value) => (
+                  <option key={value} value={value}>
+                    {RECEIVED_VIA_LABELS[value as ReceivedVia] ?? humanise(value)}
+                  </option>
                 ))}
               </select>
             </Field>
@@ -420,7 +426,10 @@ export function JobForm({
           </ul>
 
           <div className="mt-3">
-            <Field label="Washing instructions" name="special_instructions"
+            {/* The plant's field, kept distinct from each item's own notes:
+                one is how to wash it, the other is what came in the bag. Same
+                `special_instructions` column it has always written to. */}
+            <Field label="Machine instructions" name="special_instructions"
                    hint="Anything the plant needs to know. Directions to the door go under Delivery.">
               <Textarea name="special_instructions" rows={2}
                         defaultValue={order?.special_instructions}
@@ -433,11 +442,14 @@ export function JobForm({
         <Card title="Delivery or pickup"
               description="Are we taking it back to them, or are they coming for it?">
           <div className="space-y-3">
+            {/* Re-deliver leads and is the default: it is the normal job, and
+                selecting it every time was a step that was almost always the
+                same. Customer pickup is one tap away and unchanged. */}
             <div className="flex flex-wrap gap-2">
+              <ChoiceButton selected={deliveryRequired} onClick={() => setDeliveryRequired(true)}
+                            label="Re-deliver" detail="It goes back out to them on a run." />
               <ChoiceButton selected={!deliveryRequired} onClick={() => setDeliveryRequired(false)}
                             label="Customer pickup" detail="They collect it from the counter." />
-              <ChoiceButton selected={deliveryRequired} onClick={() => setDeliveryRequired(true)}
-                            label="We deliver" detail="It goes out on a run." />
             </div>
 
             {deliveryRequired ? (

@@ -323,6 +323,29 @@ Both are compositions over existing tables — neither added a migration.
   are edited and invoices voided.
 
 ## 18. Changelog
+### 2026-08-13 · Job creation form: no received time, re-deliver by default
+Targeted change to the create/edit form only — no migration, no new component, no change to
+the Jobs list, detail page, status workflow, priority or permissions.
+- **Received time is no longer asked for.** It was a field that was never wrong and always in
+  the way: the counter is standing there as they fill it in. The form posts only
+  `received_date`; `receivedInstant()` (in `src/lib/domain/laundry-orders.ts`) composes
+  `received_at` server-side — the clock time now for a new job, and **the job's existing time
+  of day on an edit**, so correcting a received date does not move an 8am drop-off to
+  whenever the correction was made. `received_time` is out of the Zod schema, so nothing
+  the form no longer sends is still required. `received_at` keeps its column and its data.
+- **Received via offers the two real answers**, drop-off and driver pickup. `RECEIVED_VIA`
+  stays the full column set (0014 allows `other`) and the Zod enum still accepts it:
+  `receivedViaOptions()` adds a job's own stored value back to the list when it is not one of
+  the two, so editing a legacy job cannot silently rewrite how it arrived.
+- **The delivery fork now defaults to Re-deliver**, and reads "Re-deliver" / "Customer pickup".
+  `initialDeliveryRequired()` is the rule: a new job starts at `delivery_required = true`, an
+  existing one answers with its own value. The column default in 0014 stays `false` — the
+  action always writes the field explicitly, so no historical row and no migration is touched.
+- "Washing instructions" is now labelled **Machine instructions**, still writing
+  `special_instructions`; per-item **Item notes** is untouched and remains a different field.
+- Priority, the assignee (blank, never the creator), the customer picker and its phone
+  display, both quantity types and every delivery/collection field are unchanged. 204 unit
+  tests (was 195). Rendered at 1280 and 834 to confirm the layout.
 ### 2026-08-13 · Jobs: laundry order management, drop-off to hand-back
 The counter's own module — take laundry in, itemise it, track it through the plant, and
 deliver it back or hand it over. New area "Jobs" in the rail, one migration (`0014`), no

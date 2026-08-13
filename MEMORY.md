@@ -29,6 +29,13 @@ feature branch `claude/jobs-laundry-order-management-p4fu8k`, commit `39a1f0e`).
   documented helpers plus `park_number_sequence` (from another branch's migration) and the
   auth leaked-password toggle.
 
+**In flight: the job creation form update** (branch `claude/job-creation-form-update-w1zzn2`).
+Form-and-action change only, **no migration** — received time removed (server stamps
+`received_at`; an edit keeps the job's existing time of day), received via narrowed to the two
+real answers with legacy values preserved in edit mode, the delivery fork defaulting to
+Re-deliver for new jobs only, and "Machine instructions" as the label on `special_instructions`.
+`verify` green, 204 unit tests. Not yet applied anywhere but the branch. See §18.
+
 **The live DB is ahead of `Prod`'s migrations folder.** `list_migrations` shows
 `0012_return_count`, `purchases`, `supplier_payments` and `import_helpers` applied to
 `laundrymart-syd` with no matching file on `Prod`. They came from unmerged branches (the

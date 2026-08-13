@@ -12,7 +12,7 @@ import {
 } from "@/lib/actions";
 import {
   DELIVERY_WINDOWS, ORDER_PRIORITIES, RECEIVED_VIA,
-  checkTransition, isBlankItem, isOrderStatus, validateItem,
+  checkTransition, isBlankItem, isOrderStatus, receivedInstant, validateItem,
   type OrderItemInput, type OrderStatus,
 } from "@/lib/domain/laundry-orders";
 import { businessToday, isClockTime, toInstant } from "@/lib/domain/timezone";
@@ -84,7 +84,10 @@ const itemsField = z.preprocess((value) => {
 const orderSchema = z.object({
   customer_id: z.string().uuid("Please select a customer."),
   received_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Please select a valid date."),
-  received_time: requiredTime,
+  // No `received_time`: the form does not ask for it, so requiring one here
+  // would refuse every post from it. The time of day is stamped server-side —
+  // see `receivedInstant`. The enum stays the full column set rather than the
+  // two the form offers, so a job holding a legacy value can still be edited.
   received_via: z.enum(RECEIVED_VIA),
   pickup_date: optionalDate,
   pickup_time: optionalTime,
@@ -157,12 +160,18 @@ function itemsFrom(formData: FormData): OrderItemInput[] {
     .filter((item) => !isBlankItem(item));
 }
 
-/** Only the fields the database column set actually holds, ready to write. */
-function toRow(input: OrderInput, deliveryAddress: string | null) {
+/**
+ * Only the fields the database column set actually holds, ready to write.
+ *
+ * `receivedAt` is passed in rather than composed here: creating stamps the
+ * current time, editing keeps the time already on the job, and only the caller
+ * knows which of the two it is.
+ */
+function toRow(input: OrderInput, deliveryAddress: string | null, receivedAt: string) {
   const delivery = input.delivery_required;
   return {
     customer_id: input.customer_id,
-    received_at: toInstant(input.received_date, input.received_time),
+    received_at: receivedAt,
     received_via: input.received_via,
     // Pickup details only mean anything on a driver collection; carrying them
     // over from a changed answer would leave a drop-off claiming a driver.
@@ -281,12 +290,17 @@ async function logActivity(
 async function loadOrder(
   supabase: Awaited<ReturnType<typeof createClient>>,
   id: string,
-): Promise<{ id: string; order_number: string; status: OrderStatus; delivery_required: boolean } | null> {
+): Promise<
+  { id: string; order_number: string; status: OrderStatus; delivery_required: boolean; received_at: string } | null
+> {
   const { data } = await supabase
     .from("laundry_orders")
-    .select("id, order_number, status, delivery_required")
+    .select("id, order_number, status, delivery_required, received_at")
     .eq("id", id)
-    .maybeSingle<{ id: string; order_number: string; status: string; delivery_required: boolean }>();
+    .maybeSingle<{
+      id: string; order_number: string; status: string;
+      delivery_required: boolean; received_at: string;
+    }>();
   if (!data || !isOrderStatus(data.status)) return null;
   return { ...data, status: data.status };
 }
@@ -335,7 +349,7 @@ export async function createOrder(formData: FormData): Promise<void> {
   const { data: order, error } = await supabase
     .from("laundry_orders")
     .insert({
-      ...toRow(parsed.data, deliveryAddress),
+      ...toRow(parsed.data, deliveryAddress, receivedInstant(parsed.data.received_date)),
       tenant_id: session.tenantId,
       depot_id: session.depotId ?? customer.depot_id,
       created_by: session.userId,
@@ -418,7 +432,12 @@ export async function updateOrder(formData: FormData): Promise<void> {
   }
 
   const deliveryAddress = await resolveDeliveryAddress(supabase, parsed.data);
-  const row = toRow(parsed.data, deliveryAddress);
+  // The stored time of day is carried over, so correcting the received *date*
+  // does not move an 8am drop-off to whenever the correction was made.
+  const row = toRow(
+    parsed.data, deliveryAddress,
+    receivedInstant(parsed.data.received_date, existing.received_at),
+  );
 
   const { data: before } = await supabase
     .from("laundry_orders")
