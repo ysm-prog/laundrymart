@@ -6,11 +6,13 @@ import { createClient } from "@/lib/supabase/server";
 import { can } from "@/lib/roles";
 import { date, money } from "@/lib/format";
 import { describePattern, parsePattern } from "@/lib/domain/service-calendar";
+import { isOverdue, summariseItems } from "@/lib/domain/laundry-orders";
+import { businessToday } from "@/lib/domain/timezone";
 import type {
   Customer, CustomerContact, CustomerLocation, Invoice, Job, ServiceAgreement,
 } from "@/lib/db/types";
 import {
-  ButtonLink, Card, DataTable, EmptyState, PageHeader,
+  Badge, ButtonLink, Card, DataTable, EmptyState, PageHeader,
   SkeletonRows, StatusBadge,
 } from "@/components/ui";
 import { Checkbox, Field, Input, SubmitButton, Textarea } from "@/components/form";
@@ -105,6 +107,12 @@ export default async function CustomerDetailPage({
       <Suspense fallback={<SkeletonRows rows={3} />}>
         <Agreements customerId={id} />
       </Suspense>
+
+      {can(session.role, "orders.read") ? (
+        <Suspense fallback={<SkeletonRows rows={3} />}>
+          <LaundryJobs customerId={id} canCreate={can(session.role, "orders.write")} />
+        </Suspense>
+      ) : null}
 
       <Suspense fallback={<SkeletonRows rows={3} />}>
         <History customerId={id} showInvoices={can(session.role, "invoices.read")} />
@@ -243,6 +251,96 @@ async function Agreements({ customerId }: { customerId: string }) {
           { header: "Pickup pattern", cell: (row) => describePattern(parsePattern(row.pickup_pattern)), hideBelow: "sm" },
           { header: "Minimum", cell: (row) => money(row.minimum_charge), hideBelow: "md", align: "right" },
           { header: "Starts", cell: (row) => date(row.start_date), hideBelow: "lg" },
+          { header: "Status", cell: (row) => <StatusBadge status={row.status} /> },
+        ]}
+      />
+    </Card>
+  );
+}
+
+/**
+ * The customer's laundry jobs, read through the existing `customer_id` key —
+ * nothing about a job is copied onto the customer row. Ten most recent, newest
+ * first, with the whole list one click away.
+ *
+ * Deliberately separate from "Recent jobs" below, which is the *routing* module:
+ * that lists stops on a driver's run, this lists laundry taken in at the counter.
+ * Same word, two records, and putting them in one table would suggest they were
+ * the same thing.
+ */
+async function LaundryJobs({
+  customerId, canCreate,
+}: { customerId: string; canCreate: boolean }) {
+  const supabase = await createClient();
+  const today = businessToday();
+  const { data } = await supabase
+    .from("laundry_orders")
+    .select(
+      "id, order_number, status, priority, received_at, due_date, delivery_required, " +
+      "laundry_order_items(item_type, custom_description, quantity_type, exact_quantity, " +
+      "bag_count, estimated_quantity)",
+    )
+    .eq("customer_id", customerId)
+    .order("received_at", { ascending: false })
+    .limit(10)
+    .returns<Array<{
+      id: string; order_number: string; status: string; priority: string;
+      received_at: string; due_date: string | null; delivery_required: boolean;
+      laundry_order_items: Array<{
+        item_type: string; custom_description: string | null; quantity_type: string;
+        exact_quantity: number | null; bag_count: number | null; estimated_quantity: number | null;
+      }>;
+    }>>();
+
+  return (
+    <Card
+      title="Jobs"
+      description="Laundry taken in for this customer, newest first."
+      actions={
+        <>
+          <Link href={`/orders?customer=${customerId}`} className="text-sm text-primary hover:underline">
+            All jobs
+          </Link>
+          {canCreate ? <ButtonLink href={`/orders/new?customer=${customerId}`}>New job</ButtonLink> : null}
+        </>
+      }
+    >
+      <DataTable
+        label="Laundry jobs"
+        rows={data ?? []}
+        rowHref={(row) => `/orders/${row.id}`}
+        empty={
+          <EmptyState
+            title="No jobs yet"
+            description="Nothing has been taken in for this customer."
+            action={canCreate
+              ? <ButtonLink href={`/orders/new?customer=${customerId}`} variant="primary">Take in laundry</ButtonLink>
+              : null}
+          />
+        }
+        columns={[
+          { header: "Job", cell: (row) => row.order_number },
+          { header: "Received", cell: (row) => date(row.received_at) },
+          {
+            header: "Laundry",
+            cell: (row) => summariseItems(row.laundry_order_items ?? []),
+            hideBelow: "md",
+          },
+          {
+            header: "Due",
+            cell: (row) => (
+              <span className="flex flex-wrap items-center gap-1.5">
+                <span>{row.due_date ? date(row.due_date) : "Not set"}</span>
+                {isOverdue(row, today) ? <Badge tone="danger">Late</Badge> : null}
+              </span>
+            ),
+            hideBelow: "sm",
+          },
+          {
+            header: "Priority",
+            cell: (row) => (row.priority === "urgent" ? <Badge tone="warning">Urgent</Badge> : "Normal"),
+            hideBelow: "lg",
+          },
           { header: "Status", cell: (row) => <StatusBadge status={row.status} /> },
         ]}
       />

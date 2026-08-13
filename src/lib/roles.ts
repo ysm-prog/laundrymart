@@ -51,6 +51,15 @@ export const CAPABILITIES = [
   "operations.read",
   "operations.write",
   "run.execute",
+  // The counter's laundry jobs (`/orders`, labelled "Jobs"), split the same way
+  // routes are: `write` creates and edits, `status` walks a job through the
+  // workflow — the plant floor advances jobs it does not plan — and `manage` is
+  // the supervisor's set: cancel a job, backdate a receipt, reopen the edit form
+  // on one that is already completed.
+  "orders.read",
+  "orders.write",
+  "orders.status",
+  "orders.manage",
   "inventory.read",
   "inventory.write",
   "warehouse.read",
@@ -80,6 +89,7 @@ export const ROLE_CAPABILITIES: Record<Role, readonly Capability[]> = {
     "fleet.read", "fleet.write",
     "routes.read", "routes.write", "routes.status",
     "operations.read", "operations.write",
+    "orders.read", "orders.write", "orders.status",
     "inventory.read",
     "warehouse.read",
     "invoices.read", "invoices.write",
@@ -93,6 +103,9 @@ export const ROLE_CAPABILITIES: Record<Role, readonly Capability[]> = {
     "customers.read",
     "agreements.read",
     "items.read",
+    // Read-only on jobs: "what did we actually take in for them?" is a billing
+    // question, but finance never works the counter or the floor.
+    "orders.read",
     "invoices.read", "invoices.write",
     "reports.read",
   ],
@@ -100,10 +113,16 @@ export const ROLE_CAPABILITIES: Record<Role, readonly Capability[]> = {
     "inventory.read", "inventory.write",
     "warehouse.read", "warehouse.write",
     "items.read", "operations.read",
+    // The floor is what actually moves a job from new to ready, so it holds
+    // `orders.status` without `orders.write` — it advances work, it does not
+    // take orders or change what was agreed.
+    "orders.read", "orders.status",
   ],
   customer_service: [
     "customers.read", "customers.write", "agreements.read", "operations.read",
     "routes.read", "routes.status",
+    // The counter: takes the laundry in and hands it back.
+    "orders.read", "orders.write", "orders.status",
   ],
   sales: ["customers.read", "customers.write", "agreements.read", "agreements.write", "items.read", "reports.read"],
   branch_manager: ALL.filter((c) => !c.startsWith("admin.")),

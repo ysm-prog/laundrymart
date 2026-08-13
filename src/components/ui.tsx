@@ -180,6 +180,10 @@ const STATUS_TONES: Record<string, BadgeTone> = {
   closed: "success", pass: "success", in_progress: "primary", assigned: "primary",
   travelling: "primary", at_customer: "primary", draft: "neutral", planned: "neutral",
   scheduled: "neutral", not_started: "neutral", inactive: "neutral", archived: "neutral",
+  // Laundry jobs: "new" is colourless because a job just taken in is not yet a
+  // status anyone acts on, and the two delivery states are on-track blues rather
+  // than warnings — nothing is wrong with a job that is out on a van.
+  new: "neutral", ready_for_delivery: "info", out_for_delivery: "primary",
   prospect: "info", on_hold: "warning", due: "warning", part_paid: "warning",
   pending: "warning", inspection_pending: "warning", returning: "warning",
   unloading: "warning", pass_with_defects: "warning", overdue: "danger",

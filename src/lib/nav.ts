@@ -4,9 +4,9 @@ import { can, type Capability, type Role } from "@/lib/roles";
  * The navigation map.
  *
  * Organised by the operator's day, not by the database. Every destination the
- * app has is still reachable, but the rail lists **areas of work** (at most ten
- * rows, usually fewer) and the screens inside an area appear as tabs once you
- * are in it. The previous rail was a flat inventory of 22 tables under six
+ * app has is still reachable, but the rail lists **areas of work** (at most
+ * eleven rows, usually fewer) and the screens inside an area appear as tabs once
+ * you are in it. The previous rail was a flat inventory of 22 tables under six
  * headings named after internal concepts (Plant, Fleet, Accounts) — a
  * first-timer had to know the data model to find anything.
  *
@@ -24,7 +24,8 @@ import { can, type Capability, type Role } from "@/lib/roles";
  */
 
 /** Counts the rail can surface. Resolved once per request in the layout. */
-export type NavCountKey = "routesToday" | "exceptions" | "batches" | "unpaidInvoices";
+export type NavCountKey =
+  | "routesToday" | "exceptions" | "batches" | "unpaidInvoices" | "overdueJobs";
 
 export type NavItem = {
   label: string;
@@ -108,6 +109,20 @@ export const NAVIGATION: NavItem[] = [
         blurb: "Clean linen handed over, with the signature taken at the door.",
       },
     ],
+  },
+  {
+    // The counter's work, and deliberately a separate row from "Stops": a stop
+    // is a visit on a driver's run, a job is a customer's laundry from the
+    // moment it lands on the counter to the moment it goes back. They meet only
+    // when a job is collected or delivered by a driver. `/orders` rather than
+    // `/jobs` because the routing module took that path in 0004 — the same
+    // label-is-not-the-route arrangement as Contracts (`/agreements`) and Linen
+    // (`/inventory`), and /help defines both words.
+    label: "Jobs",
+    href: "/orders",
+    capability: "orders.read",
+    count: "overdueJobs",
+    blurb: "Laundry taken in at the counter, from drop-off to delivery or collection.",
   },
   {
     label: "Customers",

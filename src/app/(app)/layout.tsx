@@ -12,7 +12,7 @@ import { signOut } from "@/app/login/actions";
 /**
  * Counts for the sidebar badges.
  *
- * Four head-only counts, issued together — no rows come back, just the numbers,
+ * Five head-only counts, issued together — no rows come back, just the numbers,
  * and each is served by an existing index. They are the reason the rail is worth
  * looking at, so they run inline rather than streaming in afterwards; a badge
  * that appears a second late is a badge nobody trusts.
@@ -25,7 +25,7 @@ async function navCounts(): Promise<NavCounts> {
     const supabase = await createClient();
     const head = { count: "exact" as const, head: true };
 
-    const [routes, exceptions, batches, unpaid] = await Promise.all([
+    const [routes, exceptions, batches, unpaid, overdueJobs] = await Promise.all([
       supabase.from("daily_routes").select("id", head).eq("route_date", today()),
       supabase.from("jobs").select("id", head).eq("status", "exception"),
       supabase.from("production_batches").select("id", head)
@@ -33,6 +33,12 @@ async function navCounts(): Promise<NavCounts> {
         .is("deleted_at", null),
       supabase.from("invoices").select("id", head)
         .in("status", ["issued", "part_paid", "overdue"]).is("deleted_at", null),
+      // Late jobs. Computed, never stored — `due_date` is the generated column
+      // that already picks delivery-or-collection, and the partial index in
+      // 0014 covers exactly this predicate.
+      supabase.from("laundry_orders").select("id", head)
+        .lt("due_date", today())
+        .not("status", "in", "(completed,cancelled)"),
     ]);
 
     return {
@@ -40,6 +46,7 @@ async function navCounts(): Promise<NavCounts> {
       exceptions: exceptions.count ?? undefined,
       batches: batches.count ?? undefined,
       unpaidInvoices: unpaid.count ?? undefined,
+      overdueJobs: overdueJobs.count ?? undefined,
     };
   } catch {
     return {};

@@ -32,9 +32,10 @@ The master spec names a .NET 9 Web API; this build follows the supplied skeleton
   cannot be. `/api/sync` stays the one API exception for the offline outbox.
 - Pure domain logic lives in `src/lib/domain/` with no database access: the service calendar,
   pricing, recurring invoicing (`invoicing.ts` — one contract's charges, and the
-  `consolidate()` rule for header fields two contracts disagree on), ABN validation and date
-  helpers. Unit-tested; shared by preview, route generation and invoicing so they cannot
-  diverge.
+  `consolidate()` rule for header fields two contracts disagree on), ABN validation, date
+  helpers, the laundry-job workflow (`laundry-orders.ts`) and the business-timezone
+  conversion (`timezone.ts`). Unit-tested; shared by preview, route generation, invoicing and
+  the jobs module so they cannot diverge.
 - Invoice PDFs render server-side with `@react-pdf/renderer` (`src/lib/pdf/`), streamed from
   `/api/invoices/:id/pdf` and attached to the Resend email. `serverExternalPackages` keeps the
   renderer out of the client bundle.
@@ -69,7 +70,11 @@ Resource-scoped beyond tenancy:
   applied in `src/lib/notifications/query.ts`, layered on top of RLS and never instead of it.
 
 Roles and capabilities are declared once in `src/lib/roles.ts` and drive the nav, page guards
-and action guards. `routes.write` (plan and assign) is separate from `routes.status` (advance
+and action guards. `orders.*` follows the same split as routes: `write` creates and edits a
+laundry job, `status` walks it through the workflow (the plant floor advances work it does not
+plan, so `warehouse_operator` holds `status` without `write`), and `manage` is the supervisor's
+set — cancel a job, backdate a receipt, edit one already completed. `driver` holds none of
+them: counter jobs are not stops on a run. `routes.write` (plan and assign) is separate from `routes.status` (advance
 a run that is already out): the latter also goes to `driver` — RLS confines them to their own
 run — and to `customer_service`, so a stuck run is not waiting on a dispatcher.
 
@@ -89,6 +94,15 @@ run — and to `customer_service`, so a stuck run is not waiting on a dispatcher
   kilograms and the same lost towels once per contract. Each contract's minimum, levy and
   surcharges are still computed against its own services only; every line keeps its
   `agreement_id` (null for replacement charges, which belong to no contract).
+- **A laundry job's six statuses are enforced by `guard_laundry_order_transition`**, not just
+  by the screen: no skipping the middle, no going backwards, `completed`/`cancelled` terminal,
+  a customer pickup never reaches `out_for_delivery`, and a delivery job cannot be completed
+  off the shelf. The trigger stamps `completed_at`/`cancelled_at`, so no client can record a
+  finished job with no finishing time. Overdue is **not** among the statuses — it is
+  `due_date < today and status not in (completed, cancelled)`, computed every time it is
+  asked, where `due_date` is a generated column (delivery date, or collection date for a
+  pickup job). A job's laundry list is replaced through `save_laundry_order_items()`, one
+  transaction, because a delete-then-insert over PostgREST has a window with no items in it.
 - A production batch cannot start with an empty manifest, cannot be completed except from
   `ready_for_dispatch`, and cannot be reopened once finished (`guard_batch_transition`). Its
   manifest freezes when it leaves receiving — only `rejected_quantity` and notes stay writable
@@ -103,20 +117,25 @@ branches deploy. Never force-push `Prod`.
 `/` landing · `/login` · `/offline` · `/api/sync` · `/api/media` · `/api/invoices/:id/pdf` ·
 `/api/notifications/sweep` (cron, bearer-token authed, no session)
 `(app)`: `/dashboard` · `/customers[/new|/:id|/:id/edit]` · `/agreements[/new|/:id]` ·
+`/orders[/new|/:id|/:id/edit]` ·
 `/items[/:id]` · `/drivers` · `/vehicles` · `/routes/templates[/:id]` ·
 `/routes/daily[/:id|/:id/sheet]` · `/routes/planner` · `/jobs[/:id]` ·
 `/operations/{pickups,deliveries,exceptions}` · `/run` · `/warehouse[/:id]` · `/inventory` ·
 `/invoices[/:id]` · `/reports` · `/search` · `/help` · `/notifications` ·
 `/admin` (redirects) `[/depots|/users|/holidays|/audit|/notifications]`
 
-**Navigation is data** (`src/lib/nav.ts`): ten areas, each with optional `children`
+**Navigation is data** (`src/lib/nav.ts`): eleven areas, each with optional `children`
 rendered as a tab strip (`SectionNav` in the layout, not per page). An area is visible
 when any screen inside it is, and `navigationFor()` resolves its href *and capability*
 together to the first screen the role can open — so a row never links somewhere the auth
 gate would bounce. `sectionFor()` (longest match wins) decides which rail row highlights
 and which tabs show, so detail routes stay inside their area. `capability` is optional:
 omitted means every signed-in member, which is what `/dashboard` and `/help` need since no
-single capability is held by all eleven roles. `/notifications` (the bell's list) is
+single capability is held by all eleven roles. **"Jobs" (`/orders`) and "Stops" (`/jobs`) are two different things and both keep their rail
+row**: a stop is a visit on a driver's run, a job is a customer's laundry from counter to
+hand-back. The route path is `/orders` because 0004 already took `/jobs` — the same
+label-is-not-the-route arrangement as Contracts (`/agreements`) and Linen (`/inventory`), and
+`/help` defines both words. `/notifications` (the bell's list) is
 deliberately off the map — the bell is its entry point, so it needs no rail row and
 renders no tab strip. Tested in `src/lib/__tests__/nav.test.ts`.
 
@@ -142,14 +161,17 @@ renders no tab strip. Tested in `src/lib/__tests__/nav.test.ts`.
 - `0012_optional_inspection` — `guard_route_transition` no longer requires `inspection_id`
   to start a run. Restates the pinned `search_path` (a `create or replace` drops it) and the
   revoke, then asserts `anon` still cannot execute it.
+- `0014_laundry_orders` — the counter's job: `laundry_orders` (+ generated `due_date`),
+  `laundry_order_items`, `laundry_order_activity`, the transition and cancelled-items guards,
+  and `save_laundry_order_items()` for the atomic child-set replace. Adds nothing to 0001–0013.
 - `0013_notifications` — `tenants.settings jsonb` (AD-3) and the `notifications` table
   (AD-4). Beware the numbering drift: the unmerged branch
   `claude/warehouse-inventory-flow-psooyq` carries its own `0012_return_count.sql`, which
   has to be renumbered when it lands.
 
 Proofs in `supabase/tests/`: `rls_isolation`, `rls_coverage`, `driver_scope`,
-`business_rules`, `media_scope`, `warehouse_rules`, `notifications_scope`
-(56 assertions). Demo data in `supabase/seed.sql` — not applied by migrations.
+`business_rules`, `media_scope`, `warehouse_rules`, `notifications_scope`, `laundry_orders`
+(83 assertions). Demo data in `supabase/seed.sql` — not applied by migrations.
 
 **Do not re-add `grant execute on all functions in schema public to anon`.** That
 boilerplate in 0002–0009 is what exposed every SECURITY DEFINER helper on
@@ -257,7 +279,9 @@ between them the embed is ambiguous and errors with PGRST201. `daily_routes` has
 `vehicles` (`vehicle_id`, `trailer_id`), so those must be written
 `vehicles!daily_routes_vehicle_id_fkey(...)`. Current ambiguous pairs: daily_routes→vehicles,
 daily_routes→auth.users, drivers→auth.users, inventory_movements→inventory_pools,
-production_batches→auth.users.
+production_batches→auth.users, **laundry_orders→auth.users** (four FKs: `assigned_to`,
+`created_by`, `delivered_by`, `collected_by` — which is why staff names are resolved through
+`src/lib/staff.ts` rather than embedded).
 
 ## 11. Hosted project
 `laundrymart-syd` · ref `xujhwljrmogenhvqpkrf` · ap-southeast-2 (Sydney) · org `ysm-prog`.
@@ -294,6 +318,55 @@ Both are compositions over existing tables — neither added a migration.
   are edited and invoices voided.
 
 ## 18. Changelog
+### 2026-08-13 · Jobs: laundry order management, drop-off to hand-back
+The counter's own module — take laundry in, itemise it, track it through the plant, and
+deliver it back or hand it over. New area "Jobs" in the rail, one migration (`0014`), no
+change to any existing screen except the three integration points below.
+
+- **`/jobs` was already taken.** `public.jobs` is the routing module's *stop* — a visit on a
+  driver's run, labelled "Stops" since the simplification. What this module needed is the
+  customer's laundry as one tracked thing, which is a different record with a different life.
+  So the schema calls it a `laundry_order`, the route is `/orders`, and the operator-facing
+  word is **Job** — the arrangement Contracts (`/agreements`) and Linen (`/inventory`) already
+  use. `/help` now defines Job, Stop, Overdue and Bulk lot so the two cannot be confused, and
+  the rail carries both rows.
+- **Six statuses, and the database is what enforces them.** `new → in_progress →
+  ready_for_delivery → {out_for_delivery → completed | completed} → ·`, plus `cancelled` from
+  any live state. `guard_laundry_order_transition` refuses the rest, including the two that
+  are only wrong for one workflow: a customer pickup never goes out on a van, and a delivery
+  job cannot be completed off the shelf. The same table is stated once in
+  `src/lib/domain/laundry-orders.ts` so the buttons, the action and the trigger agree — the
+  action gives a sentence, the trigger is the boundary.
+- **Overdue is a calculation, not a status.** `due_date` is a generated column — the delivery
+  date, or the collection date for a pickup — so the list column, the filters, the summary
+  card, the rail badge and the row rule all read one definition, and a job clears the flag by
+  being finished rather than by anything writing to it at midnight.
+- **The business timezone is now explicit** (`src/lib/domain/timezone.ts`, 22 tests). Dates
+  come from `<input type="date">` and times from `<input type="time">`, both zoneless; the
+  column is a `timestamptz`. Composing them on the server in `Australia/Sydney` is what keeps
+  an 11:30pm receipt on the day the counter saw it rather than on UTC's tomorrow. Reads the
+  offset out of `Intl` in two passes, so the October changeover is the platform's problem.
+- **Child rows are replaced in one transaction.** `save_laundry_order_items()` (SECURITY
+  INVOKER, so RLS still decides which job you can touch) deletes and re-inserts inside one
+  function body. Over PostgREST the same edit is two requests with a window where the job has
+  no laundry on it and nothing to roll back.
+- **Capabilities, not new roles**: `orders.read` / `.write` / `.status` / `.manage`, mirroring
+  the `routes.read`/`.write`/`.status` split. The counter (`customer_service`) takes jobs in,
+  the floor (`warehouse_operator`) advances them without being able to edit what was agreed,
+  finance reads them, managers cancel and backdate. A driver holds none — their world is
+  their own run. The rail is 4–11 rows by role (was 4–10).
+- **Three integration points and nothing else touched**: a Jobs section on the customer's
+  detail page (read through `customer_id`; nothing copied onto the customer), an overdue count
+  beside the other four rail badges, and `ConfirmSubmit` gaining an optional-reason flag so
+  cancelling can ask for a reason without demanding one. The customer quick-create is the
+  existing `createCustomer` reused through `return_to`, so adding a customer mid-job comes
+  back with them selected instead of restarting the form.
+- **The delivery address is snapshotted on purpose** — the one piece of customer data this
+  module duplicates. A job has to answer "where was this taken?", so a customer who moves next
+  year must not rewrite where last year's linen went.
+- 195 unit tests (was 145) and 83 pgTAP assertions (was 56). `/design-preview` gained the
+  module, rendered light and dark before this landed.
+
 ### 2026-08-05 · Simplification audit: navigation, search, help, responsive tables
 Full-application UX/code review in `docs/SIMPLIFICATION-AUDIT.md` (13-part deliverable:
 executive summary, UX and code audits, architecture review, navigation and workflow

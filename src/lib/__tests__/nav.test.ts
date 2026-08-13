@@ -63,10 +63,21 @@ describe("navigationFor", () => {
     expect(navigationFor("dispatcher").map((item) => item.label)).not.toContain("Settings");
   });
 
-  it("stays inside the ten rows the redesign promises", () => {
+  // Ten when the redesign landed; eleven since the laundry-jobs module added an
+  // area of its own. The number is not sacred — the promise it stands for is
+  // that the rail lists areas of work rather than tables, and that a role only
+  // ever sees the ones it can open.
+  it("stays inside the eleven rows the redesign promises", () => {
     for (const role of ROLES) {
-      expect(navigationFor(role).length, role).toBeLessThanOrEqual(10);
+      expect(navigationFor(role).length, role).toBeLessThanOrEqual(11);
     }
+  });
+
+  it("shows the counter its jobs and keeps them from the driver", () => {
+    expect(navigationFor("customer_service").map((item) => item.label)).toContain("Jobs");
+    expect(navigationFor("warehouse_operator").map((item) => item.label)).toContain("Jobs");
+    // A driver's world is their own run; counter jobs are not on it.
+    expect(navigationFor("driver").map((item) => item.label)).not.toContain("Jobs");
   });
 });
 
