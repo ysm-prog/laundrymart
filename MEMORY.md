@@ -29,9 +29,13 @@ select (select count(*) from customers where tenant_id = '2000...0001') customer
        (select count(*) from invoices where invoice_type = 'credit') credits;         -- 46
 ```
 
-At last check: customers 155 of 459 in; suppliers, accounts, bills, orders and credits
-not started. Order matters — suppliers must land before bills, customers before credits,
-because those statements join on the party's number.
+**Loaded so far: customers 459/459, suppliers 192/192, accounts 268/268, credits 46/46,
+number sequences all set. Bills 456/1515. Purchase order 0/1.** Only `supplier_bills`
+and the single `purchase_orders` row remain — regenerate the SQL and re-run it whole; the
+statements that already landed upsert to no effect, so nothing doubles.
+
+Order matters if you rebuild from scratch: suppliers before bills, customers before
+credits, because those statements join on the party's number rather than carrying a uuid.
 
 Proof it worked, once done: `sum(balance_due)` over `supplier_bills` must be **65,724.25**,
 which is exactly Trade Creditors (`2-1200`) in the imported chart of accounts. The customer
