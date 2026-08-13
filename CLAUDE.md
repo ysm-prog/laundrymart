@@ -164,14 +164,19 @@ renders no tab strip. Tested in `src/lib/__tests__/nav.test.ts`.
 - `0014_laundry_orders` — the counter's job: `laundry_orders` (+ generated `due_date`),
   `laundry_order_items`, `laundry_order_activity`, the transition and cancelled-items guards,
   and `save_laundry_order_items()` for the atomic child-set replace. Adds nothing to 0001–0013.
+- `0015_import_activation` — `import_activation_state` plus `deactivate_tenant_records()` /
+  `reactivate_tenant_records()`: a reversible tenant-wide hold on imported master records,
+  remembering each row's status before it is overwritten. Service-role only. Adds nothing to
+  0001–0014.
 - `0013_notifications` — `tenants.settings jsonb` (AD-3) and the `notifications` table
   (AD-4). Beware the numbering drift: the unmerged branch
   `claude/warehouse-inventory-flow-psooyq` carries its own `0012_return_count.sql`, which
   has to be renumbered when it lands.
 
 Proofs in `supabase/tests/`: `rls_isolation`, `rls_coverage`, `driver_scope`,
-`business_rules`, `media_scope`, `warehouse_rules`, `notifications_scope`, `laundry_orders`
-(83 assertions). Demo data in `supabase/seed.sql` — not applied by migrations.
+`business_rules`, `media_scope`, `warehouse_rules`, `notifications_scope`, `laundry_orders`,
+`import_activation` (98 assertions). Demo data in `supabase/seed.sql` — not applied by
+migrations.
 
 **Do not re-add `grant execute on all functions in schema public to anon`.** That
 boilerplate in 0002–0009 is what exposed every SECURITY DEFINER helper on
@@ -285,11 +290,18 @@ production_batches→auth.users, **laundry_orders→auth.users** (four FKs: `ass
 
 ## 11. Hosted project
 `laundrymart-syd` · ref `xujhwljrmogenhvqpkrf` · ap-southeast-2 (Sydney) · org `ysm-prog`.
-Deployed on Vercel at `ats.coreit.com.au`. All migrations through `0014_laundry_orders`
-applied (0014 on 2026-08-13, verified by rolled-back probe: the full workflow, the three
-guards, `anon` reading nothing, and no new security advisor). Note the live project also
+Deployed on Vercel at `ats.coreit.com.au`. All migrations through `0015_import_activation`
+applied (0014 and 0015 on 2026-08-13, each verified by rolled-back probe: for 0014 the full
+workflow, the three guards, `anon` reading nothing; for 0015 a full release replaying to the
+exact pre-hold counts. No new security advisor from either). Note the live project also
 carries `0012_return_count`, `purchases`, `supplier_payments` and `import_helpers` from
 branches not yet merged here, so `supabase/migrations/` is not a complete picture of it.
+
+**A second tenant holds real data and is currently switched off.** `Adelaide Towel Service`
+(`20000000-0000-4000-8000-000000000001`, loaded 2026-08-13) is a live import, not a demo:
+508 customers, 192 suppliers, 646 invoices, 1,515 supplier bills, 268 GL accounts, 62
+supplier payments. Every customer and supplier in it is `inactive` by way of 0015 and stays
+that way until someone deliberately releases the hold — see §19.
 Demo tenant seeded
 (`Harbour Commercial Laundry`); two `super_admin` logins, one also linked to the seeded driver.
 Sign-in verified end to end 2026-08-05.
@@ -322,7 +334,71 @@ Both are compositions over existing tables — neither added a migration.
   action an open redirect. `/invoices/:id` stays as the printable record and the place lines
   are edited and invoices voided.
 
+## 19. The imported-tenant hold, and how to release it
+`Adelaide Towel Service` is real data loaded ahead of the business running on the system, so
+0015 holds its master records inactive rather than letting the app treat them as live. Two
+things about the design are worth knowing before touching it.
+
+**The hold remembers, because the release cannot guess.** The import arrived carrying the
+source system's own distinctions — 60 of 508 customers and 4 of 192 suppliers were *already*
+inactive over there. A release that simply set everything to `active` would resurrect those
+64 records: they would reappear in every customer picker and become billable, silently and
+with nothing left in the database recording that they should not have. So
+`deactivate_tenant_records()` writes each row's prior status into
+`import_activation_state` before overwriting it, and `reactivate_tenant_records()` replays
+it. Re-running the hold is a no-op rather than a second pass that records `inactive` as the
+value to restore — the failure that would quietly make the hold permanent.
+
+**Financial documents are deliberately not held.** `invoices` (draft/issued/part_paid/paid/
+overdue/void), `supplier_bills` (open/closed/debit) and `purchase_orders` have no `inactive`
+value; their status *is* the financial lifecycle, and borrowing one of those values to mean
+"not live yet" would misstate the books. `gl_accounts` and `supplier_payments` have no status
+column at all. They are history and do not act on their own — and with every customer
+inactive, nothing bills or emails anyone regardless.
+
+To release it, as the service role:
+```sql
+select public.reactivate_tenant_records('20000000-0000-4000-8000-000000000001');
+-- {"customers": {"restored": 448, "skipped": 0}, "suppliers": {"restored": 188, "skipped": 0}}
+```
+`skipped` counts rows changed by hand while the hold was on; those are a later decision than
+the hold and are left alone. Both functions are **service-role only** — a step tighter than
+`save_laundry_order_items()`, because there is no screen behind them to gate by capability
+and they switch an entire tenant's customer base on or off. Before releasing, note that this
+tenant's 297 overdue invoices become live chase candidates the moment the customer-email
+switch in `tenants.settings` is on: §10's two preconditions (`CRON_SECRET` set, the Resend
+path proven) should be settled first.
+
 ## 18. Changelog
+### 2026-08-13 · Hold the imported tenant inactive, reversibly (`0015`)
+Real customer and supplier data was loaded into `Adelaide Towel Service` on the live project
+before the business is ready to run on it, so it is now switched off until deliberately
+released. One migration, no application code, no screen changed. See §19.
+- **508 customers and 192 suppliers are `inactive`** on `laundrymart-syd`. 448 + 188 rows
+  actually moved, which is exactly the count that was active; the 60 customers and 4
+  suppliers already inactive in the source were left alone rather than rewritten.
+- **`import_activation_state` is why the release is safe.** It records the status each row
+  held before the hold overwrote it. Without it the obvious "turn it on" — set everything to
+  `active` — would resurrect those 64 deliberately-retired records into every customer picker
+  and onto invoices, with nothing left in the database saying they should not be there. The
+  absence of a state row is meaningful: it means the hold did not touch that record, so the
+  release must not either.
+- **Re-running the hold is a no-op**, guarded by a `not exists` on the state table. A second
+  pass that recorded `inactive` as the value to restore would make the hold permanent and
+  look like it had worked.
+- **The release lets a later decision win.** Only rows still sitting at `inactive` are
+  restored; anything changed by hand while the hold was on is reported as `skipped` rather
+  than walked back.
+- **Financial records are untouched** — 646 invoices, 1,515 supplier bills, 268 GL accounts,
+  62 supplier payments keep every value they were imported with. Those tables have no
+  `inactive` state to set (their status is the financial lifecycle) and nothing acts on them
+  while the customers are off.
+- **Service-role only**, a step tighter than the other helpers here: no screen gates these,
+  and they switch a whole tenant on or off. `anon` and `authenticated` hold no EXECUTE.
+- Verified on the live project by a rolled-back probe replaying the full release: back to
+  448 active / 60 inactive customers and 188 active / 4 inactive suppliers, the exact
+  pre-hold state, with no state rows left. Security advisors unchanged at 7 — the two
+  functions are SECURITY INVOKER, so they do not trip the lint. 98 pgTAP assertions (was 83).
 ### 2026-08-13 · Job creation form: no received time, re-deliver by default
 Targeted change to the create/edit form only — no migration, no new component, no change to
 the Jobs list, detail page, status workflow, priority or permissions.

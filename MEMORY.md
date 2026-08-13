@@ -29,6 +29,26 @@ feature branch `claude/jobs-laundry-order-management-p4fu8k`, commit `39a1f0e`).
   documented helpers plus `park_number_sequence` (from another branch's migration) and the
   auth leaked-password toggle.
 
+**The imported tenant is switched off.** `Adelaide Towel Service`
+(`20000000-0000-4000-8000-000000000001`) holds real data loaded 2026-08-13 — 508 customers,
+192 suppliers, 646 invoices, 1,515 supplier bills, 268 GL accounts, 62 supplier payments.
+`0015_import_activation` is applied to `laundrymart-syd` and **every customer and supplier in
+that tenant is now `inactive`** (448 + 188 rows moved; the 60 customers and 4 suppliers
+already inactive in the source were deliberately left alone).
+- `import_activation_state` records what each row's status was before the hold. **This is the
+  point of the migration** — without it, "turn it on later" would set everything to `active`
+  and resurrect those 64 retired records into every picker and onto invoices, silently.
+- Release with `select public.reactivate_tenant_records('20000000-0000-4000-8000-000000000001');`
+  **as the service role** — both functions are service-role only, `authenticated` holds no
+  EXECUTE. A rolled-back probe on the live project already proved the release replays to the
+  exact pre-hold counts (448/60 customers, 188/4 suppliers) with no state rows left.
+- Financial records were **not** touched: invoices/bills/POs have no `inactive` status (theirs
+  is the financial lifecycle) and gl_accounts/supplier_payments have no status column at all.
+- **Before releasing**, remember this tenant carries **297 overdue invoices** — they become
+  live chase candidates the moment customer email is switched on, so settle the two Phase C
+  preconditions below first.
+- Note the demo tenant `Harbour Commercial Laundry` is untouched and still active.
+
 **In flight: the job creation form update** (branch `claude/job-creation-form-update-w1zzn2`).
 Form-and-action change only, **no migration** — received time removed (server stamps
 `received_at`; an edit keeps the job's existing time of day), received via narrowed to the two
