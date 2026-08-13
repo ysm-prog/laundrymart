@@ -1,6 +1,6 @@
 import { requireCapability } from "@/lib/auth/context";
 import { can } from "@/lib/roles";
-import { Notice, PageHeader } from "@/components/ui";
+import { Notice, PageContainer, PageHeader } from "@/components/ui";
 import { createCustomer } from "@/app/(app)/customers/actions";
 import { createOrder } from "../actions";
 import { loadJobFormData } from "../form-data";
@@ -28,15 +28,17 @@ export default async function NewJobPage({
   const { customers, drivers, staff, truncated } = await loadJobFormData();
 
   return (
-    <div>
+    /* Capped at ~1040px: an entry form stretched across a 1900px monitor puts
+       the label at one end of the desk and its input at the other. */
+    <PageContainer width="form">
       <PageHeader
-        eyebrow="Jobs"
+        back={{ href: "/orders", label: "All jobs" }}
         title="Take in laundry"
         description="Pick the customer, list what they brought, say when they get it back."
       />
 
       {customers.length === 0 ? (
-        <div className="mb-4">
+        <div className="mb-5">
           <Notice tone="warning" title="No customers yet">
             A job always belongs to a customer. Add one below and it will be selected
             for you, or set them up properly on the Customers screen first.
@@ -45,7 +47,7 @@ export default async function NewJobPage({
       ) : null}
 
       {truncated ? (
-        <div className="mb-4">
+        <div className="mb-5">
           <Notice tone="info" title="Showing your first 500 customers">
             The search box below covers those. If someone is missing, open their
             record from Customers and start the job from there.
@@ -63,6 +65,6 @@ export default async function NewJobPage({
         canBackdate={can(session.role, "orders.manage")}
         returnPath="/orders/new"
       />
-    </div>
+    </PageContainer>
   );
 }

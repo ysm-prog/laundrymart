@@ -1,13 +1,13 @@
 {
-  "name": "LaundryMart",
-  "short_name": "LaundryMart",
-  "description": "Commercial laundry operations — routes, jobs, inventory and billing.",
+  "name": "Electro Services",
+  "short_name": "Electro Services",
+  "description": "Commercial laundry operations — runs, jobs, linen and invoicing.",
   "start_url": "/dashboard",
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#0b1120",
-  "theme_color": "#0b1120",
+  "background_color": "#f5f6f9",
+  "theme_color": "#2145c4",
   "icons": [
     { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
   ]

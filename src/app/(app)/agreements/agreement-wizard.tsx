@@ -157,7 +157,7 @@ export function AgreementWizard({
                         <select
                           id="customer_id" name="customer_id" value={customerId}
                           onChange={(event) => { setCustomerId(event.target.value); setLocationId(""); }}
-                          className="w-full border border-strong bg-surface-muted px-2.5 py-1.5 text-[12.5px]"
+                          className="rounded-lg w-full border border-strong bg-surface-muted px-2.5 py-1.5 text-sm"
                         >
                           <option value="">Choose a customer</option>
                           {customers.map((customer) => (
@@ -182,7 +182,7 @@ export function AgreementWizard({
                       <select
                         id="location_id" name="location_id" value={effectiveLocationId}
                         onChange={(event) => setLocationId(event.target.value)}
-                        className="w-full border border-strong bg-surface-muted px-2.5 py-1.5 text-[12.5px]"
+                        className="rounded-lg w-full border border-strong bg-surface-muted px-2.5 py-1.5 text-sm"
                       >
                         <option value="">All sites</option>
                         {customerLocations.map((location) => (
@@ -193,11 +193,11 @@ export function AgreementWizard({
                   </div>
 
                   {quickCreate ? (
-                    <div className="space-y-3 border border-l-[5px] border-l-primary p-3">
-                      <p className="text-[12.5px] font-medium">New customer — four fields is all it takes.</p>
+                    <div className="rounded-lg space-y-3 border border-l-[5px] border-l-primary p-3">
+                      <p className="text-sm font-medium">New customer — four fields is all it takes.</p>
                       <CustomerEssentials formId={QUICK_CREATE_FORM} />
                       <button type="submit" form={QUICK_CREATE_FORM}
-                              className="bg-action px-3 py-1.5 text-[12.5px] font-medium text-action-foreground hover:opacity-90">
+                              className="rounded-lg bg-action px-3 py-1.5 text-sm font-medium text-action-foreground hover:brightness-110">
                         Create customer
                       </button>
                       <p className="text-xs text-muted-foreground">
@@ -270,7 +270,7 @@ export function AgreementWizard({
                     <DayPicker name="pickup_weekdays" value={pickupDays} onChange={setPickupDays} />
                   </Field>
 
-                  <label className="flex items-start gap-2 text-[12.5px]">
+                  <label className="flex items-start gap-2 text-sm">
                     <input type="checkbox" checked={follows}
                            onChange={(event) => setFollows(event.target.checked)}
                            className="mt-0.5 h-3.5 w-3.5 border border-strong accent-primary" />
@@ -307,13 +307,13 @@ export function AgreementWizard({
                   ) : (
                     <>
                       <div className="overflow-x-auto border">
-                        <table className="w-full text-[12.5px]">
+                        <table className="w-full text-sm">
                           <thead className="bg-surface-muted text-left">
                             <tr>
                               {["Item", "Qty per visit", "Unit price",
                                 ...(advanced ? ["Priced", "Included free"] : []), ""].map((header) => (
                                 <th key={header || "x"}
-                                    className="px-2.5 py-1.5 font-mono text-3xs font-normal uppercase tracking-[0.08em] text-muted-foreground">
+                                    className="px-2.5 py-1.5 text-3xs font-normal text-muted-foreground">
                                   {header}
                                 </th>
                               ))}
@@ -332,7 +332,7 @@ export function AgreementWizard({
                                         unitPrice: item ? String(item.rental_price ?? 0) : line.unitPrice,
                                       });
                                     }}
-                                    className="w-full min-w-[10rem] border border-strong bg-surface-muted px-2 py-1"
+                                    className="rounded-lg w-full min-w-[10rem] border border-strong bg-surface-muted px-2 py-1"
                                   >
                                     {items.map((item) => (
                                       <option key={item.id} value={item.id}>{item.name} ({item.sku})</option>
@@ -343,13 +343,13 @@ export function AgreementWizard({
                                   <input type="number" min={0} step="0.01" inputMode="decimal" placeholder="0"
                                          value={line.quantity} aria-label="Quantity per visit"
                                          onChange={(event) => patchLine(line.key, { quantity: event.target.value })}
-                                         className="w-20 border border-strong bg-surface-muted px-2 py-1 text-right" />
+                                         className="rounded-lg w-20 border border-strong bg-surface-muted px-2 py-1 text-right" />
                                 </td>
                                 <td className="px-2.5 py-1.5">
                                   <input type="number" min={0} step="0.01" inputMode="decimal"
                                          value={line.unitPrice} aria-label="Unit price"
                                          onChange={(event) => patchLine(line.key, { unitPrice: event.target.value })}
-                                         className="w-20 border border-strong bg-surface-muted px-2 py-1 text-right" />
+                                         className="rounded-lg w-20 border border-strong bg-surface-muted px-2 py-1 text-right" />
                                 </td>
                                 {advanced ? (
                                   <>
@@ -359,7 +359,7 @@ export function AgreementWizard({
                                         onChange={(event) => patchLine(line.key, {
                                           pricingModel: event.target.value as LineRow["pricingModel"],
                                         })}
-                                        className="border border-strong bg-surface-muted px-2 py-1"
+                                        className="rounded-lg border border-strong bg-surface-muted px-2 py-1"
                                       >
                                         <option value="per_item">Per item</option>
                                         <option value="per_kg">Per kg</option>
@@ -371,7 +371,7 @@ export function AgreementWizard({
                                       <input type="number" min={0} step="0.01" inputMode="decimal"
                                              value={line.includedQuantity} aria-label="Included free"
                                              onChange={(event) => patchLine(line.key, { includedQuantity: event.target.value })}
-                                             className="w-20 border border-strong bg-surface-muted px-2 py-1 text-right" />
+                                             className="rounded-lg w-20 border border-strong bg-surface-muted px-2 py-1 text-right" />
                                     </td>
                                   </>
                                 ) : null}
@@ -398,7 +398,7 @@ export function AgreementWizard({
 
                       <div className="flex flex-wrap items-center gap-3">
                         <button type="button" onClick={addLine}
-                                className="border border-strong bg-surface px-3 py-1.5 text-[12.5px] font-medium hover:bg-surface-muted">
+                                className="rounded-lg border border-strong bg-surface px-3 py-1.5 text-sm font-medium hover:bg-surface-muted">
                           + Add an item
                         </button>
                         <button type="button" onClick={() => setAdvanced((open) => !open)}
@@ -434,13 +434,13 @@ export function AgreementWizard({
             <div className="mt-4 flex flex-wrap items-center gap-2 border-t pt-4">
               {step > 1 ? (
                 <button type="button" onClick={() => toStep(step - 1)}
-                        className="border border-strong bg-surface px-3 py-1.5 text-[12.5px] font-medium hover:bg-surface-muted">
+                        className="rounded-lg border border-strong bg-surface px-3 py-1.5 text-sm font-medium hover:bg-surface-muted">
                   Back
                 </button>
               ) : null}
               {step < 3 ? (
                 <button type="button" onClick={() => toStep(step + 1)}
-                        className="bg-action px-3 py-1.5 text-[12.5px] font-medium text-action-foreground hover:opacity-90">
+                        className="rounded-lg bg-action px-3 py-1.5 text-sm font-medium text-action-foreground hover:brightness-110">
                   Next
                 </button>
               ) : (
@@ -475,7 +475,7 @@ function DayPicker({
         const active = value.includes(day);
         return (
           <label key={day} className={cx(
-            "cursor-pointer border px-3 py-1.5 text-sm",
+            "rounded-lg cursor-pointer border px-3 py-1.5 text-sm",
             active ? "border-primary bg-primary/10 font-medium text-primary" : "border-border",
           )}>
             <input
@@ -557,7 +557,7 @@ function PlainEnglishSummary({
   return (
     <Card title="The contract so far"
           description={customerName ?? "In plain English, as you build it."}>
-      <ul className="space-y-2 text-[12.5px]">
+      <ul className="space-y-2 text-sm">
         {sentences.map((sentence) => (
           <li key={sentence} className="border-l-[3px] border-l-primary/40 pl-2.5">{sentence}</li>
         ))}

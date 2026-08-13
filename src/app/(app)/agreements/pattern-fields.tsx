@@ -34,7 +34,7 @@ export function PatternFields({
   const anchor = value && value.type === "alternate_weekly" ? value.anchorDate : "";
   const monthlyWeekday = value && value.type === "monthly_nth" ? String(value.weekday) : "1";
   const nth = value && value.type === "monthly_nth" ? String(value.nth) : "1";
-  const dates = value && value.type === "custom" ? value.dates.join("\n") : "";
+  const dates = value && value.type === "custom" ? value.dates.join("\n") :"";
 
   return (
     <fieldset className="space-y-3 rounded-md border p-3">

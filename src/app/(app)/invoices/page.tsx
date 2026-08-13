@@ -140,9 +140,9 @@ async function Aging() {
   }
 
   return (
-    <div className="grid gap-px border bg-border sm:grid-cols-2 lg:grid-cols-4">
+    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
       {buckets.map((bucket) => (
-        <div key={bucket.label} className="bg-surface px-4 py-3">
+        <div key={bucket.label} className="rounded-xl border bg-surface px-4 py-3 shadow-sm">
           <Eyebrow>{bucket.label}</Eyebrow>
           <div className={cx(
             "mt-1 text-2xl font-semibold tabular-nums tracking-[-0.02em]",
@@ -151,7 +151,7 @@ async function Aging() {
             {money(bucket.total)}
           </div>
           <div className={cx(
-            "mt-0.5 text-[11px]",
+            "mt-0.5 text-xs",
             bucket.total > 0 ? (bucket.hint || "text-muted-foreground") : "text-muted-foreground",
           )}>
             {bucket.total > 0 ? "outstanding" : "nothing outstanding"}
@@ -232,23 +232,23 @@ async function Register({ params }: { params: Search }) {
                   )}
                 >
                   <div className="flex items-baseline justify-between gap-2">
-                    <span className="font-mono text-[11.5px] font-medium">{row.invoice_number}</span>
-                    <span className="font-mono text-[12.5px] font-semibold tabular-nums">
+                    <span className="text-xs font-medium">{row.invoice_number}</span>
+                    <span className="text-sm font-semibold tabular-nums">
                       {money(row.balance)}
                     </span>
                   </div>
                   <div className="mt-0.5 flex items-baseline justify-between gap-2">
-                    <span className="truncate text-[12.5px] font-semibold">
+                    <span className="truncate text-sm font-semibold">
                       {row.customers?.business_name ?? "—"}
                     </span>
-                    <span className="shrink-0 font-mono text-[11px] text-muted-foreground">
+                    <span className="shrink-0 text-xs text-muted-foreground">
                       of {money(row.total)}
                     </span>
                   </div>
                   <div className="mt-1 flex flex-wrap items-center gap-2">
                     <StatusBadge status={row.status} />
                     <span className={cx(
-                      "font-mono text-[11px]",
+                      "text-xs",
                       chasing ? "text-warning" : "text-muted-foreground",
                     )}>
                       {row.due_date
@@ -366,7 +366,7 @@ async function InvoicePane({ params, writable }: { params: Search; writable: boo
           </Notice>
         ) : null}
 
-        <div className="grid grid-cols-2 gap-px border bg-border">
+        <div className="grid grid-cols-2 gap-3">
           <PaneFigure label="Total" value={money(invoice.total)} />
           <PaneFigure
             label="Balance" value={money(invoice.balance)}
@@ -398,24 +398,24 @@ async function InvoicePane({ params, writable }: { params: Search; writable: boo
             {lines.map((line) => (
               <li key={line.id} className="flex items-baseline justify-between gap-3 px-4 py-1.5">
                 <span className="min-w-0">
-                  <span className="block truncate text-[12.5px]">{line.description}</span>
+                  <span className="block truncate text-sm">{line.description}</span>
                   <Eyebrow>
                     {CHARGE_TYPE_LABELS[line.charge_type as ChargeType] ?? humanise(line.charge_type)}
                     {" · "}{line.quantity} × {money(line.unit_price)}
                   </Eyebrow>
                 </span>
-                <span className="shrink-0 font-mono text-[12px] tabular-nums">{money(line.amount)}</span>
+                <span className="shrink-0 text-sm tabular-nums">{money(line.amount)}</span>
               </li>
             ))}
-            <li className="flex items-baseline justify-between gap-3 bg-surface-muted px-4 py-1.5">
+            <li className="rounded-lg flex items-baseline justify-between gap-3 bg-surface-muted px-4 py-1.5">
               <Eyebrow>Subtotal · GST {money(invoice.tax_amount)}</Eyebrow>
-              <span className="font-mono text-[12px] font-semibold tabular-nums">
+              <span className="text-sm font-semibold tabular-nums">
                 {money(invoice.subtotal)}
               </span>
             </li>
           </ul>
         ) : (
-          <p className="px-4 py-3 text-[12.5px] text-muted-foreground">
+          <p className="px-4 py-3 text-sm text-muted-foreground">
             No lines yet. Add them on the full invoice.
           </p>
         )}
@@ -427,10 +427,10 @@ async function InvoicePane({ params, writable }: { params: Search; writable: boo
             {payments.map((payment) => (
               <li key={payment.id} className="flex items-baseline justify-between gap-3 px-4 py-1.5">
                 <span className="min-w-0">
-                  <span className="block font-mono text-[11.5px]">{date(payment.paid_on)}</span>
+                  <span className="block text-xs">{date(payment.paid_on)}</span>
                   <Eyebrow>{humanise(payment.method)}{payment.reference ? ` · ${payment.reference}` : ""}</Eyebrow>
                 </span>
-                <span className="shrink-0 font-mono text-[12px] tabular-nums">{money(payment.amount)}</span>
+                <span className="shrink-0 text-sm tabular-nums">{money(payment.amount)}</span>
               </li>
             ))}
           </ul>
@@ -445,7 +445,7 @@ async function InvoicePane({ params, writable }: { params: Search; writable: boo
                 <input type="hidden" name="id" value={invoice.id} />
                 <input type="hidden" name="return_to" value={backHere} />
                 <Button variant="primary">Issue invoice</Button>
-                <span className="text-[11.5px] text-muted-foreground">
+                <span className="text-xs text-muted-foreground">
                   Lines are frozen once issued.
                 </span>
               </form>
@@ -510,11 +510,11 @@ async function InvoicePane({ params, writable }: { params: Search; writable: boo
       ) : null}
 
       <div className="flex flex-wrap items-center gap-3 border-t px-4 py-2.5">
-        <Link href={`/invoices/${invoice.id}`} className="text-[12.5px] font-medium text-primary hover:underline">
+        <Link href={`/invoices/${invoice.id}`} className="text-sm font-medium text-primary hover:underline">
           Open full invoice →
         </Link>
         <a href={`/api/invoices/${invoice.id}/pdf`} target="_blank" rel="noreferrer"
-           className="text-[12.5px] font-medium text-primary hover:underline">
+           className="text-sm font-medium text-primary hover:underline">
           Download PDF
         </a>
       </div>
@@ -526,7 +526,7 @@ function PaneFigure({
   label, value, tone = "default",
 }: { label: string; value: string; tone?: "default" | "warning" | "success" }) {
   return (
-    <div className="bg-surface px-3 py-2">
+    <div className="rounded-lg border bg-surface px-3 py-2">
       <Eyebrow>{label}</Eyebrow>
       <div className={cx(
         "mt-0.5 text-[17px] font-semibold tabular-nums",
@@ -542,7 +542,7 @@ function PaneMeta({ label, value, wide }: { label: string; value: string; wide?:
   return (
     <div className={wide ? "col-span-2" : undefined}>
       <dt><Eyebrow>{label}</Eyebrow></dt>
-      <dd className="font-mono text-[11.5px]">{value}</dd>
+      <dd className="text-xs">{value}</dd>
     </div>
   );
 }
@@ -550,7 +550,7 @@ function PaneMeta({ label, value, wide }: { label: string; value: string; wide?:
 function PaneSection({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section className="border-t">
-      <h3 className="bg-surface-muted px-4 py-1.5 font-mono text-3xs uppercase tracking-[0.08em] text-muted-foreground">
+      <h3 className="rounded-lg bg-surface-muted px-4 py-1.5 text-xs font-semibold text-muted-foreground">
         {title}
       </h3>
       {children}

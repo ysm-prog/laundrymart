@@ -2,65 +2,127 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState, useSyncExternalStore } from "react";
+import { useSyncExternalStore, type ComponentType } from "react";
+import {
+  ChartColumn, CircleQuestionMark, ClipboardList, LayoutDashboard, MapPin, Moon,
+  Receipt, Route, Settings, Shirt, Sun, Truck, Users,
+} from "lucide-react";
 import { cx } from "./ui";
-import { isActive, sectionFor, type NavCountKey, type NavItem } from "@/lib/nav";
+import { isActive, sectionFor, type NavCountKey, type NavIcon, type NavItem } from "@/lib/nav";
 
 export type NavCounts = Partial<Record<NavCountKey, number>>;
 
 /**
- * The sidebar rail, on the pack's near-black surface.
+ * Icon per area, resolved from the name held in `nav.ts`.
+ *
+ * Icons are here to make a row recognisable at a glance, not to decorate it —
+ * one set, one weight, one size, and every row has one so the column of labels
+ * stays aligned.
+ */
+const NAV_ICONS: Record<NavIcon, ComponentType<{ className?: string }>> = {
+  today: LayoutDashboard,
+  myRun: Truck,
+  runs: Route,
+  stops: MapPin,
+  jobs: ClipboardList,
+  customers: Users,
+  invoices: Receipt,
+  linen: Shirt,
+  reports: ChartColumn,
+  settings: Settings,
+  help: CircleQuestionMark,
+};
+
+/** The Electro Services mark, used in the rail, the drawer and the phone header. */
+export function BrandMark({ className }: { className?: string }) {
+  return (
+    <span aria-hidden
+          className={cx(
+            "flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary",
+            "text-sm font-bold text-primary-foreground",
+            className,
+          )}>
+      E
+    </span>
+  );
+}
+
+/**
+ * The sidebar rail.
  *
  * One flat list of areas — no headings, no nesting, no expanding tree. The
  * screens inside an area are tabs (`SectionNav`) rather than rail rows, because
  * a rail that lists every screen in the product is a table of contents for the
  * database, not a way to get to work.
  *
- * Deliberately not themed with the app's surface tokens: the rail is the one
- * surface that stays dark in both light and dark mode, exactly as the mockups
- * show, so it needs literal colours rather than `bg-surface`.
+ * The rail used to be a near-black console with literal hex colours. It is now
+ * an ordinary light surface driven by the `--sidebar-*` tokens, so it reads as
+ * part of the application rather than as a terminal bolted to the side of it.
  *
  * Counts sit right-aligned per item. A zero is not rendered at all — a badge
  * showing "0" is noise, and the point of the badge is to pull attention.
  */
 export function AppNav({
-  items, counts, onNavigate,
+  items, counts, onNavigate, collapsed = false,
 }: {
   items: NavItem[];
   counts?: NavCounts;
   onNavigate?: () => void;
+  /** Icon-only rail. The label becomes the tooltip and the accessible name. */
+  collapsed?: boolean;
 }) {
   const pathname = usePathname();
   const current = sectionFor(pathname, items);
 
   return (
-    <nav aria-label="Main" className="flex flex-col py-1">
+    <nav aria-label="Main" className="flex flex-col gap-0.5">
       {items.map((item) => {
         // The area owning the current path highlights, so a detail route still
         // says where you are — `isActive` alone would unlight the whole rail on
         // `/customers/abc`.
         const active = current ? current.href === item.href : isActive(pathname, item.href);
         const count = item.count ? counts?.[item.count] : undefined;
+        const Icon = item.icon ? NAV_ICONS[item.icon] : undefined;
+
         return (
           <Link
             key={item.href}
             href={item.href}
             onClick={onNavigate}
             aria-current={active ? "page" : undefined}
+            title={collapsed ? item.label : undefined}
             className={cx(
-              "flex min-h-9 items-center justify-between gap-2 px-4 py-2 text-[13px] transition",
+              "group relative flex min-h-11 items-center rounded-lg text-sm transition",
+              collapsed ? "justify-center px-2" : "gap-3 px-3",
               active
-                ? "bg-primary font-medium text-white"
-                : "text-[#c7ced4] hover:bg-white/5 hover:text-white",
+                ? "bg-sidebar-active-bg font-semibold text-sidebar-active"
+                : "font-medium text-sidebar-foreground hover:bg-sidebar-hover",
             )}
           >
-            <span className="truncate">{item.label}</span>
+            {Icon ? (
+              <Icon className={cx(
+                "size-[1.15rem] shrink-0",
+                active ? "text-sidebar-active" : "text-sidebar-muted",
+              )} />
+            ) : null}
+            {collapsed ? (
+              <span className="sr-only">{item.label}</span>
+            ) : (
+              <span className="truncate">{item.label}</span>
+            )}
             {count ? (
               <span className={cx(
-                "font-mono text-2xs tabular-nums",
-                active ? "text-white" : "text-[#7d8791]",
+                "tabular-nums",
+                collapsed
+                  ? "absolute right-1 top-1 min-w-4 rounded-full bg-primary px-1 text-center " +
+                    "text-3xs font-semibold leading-4 text-primary-foreground"
+                  : "ml-auto rounded-full px-2 py-0.5 text-2xs font-semibold " +
+                    (active
+                      ? "bg-primary text-primary-foreground"
+                      : "bg-surface-sunken text-muted-foreground"),
               )}>
                 {count}
+                {collapsed ? <span className="sr-only"> needing attention</span> : null}
               </span>
             ) : null}
           </Link>
@@ -71,7 +133,7 @@ export function AppNav({
 }
 
 /**
- * The screens inside the current area, as a tab strip under the context bar.
+ * The screens inside the current area, as a tab strip under the header.
  *
  * Renders nothing for a single-screen area (a strip of one tab is decoration)
  * and nothing off the map at all, so print sheets and the run screen stay clean.
@@ -87,7 +149,7 @@ export function SectionNav({ items }: { items: NavItem[] }) {
   return (
     <div className="flex-none border-b bg-surface print:hidden">
       <nav aria-label={section?.label ?? "Section"}
-           className="flex gap-1 overflow-x-auto px-3 sm:px-4">
+           className="flex gap-1 overflow-x-auto px-3 sm:px-5">
         {tabs.map((tab) => {
           const active = isActive(pathname, tab.href);
           return (
@@ -96,10 +158,10 @@ export function SectionNav({ items }: { items: NavItem[] }) {
               href={tab.href}
               aria-current={active ? "page" : undefined}
               className={cx(
-                "-mb-px flex min-h-10 shrink-0 items-center border-b-2 px-2 text-[13px] transition",
+                "-mb-px flex min-h-12 shrink-0 items-center border-b-2 px-3 text-sm transition",
                 active
-                  ? "border-b-action font-medium text-foreground"
-                  : "border-b-transparent text-muted-foreground hover:text-foreground",
+                  ? "border-b-primary font-semibold text-primary"
+                  : "border-b-transparent font-medium text-muted-foreground hover:text-foreground",
               )}
             >
               {tab.label}
@@ -107,40 +169,6 @@ export function SectionNav({ items }: { items: NavItem[] }) {
           );
         })}
       </nav>
-    </div>
-  );
-}
-
-export function MobileNav({ items, counts }: { items: NavItem[]; counts?: NavCounts }) {
-  const [open, setOpen] = useState(false);
-  const pathname = usePathname();
-  const [lastPathname, setLastPathname] = useState(pathname);
-
-  // Close the drawer whenever a navigation actually lands. Adjusting state
-  // during render (rather than in an effect) means the closed drawer is part of
-  // the same commit as the new route — no flash of the old menu over the new page.
-  if (lastPathname !== pathname) {
-    setLastPathname(pathname);
-    setOpen(false);
-  }
-
-  return (
-    <div className="lg:hidden">
-      <button
-        type="button"
-        onClick={() => setOpen((value) => !value)}
-        aria-expanded={open}
-        aria-controls="mobile-nav"
-        className="min-h-9 border border-strong px-2.5 py-1.5 text-[12.5px] font-medium"
-      >
-        {open ? "Close" : "Menu"}
-      </button>
-      {open ? (
-        <div id="mobile-nav"
-             className="absolute inset-x-0 top-full z-20 max-h-[70vh] overflow-y-auto bg-[#14171a] pb-3 shadow-lg">
-          <AppNav items={items} counts={counts} onNavigate={() => setOpen(false)} />
-        </div>
-      ) : null}
     </div>
   );
 }
@@ -179,10 +207,11 @@ export function ThemeToggle() {
       type="button"
       onClick={toggle}
       aria-pressed={dark}
-      className="border border-strong px-2 py-1.5 font-mono text-2xs hover:bg-surface-muted"
+      className="flex size-10 shrink-0 items-center justify-center rounded-lg text-muted-foreground
+                 transition hover:bg-surface-muted hover:text-foreground"
       title={dark ? "Switch to light mode" : "Switch to dark mode"}
     >
-      <span aria-hidden>{dark ? "☀" : "☾"}</span>
+      {dark ? <Sun className="size-[1.15rem]" aria-hidden /> : <Moon className="size-[1.15rem]" aria-hidden />}
       <span className="sr-only">{dark ? "Switch to light mode" : "Switch to dark mode"}</span>
     </button>
   );

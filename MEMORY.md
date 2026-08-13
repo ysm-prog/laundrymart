@@ -1,6 +1,20 @@
 # MEMORY — working session handoff
 > Auto-loaded each session. Canonical state is CLAUDE.md; this is the live delta.
 
+**IN FLIGHT — Electro Services redesign** (branch `claude/electro-services-redesign-6o2q4f`,
+not yet merged to `Dev`/`Prod`). Full UI/UX pass: new token palette, Inter, restored radius and
+shadow scales, light icon rail with a collapsible desktop mode and a real phone drawer, header
+user menu + global search, Lucide icons, `Overlay`, `FormSection`, `PageContainer`, `bare`
+DataTable. Rebranded to **Electro Services** in every customer-facing string. **Nothing in the
+schema, actions, RLS, capabilities or queries changed** — no migration, 204 tests untouched.
+Verify passes; light and dark screenshotted at 390/820/1440 with no console errors and no
+horizontal overflow. See CLAUDE.md §10b and the 2026-08-13 changelog entry.
+- **Not seen with real data.** No Supabase credentials in that container, so authenticated
+  screens were checked via build/typecheck/lint/tests and `/design-preview` only. Worth opening
+  the deployed app once — Jobs list, Create job, Today, Invoices two-pane, `/run` on a phone.
+- Deliberately *not* renamed: package name, `laundrymart-offline` IndexedDB, `laundrymart-shell-v1`
+  SW cache key. Renaming the first orphans drivers' queued stops.
+
 **Status:** Live, signed into, and on the upgraded stack (Next 16, Tailwind 4, Zod 4,
 vitest 4). `laundrymart-syd` (ref `xujhwljrmogenhvqpkrf`) has the demo tenant; the app is on
 Vercel at `ats.coreit.com.au`; sign-in verified end to end.

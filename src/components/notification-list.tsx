@@ -47,7 +47,7 @@ export function NotificationList({
               <button
                 type="submit"
                 className="flex w-full items-start gap-3 px-3 py-2.5 text-left
-                           transition hover:bg-surface-muted"
+ transition hover:bg-surface-muted"
               >
                 <span
                   aria-hidden
@@ -61,13 +61,13 @@ export function NotificationList({
                     <Eyebrow>{NOTIFICATION_EVENTS[item.kind].label}</Eyebrow>
                   </span>
                   <span className={cx(
-                    "mt-0.5 block text-[12.5px] leading-snug",
+                    "mt-0.5 block text-sm leading-snug",
                     unread ? "font-medium" : "text-muted-foreground",
                   )}>
                     {item.title}
                   </span>
                 </span>
-                <span className="shrink-0 font-mono text-3xs text-muted-foreground">
+                <span className="shrink-0 text-3xs text-muted-foreground">
                   {dateTime(item.created_at)}
                 </span>
                 <span className="sr-only">

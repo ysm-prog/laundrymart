@@ -113,9 +113,9 @@ export async function sendTestEmail(): Promise<void> {
   const result = await sendEmail({
     to: session.email,
     subject: `${session.tenantName} — email delivery test`,
-    html: "<p>This is a test from LaundryMart. If you are reading it, invoice emails, "
+    html: "<p>This is a test from Electro Services. If you are reading it, invoice emails, "
       + "delivery confirmations and overdue reminders can reach your customers.</p>",
-    text: "This is a test from LaundryMart. If you are reading it, invoice emails, "
+    text: "This is a test from Electro Services. If you are reading it, invoice emails, "
       + "delivery confirmations and overdue reminders can reach your customers.",
   });
 

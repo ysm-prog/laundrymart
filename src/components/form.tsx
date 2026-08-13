@@ -2,8 +2,18 @@
 
 import { useFormStatus } from "react-dom";
 import type { ReactNode } from "react";
-import { CONTROL, cx } from "./ui";
+import { CONTROL, SELECT_CHEVRON, cx } from "./ui";
 
+/**
+ * A labelled field.
+ *
+ * The label is 14px sentence-case sans — it used to be 10px mono uppercase with
+ * wide tracking, which is the single change that most made forms read as
+ * database admin rather than as a question someone is being asked.
+ *
+ * Helper text is deliberately optional and used sparingly: a hint under every
+ * field is noise that trains people to read none of them.
+ */
 export function Field({
   label, name, hint, error, required, children, className,
 }: {
@@ -11,26 +21,23 @@ export function Field({
   required?: boolean; children: ReactNode; className?: string;
 }) {
   return (
-    <div className={cx("space-y-1", className)}>
-      {/* 10px rather than the 9px used for chrome labels elsewhere: a field
-          label is the thing being read while typing, not decoration on a panel.
-          The asterisk is decorative — `required` on the control itself is what
-          assistive tech announces. */}
-      <label htmlFor={name}
-             className="block font-mono text-2xs uppercase tracking-[0.1em] text-muted-foreground">
+    <div className={cx("space-y-1.5", className)}>
+      <label htmlFor={name} className="block text-sm font-medium text-foreground">
         {label}
-        {required ? <span className="ml-0.5 text-danger" aria-hidden>*</span> : null}
+        {/* Decorative — `required` on the control itself is what assistive
+            technology announces. */}
+        {required ? <span className="ml-1 text-danger" aria-hidden>*</span> : null}
       </label>
       {children}
       {hint && !error ? <p className="text-xs text-muted-foreground">{hint}</p> : null}
-      {error ? <p className="text-xs text-danger">{error}</p> : null}
+      {error ? <p className="text-xs font-medium text-danger">{error}</p> : null}
     </div>
   );
 }
 
 export function Input({
   name, type = "text", defaultValue, placeholder, required, step, min, max, readOnly, inputMode,
-  formId,
+  formId, autoComplete, id,
 }: {
   name: string; type?: string; defaultValue?: string | number | null;
   placeholder?: string; required?: boolean; step?: string; min?: string | number;
@@ -38,12 +45,19 @@ export function Input({
   inputMode?: "numeric" | "decimal" | "tel" | "email" | "text";
   /** Associates the input with a <form id=…> elsewhere, so fields can sit visually inside another form without nesting. */
   formId?: string;
+  autoComplete?: string;
+  /**
+   * Overrides the id, which otherwise mirrors `name`. Needed where two forms on
+   * one page post the same field name — the sign-in page asks for an email
+   * twice — because duplicate ids leave both labels pointing at the first input.
+   */
+  id?: string;
 }) {
   return (
     <input
-      id={name} name={name} type={type} required={required} step={step}
+      id={id ?? name} name={name} type={type} required={required} step={step}
       min={min} max={max} readOnly={readOnly} placeholder={placeholder}
-      inputMode={inputMode} form={formId}
+      inputMode={inputMode} form={formId} autoComplete={autoComplete}
       defaultValue={defaultValue ?? undefined} className={CONTROL}
     />
   );
@@ -54,7 +68,8 @@ export function Textarea({
 }: { name: string; defaultValue?: string | null; rows?: number; placeholder?: string }) {
   return (
     <textarea id={name} name={name} rows={rows} placeholder={placeholder}
-              defaultValue={defaultValue ?? undefined} className={CONTROL} />
+              defaultValue={defaultValue ?? undefined}
+              className={cx(CONTROL, "min-h-[5.5rem] resize-y py-2.5 leading-relaxed")} />
   );
 }
 
@@ -75,7 +90,7 @@ export function Select({
 }) {
   return (
     <select id={name} name={name} required={required}
-            defaultValue={defaultValue ?? ""} className={CONTROL}>
+            defaultValue={defaultValue ?? ""} className={cx(CONTROL, SELECT_CHEVRON)}>
       {placeholder ? <option value="">{placeholder}</option> : null}
       {(options ?? []).map((option) => (
         <option key={option.value} value={option.value}>{option.label}</option>
@@ -94,12 +109,13 @@ export function Select({
 export function Checkbox({
   name, label, defaultChecked, value,
 }: { name: string; label: string; defaultChecked?: boolean; value?: string }) {
-  // The padded label is the hit area, not just the 16px box — the whole row is
+  // The padded label is the hit area, not just the 18px box — the whole row is
   // tappable, which is what makes a checklist usable one-handed in a truck.
   return (
-    <label className="flex min-h-9 items-center gap-2 py-1 text-[12.5px]">
+    <label className="flex min-h-11 cursor-pointer items-center gap-3 rounded-lg py-1.5 text-sm
+                      transition hover:bg-surface-muted/60">
       <input id={name} name={name} type="checkbox" value={value} defaultChecked={defaultChecked}
-             className="h-4 w-4 border border-strong accent-primary" />
+             className="size-[1.15rem] shrink-0 rounded border-strong accent-primary" />
       {label}
     </label>
   );
@@ -111,7 +127,7 @@ export function WeekdayPicker({
 }: { name: string; defaultValue?: readonly number[] }) {
   const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
   return (
-    <fieldset className="flex flex-wrap gap-1.5">
+    <fieldset className="flex flex-wrap gap-2">
       <legend className="sr-only">Service days</legend>
       {days.map((day, index) => {
         const value = index + 1;
@@ -121,10 +137,13 @@ export function WeekdayPicker({
             <input type="checkbox" id={id} name={name} value={value}
                    defaultChecked={defaultValue.includes(value)} className="peer sr-only" />
             <label htmlFor={id}
-                   className="flex min-h-9 cursor-pointer items-center border px-3 py-1.5 text-sm
-                              peer-checked:border-primary peer-checked:bg-primary/10
-                              peer-checked:font-medium peer-checked:text-primary
-                              peer-focus-visible:outline peer-focus-visible:outline-2">
+                   className="flex min-h-11 min-w-[3.25rem] cursor-pointer items-center justify-center
+                              rounded-lg border border-strong bg-surface px-3 text-sm font-medium
+                              shadow-xs transition hover:bg-surface-muted
+                              peer-checked:border-primary peer-checked:bg-primary
+                              peer-checked:text-primary-foreground
+                              peer-focus-visible:outline peer-focus-visible:outline-2
+                              peer-focus-visible:outline-offset-2 peer-focus-visible:outline-ring">
               {day}
             </label>
           </span>
@@ -136,26 +155,51 @@ export function WeekdayPicker({
 
 /** Disables itself while the server action is in flight. */
 export function SubmitButton({
-  children = "Save", variant = "primary", pendingLabel = "Saving…",
-}: { children?: ReactNode; variant?: "primary" | "danger" | "secondary"; pendingLabel?: string }) {
+  children = "Save", variant = "primary", pendingLabel = "Saving…", size = "lg", formId,
+  className,
+}: {
+  children?: ReactNode;
+  variant?: "primary" | "danger" | "secondary";
+  pendingLabel?: string;
+  size?: "md" | "lg";
+  formId?: string;
+  /** For the few places the button should fill its column — a sign-in form. */
+  className?: string;
+}) {
   const { pending } = useFormStatus();
-  // Mirrors BUTTON_VARIANTS in ui.tsx — near-black action, not the teal accent.
+  // Mirrors BUTTON_VARIANTS in ui.tsx.
   const variants = {
-    primary: "bg-action text-action-foreground hover:opacity-90",
-    danger: "bg-danger text-white hover:opacity-90",
-    secondary: "border border-strong bg-surface hover:bg-surface-muted",
+    primary: "bg-action text-action-foreground shadow-xs hover:brightness-110",
+    danger: "bg-danger text-on-status shadow-xs hover:brightness-110",
+    secondary: "border border-strong bg-surface shadow-xs hover:bg-surface-muted",
   } as const;
+  const sizes = { md: "min-h-10 px-4", lg: "min-h-11 px-5" } as const;
   return (
-    <button type="submit" disabled={pending}
+    <button type="submit" disabled={pending} form={formId}
             className={cx(
-              "inline-flex min-h-9 items-center justify-center px-3 py-1.5 text-[12.5px] font-medium transition",
-              "disabled:pointer-events-none disabled:opacity-60", variants[variant],
+              "inline-flex items-center justify-center gap-2 rounded-lg text-sm font-medium transition",
+              "disabled:pointer-events-none disabled:opacity-60 [&_svg]:size-4 [&_svg]:shrink-0",
+              sizes[size], variants[variant], className,
             )}>
       {pending ? pendingLabel : children}
     </button>
   );
 }
 
-export function FormActions({ children }: { children: ReactNode }) {
-  return <div className="flex flex-wrap items-center gap-2 border-t pt-4">{children}</div>;
+/**
+ * The action row at the foot of a form.
+ *
+ * On a phone it sticks to the bottom of the viewport: a long entry form
+ * otherwise buries "Create job" below several screenfuls of scrolling, and the
+ * one thing the operator came to do should never need hunting for.
+ */
+export function FormActions({ children, sticky = true }: { children: ReactNode; sticky?: boolean }) {
+  return (
+    <div className={cx(
+      "flex flex-wrap items-center gap-3 border-t bg-surface px-4 py-4 sm:rounded-xl sm:border sm:px-5 sm:shadow-sm",
+      sticky && "sticky bottom-0 z-20 -mx-4 shadow-[0_-2px_8px_rgb(16_24_40/0.06)] sm:static sm:mx-0 sm:shadow-sm",
+    )}>
+      {children}
+    </div>
+  );
 }

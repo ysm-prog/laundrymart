@@ -36,7 +36,7 @@ export async function ProofOfService({
                 <a href={photo.url} target="_blank" rel="noreferrer">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={photo.url} alt={`Stop photo ${index + 1}`}
-                       className="h-20 w-20 rounded-md border object-cover transition hover:opacity-90" />
+                       className="h-20 w-20 rounded-md border object-cover transition hover:brightness-110" />
                 </a>
               </li>
             ))}

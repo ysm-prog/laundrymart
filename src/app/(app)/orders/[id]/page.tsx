@@ -342,12 +342,12 @@ export default async function JobDetailPage({
             {(activity.data ?? []).map((entry) => (
               <li key={entry.id} className="flex flex-col gap-1 py-2 sm:flex-row sm:gap-4">
                 <div className="sm:w-48 sm:shrink-0">
-                  <span className="font-mono text-2xs text-muted-foreground">
+                  <span className="text-2xs text-muted-foreground">
                     {dateTime(entry.created_at)}
                   </span>
                 </div>
                 <div className="min-w-0">
-                  <p className="text-[12.5px]">
+                  <p className="text-sm">
                     <span className="font-medium">
                       {entry.actor_id ? names.get(entry.actor_id) ?? "Someone" : "The system"}
                     </span>

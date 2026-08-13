@@ -357,12 +357,12 @@ function CountGrid({
       <table className="w-full text-sm">
         <thead className="bg-surface-muted text-left">
           <tr>
-            <th className="px-3 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Item</th>
-            <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">Qty</th>
+            <th className="px-3 py-2 text-xs font-semibold text-muted-foreground">Item</th>
+            <th className="px-3 py-2 text-right text-xs font-semibold text-muted-foreground">Qty</th>
             {showDamage ? (
               <>
-                <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">Damaged</th>
-                <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">Missing</th>
+                <th className="px-3 py-2 text-right text-xs font-semibold text-muted-foreground">Damaged</th>
+                <th className="px-3 py-2 text-right text-xs font-semibold text-muted-foreground">Missing</th>
               </>
             ) : null}
           </tr>

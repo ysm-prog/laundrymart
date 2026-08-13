@@ -43,7 +43,7 @@ export default async function DispatchPlannerPage({ searchParams }: { searchPara
           <Input name="date" type="date" defaultValue={routeDate} />
         </Field>
         <button type="submit"
-                className="border border-strong bg-surface px-3 py-1.5 text-[12.5px] font-medium hover:bg-surface-muted">
+                className="rounded-lg border border-strong bg-surface px-3 py-1.5 text-sm font-medium hover:bg-surface-muted">
           Show
         </button>
       </form>
@@ -189,20 +189,20 @@ async function Board({ routeDate }: { routeDate: string }) {
 
   return (
     <div className="space-y-4">
-      <div className="grid gap-px border bg-border sm:grid-cols-2 lg:grid-cols-4">
-        <Stat flush label="Runs" value={String(routeRows.length)} hint={`${jobRows.length} stops in total`} />
-        <Stat flush label="Unassigned stops" value={String(unassigned)}
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <Stat label="Runs" value={String(routeRows.length)} hint={`${jobRows.length} stops in total`} />
+        <Stat label="Unassigned stops" value={String(unassigned)}
               hint={unassigned === 0 ? "every stop has a run" : "waiting on a run"}
               tone={unassigned > 0 ? "warning" : "success"} />
-        <Stat flush label="Runs without a driver" value={String(uncrewed)}
+        <Stat label="Runs without a driver" value={String(uncrewed)}
               hint={uncrewed === 0 ? "all crewed" : "assign before the day starts"}
               tone={uncrewed > 0 ? "warning" : "success"} />
-        <Stat flush label="Problems" value={String(exceptions)}
+        <Stat label="Problems" value={String(exceptions)}
               hint={exceptions === 0 ? "none on the board" : "may need re-dispatching"}
               tone={exceptions > 0 ? "danger" : "success"} />
       </div>
 
-      <div className={cx("border bg-surface p-3")}>
+      <div className={cx("rounded-lg border bg-surface p-3")}>
         <PlannerBoard
           columns={columns}
           jobs={jobsById}

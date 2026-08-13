@@ -73,7 +73,7 @@ async function AuditList({ params }: { params: Search }) {
           { header: "Detail", cell: (row) => row.summary ?? "—", hideBelow: "sm" },
           {
             header: "Actor",
-            cell: (row) => (row.actor_id ? <span className="font-mono text-xs">{row.actor_id.slice(0, 8)}…</span> : "system"),
+            cell: (row) => (row.actor_id ? <span className="text-xs">{row.actor_id.slice(0, 8)}…</span> : "system"),
             hideBelow: "md",
           },
         ]}

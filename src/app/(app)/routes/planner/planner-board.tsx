@@ -155,25 +155,31 @@ export function PlannerBoard({
                 setDragging(null);
               }}
               className={cx(
-                "flex w-[268px] shrink-0 flex-col border bg-surface",
+                // `relative` is load-bearing, not cosmetic. Each stop card holds
+                // an `sr-only` label, which is absolutely positioned; with no
+                // positioned ancestor inside the board its containing block is
+                // the page, so it escaped the board's horizontal scroller and
+                // stretched the document ~230px wide on a phone. Making the
+                // column a containing block keeps it clipped where it belongs.
+                "relative flex w-[268px] shrink-0 flex-col rounded-xl border bg-surface shadow-sm",
                 column.id === UNASSIGNED && "border-strong",
                 !column.open && "opacity-70",
               )}
             >
               <header className="border-b px-3 py-2">
                 <div className="flex items-baseline justify-between gap-2">
-                  <span className="truncate font-mono text-[11.5px] font-semibold">{column.code}</span>
-                  <span className="font-mono text-[11px] tabular-nums text-muted-foreground">
+                  <span className="truncate text-xs font-semibold">{column.code}</span>
+                  <span className="text-xs tabular-nums text-muted-foreground">
                     {column.jobIds.length}
                   </span>
                 </div>
                 <div className="mt-0.5 flex items-center justify-between gap-2">
-                  <span className="truncate text-[11.5px] text-muted-foreground">{column.name}</span>
+                  <span className="truncate text-xs text-muted-foreground">{column.name}</span>
                   {column.status ? <StatusBadge status={column.status} /> : null}
                 </div>
 
                 {column.id === UNASSIGNED ? (
-                  <p className="mt-2 text-[11px] text-muted-foreground">
+                  <p className="mt-2 text-xs text-muted-foreground">
                     Stops scheduled for this date with no run.
                   </p>
                 ) : (
@@ -193,7 +199,7 @@ export function PlannerBoard({
 
               <ol className="flex-1 space-y-1.5 p-2">
                 {column.jobIds.length === 0 ? (
-                  <li className="border border-dashed px-3 py-6 text-center text-[11.5px] text-muted-foreground">
+                  <li className="rounded-lg border border-dashed px-3 py-6 text-center text-xs text-muted-foreground">
                     {column.open ? "Drop a stop here" : "No stops"}
                   </li>
                 ) : null}
@@ -214,30 +220,30 @@ export function PlannerBoard({
                         if (dragging && dragging !== jobId) place(dragging, column.id, index);
                       }}
                       className={cx(
-                        "border bg-surface px-2.5 py-2",
+                        "rounded-lg border bg-surface px-2.5 py-2",
                         dragging === jobId && "opacity-50",
                         job.status === "exception" && "border-l-[3px] border-l-danger",
                         !movable && "bg-surface-muted",
                       )}
                     >
                       <div className="flex items-baseline justify-between gap-2">
-                        <span className="font-mono text-[11px] tabular-nums text-muted-foreground">
+                        <span className="text-xs tabular-nums text-muted-foreground">
                           {index + 1}
                         </span>
                         <Link href={`/jobs/${job.id}`}
-                              className="truncate font-mono text-[11px] text-primary hover:underline">
+                              className="truncate text-xs text-primary hover:underline">
                           {job.jobNumber}
                         </Link>
                       </div>
-                      <p className="mt-0.5 truncate text-[12.5px] font-semibold">{job.customer}</p>
-                      <p className="truncate text-[11px] text-muted-foreground">{job.site}</p>
+                      <p className="mt-0.5 truncate text-sm font-semibold">{job.customer}</p>
+                      <p className="truncate text-xs text-muted-foreground">{job.site}</p>
 
                       <div className="mt-1.5 flex flex-wrap items-center gap-1">
                         <Badge>{humanise(job.serviceType)}</Badge>
                         {job.status === "exception" ? <Badge tone="danger">Exception</Badge> : null}
                         {job.lockedBecause ? <Badge tone="neutral">{job.lockedBecause}</Badge> : null}
                         {job.estimateKg != null ? (
-                          <span className="font-mono text-2xs tabular-nums text-muted-foreground">
+                          <span className="text-2xs tabular-nums text-muted-foreground">
                             ≈{Math.round(job.estimateKg)}kg
                           </span>
                         ) : null}
@@ -248,11 +254,11 @@ export function PlannerBoard({
                           <button type="button" onClick={() => nudge(column.id, index, -1)}
                                   disabled={index === 0}
                                   aria-label={`Move ${job.jobNumber} earlier`}
-                                  className="border border-strong px-1.5 py-0.5 text-2xs disabled:opacity-40">↑</button>
+                                  className="rounded-lg border border-strong px-1.5 py-0.5 text-2xs disabled:opacity-40">↑</button>
                           <button type="button" onClick={() => nudge(column.id, index, 1)}
                                   disabled={index === column.jobIds.length - 1}
                                   aria-label={`Move ${job.jobNumber} later`}
-                                  className="border border-strong px-1.5 py-0.5 text-2xs disabled:opacity-40">↓</button>
+                                  className="rounded-lg border border-strong px-1.5 py-0.5 text-2xs disabled:opacity-40">↓</button>
                           <label className="sr-only" htmlFor={`move-${jobId}`}>
                             Move {job.jobNumber} to another run
                           </label>
@@ -260,7 +266,7 @@ export function PlannerBoard({
                             id={`move-${jobId}`}
                             value={column.id}
                             onChange={(event) => place(jobId, event.target.value, Number.MAX_SAFE_INTEGER)}
-                            className="min-w-0 flex-1 border border-strong bg-surface-muted px-1 py-0.5 text-2xs"
+                            className="rounded-lg min-w-0 flex-1 border border-strong bg-surface-muted px-1 py-0.5 text-2xs"
                           >
                             {columns.filter((target) => target.open || target.id === column.id).map((target) => (
                               <option key={target.id} value={target.id}>{target.code}</option>
@@ -278,7 +284,7 @@ export function PlannerBoard({
       </div>
 
       {overloaded.length > 0 ? (
-        <p className="border border-l-[5px] border-l-warning border-warning/40 bg-warning/5 px-3 py-2 text-[12.5px] text-warning">
+        <p className="rounded-lg border border-l-[5px] border-l-warning border-warning/40 bg-warning/5 px-3 py-2 text-sm text-warning">
           {overloaded.map((column) => column.code).join(", ")} {overloaded.length === 1 ? "is" : "are"} over
           the vehicle&rsquo;s rated capacity on recent-average weights. The plan can still be applied — the
           estimate is history, not a booking.
@@ -287,18 +293,18 @@ export function PlannerBoard({
 
       <div className="flex flex-wrap items-center gap-3 border-t pt-3">
         <button type="submit" disabled={!dirty}
-                className="inline-flex items-center justify-center bg-action px-3 py-1.5 text-[12.5px]
-                           font-medium text-action-foreground transition hover:opacity-90
-                           disabled:pointer-events-none disabled:opacity-50">
+                className="rounded-lg inline-flex items-center justify-center bg-action px-3 py-1.5 text-sm
+ font-medium text-action-foreground transition hover:brightness-110
+ disabled:pointer-events-none disabled:opacity-50">
           Apply plan
         </button>
         <button type="button" onClick={() => setColumns(initial)} disabled={!dirty}
-                className="inline-flex items-center justify-center border border-strong bg-surface px-3 py-1.5
-                           text-[12.5px] font-medium transition hover:bg-surface-muted
-                           disabled:pointer-events-none disabled:opacity-50">
+                className="rounded-lg inline-flex items-center justify-center border border-strong bg-surface px-3 py-1.5
+ text-sm font-medium transition hover:bg-surface-muted
+ disabled:pointer-events-none disabled:opacity-50">
           Discard changes
         </button>
-        <span className="text-[12.5px] text-muted-foreground">
+        <span className="text-sm text-muted-foreground">
           {dirty ? describeChanges(changes) : "No changes to apply."}
         </span>
       </div>
@@ -318,7 +324,7 @@ function CrewSelect({
       <select
         value={value} disabled={disabled}
         onChange={(event) => onChange(event.target.value)}
-        className="min-w-0 flex-1 border border-strong bg-surface-muted px-1.5 py-0.5 text-[11.5px] disabled:opacity-60"
+        className="rounded-lg min-w-0 flex-1 border border-strong bg-surface-muted px-1.5 py-0.5 text-xs disabled:opacity-60"
       >
         <option value="">Unassigned</option>
         {options.map((option) => (
@@ -338,7 +344,7 @@ function CrewSelect({
 function LoadMeter({ load }: { load: ReturnType<typeof estimateLoad> }) {
   if (load.capacityKg == null) {
     return (
-      <p className="font-mono text-2xs text-muted-foreground">
+      <p className="text-2xs text-muted-foreground">
         {load.known > 0 ? `≈${load.kg} kg est.` : "No load estimate"} · no rated vehicle
       </p>
     );
@@ -350,7 +356,7 @@ function LoadMeter({ load }: { load: ReturnType<typeof estimateLoad> }) {
       <div className="flex items-baseline justify-between gap-2">
         <Eyebrow className={load.over ? "text-warning" : undefined}>Load est.</Eyebrow>
         <span className={cx(
-          "font-mono text-2xs tabular-nums",
+          "text-2xs tabular-nums",
           load.over ? "text-warning" : "text-muted-foreground",
         )}>
           {load.kg} / {Math.round(load.capacityKg)} kg
@@ -361,7 +367,7 @@ function LoadMeter({ load }: { load: ReturnType<typeof estimateLoad> }) {
              style={{ width: `${percent}%` }} />
       </div>
       {load.unknown > 0 ? (
-        <p className="mt-0.5 font-mono text-2xs text-muted-foreground">
+        <p className="mt-0.5 text-2xs text-muted-foreground">
           {load.known} of {load.known + load.unknown} stops weighed before
         </p>
       ) : null}

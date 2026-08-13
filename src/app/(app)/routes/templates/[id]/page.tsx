@@ -165,7 +165,7 @@ async function Stops({ templateId, writable }: { templateId: string; writable: b
 
           {rows.length ? (
             <div className="mt-4 border-t pt-4">
-              <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              <p className="mb-2 text-xs font-medium text-muted-foreground">
                 Remove a stop
               </p>
               <div className="flex flex-wrap gap-2">

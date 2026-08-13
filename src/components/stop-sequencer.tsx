@@ -84,7 +84,7 @@ export function StopSequencer({
       <div className="flex items-center gap-3">
         <button type="submit" disabled={!dirty}
                 className="rounded-md bg-action px-3 py-2 text-sm font-medium text-action-foreground
-                           transition hover:opacity-90 disabled:pointer-events-none disabled:opacity-50">
+ transition hover:brightness-110 disabled:pointer-events-none disabled:opacity-50">
           Save order
         </button>
         {dirty ? <span className="text-sm text-muted-foreground">Unsaved changes</span> : null}

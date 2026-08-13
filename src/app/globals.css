@@ -7,20 +7,23 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 /*
- * Design tokens, from the Plantline concept pack.
+ * Electro Services — design tokens.
  *
- * Two rules from the pack drive the palette, and both are load-bearing:
+ * This replaces the earlier "Plantline" language (flat, square, near-black
+ * chrome, monospace labels), which read as a developer console to the counter
+ * staff, drivers and managers who actually use the app. Three rules carry the
+ * current system:
  *
- *  - "Colour means status only." Teal is on-track, amber is warning, red is
- *    late, green is resolved. Nothing else is coloured — which is why the solid
- *    call-to-action is near-black (`--action`) rather than the accent. Reaching
- *    for teal on a button would make an ordinary control read as a status.
- *  - Flat, hairline-bordered surfaces: `--border` is the everyday hairline and
- *    `--strong` frames inputs and panels. No rounding, near-no shadow.
- *
- * Light values are lifted from the mockups; dark has no counterpart in the pack,
- * so it is derived around the same near-black and a lifted teal that still
- * clears AA on a dark surface (NFR §8).
+ *  - **One brand colour, used for intent.** `--primary` is the Electro Services
+ *    blue and it marks the primary action and the place you are — buttons,
+ *    active navigation, focus. Status keeps its own family (`--success`,
+ *    `--warning`, `--danger`, `--info`) and is always paired with a written
+ *    label, never carried by colour alone.
+ *  - **Soft, not flat.** A real radius scale, hairline borders in a warm grey,
+ *    and a light layered shadow set. Surfaces are white on an off-white page so
+ *    panels read as panels without needing a box drawn round every cell.
+ *  - **Comfortable, not dense.** Controls are 44px so a thumb on a tablet at the
+ *    counter hits them, body text is 14–16px, and labels are sentence-case sans.
  *
  * Values stay as raw HSL channels so the palette can be themed from one place;
  * the @theme block below turns them into Tailwind colours, and v4's color-mix()
@@ -29,43 +32,82 @@
 @layer base {
   :root {
     color-scheme: light;
-    --background: 204 15% 94%;      /* #eceff1 — page behind the chrome       */
-    --surface: 0 0% 100%;           /* #ffffff — panels                       */
-    --surface-muted: 210 17% 98%;   /* #f8f9fa — table headers, search field  */
-    --foreground: 210 13% 9%;       /* #14171a                                */
-    --muted-foreground: 211 10% 40%;/* #5b6570                                */
-    --border: 214 14% 90%;          /* #e2e5e9 — hairline                     */
-    --strong: 207 12% 85%;          /* #d4d9dd — inputs, panel frames         */
-    --primary: 175 77% 26%;         /* #0f766e — accent, links, on track      */
+    --background: 220 24% 97%;       /* #f5f6f9 — off-white page              */
+    --surface: 0 0% 100%;            /* #ffffff — cards and panels            */
+    --surface-muted: 220 20% 96%;    /* #f3f4f8 — table headers, input fills  */
+    --surface-sunken: 220 22% 94%;   /* #eef0f5 — wells, inset areas          */
+    --foreground: 222 25% 15%;       /* #1d2231 — charcoal, never pure black  */
+    --muted-foreground: 220 11% 46%; /* #6b7280 — supporting text             */
+    --border: 220 18% 91%;           /* #e4e7ed — the everyday hairline       */
+    --strong: 220 15% 84%;           /* #d1d6e0 — inputs and framed panels    */
+
+    /* The brand. Used for the primary action, the active nav row and focus —
+       intent and place, not status. AA on white at 5.6:1. */
+    --primary: 224 71% 45%;          /* #2145c4                               */
     --primary-foreground: 0 0% 100%;
-    --action: 210 13% 9%;           /* #14171a — the one solid button         */
+    /* Kept as a separate token because the whole app spells the solid button
+       `bg-action`. Pointing it at the brand turns every primary button over at
+       once, and leaves the seam here if the two ever need to diverge again. */
+    --action: 224 71% 45%;
     --action-foreground: 0 0% 100%;
-    --success: 142 72% 29%;         /* #15803d — resolved                     */
-    --warning: 26 90% 37%;          /* #b45309 — warning                      */
-    --danger: 0 74% 42%;            /* #b91c1c — late                         */
-    --info: 175 77% 26%;
-    --ring: 175 77% 26%;
+    /* A quiet secondary accent, for supporting highlights only. */
+    --accent: 190 82% 34%;           /* #0a8ba0                               */
+
+    /* Status. Each is paired with a label everywhere it is used. */
+    --success: 148 62% 30%;          /* #1d7a4c — resolved, paid, completed   */
+    --warning: 30 84% 40%;           /* #bc6c11 — needs attention             */
+    --danger: 356 68% 46%;           /* #c62839 — late, failed, cancelled     */
+    --info: 202 84% 36%;             /* #0e6ea8 — informational, ready        */
+    /* Text sitting *on* a solid status fill. It cannot be a fixed white: the
+       dark theme lifts every status colour to clear AA against a dark surface,
+       which leaves them far too light to carry white text. */
+    --on-status: 0 0% 100%;
+    --ring: 224 71% 45%;
+
+    /* The sidebar is now a light surface rather than a near-black console.
+       Tokenised separately so the rail can be themed without touching the
+       page surfaces it sits beside. */
+    --sidebar: 0 0% 100%;
+    --sidebar-foreground: 222 20% 28%;
+    --sidebar-muted: 220 10% 52%;
+    --sidebar-border: 220 18% 91%;
+    --sidebar-active: 224 71% 45%;
+    --sidebar-active-bg: 224 71% 96%;
+    --sidebar-hover: 220 22% 96%;
   }
 
   .dark {
     color-scheme: dark;
-    --background: 210 13% 9%;
-    --surface: 210 12% 12%;
-    --surface-muted: 210 11% 16%;
-    --foreground: 210 14% 92%;
-    --muted-foreground: 210 9% 68%;
-    --border: 210 11% 20%;
-    --strong: 210 10% 27%;
-    --primary: 174 55% 48%;
-    --primary-foreground: 210 13% 9%;
-    /* Inverted on dark: the solid button stays the highest-contrast surface. */
-    --action: 210 14% 92%;
-    --action-foreground: 210 13% 9%;
-    --success: 142 48% 58%;
-    --warning: 32 85% 62%;
-    --danger: 0 75% 67%;
-    --info: 174 55% 48%;
-    --ring: 174 55% 48%;
+    --background: 222 24% 10%;
+    --surface: 222 21% 13%;
+    --surface-muted: 222 18% 17%;
+    --surface-sunken: 222 22% 11%;
+    --foreground: 214 20% 93%;
+    --muted-foreground: 218 12% 68%;
+    --border: 220 14% 22%;
+    --strong: 220 12% 30%;
+
+    /* Lifted so the brand still clears AA against a dark surface. */
+    --primary: 219 84% 68%;          /* #7ba4f5                               */
+    --primary-foreground: 222 40% 12%;
+    --action: 219 84% 68%;
+    --action-foreground: 222 40% 12%;
+    --accent: 188 70% 55%;
+
+    --success: 148 52% 58%;
+    --warning: 34 88% 64%;
+    --danger: 356 82% 70%;
+    --info: 202 80% 65%;
+    --on-status: 222 40% 12%;
+    --ring: 219 84% 68%;
+
+    --sidebar: 222 22% 12%;
+    --sidebar-foreground: 214 16% 80%;
+    --sidebar-muted: 218 10% 58%;
+    --sidebar-border: 220 14% 20%;
+    --sidebar-active: 219 84% 68%;
+    --sidebar-active-bg: 219 60% 20%;
+    --sidebar-hover: 222 18% 17%;
   }
 
   /* v4 defaults the border colour to currentColor; pin it to our token. */
@@ -77,12 +119,42 @@
     @apply antialiased;
     background-color: hsl(var(--background));
     color: hsl(var(--foreground));
+    /* 15px base: the operator reads this all day on a counter tablet. */
+    font-size: 0.9375rem;
+    line-height: 1.5;
   }
+
+  /* Headings carry a slight optical tightening; body text does not. */
+  h1, h2, h3, h4 {
+    letter-spacing: -0.011em;
+  }
+
+  /*
+   * Native controls carry the system radius by default.
+   *
+   * The app has ~120 hand-rolled buttons and inputs written when the design
+   * language was deliberately square, so most of them never needed a
+   * `rounded-*` class. Setting it here means none of them can come out square
+   * now; a `rounded-*` utility at the call site still wins, because utilities
+   * are layered after base.
+   */
+  button, select, textarea,
+  input:not([type="checkbox"]):not([type="radio"]) {
+    border-radius: var(--radius-lg);
+  }
+  input[type="checkbox"] { border-radius: var(--radius-xs); }
+  input[type="radio"] { border-radius: 9999px; }
 
   /* Visible focus everywhere — keyboard accessibility is a requirement here. */
   :focus-visible {
     outline: 2px solid hsl(var(--ring));
     outline-offset: 2px;
+    border-radius: 2px;
+  }
+
+  /* Numbers in tables and totals line up without needing a monospace face. */
+  table {
+    font-variant-numeric: tabular-nums;
   }
 }
 
@@ -90,6 +162,7 @@
   --color-background: hsl(var(--background));
   --color-surface: hsl(var(--surface));
   --color-surface-muted: hsl(var(--surface-muted));
+  --color-surface-sunken: hsl(var(--surface-sunken));
   --color-foreground: hsl(var(--foreground));
   --color-muted-foreground: hsl(var(--muted-foreground));
   --color-border: hsl(var(--border));
@@ -100,41 +173,102 @@
   --color-primary-foreground: hsl(var(--primary-foreground));
   --color-action: hsl(var(--action));
   --color-action-foreground: hsl(var(--action-foreground));
+  --color-accent: hsl(var(--accent));
   --color-success: hsl(var(--success));
   --color-warning: hsl(var(--warning));
   --color-danger: hsl(var(--danger));
   --color-info: hsl(var(--info));
+  --color-on-status: hsl(var(--on-status));
   --color-ring: hsl(var(--ring));
 
-  /* IBM Plex, bound by next/font in the root layout. Mono is structural in this
-     design — every number, identifier, date and uppercase label. */
-  --font-sans: var(--font-plex-sans), system-ui, sans-serif;
-  --font-mono: var(--font-plex-mono), ui-monospace, monospace;
+  --color-sidebar: hsl(var(--sidebar));
+  --color-sidebar-foreground: hsl(var(--sidebar-foreground));
+  --color-sidebar-muted: hsl(var(--sidebar-muted));
+  --color-sidebar-border: hsl(var(--sidebar-border));
+  --color-sidebar-active: hsl(var(--sidebar-active));
+  --color-sidebar-active-bg: hsl(var(--sidebar-active-bg));
+  --color-sidebar-hover: hsl(var(--sidebar-hover));
 
-  /* The pack's chrome runs smaller than Tailwind's defaults: 9–10px mono labels
-     against 11.5–13.5px body. Added, so existing sizes keep their meaning. */
-  --text-2xs: 0.625rem;   /* 10px — mono labels, count badges */
-  --text-3xs: 0.5625rem;  /*  9px — sidebar section headings  */
+  /* Inter for everything a person reads. Mono is bound but deliberately
+     unused in the shared components — it is for genuine machine text only
+     (an audit payload, a raw identifier), never for ordinary business
+     content like a date, a total or a job number. */
+  --font-sans: var(--font-inter), system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: var(--font-jetbrains-mono), ui-monospace, monospace;
 
-  /* Square, not rounded. Zeroing the scale beats editing every `rounded-*` in
-     the codebase — and stops the next rounded corner creeping back in. Note
-     `rounded-full` is a static utility in v4 and cannot be zeroed here, so the
-     few places that wanted a pill were changed at the call site instead. */
-  --radius-xs: 0;
-  --radius-sm: 0;
-  --radius-md: 0;
-  --radius-lg: 0;
-  --radius-xl: 0;
-  --radius-2xl: 0;
-  --radius-3xl: 0;
-  --radius-4xl: 0;
+  /* These two used to be 9px and 10px, and were sprinkled over labels
+     throughout the app. They are kept so those call sites keep working, but
+     raised to sizes a person can actually read at arm's length on a tablet. */
+  --text-3xs: 0.6875rem;  /* 11px — the smallest thing we will render */
+  --text-2xs: 0.75rem;    /*  12px — supporting labels, counts        */
 
-  /* The pack uses exactly one shadow, on the outermost frame. */
-  --shadow-2xs: 0 1px 2px rgb(20 23 26 / 0.06);
-  --shadow-xs: 0 1px 2px rgb(20 23 26 / 0.06);
-  --shadow-sm: 0 1px 2px rgb(20 23 26 / 0.06);
-  --shadow-md: 0 1px 3px rgb(20 23 26 / 0.08);
-  --shadow-lg: 0 2px 6px rgb(20 23 26 / 0.10);
-  --shadow-xl: 0 2px 6px rgb(20 23 26 / 0.10);
-  --shadow-2xl: 0 2px 6px rgb(20 23 26 / 0.10);
+  /* Soft, modern corners. The scale was previously zeroed to force square
+     chrome; restoring it makes the `rounded-*` classes already scattered
+     through the app do the right thing. */
+  --radius-xs: 0.25rem;   /*  4px */
+  --radius-sm: 0.375rem;  /*  6px */
+  --radius-md: 0.5rem;    /*  8px */
+  --radius-lg: 0.625rem;  /* 10px */
+  --radius-xl: 0.75rem;   /* 12px */
+  --radius-2xl: 1rem;     /* 16px */
+  --radius-3xl: 1.25rem;  /* 20px */
+  --radius-4xl: 1.5rem;   /* 24px */
+
+  /* Light and layered. Shadow carries elevation, not decoration — a card at
+     rest is `sm`, something floating over the page is `lg` or `xl`. */
+  --shadow-2xs: 0 1px 2px rgb(16 24 40 / 0.04);
+  --shadow-xs: 0 1px 2px rgb(16 24 40 / 0.05);
+  --shadow-sm: 0 1px 3px rgb(16 24 40 / 0.07), 0 1px 2px rgb(16 24 40 / 0.04);
+  --shadow-md: 0 4px 8px -2px rgb(16 24 40 / 0.08), 0 2px 4px -2px rgb(16 24 40 / 0.04);
+  --shadow-lg: 0 12px 16px -4px rgb(16 24 40 / 0.08), 0 4px 6px -2px rgb(16 24 40 / 0.03);
+  --shadow-xl: 0 20px 24px -4px rgb(16 24 40 / 0.10), 0 8px 8px -4px rgb(16 24 40 / 0.04);
+  --shadow-2xl: 0 24px 48px -12px rgb(16 24 40 / 0.18);
+}
+
+/*
+ * Motion, used sparingly. The drawer and the toast are the only things that
+ * move, and both respect a reduced-motion preference.
+ */
+@keyframes es-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes es-slide-in-left {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(0); }
+}
+
+@keyframes es-slide-up {
+  from { transform: translateY(8px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+@keyframes es-sheet-up {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+
+@utility animate-fade-in {
+  animation: es-fade-in 150ms ease-out;
+}
+
+@utility animate-slide-in-left {
+  animation: es-slide-in-left 200ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+@utility animate-slide-up {
+  animation: es-slide-up 180ms ease-out;
+}
+
+@utility animate-sheet-up {
+  animation: es-sheet-up 240ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

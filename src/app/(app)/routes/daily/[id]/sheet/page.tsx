@@ -119,7 +119,7 @@ export default async function RouteSheetPage({ params }: { params: Promise<{ id:
 function Meta({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <dt className="text-xs uppercase tracking-wide text-muted-foreground">{label}</dt>
+      <dt className="text-xs text-muted-foreground">{label}</dt>
       <dd className="font-medium">{value}</dd>
     </div>
   );
