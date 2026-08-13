@@ -272,7 +272,11 @@ production_batches→auth.users.
 
 ## 11. Hosted project
 `laundrymart-syd` · ref `xujhwljrmogenhvqpkrf` · ap-southeast-2 (Sydney) · org `ysm-prog`.
-Deployed on Vercel at `ats.coreit.com.au`. All 12 migrations applied; demo tenant seeded
+Deployed on Vercel at `ats.coreit.com.au`. **Two tenants**: the seeded demo, and
+`Adelaide Towel Service` (`20000000-…-0001`, Australia/Adelaide, depot `ADL`) carrying the
+real books imported from MYOB — 459 customers, 192 suppliers, 268 accounts, 1,515 bills,
+1 purchase order, 46 credit invoices. Both super_admin logins are members of both.
+All 14 migrations applied; demo tenant seeded
 (`Harbour Commercial Laundry`); two `super_admin` logins, one also linked to the seeded driver.
 Sign-in verified end to end 2026-08-05.
 

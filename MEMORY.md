@@ -1,46 +1,31 @@
 # MEMORY — working session handoff
 > Auto-loaded each session. Canonical state is CLAUDE.md; this is the live delta.
 
-**In flight (2026-08-13): the MYOB import for Adelaide Towel Service.**
-Branch `claude/data-database-import-19ijkz`. Code, migration, tests and docs are done,
-verified and pushed. `0014_purchases` is **applied to `laundrymart-syd`**, and the tenant
-`Adelaide Towel Service` (`20000000-0000-4000-8000-000000000001`, Australia/Adelaide)
-exists with both super_admin logins as members and one depot (`ADL`).
+**Done (2026-08-13): the MYOB books for Adelaide Towel Service are in.**
+Branch `claude/data-database-import-19ijkz`, pushed. `0014_purchases` is applied to
+`laundrymart-syd`, and the tenant `Adelaide Towel Service`
+(`20000000-0000-4000-8000-000000000001`, Australia/Adelaide) holds the data with both
+super_admin logins as members and one depot (`ADL`). The demo tenant is untouched.
 
-**The data load into the hosted project is PARTIAL — resume it.** This container's egress
-policy answers 403 to `CONNECT xujhwljrmogenhvqpkrf.supabase.co`, so the Supabase MCP
-`execute_sql` tool is the only channel and the 217 KB of SQL has to go through it in
-~11 KB statements. Regenerate and continue:
+Loaded and verified against the local run, row for row: **customers 459, suppliers 192,
+chart of accounts 268, supplier bills 1515, purchase order 1, credit invoices 46.**
+Bills outstanding sums to **65,724.25**, exactly Trade Creditors (`2-1200`) in the imported
+chart of accounts; no bill is orphaned from its supplier; the 12 supplier debit notes keep
+their negative balances. The customer side is knowingly 5,466.06 short of Trade Debtors —
+that gap is in the source export, not the import (`docs/IMPORT-MYOB.md`).
 
-```
-python3 scripts/import/myob-import.py --compact --max-bytes 11000 <export-dir> \
-  20000000-0000-4000-8000-000000000001 > import.sql
-```
+Security advisors after the migration: the same five SECURITY DEFINER warnings §18 records
+as legitimate, plus a pre-existing `auth_leaked_password_protection` notice that has nothing
+to do with this work. No new lint from 0014.
 
-Everything is idempotent (parties upsert on a name-derived id, documents on their own
-number), so re-running any statement is safe. Check where it got to with:
+**How to re-run or extend it.** The export is not in the repo (real contact details);
+`scripts/import/myob-import.py` is, and `docs/IMPORT-MYOB.md` explains both the run and the
+two flags that matter when the database can only be reached through a statement-capped tool
+— which was the case here, since this container's egress policy answers 403 to
+`CONNECT xujhwljrmogenhvqpkrf.supabase.co` and the Supabase MCP was the only channel.
 
-```sql
-select (select count(*) from customers where tenant_id = '2000...0001') customers,   -- 459
-       (select count(*) from suppliers) suppliers,                                   -- 192
-       (select count(*) from gl_accounts) accounts,                                  -- 268
-       (select count(*) from supplier_bills) bills,                                  -- 1515
-       (select count(*) from purchase_orders) orders,                                -- 1
-       (select count(*) from invoices where invoice_type = 'credit') credits;         -- 46
-```
-
-**Loaded so far: customers 459/459, suppliers 192/192, accounts 268/268, credits 46/46,
-number sequences all set. Bills 456/1515. Purchase order 0/1.** Only `supplier_bills`
-and the single `purchase_orders` row remain — regenerate the SQL and re-run it whole; the
-statements that already landed upsert to no effect, so nothing doubles.
-
-Order matters if you rebuild from scratch: suppliers before bills, customers before
-credits, because those statements join on the party's number rather than carrying a uuid.
-
-Proof it worked, once done: `sum(balance_due)` over `supplier_bills` must be **65,724.25**,
-which is exactly Trade Creditors (`2-1200`) in the imported chart of accounts. The customer
-side is knowingly 5,466.06 short of Trade Debtors — that gap is in the source data; see
-`docs/IMPORT-MYOB.md`.
+**Still open, unchanged from before:** `/design-preview` has no section for the three new
+screens (`/bills`, `/suppliers`, `/accounts`).
 
 ---
 
