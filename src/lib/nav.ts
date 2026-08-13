@@ -24,7 +24,8 @@ import { can, type Capability, type Role } from "@/lib/roles";
  */
 
 /** Counts the rail can surface. Resolved once per request in the layout. */
-export type NavCountKey = "routesToday" | "exceptions" | "batches" | "unpaidInvoices";
+export type NavCountKey =
+  | "routesToday" | "exceptions" | "batches" | "unpaidInvoices" | "unpaidBills";
 
 export type NavItem = {
   label: string;
@@ -126,11 +127,34 @@ export const NAVIGATION: NavItem[] = [
     ],
   },
   {
-    label: "Invoices",
+    // Renamed from "Invoices" when the payable side landed: the row now covers
+    // money in *and* money out, and an area named after one of its four tabs
+    // would read as the odd one out.
+    label: "Money",
     href: "/invoices",
     capability: "invoices.read",
     count: "unpaidInvoices",
-    blurb: "Bill the work, chase what is unpaid, record what comes in.",
+    blurb: "What customers owe you, what you owe your suppliers.",
+    children: [
+      {
+        label: "Invoices", href: "/invoices", capability: "invoices.read",
+        count: "unpaidInvoices",
+        blurb: "Bill the work, chase what is unpaid, record what comes in.",
+      },
+      {
+        label: "Bills", href: "/bills", capability: "purchases.read",
+        count: "unpaidBills",
+        blurb: "What your suppliers have invoiced you, and what is still owed.",
+      },
+      {
+        label: "Suppliers", href: "/suppliers", capability: "purchases.read",
+        blurb: "Businesses you buy from, and what you owe each of them.",
+      },
+      {
+        label: "Accounts", href: "/accounts", capability: "purchases.read",
+        blurb: "The chart of accounts every invoice and bill is coded against.",
+      },
+    ],
   },
   {
     label: "Linen",

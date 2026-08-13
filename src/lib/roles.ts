@@ -57,6 +57,13 @@ export const CAPABILITIES = [
   "warehouse.write",
   "invoices.read",
   "invoices.write",
+  // The payable side: suppliers, their bills, purchase orders and the chart of
+  // accounts. Split from `invoices.*` rather than folded into it because the
+  // two answer to different people — a dispatcher holds `invoices.read` so they
+  // can see whether a customer is on stop, which is no reason to show them what
+  // the business pays its suppliers.
+  "purchases.read",
+  "purchases.write",
   "reports.read",
   "admin.read",
   "admin.write",
@@ -88,12 +95,15 @@ export const ROLE_CAPABILITIES: Record<Role, readonly Capability[]> = {
   // Own run only — RLS confines every routes row to their own `drivers.id`, so
   // `routes.status` here means "my run", not "any run".
   driver: ["run.execute", "routes.read", "routes.status", "operations.read", "operations.write"],
-  // Invoices, payments, reports.
+  // Invoices, payments, bills, reports. The only role that needs the payable
+  // side named explicitly — every other holder of it derives from ALL or
+  // READ_ONLY and picks it up on its own.
   finance: [
     "customers.read",
     "agreements.read",
     "items.read",
     "invoices.read", "invoices.write",
+    "purchases.read", "purchases.write",
     "reports.read",
   ],
   warehouse_operator: [
@@ -130,7 +140,7 @@ export const ROLE_SUMMARY: Record<Role, string> = {
   operations_manager: "Everything day to day, but not the settings",
   dispatcher: "Customers, runs, stops, drivers, trucks and invoices",
   driver: "Their own run, on their phone, and nothing else",
-  finance: "Invoices, payments and reports",
+  finance: "Invoices, payments, supplier bills and reports",
   warehouse_operator: "The plant floor and stock",
   customer_service: "Customers and the day's stops",
   sales: "Customers and their contracts",

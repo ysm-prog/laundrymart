@@ -48,7 +48,7 @@ describe("navigationFor", () => {
 
   it("hides an area entirely when no screen inside it is reachable", () => {
     const driver = navigationFor("driver");
-    expect(driver.map((item) => item.label)).not.toContain("Invoices");
+    expect(driver.map((item) => item.label)).not.toContain("Money");
     expect(driver.map((item) => item.label)).not.toContain("Settings");
   });
 
@@ -61,6 +61,19 @@ describe("navigationFor", () => {
       "Today's runs", "Plan the day", "Weekly runs", "Drivers", "Vehicles",
     ]);
     expect(navigationFor("dispatcher").map((item) => item.label)).not.toContain("Settings");
+  });
+
+  it("keeps the payable screens away from the people who plan the day", () => {
+    // A dispatcher holds `invoices.read` so they can see whether a customer is
+    // on stop. That is not a reason to show them what the business pays its
+    // suppliers, which is why `purchases.read` exists as its own capability.
+    const money = navigationFor("dispatcher").find((item) => item.label === "Money");
+    expect(money?.children?.map((child) => child.label)).toEqual(["Invoices"]);
+
+    const finance = navigationFor("finance").find((item) => item.label === "Money");
+    expect(finance?.children?.map((child) => child.label)).toEqual([
+      "Invoices", "Bills", "Suppliers", "Accounts",
+    ]);
   });
 
   it("stays inside the ten rows the redesign promises", () => {
@@ -77,7 +90,7 @@ describe("sectionFor", () => {
   it("puts a detail route in its own area", () => {
     expect(label("/customers/abc-123")).toBe("Customers");
     expect(label("/customers/abc-123/edit")).toBe("Customers");
-    expect(label("/invoices/inv-1")).toBe("Invoices");
+    expect(label("/invoices/inv-1")).toBe("Money");
   });
 
   it("resolves a child that is not under the area's own path", () => {
@@ -85,6 +98,9 @@ describe("sectionFor", () => {
     expect(label("/operations/exceptions")).toBe("Stops");
     expect(label("/warehouse/batch-1")).toBe("Linen");
     expect(label("/vehicles")).toBe("Runs");
+    expect(label("/bills")).toBe("Money");
+    expect(label("/suppliers")).toBe("Money");
+    expect(label("/accounts")).toBe("Money");
   });
 
   it("prefers the longest matching destination", () => {

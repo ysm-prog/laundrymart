@@ -40,6 +40,11 @@ export type Customer = {
   status: string;
   depot_id: Uuid | null;
   created_at: string;
+  /** 0014 — what they owed when the books were carried across, not a live figure. */
+  opening_balance?: number;
+  opening_balance_overdue?: number;
+  /** 0014 — whether this customer is in the overdue chase at all. */
+  reminders_enabled?: boolean;
 };
 
 export type CustomerLocation = {
@@ -379,6 +384,59 @@ export type ProductionBatchLine = {
   quantity: number;
   rejected_quantity: number;
   notes: string | null;
+};
+
+/** 0014 — the payable side of the books. */
+export type Supplier = {
+  id: Uuid;
+  supplier_number: string;
+  name: string;
+  phone: string | null;
+  email: string | null;
+  /** Balance carried in from the previous system, not a running total. */
+  opening_balance: number;
+  notes: string | null;
+  status: string;
+};
+
+export type SupplierBill = {
+  id: Uuid;
+  supplier_id: Uuid;
+  bill_number: string;
+  supplier_invoice_no: string | null;
+  issue_date: string;
+  due_date: string | null;
+  amount: number;
+  /** Legitimately negative: a supplier debit note is money owed back to us. */
+  balance_due: number;
+  status: string;
+  suppliers: { name: string } | null;
+};
+
+export type PurchaseOrder = {
+  id: Uuid;
+  supplier_id: Uuid;
+  po_number: string;
+  supplier_invoice_no: string | null;
+  issue_date: string;
+  promised_date: string | null;
+  amount: number;
+  balance_due: number;
+  status: string;
+  suppliers: { name: string } | null;
+};
+
+export type GlAccount = {
+  id: Uuid;
+  code: string;
+  name: string;
+  account_type: string;
+  tax_code: string | null;
+  is_linked: boolean;
+  /** True for the six MYOB classification rows that carry no code of their own. */
+  is_header: boolean;
+  level: number;
+  current_balance: number;
 };
 
 /** `select("id, name")` on a lookup table. */

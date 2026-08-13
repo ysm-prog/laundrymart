@@ -72,6 +72,10 @@ Roles and capabilities are declared once in `src/lib/roles.ts` and drive the nav
 and action guards. `routes.write` (plan and assign) is separate from `routes.status` (advance
 a run that is already out): the latter also goes to `driver` — RLS confines them to their own
 run — and to `customer_service`, so a stuck run is not waiting on a dispatcher.
+`purchases.read`/`purchases.write` (suppliers, bills, purchase orders, the chart of
+accounts) is separate from `invoices.*` for the same kind of reason: a dispatcher holds
+`invoices.read` to see whether a customer is on stop, which is no reason to show them what
+the business pays its suppliers.
 
 ## 4. Business rules enforced in the database
 - Run cannot start without `load_confirmed_at`; cannot close before `unloaded_at`
@@ -103,13 +107,15 @@ branches deploy. Never force-push `Prod`.
 `/` landing · `/login` · `/offline` · `/api/sync` · `/api/media` · `/api/invoices/:id/pdf` ·
 `/api/notifications/sweep` (cron, bearer-token authed, no session)
 `(app)`: `/dashboard` · `/customers[/new|/:id|/:id/edit]` · `/agreements[/new|/:id]` ·
+`/bills` · `/suppliers` · `/accounts` ·
 `/items[/:id]` · `/drivers` · `/vehicles` · `/routes/templates[/:id]` ·
 `/routes/daily[/:id|/:id/sheet]` · `/routes/planner` · `/jobs[/:id]` ·
 `/operations/{pickups,deliveries,exceptions}` · `/run` · `/warehouse[/:id]` · `/inventory` ·
 `/invoices[/:id]` · `/reports` · `/search` · `/help` · `/notifications` ·
 `/admin` (redirects) `[/depots|/users|/holidays|/audit|/notifications]`
 
-**Navigation is data** (`src/lib/nav.ts`): ten areas, each with optional `children`
+**Navigation is data** (`src/lib/nav.ts`): ten areas (the old "Invoices" row is now
+"Money", covering both directions — invoices, bills, suppliers, the chart of accounts), each with optional `children`
 rendered as a tab strip (`SectionNav` in the layout, not per page). An area is visible
 when any screen inside it is, and `navigationFor()` resolves its href *and capability*
 together to the first screen the role can open — so a row never links somewhere the auth
@@ -146,10 +152,15 @@ renders no tab strip. Tested in `src/lib/__tests__/nav.test.ts`.
   (AD-4). Beware the numbering drift: the unmerged branch
   `claude/warehouse-inventory-flow-psooyq` carries its own `0012_return_count.sql`, which
   has to be renumbered when it lands.
+- `0014_purchases` — the payable side: `suppliers`, `gl_accounts`, `supplier_bills`,
+  `purchase_orders`. Plus three columns on `customers` the previous books carried:
+  `opening_balance`, `opening_balance_overdue` and `reminders_enabled`.
 
 Proofs in `supabase/tests/`: `rls_isolation`, `rls_coverage`, `driver_scope`,
-`business_rules`, `media_scope`, `warehouse_rules`, `notifications_scope`
-(56 assertions). Demo data in `supabase/seed.sql` — not applied by migrations.
+`business_rules`, `media_scope`, `warehouse_rules`, `notifications_scope`,
+`purchases_scope` (67 assertions). Demo data in `supabase/seed.sql` — not applied by
+migrations. Carrying a set of books in from MYOB: `docs/IMPORT-MYOB.md` and
+`scripts/import/myob-import.py`.
 
 **Do not re-add `grant execute on all functions in schema public to anon`.** That
 boilerplate in 0002–0009 is what exposed every SECURITY DEFINER helper on
@@ -294,6 +305,50 @@ Both are compositions over existing tables — neither added a migration.
   are edited and invoices voided.
 
 ## 18. Changelog
+### 2026-08-13 · The books came across: suppliers, bills, purchase orders, accounts
+The MYOB export for **Adelaide Towel Service** is now in the app, in a tenant of its own
+(`Adelaide Towel Service`, Australia/Adelaide) beside the untouched demo tenant. The app
+had only the receivable half of the books; everything payable had no home, and neither did
+the chart of accounts every document is coded against.
+- **`0014_purchases`** — `suppliers`, `gl_accounts`, `supplier_bills`, `purchase_orders`,
+  each through `apply_tenant_policy`. Suppliers are deliberately *not* folded into
+  `customers`: the two share a name and an email and nothing else, and a shared contacts
+  table would have made every customer query filter on a type flag. Amounts are not
+  constrained positive — a supplier debit note is money owed back, and the obvious check
+  would have dropped 10 real bills. Proof in `purchases_scope.test.sql` (11 assertions:
+  cross-tenant read, the `with check` tenant-hop, `anon` by privilege *and* by message,
+  the negative balance, the due-before-issue refusal, per-tenant numbering).
+- **Three columns on `customers`.** `opening_balance` and `opening_balance_overdue` are
+  what each customer owed on the day the books were carried across, kept apart from
+  anything the app computes so the first period cannot double-count. `reminders_enabled`
+  is the per-customer consent the old system already recorded — **and the overdue chase
+  now honours it**, because a switch that looks like it stops mail but does not is worse
+  than not importing the column. 233 of the 459 customers arrive with it off.
+- **`purchases.read`/`purchases.write`**, split from `invoices.*`. See §3. Only `finance`
+  needed it named explicitly; every other holder derives from ALL or READ_ONLY.
+- **The rail's "Invoices" row is now "Money"** with four tabs (Invoices, Bills, Suppliers,
+  Accounts). An area named after one of its four tabs would read as the odd one out.
+  `/search` gained suppliers and bills, each gated exactly like its own screen — a bill
+  matches on the supplier's own invoice number too, since that is the number being read
+  down the phone. Bills badge on the rail counts by **balance, not status**: a bill
+  carried in from the old books keeps whatever status it was closed with there.
+- **`scripts/import/myob-import.py` + `docs/IMPORT-MYOB.md`.** The CSVs are deliberately
+  not in the repo — a real customer and supplier list does not belong in a git history —
+  so the script is the reproducible part and the export is handed to it.
+  **The export silently loses a column**: when a bill has no supplier invoice number MYOB
+  omits the field rather than emitting an empty one, shifting every later value one place
+  left on 667 of 1,515 rows. Unrepaired, each of those imports a date as its amount and
+  still looks plausible. Detected by Status being empty; repaired; asserted by the totals
+  below. Four suppliers and 12 customers exist only in document history and are created
+  inactive rather than dropping the documents that name them.
+- **It reconciles.** Bills outstanding sums to 65,724.25 — exactly Trade Creditors
+  (`2-1200`) in the imported chart of accounts. The customer side does **not**: the
+  contact export totals 125,595.68 against Trade Debtors of 131,061.74, a 5,466.06 gap
+  that is in the source data, not the import. Recorded in `docs/IMPORT-MYOB.md` rather
+  than reconciled away, because guessing an adjustment puts a number in the books that
+  nobody in the business decided on.
+- Not done: `/design-preview` has no section for the three new screens yet.
+
 ### 2026-08-05 · Simplification audit: navigation, search, help, responsive tables
 Full-application UX/code review in `docs/SIMPLIFICATION-AUDIT.md` (13-part deliverable:
 executive summary, UX and code audits, architecture review, navigation and workflow

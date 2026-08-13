@@ -1,6 +1,45 @@
 # MEMORY — working session handoff
 > Auto-loaded each session. Canonical state is CLAUDE.md; this is the live delta.
 
+**In flight (2026-08-13): the MYOB import for Adelaide Towel Service.**
+Branch `claude/data-database-import-19ijkz`. Code, migration, tests and docs are done,
+verified and pushed. `0014_purchases` is **applied to `laundrymart-syd`**, and the tenant
+`Adelaide Towel Service` (`20000000-0000-4000-8000-000000000001`, Australia/Adelaide)
+exists with both super_admin logins as members and one depot (`ADL`).
+
+**The data load into the hosted project is PARTIAL — resume it.** This container's egress
+policy answers 403 to `CONNECT xujhwljrmogenhvqpkrf.supabase.co`, so the Supabase MCP
+`execute_sql` tool is the only channel and the 217 KB of SQL has to go through it in
+~11 KB statements. Regenerate and continue:
+
+```
+python3 scripts/import/myob-import.py --compact --max-bytes 11000 <export-dir> \
+  20000000-0000-4000-8000-000000000001 > import.sql
+```
+
+Everything is idempotent (parties upsert on a name-derived id, documents on their own
+number), so re-running any statement is safe. Check where it got to with:
+
+```sql
+select (select count(*) from customers where tenant_id = '2000...0001') customers,   -- 459
+       (select count(*) from suppliers) suppliers,                                   -- 192
+       (select count(*) from gl_accounts) accounts,                                  -- 268
+       (select count(*) from supplier_bills) bills,                                  -- 1515
+       (select count(*) from purchase_orders) orders,                                -- 1
+       (select count(*) from invoices where invoice_type = 'credit') credits;         -- 46
+```
+
+At last check: customers 155 of 459 in; suppliers, accounts, bills, orders and credits
+not started. Order matters — suppliers must land before bills, customers before credits,
+because those statements join on the party's number.
+
+Proof it worked, once done: `sum(balance_due)` over `supplier_bills` must be **65,724.25**,
+which is exactly Trade Creditors (`2-1200`) in the imported chart of accounts. The customer
+side is knowingly 5,466.06 short of Trade Debtors — that gap is in the source data; see
+`docs/IMPORT-MYOB.md`.
+
+---
+
 **Status:** Live, signed into, and on the upgraded stack (Next 16, Tailwind 4, Zod 4,
 vitest 4). `laundrymart-syd` (ref `xujhwljrmogenhvqpkrf`) has the demo tenant; the app is on
 Vercel at `ats.coreit.com.au`; sign-in verified end to end.
