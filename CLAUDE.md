@@ -105,14 +105,14 @@ branches deploy. Never force-push `Prod`.
 
 ## 6. Routes
 `/` landing · `/login` · `/offline` · `/api/sync` · `/api/media` · `/api/invoices/:id/pdf` ·
-`/api/notifications/sweep` (cron, bearer-token authed, no session)
+`/api/notifications/sweep` (cron, bearer-token authed, no session) · `/api/import` (file upload)
 `(app)`: `/dashboard` · `/customers[/new|/:id|/:id/edit]` · `/agreements[/new|/:id]` ·
 `/bills` · `/suppliers` · `/accounts` ·
 `/items[/:id]` · `/drivers` · `/vehicles` · `/routes/templates[/:id]` ·
 `/routes/daily[/:id|/:id/sheet]` · `/routes/planner` · `/jobs[/:id]` ·
 `/operations/{pickups,deliveries,exceptions}` · `/run` · `/warehouse[/:id]` · `/inventory` ·
 `/invoices[/:id]` · `/reports` · `/search` · `/help` · `/notifications` ·
-`/admin` (redirects) `[/depots|/users|/holidays|/audit|/notifications]`
+`/admin` (redirects) `[/depots|/users|/holidays|/audit|/notifications|/import]`
 
 **Navigation is data** (`src/lib/nav.ts`): ten areas (the old "Invoices" row is now
 "Money", covering both directions — invoices, bills, suppliers, the chart of accounts), each with optional `children`
@@ -159,12 +159,18 @@ renders no tab strip. Tested in `src/lib/__tests__/nav.test.ts`.
   allocated to bills because the advice does not say which), and the end of the
   opening-balance double count: an opening is cleared once a document carries the same
   money. Column comments say so, since the name invites the addition.
+- `0016_import_helpers` — `clear_superseded_openings()` and `park_number_sequence()`, the
+  two set-based steps every import ends with, so the in-app importer performs them as one
+  statement each instead of paging a tenant's invoices back to a request handler. The
+  first is SECURITY INVOKER (its tables carry member policies); the second must be
+  SECURITY DEFINER, because `number_sequences` has RLS on and **no policy at all** — it is
+  deny-all on purpose, reachable only through a function that vets the caller.
 
 Proofs in `supabase/tests/`: `rls_isolation`, `rls_coverage`, `driver_scope`,
 `business_rules`, `media_scope`, `warehouse_rules`, `notifications_scope`,
-`purchases_scope`, `supplier_payments_scope` (76 assertions). Demo data in `supabase/seed.sql` — not applied by
-migrations. Carrying a set of books in from MYOB: `docs/IMPORT-MYOB.md` and
-`scripts/import/myob-import.py`.
+`purchases_scope`, `supplier_payments_scope`, `import_helpers` (84 assertions). Demo data in
+`supabase/seed.sql` — not applied by migrations. Carrying a set of books in from MYOB: §19,
+`docs/IMPORT-MYOB.md`.
 
 **Do not re-add `grant execute on all functions in schema public to anon`.** That
 boilerplate in 0002–0009 is what exposed every SECURITY DEFINER helper on
@@ -312,7 +318,71 @@ Both are compositions over existing tables — neither added a migration.
   action an open redirect. `/invoices/:id` stays as the printable record and the place lines
   are edited and invoices voided.
 
+## 19. Bringing in a set of books
+`/admin/import` (`admin.write`) takes the reports an accounting system exports and loads
+them. It replaces handing the export to `scripts/import/myob-import.py` and running the SQL
+it prints; the script stays for a deployment with no app in front of it.
+
+- **The rules are pure and live in `src/lib/domain/myob/`** — a CSV parser, an .xlsx reader
+  (zip + XML, hand-rolled on `node:zlib`; nothing is added to `package.json` for one
+  screen), the cell rules, one reader per export, and `buildPlan()`. No database access, so
+  the preview and the write cannot disagree: `/api/import` builds the *same* plan in both
+  modes and only the second executes it. That two-step is not ceremony — this import's
+  failure mode is a number that is wrong but plausible, which is exactly what MYOB's
+  dropped column produces.
+- **Identity is a uuid5 of tenant + table + name**, byte-identical to Python's `uuid.uuid5`.
+  `myob.test.ts` pins it against four ids the hosted database actually holds, because the
+  whole feature rests on an upload addressing the rows the first load created rather than
+  making a second copy of them. Do not change the namespace.
+- **Party numbers are read back from the database**, not taken from position in the export.
+  The script numbered by sort order, so re-running a *grown* export could hand an existing
+  number to a different business; that trap is gone here. Numbers only ever grow.
+- **A party a document merely names is never overwritten.** Uploading `invoices.csv` alone
+  would otherwise set every customer it references to inactive with a zero balance. An
+  implied party is created only when genuinely new; a described one (from a contact export)
+  is always written.
+- The two finishing steps are SQL functions (0016), not loops in the handler.
+- **Not a transaction.** PostgREST cannot hold one across requests, so a failure part-way
+  leaves what was written. Survivable because every statement is an upsert on a natural
+  key: the repair for a partial import is to upload the same files again, and the error
+  message says so.
+- 4 MB per request — Vercel refuses a larger body before the handler sees it. The screen
+  says to split, and says why splitting is safe.
+
 ## 18. Changelog
+### 2026-08-13 · The books can be brought in from the app
+Answers "allow to upload from the app so it goes straight into database?". `/admin/import`
+under Settings: choose the MYOB exports, read what they add up to, load them. Until now the
+only way in was to hand the export to a Python script and run the SQL it printed, which is
+not a thing an operator can do.
+- **`src/lib/domain/myob/`** — the script's rules ported to pure TypeScript: an RFC 4180
+  CSV parser, an .xlsx reader built on `node:zlib` and a small XML scanner, the cell rules,
+  eight readers and `buildPlan()`. No new dependency. 27 unit tests; 173 in total.
+- **Verified against the real export rather than against fixtures.** Run over the ten files
+  the first load used, the TypeScript importer reproduces it exactly: 508 customers, 192
+  suppliers, 268 accounts, 1,515 bills, 1 order, 646 outstanding invoices, 62 payments,
+  receivable 131,061.24, payable 65,724.25, sequences parked at 509 and 193 — and the
+  spot-checked ids and party numbers are the ones already in the database.
+- **Two steps, one code path.** The preview is the plan; the button executes that same plan.
+  A preview generated by different code would be a preview of nothing, and this is the one
+  kind of data where a plausible wrong number costs more than a loud failure.
+- **Two things the script could not do.** Party numbers now come from the database, so a
+  re-run of a grown export no longer risks handing an existing number to a different
+  business. And a party that an upload only *names* is matched, never rewritten — uploading
+  `invoices.csv` on its own used to be a way to flip live customers to inactive and wipe the
+  balances they arrived with. Both are unit-tested.
+- **`0016_import_helpers`** — the finishing steps as functions. `park_number_sequence` had
+  to be SECURITY DEFINER: the pgTAP proof caught the invoker version failing, because
+  `number_sequences` has RLS on and no policy at all. That is deliberate (only `next_number`
+  may touch it) and was worth finding in a test rather than in production.
+  `import_helpers.test.sql` adds 8 assertions, 84 in total — including that a member of one
+  tenant cannot clear openings in another, and that a later, smaller import cannot wind a
+  number sequence backwards over numbers already issued.
+- Advisors gained exactly one line: `park_number_sequence` joining the SECURITY DEFINER
+  list beside `next_number`, scoped by the same membership check.
+- Not done: `/design-preview` still has no section for the money screens, and none for this
+  one either.
+
 ### 2026-08-13 · The receivable side, the money going out, and a reconciliation that was wrong
 A second round of MYOB reports: the sales history, the remittance advices, and a contacts
 report that turns out to be the authoritative one. Three of the five files were genuinely

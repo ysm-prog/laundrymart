@@ -1,6 +1,40 @@
 # MEMORY — working session handoff
 > Auto-loaded each session. Canonical state is CLAUDE.md; this is the live delta.
 
+**Done (2026-08-13): books can now be uploaded from the app.**
+`/admin/import` under Settings (`admin.write`) — pick the MYOB exports, read the summary,
+press the button. The script's rules are ported to `src/lib/domain/myob/` as pure
+TypeScript (CSV parser, hand-rolled .xlsx reader on `node:zlib`, cell rules, eight readers,
+`buildPlan()`), with no new dependency. `/api/import` builds the same plan in both modes —
+`analyse` returns it, `commit` executes it — so the preview cannot describe a different
+import from the one that runs.
+
+**Verified against the real export, not fixtures.** Run over the ten files the first load
+used, it reproduces that load exactly: 508 / 192 / 268 / 1515 / 1 / 646 / 62, receivable
+131,061.24, payable 65,724.25, sequences 509 and 193, and the spot-checked ids and party
+numbers match rows already in the database. `myob.test.ts` pins the uuid5 identity function
+against four of those ids — that is what makes an upload update the rows the Python load
+created instead of making a second copy. **Do not change the uuid5 namespace.**
+
+Two improvements over the script, both unit-tested: party numbers are read back from the
+database (so a re-run of a grown export cannot hand an existing number to a different
+business), and a party an upload only *names* is matched rather than rewritten (uploading
+`invoices.csv` alone used to be a way to flip live customers inactive and wipe their
+balances).
+
+**`0016_import_helpers` is applied to `laundrymart-syd`** and exercised live as a real
+member. `park_number_sequence` must be SECURITY DEFINER — the pgTAP proof caught the
+invoker version failing because `number_sequences` has RLS on and *no policy at all*, which
+is deliberate. `clear_superseded_openings` stays INVOKER. Suite is 84 assertions.
+Advisors gained exactly one line, `park_number_sequence` beside `next_number`.
+
+**What has not been exercised: the write path against the live database.** This container's
+egress answers 403 to `CONNECT xujhwljrmogenhvqpkrf.supabase.co`, so supabase-js cannot
+reach PostgREST from here — the parse/plan half is proven against the real files and the
+SQL half against local Postgres and the hosted functions, but no upload has gone end to end
+through `/api/import`. Do one from the deployed app before relying on it, ideally with a
+single small file first. The 4 MB cap is Vercel's body limit, not a choice.
+
 **Done (2026-08-13): both sides of the MYOB books for Adelaide Towel Service are in.**
 Branch `claude/data-database-import-19ijkz`, pushed. `0014_purchases` and
 `0015_supplier_payments` are applied to `laundrymart-syd`, and the tenant

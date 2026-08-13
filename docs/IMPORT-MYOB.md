@@ -30,12 +30,48 @@ customer and supplier list with contact details; a git history is a bad place
 for one, and the app is the right home for the data. Keep the export wherever
 the business keeps its accounting downloads and point the script at it.
 
-## Running it
+## Running it: from the app
+
+**Settings → Bring in your books** (`/admin/import`, `admin.write`). Upload the
+files, read the summary, press the button. That is the whole procedure, and it
+is the one to use.
+
+It works in two steps on purpose. The plan is built, counted and shown before
+anything is written, because this import's failure mode is a number that is
+wrong but entirely plausible — see the dropped column below. The preview and the
+write are the *same* code (`buildPlan` in `src/lib/domain/myob/plan.ts`), so the
+summary cannot describe a different import from the one that runs.
+
+Two things it does that the script cannot:
+
+* **Party numbers come from the database.** A customer already here keeps the
+  number they have; only genuinely new ones are numbered, from the highest in
+  use. That retires the script's one silent trap (below).
+* **A party the upload only *names* is never overwritten.** Upload `invoices.csv`
+  on its own and the customers it references are matched, not rewritten — an
+  existing customer will not be flipped to inactive with their balance wiped.
+
+Upload as much as fits in 4 MB at a time; a request larger than that never
+reaches the app. Splitting is safe and the order does not matter, because every
+row is matched on its own natural key rather than appended.
+
+## Running it: from the command line
+
+Still here, unchanged, for a deployment with no app in front of it or a database
+reachable only through a statement-capped tool. It is the path the original load
+used.
 
 ```bash
 python3 scripts/import/myob-import.py <export-dir> <tenant-uuid> > import.sql
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f import.sql
 ```
+
+**The two implementations must agree.** `src/lib/domain/myob` is a port of the
+script and is now the living one: it has the unit tests, and `myob.test.ts` pins
+its identity function against four ids the hosted database actually holds, so an
+upload updates the rows the script created rather than making a second copy. If
+a rule changes, change the TypeScript; treat the script as the record of how the
+first load was produced.
 
 The tenant must already exist, along with a membership for whoever will look at
 the data — the import writes rows, not access:
@@ -62,9 +98,10 @@ a single statement — a Supabase project behind an egress policy, for one:
 
 Re-running is safe. Parties upsert on a name-derived id and documents on their
 own number, so the same export always addresses the same rows. The one caveat
-is in the script's docstring: customer and supplier *numbers* are positional, so
-a re-run of a **grown** export stops on the unique index rather than renumbering
-silently.
+applies **to the script only**: customer and supplier *numbers* are positional
+there, so a re-run of a **grown** export stops on the unique index rather than
+renumbering silently. The app's importer reads the numbers back from the
+database instead, and has no such limit.
 
 ## What the export gets wrong, and what the importer does about it
 

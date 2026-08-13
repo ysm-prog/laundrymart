@@ -205,6 +205,12 @@ export const NAVIGATION: NavItem[] = [
         blurb: "What the app tells you about, and what it emails your customers.",
       },
       {
+        // Write, not read: the page is an upload form and nothing else, so a
+        // read-only role would get a screen it cannot submit.
+        label: "Bring in your books", href: "/admin/import", capability: "admin.write",
+        blurb: "Upload the reports from your old accounting system and load them in.",
+      },
+      {
         label: "Public holidays", href: "/admin/holidays", capability: "admin.read",
         blurb: "Days you do not serve. Contracts decide what happens on each one.",
       },
