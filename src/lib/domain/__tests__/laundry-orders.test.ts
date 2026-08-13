@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
-  ORDER_ACTIONS, ORDER_STATUSES, TERMINAL_STATUSES,
-  actionsFor, checkTransition, describeItem, isBlankItem, isOrderStatus,
-  isOverdue, nextStatuses, summariseItems, validateItem,
+  ORDER_ACTIONS, ORDER_STATUSES, RECEIVED_VIA, RECEIVED_VIA_OPTIONS, TERMINAL_STATUSES,
+  actionsFor, checkTransition, describeItem, initialDeliveryRequired, isBlankItem,
+  isOrderStatus, isOverdue, nextStatuses, receivedInstant, receivedViaOptions,
+  summariseItems, validateItem,
   type OrderStatus,
 } from "@/lib/domain/laundry-orders";
+import { businessToday, toZonedDate, toZonedTime } from "@/lib/domain/timezone";
 
 const DELIVERY = true;
 const PICKUP = false;
@@ -125,6 +127,70 @@ describe("actionsFor", () => {
     for (const action of ORDER_ACTIONS.filter((entry) => entry.key !== "cancel")) {
       expect(action.capability, action.key).toBe("orders.status");
     }
+  });
+});
+
+describe("how the laundry arrived", () => {
+  it("offers a new job the two real answers and nothing else", () => {
+    expect(receivedViaOptions()).toEqual(["customer_dropoff", "driver_pickup"]);
+    expect(receivedViaOptions(null)).not.toContain("other");
+    expect([...RECEIVED_VIA_OPTIONS]).toEqual(["customer_dropoff", "driver_pickup"]);
+  });
+
+  it("keeps a job's own value in the list, so an edit cannot rewrite it", () => {
+    // A job taken in before the choice was narrowed still opens showing how it
+    // actually arrived; saving it back writes the same value.
+    expect(receivedViaOptions("other")).toEqual(["customer_dropoff", "driver_pickup", "other"]);
+    // One that already holds an offered value is not listed twice.
+    expect(receivedViaOptions("driver_pickup")).toEqual(["customer_dropoff", "driver_pickup"]);
+  });
+
+  it("still accepts every value the column holds", () => {
+    // The narrowing is what the form offers, not what the validator allows —
+    // a narrower validator would refuse to save an edit to a legacy job.
+    expect([...RECEIVED_VIA]).toEqual(["customer_dropoff", "driver_pickup", "other"]);
+  });
+});
+
+describe("the received instant", () => {
+  it("puts a new job on the chosen date, at the time it is being taken in", () => {
+    const today = businessToday();
+    const stamped = receivedInstant(today);
+    expect(toZonedDate(stamped)).toBe(today);
+    // No time field is posted, so the value must still be a real instant rather
+    // than midnight-in-UTC landing the job on the wrong day.
+    expect(stamped).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+  });
+
+  it("backdates to the chosen day rather than to its midnight", () => {
+    expect(toZonedDate(receivedInstant("2026-08-11"))).toBe("2026-08-11");
+  });
+
+  it("keeps the time already on a job when only its date is corrected", () => {
+    // 8:30am Sydney on 12 August, moved back a day: still 8:30am.
+    const existing = "2026-08-11T22:30:00.000Z";
+    expect(toZonedTime(existing)).toBe("08:30");
+    const corrected = receivedInstant("2026-08-11", existing);
+    expect(toZonedDate(corrected)).toBe("2026-08-11");
+    expect(toZonedTime(corrected)).toBe("08:30");
+  });
+
+  it("falls back to now rather than to midnight if the stored value is unusable", () => {
+    expect(toZonedDate(receivedInstant("2026-08-11", "not-an-instant"))).toBe("2026-08-11");
+  });
+});
+
+describe("the delivery / pickup default", () => {
+  it("starts a new job on re-delivery", () => {
+    expect(initialDeliveryRequired()).toBe(true);
+    expect(initialDeliveryRequired(null)).toBe(true);
+  });
+
+  it("leaves an existing job on whichever workflow it is already on", () => {
+    // The historical-protection rule: opening a customer-pickup job to change
+    // something else must not turn it into a delivery.
+    expect(initialDeliveryRequired({ delivery_required: false })).toBe(false);
+    expect(initialDeliveryRequired({ delivery_required: true })).toBe(true);
   });
 });
 

@@ -14,6 +14,7 @@
  */
 
 import type { Capability } from "@/lib/roles";
+import { businessNowTime, toInstant, toZonedTime } from "@/lib/domain/timezone";
 
 /* --------------------------------------------------------------- statuses */
 
@@ -151,6 +152,14 @@ export const PRIORITY_LABELS: Record<OrderPriority, string> = {
   urgent: "Urgent",
 };
 
+/**
+ * Every value the column accepts, including the legacy `other`.
+ *
+ * This stays the *accepted* set, not the offered one: the check constraint in
+ * 0014 allows all three, jobs taken in before this change may hold `other`, and
+ * a validator narrower than the column would refuse to save an edit to one of
+ * them. What the counter is offered on a new job is `RECEIVED_VIA_OPTIONS`.
+ */
 export const RECEIVED_VIA = ["customer_dropoff", "driver_pickup", "other"] as const;
 export type ReceivedVia = (typeof RECEIVED_VIA)[number];
 export const RECEIVED_VIA_LABELS: Record<ReceivedVia, string> = {
@@ -158,6 +167,51 @@ export const RECEIVED_VIA_LABELS: Record<ReceivedVia, string> = {
   driver_pickup: "Pickup by driver",
   other: "Other",
 };
+
+/** The two ways laundry actually arrives, and the only two a new job is offered. */
+export const RECEIVED_VIA_OPTIONS: readonly ReceivedVia[] = ["customer_dropoff", "driver_pickup"];
+
+/**
+ * The received-via choices to render, given what the job already holds.
+ *
+ * A new job gets the two real answers. An older job holding a value that is no
+ * longer offered keeps it in the list, so opening it to change something else
+ * cannot silently rewrite how it arrived — the same read-what-is-stored rule the
+ * delivery choice follows below.
+ */
+export function receivedViaOptions(current?: string | null): string[] {
+  const offered: string[] = [...RECEIVED_VIA_OPTIONS];
+  if (current && !offered.includes(current)) offered.push(current);
+  return offered;
+}
+
+/**
+ * Whether the delivery/pickup choice starts on "Re-deliver".
+ *
+ * New jobs do: taking it back to the customer is the normal job, and making the
+ * counter select it every time was a step that was almost always the same. An
+ * existing job answers with its own stored value, so editing one never moves it
+ * onto the other workflow.
+ */
+export function initialDeliveryRequired(order?: { delivery_required: boolean } | null): boolean {
+  return order ? order.delivery_required : true;
+}
+
+/**
+ * When the laundry was received, as the instant the column stores.
+ *
+ * The counter no longer types a time — it is the moment they are standing there,
+ * and asking for it was a field that was never wrong and always in the way. So a
+ * new job takes the clock time now, on whichever date was chosen (a manager
+ * backdating to yesterday gets this time yesterday, not midnight).
+ *
+ * An edit passes the job's existing `received_at` and keeps its time of day:
+ * correcting the date must not quietly move an 8am drop-off to this afternoon.
+ */
+export function receivedInstant(date: string, existing?: string | null): string {
+  const time = (existing ? toZonedTime(existing) : "") || businessNowTime();
+  return toInstant(date, time);
+}
 
 export const DELIVERY_WINDOWS = ["morning", "afternoon", "specific_time", "no_specific_time"] as const;
 export type DeliveryWindow = (typeof DELIVERY_WINDOWS)[number];
