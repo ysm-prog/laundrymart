@@ -21,6 +21,7 @@ export function ConfirmSubmit({
   eyebrow = "Cannot be undone",
   reasonName,
   reasonLabel = "Reason",
+  reasonRequired = true,
   pendingLabel,
   variant = "danger",
 }: {
@@ -30,9 +31,16 @@ export function ConfirmSubmit({
   consequence: string;
   /** The mono warning label over the consequence. */
   eyebrow?: string;
-  /** When set, a required reason input posted under this field name. */
+  /** When set, a reason input posted under this field name. */
   reasonName?: string;
   reasonLabel?: string;
+  /**
+   * Whether that reason must be filled in. Defaults to true, which is what
+   * voiding an invoice and closing a run both need. Cancelling a laundry job is
+   * the exception: the reason is genuinely useful and genuinely optional, and
+   * demanding one would only teach people to type "n/a".
+   */
+  reasonRequired?: boolean;
   pendingLabel?: string;
   variant?: "danger" | "primary";
 }) {
@@ -61,10 +69,13 @@ export function ConfirmSubmit({
       <p className="mt-1 text-[12.5px]">{consequence}</p>
       {reasonName ? (
         <label className="mt-2 block">
-          <span className="text-xs font-medium">{reasonLabel}</span>
+          <span className="text-xs font-medium">
+            {reasonLabel}
+            {reasonRequired ? null : <span className="ml-1 text-muted-foreground">(optional)</span>}
+          </span>
           <input
             name={reasonName}
-            required
+            required={reasonRequired}
             autoFocus
             className="mt-1 w-full border border-strong bg-surface-muted px-2.5 py-1.5 text-[12.5px]"
           />
