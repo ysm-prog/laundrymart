@@ -7,6 +7,13 @@ This is the canonical shipped state. MEMORY.md holds the live session delta (aut
 After any change to `src/` or `supabase/`, in the SAME commit: update the affected section
 below and add a Changelog entry (newest on top). The Stop hook warns on drift.
 
+`.claude/` carries this project's own agents and skills plus a selected subset of the
+enterprise framework (v1.5.0): eight specialist skills, a `principal-architect` agent, four
+workflow commands and nine standards. `.claude/README.md` is the index and
+`.claude/FRAMEWORK.md` says what was taken, what was skipped and what supersedes it.
+**This file beats `.claude/standards/`** — where a standard disagrees with a rule below,
+follow this file and say so explicitly rather than applying the standard silently.
+
 ## 1. Overview
 Commercial Laundry Management System — customers, service agreements, depot-aware routing,
 an offline driver run, inventory and billing. Next.js 16 (App Router) + Supabase
@@ -344,6 +351,27 @@ Both are compositions over existing tables — neither added a migration.
   are edited and invoices voided.
 
 ## 18. Changelog
+### 2026-08-13 · Enterprise framework: adopted the gaps, not the directory
+Tooling only — nothing under `src/` or `supabase/` was touched, no migration, no test change.
+Installed a selected subset of `ysm-prog/enterprise-claude-framework` v1.5.0 into `.claude/`:
+the eight specialist skills this repo had no guidance for (accessibility, UX, frontend
+architecture, performance, QA, devops, business analysis, principal architect), the
+`principal-architect` agent, four workflow commands (`/bug-fix`, `/incident-response`,
+`/dependency-upgrade`, `/refactoring`) and the nine standards those files reference.
+- **Not a wholesale copy, on the framework's own advice.** Where this repo already has a
+  specific entry point — `security-auditor` for security, `migration-author` + `rls-test` +
+  `migrations-check` for the database, `code-reviewer` for a diff, `ship-check`/`/ship` for
+  release, `multi-tenant-feature` for a new module — the framework's generic equivalent was
+  left out. Two entry points for one job invites picking the weaker one. `.claude/FRAMEWORK.md`
+  is the manifest: what was taken, what was skipped, and what supersedes each skipped item.
+- **The framework's `.claude/CLAUDE.md` was deliberately not installed.** It is auto-loaded
+  context restating principles this file already carries, and it routes to commands this repo
+  does not have. The installed skills name the standards they need at the point of use instead.
+- **`code-reviewer.md` was the one file-level collision** and ours was kept, unmodified — it
+  knows the tenancy rules and the CI gates; the framework's does not.
+- `.claude/VERSION` records 1.5.0 so a future sync can diff the framework changelog forward.
+  Every `.claude/…` path referenced by an installed file resolves; there are no dangling links.
+
 ### 2026-08-13 · Electro Services: full UI/UX redesign
 A visual, usability and responsiveness pass over the whole application. **No schema, server
 action, RLS policy, capability, query or business rule changed** — no migration, and the 204
