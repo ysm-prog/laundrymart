@@ -2,7 +2,7 @@ import { notFound, redirect } from "next/navigation";
 import { requireCapability } from "@/lib/auth/context";
 import { createClient } from "@/lib/supabase/server";
 import { can } from "@/lib/roles";
-import { Notice, PageHeader } from "@/components/ui";
+import { Notice, PageContainer, PageHeader } from "@/components/ui";
 import { createCustomer } from "@/app/(app)/customers/actions";
 import type { LaundryOrder, LaundryOrderItem } from "@/lib/db/types";
 import { updateOrder } from "../../actions";
@@ -46,15 +46,15 @@ export default async function EditJobPage({
   const { customers, drivers, staff } = await loadJobFormData();
 
   return (
-    <div>
+    <PageContainer width="form">
       <PageHeader
-        eyebrow="Job"
+        back={{ href: `/orders/${id}`, label: `Back to ${order.order_number}` }}
         title={`Edit ${order.order_number}`}
         description="Change what was taken in, when it is due, and who is on it."
       />
 
       {order.status === "completed" ? (
-        <div className="mb-4">
+        <div className="mb-5">
           <Notice tone="warning" title="This job is already completed">
             You are correcting a finished job. The change is recorded in its activity
             trail with your name on it.
@@ -74,6 +74,6 @@ export default async function EditJobPage({
         canBackdate={can(session.role, "orders.manage")}
         returnPath={`/orders/${id}/edit`}
       />
-    </div>
+    </PageContainer>
   );
 }

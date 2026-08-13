@@ -1,13 +1,15 @@
-import Link from "next/link";
+import { cookies } from "next/headers";
 import { requireSession, type Session } from "@/lib/auth/context";
 import { navigationFor } from "@/lib/nav";
 import { ROLE_LABELS } from "@/lib/roles";
 import { createClient } from "@/lib/supabase/server";
 import { today } from "@/lib/format";
-import { AppNav, MobileNav, SectionNav, ThemeToggle, type NavCounts } from "@/components/app-nav";
+import { SectionNav, ThemeToggle, type NavCounts } from "@/components/app-nav";
+import { AppShell } from "@/components/app-shell";
+import { GlobalSearch } from "@/components/global-search";
+import { UserMenu } from "@/components/user-menu";
 import { NotificationBell } from "@/components/notification-bell";
 import { unreadNotificationCount } from "@/lib/notifications/query";
-import { signOut } from "@/app/login/actions";
 
 /**
  * Counts for the sidebar badges.
@@ -59,91 +61,43 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const items = navigationFor(session.role);
   // Both resolve to head-only counts; issued together so the bell is no slower
   // than the rail it sits beside.
-  const [counts, unread] = await Promise.all([
+  const [counts, unread, cookieStore] = await Promise.all([
     navCounts(),
     unreadNotificationCount(session),
+    cookies(),
   ]);
 
+  // Read here rather than in the browser so the rail paints at the right width
+  // on the very first frame instead of snapping after hydration.
+  const collapsed = cookieStore.get("es_rail")?.value === "collapsed";
+
   return (
-    <div className="min-h-screen lg:grid lg:grid-cols-[212px_1fr]">
-      {/* The rail keeps its own near-black surface in both themes, as designed. */}
-      {/* The right border matters in dark mode, where the page background is the
-          same near-black as the rail and the edge would otherwise vanish. */}
-      <aside className="hidden border-r border-[#262c31] bg-[#14171a] pb-3 pt-3.5 lg:flex lg:flex-col">
-        <div className="border-b border-[#262c31] px-4 pb-3.5">
-          <Link href="/dashboard" className="block text-sm font-semibold tracking-[-0.01em] text-white">
-            LaundryMart
-          </Link>
-          <span className="mt-0.5 block truncate font-mono text-3xs text-[#7d8791]">
-            {session.tenantName}
-          </span>
-        </div>
-
-        <div className="flex-1 overflow-y-auto">
-          <AppNav items={items} counts={counts} />
-        </div>
-
-        <div className="mt-auto border-t border-[#262c31] px-4 pt-3">
-          <div className="flex items-center gap-2">
-            <span aria-hidden
-                  className="grid h-6 w-6 shrink-0 place-items-center bg-[#3a444d] text-2xs font-semibold text-white">
-              {initials(session)}
-            </span>
-            <span className="min-w-0">
-              <span className="block truncate text-xs text-white">{session.email ?? "Signed in"}</span>
-              <span className="block font-mono text-3xs text-[#7d8791]">{ROLE_LABELS[session.role]}</span>
-            </span>
-          </div>
-          <form action={signOut} className="mt-2.5">
-            <button type="submit"
-                    className="w-full border border-[#3a444d] px-2 py-1 text-left text-xs text-[#c7ced4]
-                               transition hover:border-[#5b6570] hover:text-white">
-              Sign out
-            </button>
-          </form>
-        </div>
-      </aside>
-
-      <div className="flex min-w-0 flex-col">
-        {/* Context bar: what you are looking at, and one search that works. */}
-        <header className="sticky top-0 z-30 flex h-[52px] flex-none items-center gap-2.5
-                           border-b bg-surface/95 px-3 backdrop-blur sm:px-4">
-          <MobileNav items={items} counts={counts} />
-          <Link href="/dashboard" className="text-sm font-semibold lg:hidden">LaundryMart</Link>
-
-          {/* One box that finds anything with a name or a number on it. It used
-              to submit to the customers list, which quietly meant an invoice
-              number typed here returned "no customers match". */}
-          <form action="/search" className="hidden min-w-0 flex-1 sm:block">
-            <label htmlFor="global-q" className="sr-only">
-              Search customers, invoices, stops, vehicles
-            </label>
-            <input
-              id="global-q" name="q" type="search"
-              placeholder="Search a customer, invoice, stop or rego…"
-              className="min-h-9 w-full max-w-[420px] border border-strong bg-surface-muted px-2.5 py-1.5
-                         text-[12.5px] placeholder:text-muted-foreground"
+    <AppShell
+      items={items}
+      counts={counts}
+      tenantName={session.tenantName}
+      defaultCollapsed={collapsed}
+      sectionSlot={<SectionNav items={items} />}
+      headerSlot={
+        <>
+          <GlobalSearch />
+          {/* No `ml-auto` here: on a phone the search icon carries it, and on
+              `sm` and up the search field is `flex-1` and pushes these right. */}
+          <div className="flex items-center gap-1">
+            <span className="mr-1 hidden text-sm text-muted-foreground lg:inline">{today()}</span>
+            <NotificationBell count={unread} />
+            <ThemeToggle />
+            <UserMenu
+              email={session.email ?? "Signed in"}
+              role={ROLE_LABELS[session.role]}
+              initials={initials(session)}
             />
-          </form>
-
-          <Link href="/search"
-                className="ml-auto min-h-9 border border-strong px-2.5 py-1.5 text-[12.5px] sm:hidden">
-            Search
-          </Link>
-
-          <span className="ml-auto hidden border border-border px-2 py-1 font-mono text-2xs
-                           text-muted-foreground md:inline">
-            {today()}
-          </span>
-          <NotificationBell count={unread} />
-          <ThemeToggle />
-        </header>
-
-        <SectionNav items={items} />
-
-        <main id="main" className="min-w-0 flex-1 p-4 sm:p-5">{children}</main>
-      </div>
-    </div>
+          </div>
+        </>
+      }
+    >
+      {children}
+    </AppShell>
   );
 }
 

@@ -22,7 +22,7 @@ export function InspectionChecklist({ items }: { items: Array<{ name: string; la
     <div className="space-y-2.5">
       <div ref={container} className="grid gap-2 sm:grid-cols-2">
         {items.map((item) => (
-          <label key={item.name} className="flex items-center gap-2 text-[12.5px]">
+          <label key={item.name} className="flex items-center gap-2 text-sm">
             <input
               id={item.name}
               name={item.name}
@@ -36,7 +36,7 @@ export function InspectionChecklist({ items }: { items: Array<{ name: string; la
       <button
         type="button"
         onClick={tickAll}
-        className="border border-strong bg-surface px-2.5 py-1.5 text-xs font-medium hover:bg-surface-muted"
+        className="rounded-lg border border-strong bg-surface px-2.5 py-1.5 text-xs font-medium hover:bg-surface-muted"
       >
         All checks OK — tick everything
       </button>

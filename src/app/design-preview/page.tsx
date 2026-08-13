@@ -1,10 +1,12 @@
-import { AppNav } from "@/components/app-nav";
+import { AppNav, BrandMark } from "@/components/app-nav";
+import { Moon, Search } from "lucide-react";
 import { Checkbox, Field, Input, Select, SubmitButton } from "@/components/form";
 import {
   Badge, Button, ButtonLink, Card, DataTable, EmptyState, Eyebrow, Notice,
   PageHeader, Stage, Stat, StatusBadge, cx,
 } from "@/components/ui";
 import { ConfirmSubmit } from "@/components/confirm-submit";
+import { OverlayDemo } from "./overlay-demo";
 import { CompleteJob } from "@/app/(app)/orders/complete-job";
 import { NotificationBell } from "@/components/notification-bell";
 import { NotificationList, type NotificationListItem } from "@/components/notification-list";
@@ -200,53 +202,58 @@ export default function DesignPreviewPage() {
   if (process.env.VERCEL_ENV === "production") notFound();
 
   return (
-    <div className="min-h-screen lg:grid lg:grid-cols-[212px_1fr]">
-      <aside className="hidden bg-[#14171a] pb-3 pt-3.5 lg:flex lg:flex-col">
-        <div className="border-b border-[#262c31] px-4 pb-3.5">
-          <span className="block text-sm font-semibold tracking-[-0.01em] text-white">LaundryMart</span>
-          <span className="mt-0.5 block truncate font-mono text-3xs text-[#7d8791]">
-            Harbour Commercial Laundry
+    <div className="min-h-screen lg:grid lg:grid-cols-[16rem_1fr]">
+      {/* The shell, mirrored from `AppShell`. Static here — the live one reads
+          the pathname and a cookie, neither of which this gallery has. */}
+      <aside className="hidden flex-col border-r bg-sidebar lg:flex">
+        <div className="flex h-16 flex-none items-center border-b border-sidebar-border px-4">
+          <span className="flex min-w-0 items-center gap-2.5">
+            <BrandMark />
+            <span className="min-w-0">
+              <span className="block truncate text-sm font-semibold leading-tight">
+                Electro Services
+              </span>
+              <span className="block truncate text-2xs text-sidebar-muted">
+                Harbour Commercial Laundry
+              </span>
+            </span>
           </span>
         </div>
-        <div className="flex-1 overflow-y-auto">
+        <div className="flex-1 overflow-y-auto px-2 py-3">
           <AppNav items={ITEMS} counts={COUNTS} />
-        </div>
-        <div className="mt-auto border-t border-[#262c31] px-4 pt-3">
-          <div className="flex items-center gap-2">
-            <span aria-hidden className="grid h-6 w-6 shrink-0 place-items-center bg-[#3a444d] text-2xs font-semibold text-white">DA</span>
-            <span className="min-w-0">
-              <span className="block truncate text-xs text-white">darshan@ctnorwood.com.au</span>
-              <span className="block font-mono text-3xs text-[#7d8791]">Super Admin</span>
-            </span>
-          </div>
-          <div className="mt-2.5">
-            <button className="w-full border border-[#3a444d] px-2 py-1 text-left text-xs text-[#c7ced4]">Sign out</button>
-          </div>
         </div>
       </aside>
 
       <div className="flex min-w-0 flex-col">
-        <header className="sticky top-0 z-30 flex h-[52px] flex-none items-center gap-2.5 border-b bg-surface/95 px-4 backdrop-blur">
-          <div className="hidden min-w-0 flex-1 sm:block">
-            <input placeholder="Search a customer, invoice, stop or rego…"
-                   className="min-h-9 w-full max-w-[420px] border border-strong bg-surface-muted px-2.5 py-1.5 text-[12.5px] placeholder:text-muted-foreground" />
+        <header className="sticky top-0 z-30 flex h-16 flex-none items-center gap-2 border-b
+                           bg-surface/90 px-5 backdrop-blur">
+          <div className="relative hidden min-w-0 max-w-[26rem] flex-1 sm:block">
+            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2
+                               text-muted-foreground" aria-hidden />
+            <input placeholder="Search customers, jobs, invoices, stops…"
+                   className="min-h-10 w-full rounded-lg border border-strong bg-surface-muted py-2
+                              pl-9 pr-3 text-sm placeholder:text-muted-foreground" />
           </div>
-          <span className="ml-auto border border-border px-2 py-1 font-mono text-2xs text-muted-foreground">2026-08-05</span>
-          <NotificationBell count={3} />
-          <span className="border border-strong px-2 py-1.5 font-mono text-2xs">☾</span>
+          <div className="ml-auto flex items-center gap-1">
+            <span className="mr-1 hidden text-sm text-muted-foreground lg:inline">13/08/2026</span>
+            <NotificationBell count={3} />
+            <span className="flex size-10 items-center justify-center rounded-lg text-muted-foreground">
+              <Moon className="size-[1.15rem]" aria-hidden />
+            </span>
+            <span className="flex size-8 items-center justify-center rounded-full bg-primary/12
+                             text-xs font-semibold text-primary">DA</span>
+          </div>
         </header>
 
-        {/* The tab strip that replaced the rail's nested groups. Static here —
-            the live one reads the pathname, which this gallery does not have. */}
         <div className="flex-none border-b bg-surface">
-          <nav className="flex gap-1 overflow-x-auto px-4">
+          <nav className="flex gap-1 overflow-x-auto px-5">
             {["Today's runs", "Plan the day", "Weekly runs", "Drivers", "Vehicles"].map((tab, index) => (
               <span key={tab}
                     className={cx(
-                      "-mb-px flex min-h-10 shrink-0 items-center border-b-2 px-2 text-[13px]",
+                      "-mb-px flex min-h-12 shrink-0 items-center border-b-2 px-3 text-sm",
                       index === 0
-                        ? "border-b-action font-medium text-foreground"
-                        : "border-b-transparent text-muted-foreground",
+                        ? "border-b-primary font-semibold text-primary"
+                        : "border-b-transparent font-medium text-muted-foreground",
                     )}>
                 {tab}
               </span>
@@ -254,19 +261,19 @@ export default function DesignPreviewPage() {
           </nav>
         </div>
 
-        <main className="min-w-0 flex-1 space-y-4 p-5">
+        <main className="min-w-0 flex-1 space-y-6 px-6 py-8">
           <PageHeader
-            eyebrow="Harbour Commercial Laundry · 05/08/2026"
-            title="Dashboard"
-            description="What needs a decision today."
+            eyebrow="Harbour Commercial Laundry · 13/08/2026"
+            title="Today"
+            description="What needs a decision right now."
           />
 
-          <div className="grid gap-px border bg-border sm:grid-cols-3 lg:grid-cols-5">
-            <Stat flush label="Stops today" value={<>7<span className="text-sm font-normal text-muted-foreground"> / 18</span></>} hint="11 remaining" />
-            <Stat flush label="In the plant" value="621" hint="washing through to ready" />
-            <Stat flush label="Ready to dispatch" value="120" hint="waiting on a truck" tone="success" />
-            <Stat flush label="Exceptions" value="4" hint="need a decision" tone="danger" />
-            <Stat flush label="Overdue" value="$14,280.00" hint="9 invoice(s) past terms" tone="warning" />
+          <div className="grid gap-4 sm:grid-cols-3 lg:grid-cols-5">
+            <Stat label="Stops today" value={<>7<span className="text-sm font-normal text-muted-foreground"> / 18</span></>} hint="11 remaining" />
+            <Stat label="In the plant" value="621" hint="washing through to ready" />
+            <Stat label="Ready to dispatch" value="120" hint="waiting on a truck" tone="success" />
+            <Stat label="Exceptions" value="4" hint="need a decision" tone="danger" />
+            <Stat label="Overdue" value="$14,280.00" hint="9 invoice(s) past terms" tone="warning" />
           </div>
 
           <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_300px]">
@@ -276,6 +283,7 @@ export default function DesignPreviewPage() {
                     below `sm` these rows become labelled cards. */}
                 <div className="p-4 sm:p-0">
                   <DataTable
+                    bare
                     rows={DECISIONS}
                     label="Things needing a decision"
                     rowClassName={(d) => cx("border-l-[3px]", d.rule)}
@@ -293,21 +301,21 @@ export default function DesignPreviewPage() {
                       {
                         header: "State",
                         cell: (d) => (
-                          <span className={cx("whitespace-nowrap text-[11.5px]", d.text)}>{d.state}</span>
+                          <span className={cx("whitespace-nowrap text-xs", d.text)}>{d.state}</span>
                         ),
                       },
                       { header: "Size", align: "right", cell: (d) => d.size },
                       {
                         header: "Since", hideBelow: "md",
                         cell: (d) => (
-                          <span className="whitespace-nowrap font-mono text-[11.5px] text-muted-foreground">
+                          <span className="whitespace-nowrap text-xs text-muted-foreground">
                             {d.since}
                           </span>
                         ),
                       },
                       {
                         header: "Reference", hideBelow: "lg",
-                        cell: (d) => <span className="whitespace-nowrap font-mono text-[11.5px]">{d.ref}</span>,
+                        cell: (d) => <span className="whitespace-nowrap text-xs">{d.ref}</span>,
                       },
                       {
                         header: "", align: "right",
@@ -323,7 +331,7 @@ export default function DesignPreviewPage() {
                   {STAGES.map(([label, qty]) => {
                     const peak = label === "Received";
                     return (
-                      <div key={label} className={cx("border px-2.5 py-2", peak && "border-warning/40 bg-warning/5")}>
+                      <div key={label} className={cx("rounded-lg border px-2.5 py-2", peak && "border-warning/40 bg-warning/5")}>
                         <Eyebrow className={peak ? "text-warning" : undefined}>{label}</Eyebrow>
                         <div className={cx("mt-0.5 text-[17px] font-semibold tabular-nums", peak && "text-warning")}>{qty}</div>
                       </div>
@@ -368,7 +376,7 @@ export default function DesignPreviewPage() {
                     ]}
                     empty={<EmptyState title="Nothing here" />}
                     columns={[
-                      { header: "Number", cell: (r) => <span className="font-mono text-[11.5px]">{r.n}</span> },
+                      { header: "Number", cell: (r) => <span className="text-xs">{r.n}</span> },
                       { header: "Customer", cell: (r) => r.c },
                       { header: "Status", cell: (r) => <StatusBadge status={r.s} /> },
                       { header: "Terms", cell: (r) => r.t, align: "right" },
@@ -391,12 +399,12 @@ export default function DesignPreviewPage() {
                     <li key={run.c} className="border-b last:border-b-0">
                       <div className="block px-4 py-2.5">
                         <div className="flex items-baseline justify-between gap-2">
-                          <span className="truncate text-[12.5px] font-semibold">{run.c} · {run.n}</span>
-                          <span className={cx("font-mono text-[11px] tabular-nums",
+                          <span className="truncate text-sm font-semibold">{run.c} · {run.n}</span>
+                          <span className={cx("text-xs tabular-nums",
                             percent === 100 ? "text-success" : "text-warning")}>{run.done} / {run.total}</span>
                         </div>
                         <div className="mt-1 flex flex-wrap items-center gap-2">
-                          <span className="truncate text-[11.5px] text-muted-foreground">{run.d}</span>
+                          <span className="truncate text-xs text-muted-foreground">{run.d}</span>
                           <StatusBadge status={run.s} />
                         </div>
                         <div aria-hidden className="mt-1.5 h-[5px] bg-surface-muted">
@@ -415,13 +423,13 @@ export default function DesignPreviewPage() {
               title="Dispatch planner"
               description="Arrange the whole day, then apply it in one go."
             />
-            <div className="grid gap-px border bg-border sm:grid-cols-2 lg:grid-cols-4">
-              <Stat flush label="Runs" value="3" hint="18 stops in total" />
-              <Stat flush label="Unassigned stops" value="2" hint="waiting on a run" tone="warning" />
-              <Stat flush label="Runs without a driver" value="1" hint="assign before the day starts" tone="warning" />
-              <Stat flush label="Exceptions" value="1" hint="may need re-dispatching" tone="danger" />
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              <Stat label="Runs" value="3" hint="18 stops in total" />
+              <Stat label="Unassigned stops" value="2" hint="waiting on a run" tone="warning" />
+              <Stat label="Runs without a driver" value="1" hint="assign before the day starts" tone="warning" />
+              <Stat label="Exceptions" value="1" hint="may need re-dispatching" tone="danger" />
             </div>
-            <div className="mt-4 border bg-surface p-3">
+            <div className="rounded-lg mt-4 border bg-surface p-3">
               <PlannerBoard
                 columns={PREVIEW_COLUMNS}
                 jobs={PREVIEW_JOBS}
@@ -438,18 +446,18 @@ export default function DesignPreviewPage() {
               title="Invoices"
               description="The register is the chase list; the pane is where the chase happens."
             />
-            <div className="grid gap-px border bg-border sm:grid-cols-2 lg:grid-cols-4">
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
               {[
                 ["Current", "$8,412.00", ""],
                 ["1–30 days", "$3,120.00", "text-warning"],
                 ["31–60 days", "$0.00", "text-warning"],
                 ["60+ days", "$1,284.50", "text-danger"],
               ].map(([label, value, tone]) => (
-                <div key={label} className="bg-surface px-4 py-3">
+                <div key={label} className="rounded-xl border bg-surface px-4 py-3 shadow-sm">
                   <Eyebrow>{label}</Eyebrow>
                   <div className={cx("mt-1 text-2xl font-semibold tabular-nums tracking-[-0.02em]",
                                      tone === "text-danger" && "text-danger")}>{value}</div>
-                  <div className={cx("mt-0.5 text-[11px]", tone || "text-muted-foreground")}>
+                  <div className={cx("mt-0.5 text-xs", tone || "text-muted-foreground")}>
                     {value === "$0.00" ? "nothing outstanding" : "outstanding"}
                   </div>
                 </div>
@@ -467,16 +475,16 @@ export default function DesignPreviewPage() {
                           : row.chasing ? "border-l-warning" : "border-l-transparent",
                       )}>
                         <div className="flex items-baseline justify-between gap-2">
-                          <span className="font-mono text-[11.5px] font-medium">{row.number}</span>
-                          <span className="font-mono text-[12.5px] font-semibold tabular-nums">{row.balance}</span>
+                          <span className="text-xs font-medium">{row.number}</span>
+                          <span className="text-sm font-semibold tabular-nums">{row.balance}</span>
                         </div>
                         <div className="mt-0.5 flex items-baseline justify-between gap-2">
-                          <span className="truncate text-[12.5px] font-semibold">{row.customer}</span>
-                          <span className="shrink-0 font-mono text-[11px] text-muted-foreground">of {row.total}</span>
+                          <span className="truncate text-sm font-semibold">{row.customer}</span>
+                          <span className="shrink-0 text-xs text-muted-foreground">of {row.total}</span>
                         </div>
                         <div className="mt-1 flex flex-wrap items-center gap-2">
                           <StatusBadge status={row.status} />
-                          <span className={cx("font-mono text-[11px]",
+                          <span className={cx("text-xs",
                                               row.chasing ? "text-warning" : "text-muted-foreground")}>
                             {row.when}
                           </span>
@@ -495,12 +503,12 @@ export default function DesignPreviewPage() {
               >
                 <div className="space-y-3 p-4">
                   <Notice tone="warning">72 day(s) past terms · $1,284.50 outstanding.</Notice>
-                  <div className="grid grid-cols-2 gap-px border bg-border">
-                    <div className="bg-surface px-3 py-2">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="rounded-lg border bg-surface px-3 py-2">
                       <Eyebrow>Total</Eyebrow>
                       <div className="mt-0.5 text-[17px] font-semibold tabular-nums">$1,284.50</div>
                     </div>
-                    <div className="bg-surface px-3 py-2">
+                    <div className="rounded-lg border bg-surface px-3 py-2">
                       <Eyebrow>Balance</Eyebrow>
                       <div className="mt-0.5 text-[17px] font-semibold tabular-nums text-warning">$1,284.50</div>
                     </div>
@@ -510,14 +518,14 @@ export default function DesignPreviewPage() {
                       ["Type", "Recurring"], ["Terms", "14 days"]].map(([label, value]) => (
                       <div key={label}>
                         <dt><Eyebrow>{label}</Eyebrow></dt>
-                        <dd className="font-mono text-[11.5px]">{value}</dd>
+                        <dd className="text-xs">{value}</dd>
                       </div>
                     ))}
                   </dl>
                 </div>
 
                 <section className="border-t">
-                  <h3 className="bg-surface-muted px-4 py-1.5 font-mono text-3xs uppercase tracking-[0.08em] text-muted-foreground">
+                  <h3 className="rounded-lg bg-surface-muted px-4 py-1.5 text-xs font-semibold text-muted-foreground">
                     Lines · 3
                   </h3>
                   <ul className="divide-y">
@@ -528,21 +536,21 @@ export default function DesignPreviewPage() {
                     ].map(([description, charge, qty, amount]) => (
                       <li key={description} className="flex items-baseline justify-between gap-3 px-4 py-1.5">
                         <span className="min-w-0">
-                          <span className="block truncate text-[12.5px]">{description}</span>
+                          <span className="block truncate text-sm">{description}</span>
                           <Eyebrow>{charge} · {qty}</Eyebrow>
                         </span>
-                        <span className="shrink-0 font-mono text-[12px] tabular-nums">{amount}</span>
+                        <span className="shrink-0 text-sm tabular-nums">{amount}</span>
                       </li>
                     ))}
-                    <li className="flex items-baseline justify-between gap-3 bg-surface-muted px-4 py-1.5">
+                    <li className="rounded-lg flex items-baseline justify-between gap-3 bg-surface-muted px-4 py-1.5">
                       <Eyebrow>Subtotal · GST $116.77</Eyebrow>
-                      <span className="font-mono text-[12px] font-semibold tabular-nums">$1,167.73</span>
+                      <span className="text-sm font-semibold tabular-nums">$1,167.73</span>
                     </li>
                   </ul>
                 </section>
 
                 <section className="border-t">
-                  <h3 className="bg-surface-muted px-4 py-1.5 font-mono text-3xs uppercase tracking-[0.08em] text-muted-foreground">
+                  <h3 className="rounded-lg bg-surface-muted px-4 py-1.5 text-xs font-semibold text-muted-foreground">
                     Do next
                   </h3>
                   <div className="space-y-3 px-4 py-3">
@@ -570,8 +578,8 @@ export default function DesignPreviewPage() {
                 </section>
 
                 <div className="flex flex-wrap items-center gap-3 border-t px-4 py-2.5">
-                  <span className="text-[12.5px] font-medium text-primary">Open full invoice →</span>
-                  <span className="text-[12.5px] font-medium text-primary">Download PDF</span>
+                  <span className="text-sm font-medium text-primary">Open full invoice →</span>
+                  <span className="text-sm font-medium text-primary">Download PDF</span>
                 </div>
               </Card>
             </div>
@@ -623,11 +631,11 @@ export default function DesignPreviewPage() {
                 </Card>
                 <Card title="Flash toast" description="Success dismisses itself in 5 s; an error stays until closed. A prerequisite failure links the screen that fixes it.">
                   <div className="space-y-2">
-                    <div className="flex max-w-[440px] items-start gap-2.5 border border-l-[5px] border-success/40 border-l-success bg-surface px-3 py-2 text-[12.5px] text-success shadow-sm">
+                    <div className="rounded-lg flex max-w-[440px] items-start gap-2.5 border border-l-[5px] border-success/40 border-l-success bg-surface px-3 py-2 text-sm text-success shadow-sm">
                       <p className="min-w-0 flex-1">Invoice INV00008 emailed to accounts@dayspa.example.</p>
                       <span aria-hidden className="shrink-0 px-1 leading-none">×</span>
                     </div>
-                    <div className="flex max-w-[440px] items-start gap-2.5 border border-l-[5px] border-danger/40 border-l-danger bg-surface px-3 py-2 text-[12.5px] text-danger shadow-sm">
+                    <div className="rounded-lg flex max-w-[440px] items-start gap-2.5 border border-l-[5px] border-danger/40 border-l-danger bg-surface px-3 py-2 text-sm text-danger shadow-sm">
                       <div className="min-w-0 flex-1">
                         <p>This customer has no billing email. Add one, or type an address to send to.</p>
                         <span className="mt-0.5 inline-block font-medium underline underline-offset-2">
@@ -717,11 +725,11 @@ export default function DesignPreviewPage() {
               description="Six statuses and no more — overdue is worked out from today's date, never stored, so a job clears the flag by being finished rather than by anyone editing it."
             />
 
-            <div className="mb-4 grid grid-cols-2 gap-px border bg-border sm:grid-cols-3 lg:grid-cols-6">
+            <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
               {([["New", 6, false], ["In progress", 11, false], ["Ready", 4, false],
                  ["Out for delivery", 2, false], ["Completed today", 9, false],
                  ["Overdue", 2, true]] as const).map(([label, value, danger]) => (
-                <Stat key={label} flush label={label} value={value}
+                <Stat key={label} label={label} value={value}
                       tone={danger ? "danger" : "default"} />
               ))}
             </div>
@@ -770,6 +778,11 @@ export default function DesignPreviewPage() {
                       description="Inline rather than a modal: date, time and who did it, defaulted to now.">
                   <CompleteJob action={previewApply} orderId="preview" delivered
                                staff={PREVIEW_STAFF} defaultStaffId="u1" />
+                </Card>
+
+                <Card title="Overlays"
+                      description="The app has no modals by design — entry is a page, confirmation is inline. This is the one overlay shape, for a genuine detour.">
+                  <OverlayDemo />
                 </Card>
 
                 <Card title="Cancelling"

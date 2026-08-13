@@ -7,7 +7,7 @@ import { Card, Eyebrow, Notice, PageHeader } from "@/components/ui";
 import { Checkbox, Field, FormActions, Input, SubmitButton } from "@/components/form";
 import { resetNotificationSettings, saveNotificationSettings, sendTestEmail } from "./actions";
 
-export const metadata = { title: "Notification settings · LaundryMart" };
+export const metadata = { title: "Notification settings" };
 
 /**
  * Tenant-level notification preferences (roadmap C4), stored in the single

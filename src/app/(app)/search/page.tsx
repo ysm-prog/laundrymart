@@ -54,11 +54,11 @@ export default async function SearchPage({
         <input
           id="q" name="q" type="search" defaultValue={term} autoFocus
           placeholder="Harbour Hotel · INV-0042 · ABC123"
-          className="min-h-9 w-full max-w-[520px] border border-strong bg-surface-muted px-2.5 py-1.5
-                     text-[12.5px] placeholder:text-muted-foreground"
+          className="rounded-lg min-h-9 w-full max-w-[520px] border border-strong bg-surface-muted px-2.5 py-1.5
+ text-sm placeholder:text-muted-foreground"
         />
         <button type="submit"
-                className="min-h-9 bg-action px-3 py-1.5 text-[12.5px] font-medium text-action-foreground">
+                className="rounded-lg min-h-9 bg-action px-3 py-1.5 text-sm font-medium text-action-foreground">
           Search
         </button>
       </form>
@@ -100,7 +100,7 @@ async function Results({ term, role }: { term: string; role: Role }) {
               <li key={row.href} className="border-b last:border-b-0">
                 <Link href={row.href}
                       className="flex min-h-11 items-center justify-between gap-3 px-4 py-2.5
-                                 transition hover:bg-surface-muted">
+ transition hover:bg-surface-muted">
                   <span className="min-w-0">
                     <span className="block truncate text-[13px] font-medium">{row.title}</span>
                     <span className="block truncate text-xs text-muted-foreground">{row.detail}</span>

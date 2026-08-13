@@ -107,7 +107,7 @@ export function PhotoPicker({
                 onClick={() => onChange(photos.filter((_, i) => i !== index))}
                 aria-label={`Remove ${label.toLowerCase()} ${index + 1}`}
                 className="absolute -right-1.5 -top-1.5 h-6 w-6 border bg-surface
-                           text-xs font-semibold leading-none shadow-sm hover:bg-surface-muted"
+ text-xs font-semibold leading-none shadow-sm hover:bg-surface-muted"
               >
                 ×
               </button>

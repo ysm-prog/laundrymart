@@ -23,8 +23,8 @@ export function FormDisclosure({
   return (
     <details className="group border bg-surface" open={defaultOpen}>
       <summary className="flex cursor-pointer list-none items-baseline gap-2 border-border px-4 py-2.5 group-open:border-b [&::-webkit-details-marker]:hidden">
-        <span aria-hidden className="font-mono text-2xs text-muted-foreground group-open:hidden">+</span>
-        <span aria-hidden className="hidden font-mono text-2xs text-muted-foreground group-open:inline">−</span>
+        <span aria-hidden className="text-2xs text-muted-foreground group-open:hidden">+</span>
+        <span aria-hidden className="hidden text-2xs text-muted-foreground group-open:inline">−</span>
         <span className="text-[13px] font-semibold">{summary}</span>
         {hint ? <span className="text-xs text-muted-foreground">{hint}</span> : null}
       </summary>

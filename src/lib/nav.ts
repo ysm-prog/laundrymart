@@ -27,12 +27,26 @@ import { can, type Capability, type Role } from "@/lib/roles";
 export type NavCountKey =
   | "routesToday" | "exceptions" | "batches" | "unpaidInvoices" | "overdueJobs";
 
+/**
+ * The rail's icon, named rather than imported.
+ *
+ * Keeping it a string leaves this module pure data — it is imported by server
+ * components and by the unit tests, neither of which should pull in an icon
+ * library. `app-nav.tsx` maps the name to the component. Keyed here rather than
+ * off the href because `navigationFor()` rewrites an area's href per role.
+ */
+export type NavIcon =
+  | "today" | "myRun" | "runs" | "stops" | "jobs" | "customers"
+  | "invoices" | "linen" | "reports" | "settings" | "help";
+
 export type NavItem = {
   label: string;
   href: string;
   /** Omitted means "everyone who is signed in" — the home and help screens. */
   capability?: Capability;
   count?: NavCountKey;
+  /** Rail icon. Top-level areas only; the tab strip is text. */
+  icon?: NavIcon;
   /** One plain sentence, shown under the tab strip and on the help page. */
   blurb?: string;
   /** Screens inside this area. Rendered as tabs, never as a nested menu. */
@@ -47,17 +61,20 @@ export const NAVIGATION: NavItem[] = [
     // one person guaranteed to be sent to it.
     label: "Today",
     href: "/dashboard",
+    icon: "today",
     blurb: "What needs a decision right now.",
   },
   {
     label: "My run",
     href: "/run",
+    icon: "myRun",
     capability: "run.execute",
     blurb: "Your stops for today. Works without signal.",
   },
   {
     label: "Runs",
     href: "/routes/daily",
+    icon: "runs",
     capability: "routes.read",
     count: "routesToday",
     blurb: "Who is driving where, today and every week.",
@@ -87,6 +104,7 @@ export const NAVIGATION: NavItem[] = [
   {
     label: "Stops",
     href: "/jobs",
+    icon: "stops",
     capability: "routes.read",
     count: "exceptions",
     blurb: "Every visit to a customer: what was collected, what was dropped off.",
@@ -120,6 +138,7 @@ export const NAVIGATION: NavItem[] = [
     // (`/inventory`), and /help defines both words.
     label: "Jobs",
     href: "/orders",
+    icon: "jobs",
     capability: "orders.read",
     count: "overdueJobs",
     blurb: "Laundry taken in at the counter, from drop-off to delivery or collection.",
@@ -127,6 +146,7 @@ export const NAVIGATION: NavItem[] = [
   {
     label: "Customers",
     href: "/customers",
+    icon: "customers",
     capability: "customers.read",
     blurb: "Who you collect from, and what you have agreed to do for them.",
     children: [
@@ -143,6 +163,7 @@ export const NAVIGATION: NavItem[] = [
   {
     label: "Invoices",
     href: "/invoices",
+    icon: "invoices",
     capability: "invoices.read",
     count: "unpaidInvoices",
     blurb: "Bill the work, chase what is unpaid, record what comes in.",
@@ -150,6 +171,7 @@ export const NAVIGATION: NavItem[] = [
   {
     label: "Linen",
     href: "/inventory",
+    icon: "linen",
     capability: "inventory.read",
     count: "batches",
     blurb: "Where your stock is right now, and what the plant is working on.",
@@ -172,12 +194,14 @@ export const NAVIGATION: NavItem[] = [
   {
     label: "Reports",
     href: "/reports",
+    icon: "reports",
     capability: "reports.read",
     blurb: "How the business did over a period you choose.",
   },
   {
     label: "Settings",
     href: "/admin/depots",
+    icon: "settings",
     capability: "admin.read",
     blurb: "Your sites, your people, and the record of who changed what.",
     children: [
@@ -210,6 +234,7 @@ export const NAVIGATION: NavItem[] = [
     // word means.
     label: "Help",
     href: "/help",
+    icon: "help",
     blurb: "What the words mean, and how a normal day runs.",
   },
 ];

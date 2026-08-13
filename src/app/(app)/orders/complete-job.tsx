@@ -35,18 +35,18 @@ export function CompleteJob({
   if (!open) {
     return (
       <button type="button" onClick={() => setOpen(true)}
-              className="inline-flex min-h-9 items-center justify-center bg-action px-3 py-1.5
-                         text-[12.5px] font-medium text-action-foreground transition hover:opacity-90">
+              className="rounded-lg inline-flex min-h-9 items-center justify-center bg-action px-3 py-1.5
+ text-sm font-medium text-action-foreground transition hover:brightness-110">
         {label}
       </button>
     );
   }
 
   return (
-    <form action={action} className="w-full border border-l-[5px] border-l-primary p-3">
+    <form action={action} className="rounded-lg w-full border border-l-[5px] border-l-primary p-3">
       <input type="hidden" name="id" value={orderId} />
       <Eyebrow>Completes this job</Eyebrow>
-      <p className="mt-1 text-[12.5px]">
+      <p className="mt-1 text-sm">
         {delivered
           ? "Records the delivery and closes the job. It cannot be moved again afterwards."
           : "Records the customer collecting their laundry and closes the job. It cannot be moved again afterwards."}
@@ -54,21 +54,21 @@ export function CompleteJob({
 
       <div className="mt-3 grid gap-3 sm:grid-cols-2">
         <label className="space-y-1">
-          <span className="block font-mono text-2xs uppercase tracking-[0.1em] text-muted-foreground">
+          <span className="block text-sm font-medium text-foreground">
             Date {verb}
           </span>
           <input name="completed_date" type="date" required defaultValue={businessToday()}
                  max={businessToday()} className={CONTROL} />
         </label>
         <label className="space-y-1">
-          <span className="block font-mono text-2xs uppercase tracking-[0.1em] text-muted-foreground">
+          <span className="block text-sm font-medium text-foreground">
             Time {verb}
           </span>
           <input name="completed_time" type="time" required defaultValue={businessNowTime()}
                  className={CONTROL} />
         </label>
         <label className="space-y-1 sm:col-span-2">
-          <span className="block font-mono text-2xs uppercase tracking-[0.1em] text-muted-foreground">
+          <span className="block text-sm font-medium text-foreground">
             {delivered ? "Delivered by" : "Handed over by"}
           </span>
           <select name="handled_by" required defaultValue={defaultStaffId} className={CONTROL}>
@@ -78,7 +78,7 @@ export function CompleteJob({
           </select>
         </label>
         <label className="space-y-1 sm:col-span-2">
-          <span className="block font-mono text-2xs uppercase tracking-[0.1em] text-muted-foreground">
+          <span className="block text-sm font-medium text-foreground">
             Notes <span className="normal-case tracking-normal">(optional)</span>
           </span>
           <input name="note" className={CONTROL}
@@ -89,7 +89,7 @@ export function CompleteJob({
       <div className="mt-3 flex items-center gap-2">
         <SubmitButton pendingLabel="Recording…">{label}</SubmitButton>
         <button type="button" onClick={() => setOpen(false)}
-                className="min-h-9 border border-strong bg-surface px-3 py-1.5 text-[12.5px] font-medium hover:bg-surface-muted">
+                className="rounded-lg min-h-9 border border-strong bg-surface px-3 py-1.5 text-sm font-medium hover:bg-surface-muted">
           Cancel
         </button>
       </div>

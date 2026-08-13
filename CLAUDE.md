@@ -1,4 +1,6 @@
-# LaundryMart — Project State & Change Management
+# Electro Services — Project State & Change Management
+> Customer-facing name since 2026-08-13. The repository, package and storage keys
+> stay `laundrymart`; renaming those would orphan queued offline data on drivers' phones.
 
 ## 0. Update protocol
 This is the canonical shipped state. MEMORY.md holds the live session delta (auto-loaded).
@@ -230,58 +232,77 @@ which targets ESLint 9). Next 16 needs `experimental.useTypeScriptCli` and the a
 lives in `src/proxy.ts`, not `src/middleware.ts`.
 
 ## 10b. Design system
-From the Plantline concept pack (`Logistics SaaS Product Design` handoff). Two rules carry it:
+**Electro Services.** Replaced the Plantline language (flat, square, near-black chrome,
+monospace labels) in the 2026-08-13 redesign — it read as a developer console to the counter
+staff, drivers and managers who use it. Tokens live in the `@layer base` block of
+`globals.css`; nothing hard-codes a colour, radius or shadow at a call site.
 
-- **Colour means status only.** Teal `--primary` = on track, amber = warning, red = late,
-  green = resolved. The solid call-to-action is therefore **near-black `--action`**, not teal —
-  a teal button would read as a status. Never use `bg-primary` for a button.
-- **Flat.** Hairline `--border` everywhere, `--strong` for inputs and frames, one faint shadow,
-  and radius 0. The whole `--radius-*` and `--shadow-*` scale is zeroed in the `@theme` block
-  of `globals.css`, so `rounded-*` classes are inert rather than scattered edits. Tailwind v4
-  cannot theme `rounded-full` (it is a static utility), so the handful of pills were made
-  square at the call site instead — do not reintroduce it.
+- **One brand colour, used for intent.** `--primary` (blue `#2145c4`; lifted to `#7ba4f5` on
+  dark) marks the primary action and the place you are — buttons, active nav, focus ring.
+  `--action` is a separate token pointed at the same value, because the whole app spells the
+  solid button `bg-action`; the seam stays if the two ever need to diverge.
+- **Status keeps its own family** (`--success`, `--warning`, `--danger`, `--info`) and is
+  **always paired with a written label** — a badge never carries meaning by colour alone.
+  Text on a solid status fill uses `--on-status`, never a literal white: the dark theme lifts
+  every status colour to clear AA on a dark surface, which leaves them far too light for white.
+- **Soft, not flat.** The `--radius-*` scale is real again (4–24px, `rounded-lg` = 10px is the
+  default control corner) and `--shadow-*` is a light layered set. A base rule gives
+  `button`/`select`/`textarea`/`input` the system radius, so the ~120 controls hand-rolled when
+  the language was square cannot come out square; a `rounded-*` utility still wins.
+- **Comfortable, not dense.** 15px body, 44px (`min-h-11`) inputs and touch-first buttons, 40px
+  standard buttons, nothing tappable below 36px. Page titles 26–28px, section 16px, body 14–15px.
 
-IBM Plex Sans + Mono via `next/font` (self-hosted; the driver app must render without signal),
-bound to `--font-sans`/`--font-mono` in `@theme`. Mono is structural — every number,
-identifier, date and uppercase label. `Eyebrow` in `ui.tsx` is the label voice;
-`text-3xs`/`text-2xs` are the 9px/10px steps.
+Inter + JetBrains Mono via `next/font` (self-hosted; the driver app must render without signal).
+**Mono is bound but deliberately rare** — genuine machine text only, never a date, total or job
+number. `Eyebrow` in `ui.tsx` is the supporting-label voice: 12px sentence case, *not* the old
+9px mono uppercase.
 
-The strong border colour is named `--color-strong`, **not** `--color-border-strong`: the
-latter would spell the utility `border-border-strong` and silently do nothing.
+The strong border colour is named `--color-strong`, **not** `--color-border-strong`: the latter
+would spell the utility `border-border-strong` and silently do nothing.
 
-The sidebar rail keeps literal hex colours: it is the one surface that stays near-black in
-both themes, so it must not follow the surface tokens — and it needs its own `border-r`,
-because in dark mode the page background is that same near-black and the edge vanishes.
+The sidebar is a light surface driven by its own `--sidebar-*` tokens (it used to be near-black
+with literal hex). Tokenised separately so the rail can be themed without touching the page
+surfaces beside it.
 
-Guidance idiom: `Stage` in `ui.tsx` (the run screen's numbered-step pattern, also the
-dashboard's getting-started checklist — exactly one step actionable at a time);
-`ConfirmSubmit` for final actions (inline consequence strip + optional reason, no modals);
-`FlashToast` for action feedback. UI labels use operator language (Sites, Contracts, Problems,
-Stops, Collections, Weekly runs, Today's runs, In the plant, Stock, Item types, People,
-Activity log) while routes and schema keep the domain names —
-`docs/SIMPLIFICATION-DESIGN.md` holds the rename map, `docs/SIMPLIFICATION-AUDIT.md` the
-full audit and what remains open. `/help` is the in-product glossary that maps each label
-back to its trade term.
+**Shared components** (`ui.tsx` unless noted). Layout: `PageContainer` (caps width — `form`
+≈1040px for entry screens, `default` ≈1280px, `wide` opts out), `PageHeader` (title, one-line
+description, primary action, optional `back`), `Card`, `FormSection` (a titled group of fields;
+what turns a wall of inputs into a short sequence of questions), `Stat`, `Stage`, `EmptyState`.
+Status: `Badge`/`StatusBadge`, `Notice` (icon + tone). Actions: `Button`/`ButtonLink`
+(primary/secondary/danger/ghost/subtle × sm/md/lg), `IconButton`, `CONTROL` + `SELECT_CHEVRON`
+(the one input skin — import it, never restyle an input at the call site).
+Forms (`form.tsx`): `Field`, `Input`, `Textarea`, `Select`, `Checkbox`, `WeekdayPicker`,
+`SubmitButton`, `FormActions` (**sticky at the foot of the viewport on a phone**, so the one
+action the operator came for is never buried under a long form).
+Shell: `AppShell` (rail + header + content; owns the collapse and drawer state),
+`AppNav`/`SectionNav`/`BrandMark`/`ThemeToggle` (`app-nav.tsx`), `GlobalSearch`, `UserMenu`,
+`NotificationBell`, `ListControls`/`Pagination` (`list-controls.tsx`).
+Overlays: `ConfirmSubmit` for destructive actions (**inline, not a modal** — the consequence
+belongs beside the control, especially on a phone) and `Overlay` for a genuine detour
+(centred dialog from `sm`, bottom sheet below it; focus trap, scroll lock, Escape, focus
+returned on close). Entry is a page, not a modal — that has not changed.
 
-`CONTROL` in `ui.tsx` is the one input skin — import it, never restyle an input at the call
-site. `DataTable` is the one table: below `sm` it stacks each row into a labelled card, so a
-new screen gets a working phone layout for free and a hand-rolled `<table>` silently does not.
-Anything tappable carries `min-h-9` (36px).
+`DataTable` is the one table. Below `sm` each row becomes a labelled card, so a new screen gets
+a working phone layout for free and a hand-rolled `<table>` silently does not. `bare` drops its
+own frame for a table filling a `Card` that has already drawn one — without it the two rounded
+borders sit a pixel apart. `stickyHeader` caps the body height so the header has something to
+stick to. Icons are **Lucide**, one set, one weight; the rail's icon is a *name* held in
+`nav.ts` (`NavIcon`) and mapped to a component in `app-nav.tsx`, keeping `nav.ts` pure data for
+the unit tests.
 
 `/design-preview` is a static component gallery: no data, 404s in production, outside the auth
 gate so it can be rendered from a build box. It exists because every real screen is an async
 server component reading Supabase, so none render without a live project — which is how a
 doubled hairline and an invisible dark-mode sidebar edge both survived a green `verify`.
-Screenshot it with Playwright (`/opt/pw-browsers/chromium`) against `next start`.
+Screenshot it with Playwright (`/opt/pw-browsers/chromium-1194/chrome-linux/chrome`) against
+`next start`. **Two defect classes it is worth asserting on, not just looking at:** horizontal
+document overflow at 390px, and `role="dialog"` sitting on a full-screen wrapper rather than on
+the panel.
 
-**PostgREST embeds fail at runtime, not compile time.** Where two tables have more than one FK
-between them the embed is ambiguous and errors with PGRST201. `daily_routes` has two to
-`vehicles` (`vehicle_id`, `trailer_id`), so those must be written
-`vehicles!daily_routes_vehicle_id_fkey(...)`. Current ambiguous pairs: daily_routes→vehicles,
-daily_routes→auth.users, drivers→auth.users, inventory_movements→inventory_pools,
-production_batches→auth.users, **laundry_orders→auth.users** (four FKs: `assigned_to`,
-`created_by`, `delivered_by`, `collected_by` — which is why staff names are resolved through
-`src/lib/staff.ts` rather than embedded).
+**Absolutely-positioned children escape an ancestor's `overflow` clip** unless something inside
+that scroller is their containing block. `sr-only` is `position:absolute`, so an `sr-only` label
+inside a horizontally scrolling board stretched the document ~230px on a phone; the planner
+column carries `relative` for exactly that reason.
 
 ## 11. Hosted project
 `laundrymart-syd` · ref `xujhwljrmogenhvqpkrf` · ap-southeast-2 (Sydney) · org `ysm-prog`.
@@ -323,6 +344,61 @@ Both are compositions over existing tables — neither added a migration.
   are edited and invoices voided.
 
 ## 18. Changelog
+### 2026-08-13 · Electro Services: full UI/UX redesign
+A visual, usability and responsiveness pass over the whole application. **No schema, server
+action, RLS policy, capability, query or business rule changed** — no migration, and the 204
+unit tests pass untouched. What moved is the design system and the shell; every screen inherits
+it. See §10b for the system itself.
+
+- **Branding is Electro Services** everywhere it faces a person: page titles and the metadata
+  template, the PWA manifest and icon, the rail, the phone header, login, the landing page, the
+  offline page and the test-email copy. Technical identifiers are deliberately untouched — the
+  package name, the `laundrymart-offline` IndexedDB name and the `laundrymart-shell-v1` cache
+  key. Renaming the first would orphan a driver's queued stops on their phone.
+- **The rail is no longer a console.** Light surface on its own `--sidebar-*` tokens, Lucide
+  icon per area, count pills, and a **collapsible desktop rail** whose state is a cookie read in
+  the layout — so it paints at the right width on the first frame instead of snapping after
+  hydration. On a phone it is a real slide-out drawer with a focus trap, Escape and a scrim,
+  replacing a `Menu` button that pushed an absolutely-positioned block into the page.
+- **Identity moved to the header** (`UserMenu`). It used to sit in the rail footer, which meant
+  it vanished on a phone and again on a collapsed rail. Global search gained an icon and the
+  placeholder the brief asked for, and collapses to an icon below `sm`.
+- **Type is Inter, and monospace is out of ordinary business content.** 74 `font-mono`, 70
+  `text-[12.5px]`, and every `uppercase tracking-[…]` label across 28 files swept to sentence-case
+  sans at 14–15px. 9px and 10px label tokens raised to 11px and 12px so the sweep could not leave
+  anything unreadable behind.
+- **Corners and controls.** The `--radius-*` scale, zeroed since Plantline, is restored; a base
+  rule rounds native controls so the ~120 hand-rolled ones cannot stay square, and 183 class
+  strings were rounded at the call site. Inputs are 44px.
+- **The Jobs form is the screen the brief was written against.** The customer picker no longer
+  opens with a scrolling list of twelve customers — one search box, results floating only once
+  you type, and a selected-customer card in place of the search. Sections are now named groups
+  (Customer, Order received, Laundry details, Delivery, Instructions, Job management), the page
+  is capped at ~1040px, and the action row sticks to the bottom of a phone viewport.
+- **Four real defects found by screenshotting rather than by reading:**
+  - an `sr-only` label inside the planner's horizontal scroller stretched the document 227px
+    on a 390px screen (absolutely-positioned children escape an ancestor's overflow clip
+    unless something inside it is their containing block — the column now carries `relative`);
+  - `bg-danger text-white` failed contrast in dark mode, where the danger colour is lifted to a
+    light red — hence the `--on-status` token;
+  - `DataTable` drew its own frame inside a `Card` that had already drawn one, a doubled
+    hairline a pixel apart — hence `bare`;
+  - `role="dialog"` sat on the full-screen wrapper in both overlays, making the scrim part of
+    the dialog; it is on the panel now.
+- **Also fixed while in there:** both email fields on the sign-in page rendered `id="email"`, so
+  the magic-link label pointed at the password form's input (`Input` now takes an `id`).
+- The joined KPI strip (`gap-px` over `bg-border` with `flush` cells) is gone — it left an empty
+  grey cell whenever the count did not fill the row, and square corners among rounded cards.
+  `Stat` lost its `flush` prop with it.
+- `Overlay` is new and is exercised in `/design-preview`; 12 behaviour assertions pass at 390px
+  and 1440px (bottom sheet vs centred dialog, focus trap, scroll lock and restore, Escape).
+  Verified light and dark at 390 / 820 / 1440 with no console errors and no horizontal overflow.
+
+**Not verified against a live project.** This container has no Supabase credentials, so the
+authenticated screens were checked by build, typecheck, lint, tests and the component gallery
+rather than by being opened. Everything behind the auth gate inherits the swept components, but
+the data-dependent screens have not been seen with real rows in them.
+
 ### 2026-08-13 · Job creation form: no received time, re-deliver by default
 Targeted change to the create/edit form only — no migration, no new component, no change to
 the Jobs list, detail page, status workflow, priority or permissions.

@@ -117,14 +117,14 @@ async function SummaryStrip() {
     { label: "Overdue", value: overdue.count, href: "/orders?when=overdue", danger: true },
   ];
 
-  // The pack's KPI row: one joined strip divided by hairlines, so each cell is
-  // `flush` (its own border would double the divider) and the grid gap is the rule.
+  // Six separate cards rather than one joined strip: the strip left an empty
+  // grey cell whenever the count did not fill the row, and square corners among
+  // rounded panels everywhere else.
   return (
-    <div className="mb-4 grid grid-cols-2 gap-px border bg-border sm:grid-cols-3 lg:grid-cols-6">
+    <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
       {cards.map((card) => (
         <Stat
           key={card.label}
-          flush
           label={card.label}
           value={card.value ?? 0}
           href={card.href}
@@ -222,13 +222,13 @@ async function Filters({ params }: { params: Search }) {
       </div>
 
       <button type="submit"
-              className="inline-flex min-h-9 items-center border border-strong bg-surface px-3 py-1.5
-                         text-[12.5px] font-medium transition hover:bg-surface-muted">
+              className="rounded-lg inline-flex min-h-9 items-center border border-strong bg-surface px-3 py-1.5
+ text-sm font-medium transition hover:bg-surface-muted">
         Search
       </button>
       {params.q || params.status || params.priority || params.customer || params.when || params.date ? (
         <Link href="/orders"
-              className="inline-flex min-h-9 items-center px-2 text-[12.5px] text-primary hover:underline">
+              className="inline-flex min-h-9 items-center px-2 text-sm text-primary hover:underline">
           Clear
         </Link>
       ) : null}

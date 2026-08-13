@@ -161,14 +161,14 @@ export function OfflineCapture({
         <table className="w-full text-sm">
           <thead className="bg-surface-muted text-left">
             <tr>
-              <th className="px-3 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Item</th>
-              <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              <th className="px-3 py-2 text-xs font-semibold text-muted-foreground">Item</th>
+              <th className="px-3 py-2 text-right text-xs font-semibold text-muted-foreground">
                 {kind === "pickup" ? "Collected" : "Delivered"}
               </th>
               {kind === "pickup" ? (
                 <>
-                  <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">Damaged</th>
-                  <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">Missing</th>
+                  <th className="px-3 py-2 text-right text-xs font-semibold text-muted-foreground">Damaged</th>
+                  <th className="px-3 py-2 text-right text-xs font-semibold text-muted-foreground">Missing</th>
                 </>
               ) : null}
             </tr>
@@ -242,7 +242,7 @@ export function OfflineCapture({
       <div className="flex flex-wrap items-center gap-2">
         <button type="submit" disabled={isPending}
                 className="rounded-md bg-action px-4 py-2.5 text-sm font-medium text-action-foreground
-                           transition hover:opacity-90 disabled:opacity-60">
+ transition hover:brightness-110 disabled:opacity-60">
           Save {kind}
         </button>
         {queued > 0 ? (
@@ -303,7 +303,7 @@ export function ExceptionCapture({
     return (
       <div className="border-t pt-4">
         <button type="button" onClick={() => { setOpen(true); setStatus(null); }}
-                className="border border-danger/40 px-3 py-1.5 text-[12.5px] font-medium text-danger hover:bg-danger/5">
+                className="rounded-lg border border-danger/40 px-3 py-1.5 text-sm font-medium text-danger hover:bg-danger/5">
           Something&rsquo;s wrong at this stop
         </button>
         {status ? <p className="mt-2 text-xs text-muted-foreground">{status}</p> : null}
@@ -314,14 +314,14 @@ export function ExceptionCapture({
   return (
     <form onSubmit={onSubmit}
           className="space-y-3 border-t border-l-[5px] border-l-danger pt-4 pl-3">
-      <p className="font-mono text-3xs uppercase tracking-[0.12em] text-danger">
+      <p className="text-xs font-semibold text-danger">
         Something&rsquo;s wrong
       </p>
       <div className="grid gap-3 sm:grid-cols-2">
         <label className="text-sm">
           <span className="mb-1 block font-medium">What happened?</span>
           <select name="reason" defaultValue={reasons[0]?.value}
-                  className="w-full border border-strong bg-surface-muted px-2.5 py-1.5 text-sm">
+                  className="rounded-lg w-full border border-strong bg-surface-muted px-2.5 py-1.5 text-sm">
             {reasons.map((reason) => (
               <option key={reason.value} value={reason.value}>{reason.label}</option>
             ))}
@@ -330,17 +330,17 @@ export function ExceptionCapture({
         <label className="text-sm">
           <span className="mb-1 block font-medium">Notes</span>
           <input name="notes" placeholder="Gate locked, no answer on the intercom"
-                 className="w-full border border-strong bg-surface-muted px-2.5 py-1.5 text-sm" />
+                 className="rounded-lg w-full border border-strong bg-surface-muted px-2.5 py-1.5 text-sm" />
         </label>
       </div>
       <PhotoPicker photos={photos} onChange={setPhotos} label="Photo (optional)" />
       <div className="flex flex-wrap items-center gap-2">
         <button type="submit"
-                className="bg-danger px-3 py-1.5 text-[12.5px] font-medium text-white hover:opacity-90">
+                className="rounded-lg bg-danger px-3 py-1.5 text-sm font-medium text-white hover:brightness-110">
           Flag the problem
         </button>
         <button type="button" onClick={() => setOpen(false)}
-                className="border border-strong bg-surface px-3 py-1.5 text-[12.5px] font-medium hover:bg-surface-muted">
+                className="rounded-lg border border-strong bg-surface px-3 py-1.5 text-sm font-medium hover:bg-surface-muted">
           Cancel
         </button>
         <span className="text-xs text-muted-foreground">

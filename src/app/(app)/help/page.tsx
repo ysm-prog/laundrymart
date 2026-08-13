@@ -147,10 +147,10 @@ export default async function HelpPage() {
       <Card title="How a normal day runs" description="Four things happen, in this order.">
         <ol className="space-y-3">
           {DAY.map((step, index) => (
-            <li key={step.title} className="flex items-start gap-3 border p-3">
+            <li key={step.title} className="rounded-lg flex items-start gap-3 border p-3">
               <span aria-hidden
                     className="flex h-6 w-6 shrink-0 items-center justify-center bg-surface-muted
-                               text-xs font-semibold text-muted-foreground">
+ text-xs font-semibold text-muted-foreground">
                 {index + 1}
               </span>
               <div className="min-w-0">
@@ -181,7 +181,7 @@ export default async function HelpPage() {
                   {area.children.map((child) => (
                     <Link key={child.href} href={child.href}
                           className="text-xs text-muted-foreground underline underline-offset-2
-                                     hover:text-foreground">
+ hover:text-foreground">
                       {child.label}
                     </Link>
                   ))}

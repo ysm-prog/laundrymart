@@ -135,12 +135,12 @@ async function MembershipList({
                 {emails.has(row.user_id) ? (
                   <span className="min-w-0">
                     <span className="block truncate text-[13px]">{emails.get(row.user_id)}</span>
-                    <span className="block font-mono text-3xs text-muted-foreground">
+                    <span className="block text-3xs text-muted-foreground">
                       {row.user_id.slice(0, 8)}
                     </span>
                   </span>
                 ) : (
-                  <span className="font-mono text-xs">{row.user_id.slice(0, 8)}…</span>
+                  <span className="text-xs">{row.user_id.slice(0, 8)}…</span>
                 )}
                 {row.user_id === currentUserId ? <Badge tone="primary">you</Badge> : null}
               </span>

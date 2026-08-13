@@ -5,7 +5,7 @@ import { PageHeader, ButtonLink, Button } from "@/components/ui";
 import { can } from "@/lib/roles";
 import { markAllRead, openNotification } from "./actions";
 
-export const metadata = { title: "Notifications · LaundryMart" };
+export const metadata = { title: "Notifications" };
 
 /**
  * Everything the app has spoken up about, newest first.

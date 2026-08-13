@@ -232,26 +232,23 @@ async function Kpis({ date, seesMoney }: { date: string; seesMoney: boolean }) {
 
   return (
     <div className={cx(
-      "grid gap-px border bg-border",
+      "grid gap-4",
       seesMoney ? "sm:grid-cols-3 lg:grid-cols-5" : "sm:grid-cols-2 lg:grid-cols-4",
     )}>
       <Stat
-        flush
         label="Stops today"
         value={<>{done}<span className="text-sm font-normal text-muted-foreground"> / {total}</span></>}
         hint={total === 0 ? "nothing scheduled" : `${remaining} remaining`}
         tone={total > 0 && remaining === 0 ? "success" : "default"}
       />
-      <Stat flush label="In the plant" value={number(inPlant)} hint="washing through to ready" />
+      <Stat label="In the plant" value={number(inPlant)} hint="washing through to ready" />
       <Stat
-        flush
         label="Ready to dispatch"
         value={number(ready)}
         hint={ready > 0 ? "waiting on a truck" : "nothing staged"}
         tone={ready > 0 ? "success" : "default"}
       />
       <Stat
-        flush
         label="Problems"
         value={String(late)}
         hint={late === 0 ? "none open" : "need a decision"}
@@ -259,7 +256,6 @@ async function Kpis({ date, seesMoney }: { date: string; seesMoney: boolean }) {
       />
       {seesMoney ? (
         <Stat
-          flush
           label="Overdue"
           value={money(overdueTotal)}
           hint={`${overdueRows.length} invoice(s) past terms`}
@@ -394,6 +390,7 @@ async function NeedsDecision({ seesMoney }: { seesMoney: boolean }) {
           edge on a desktop, and so is the empty state's dashed frame. */}
       <div className={rows.length ? "p-4 sm:p-0" : "p-4"}>
         <DataTable
+                    bare
           rows={rows}
           label="Things needing a decision"
           rowClassName={(row) => cx("border-l-[3px]", SEVERITY_RULE[row.severity])}
@@ -416,7 +413,7 @@ async function NeedsDecision({ seesMoney }: { seesMoney: boolean }) {
             {
               header: "State",
               cell: (row) => (
-                <span className={cx("whitespace-nowrap text-[11.5px]", SEVERITY_TEXT[row.severity])}>
+                <span className={cx("whitespace-nowrap text-xs", SEVERITY_TEXT[row.severity])}>
                   {row.state}
                 </span>
               ),
@@ -425,7 +422,7 @@ async function NeedsDecision({ seesMoney }: { seesMoney: boolean }) {
             {
               header: "Since", hideBelow: "md",
               cell: (row) => (
-                <span className="whitespace-nowrap font-mono text-[11.5px] text-muted-foreground">
+                <span className="whitespace-nowrap text-xs text-muted-foreground">
                   {formatDate(row.when)}
                 </span>
               ),
@@ -433,7 +430,7 @@ async function NeedsDecision({ seesMoney }: { seesMoney: boolean }) {
             {
               header: "Reference", hideBelow: "lg",
               cell: (row) => (
-                <span className="whitespace-nowrap font-mono text-[11.5px]">{row.reference}</span>
+                <span className="whitespace-nowrap text-xs">{row.reference}</span>
               ),
             },
             {
@@ -477,7 +474,7 @@ async function PlantStages() {
           const bottleneck = quantity > 0 && quantity === peak && stage.state !== "at_depot";
           return (
             <div key={stage.state}
-                 className={cx("border px-2.5 py-2", bottleneck && "border-warning/40 bg-warning/5")}>
+                 className={cx("rounded-lg border px-2.5 py-2", bottleneck && "border-warning/40 bg-warning/5")}>
               <Eyebrow className={bottleneck ? "text-warning" : undefined}>{stage.label}</Eyebrow>
               <div className={cx(
                 "mt-0.5 text-[17px] font-semibold tabular-nums",
@@ -537,16 +534,16 @@ async function RunsToday({ date, canPlan }: { date: string; canPlan: boolean }) 
                 <Link href={`/routes/daily/${run.id}`}
                       className="block px-4 py-2.5 transition hover:bg-surface-muted">
                   <div className="flex items-baseline justify-between gap-2">
-                    <span className="truncate text-[12.5px] font-semibold">{run.code} · {run.name}</span>
+                    <span className="truncate text-sm font-semibold">{run.code} · {run.name}</span>
                     <span className={cx(
-                      "font-mono text-[11px] tabular-nums",
+                      "text-xs tabular-nums",
                       percent === 100 ? "text-success" : behind ? "text-warning" : "text-muted-foreground",
                     )}>
                       {done} / {total}
                     </span>
                   </div>
                   <div className="mt-1 flex flex-wrap items-center gap-2">
-                    <span className="truncate text-[11.5px] text-muted-foreground">
+                    <span className="truncate text-xs text-muted-foreground">
                       {run.drivers?.full_name ?? "Unassigned"}
                     </span>
                     <StatusBadge status={run.status} />
@@ -595,10 +592,10 @@ async function MyRun({ session, date }: { session: Session; date: string }) {
   return (
     <Card title="Today's run" description={driver.full_name}>
       {route ? (
-        <div className="flex flex-wrap items-center gap-3 text-[12.5px]">
+        <div className="flex flex-wrap items-center gap-3 text-sm">
           <span className="font-semibold">{route.code} · {route.name}</span>
           <StatusBadge status={route.status} />
-          <span className="font-mono text-[11.5px] text-muted-foreground">
+          <span className="text-xs text-muted-foreground">
             {doneStops ?? 0} / {stops ?? 0} stops
           </span>
           <Link href="/run" className="font-medium text-primary hover:underline">Open my run →</Link>

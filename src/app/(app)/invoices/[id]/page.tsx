@@ -67,7 +67,7 @@ export default async function InvoiceDetailPage({
                 downloads it rather than client-navigating to a PDF. */}
             <a href={`/api/invoices/${id}/pdf`} target="_blank" rel="noreferrer"
                className="inline-flex items-center justify-center rounded-md border px-3 py-2
-                          text-sm font-medium transition hover:bg-surface-muted print:hidden">
+ text-sm font-medium transition hover:bg-surface-muted print:hidden">
               Download PDF
             </a>
             <PrintButton label="Print" />
@@ -195,7 +195,7 @@ export default async function InvoiceDetailPage({
 function Meta({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <dt className="text-xs uppercase tracking-wide text-muted-foreground">{label}</dt>
+      <dt className="text-xs text-muted-foreground">{label}</dt>
       <dd className="font-medium">{value}</dd>
     </div>
   );

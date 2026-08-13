@@ -279,7 +279,7 @@ async function EditSection({ agreement }: { agreement: ServiceAgreement }) {
 
   return (
     <div>
-      <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+      <h2 className="mb-3 text-sm font-semibold text-muted-foreground">
         Edit agreement
       </h2>
       <AgreementForm

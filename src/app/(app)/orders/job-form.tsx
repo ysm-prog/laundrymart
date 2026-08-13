@@ -1,9 +1,13 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import Link from "next/link";
 import { Field, FormActions, Input, Select, SubmitButton, Textarea } from "@/components/form";
-import { Badge, ButtonLink, Card, CONTROL, Eyebrow, Notice, cx, humanise } from "@/components/ui";
+import {
+  Badge, ButtonLink, CONTROL, Eyebrow, FormSection, Notice, cx, humanise,
+} from "@/components/ui";
+import {
+  Building2, CalendarClock, Check, ClipboardList, MessageSquareText, Plus, Search, Shirt, Truck,
+} from "lucide-react";
 import { CustomerEssentials } from "@/app/(app)/customers/customer-form";
 import {
   DELIVERY_WINDOWS, DELIVERY_WINDOW_LABELS, ITEM_TYPES, ITEM_TYPE_LABELS,
@@ -205,29 +209,43 @@ export function JobForm({
         {customAddress ? <input type="hidden" name="use_custom_address" value="on" /> : null}
 
         {/* ------------------------------------------------------ customer --- */}
-        <Card title="Customer" description="Every job belongs to a customer already on file.">
-          <div className="space-y-3">
-            <Field label="Find a customer" name="customer_search"
-                   hint="Search by business name, customer number, phone or email.">
-              <input
-                id="customer_search" type="search" className={CONTROL} autoComplete="off"
-                placeholder="Harbourview, 0400…, accounts@…"
-                value={query} onChange={(event) => setQuery(event.target.value)}
-              />
-            </Field>
-
+        <FormSection
+          title="Customer"
+          description="Every job belongs to a customer already on file."
+          icon={<Building2 className="size-[1.15rem]" />}
+        >
+          <div className="space-y-4">
             {selected ? (
-              <div className="border border-l-[5px] border-l-primary p-3">
-                <div className="flex flex-wrap items-baseline justify-between gap-2">
-                  <p className="text-[13px] font-semibold">{selected.business_name}</p>
+              /*
+                Chosen: the search box is gone and what remains is a card that
+                answers "is this the right business?" at a glance. Nothing else
+                on this screen needs the customer list any more.
+              */
+              <div className="rounded-xl border border-primary/30 bg-primary/5 p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="flex min-w-0 items-start gap-3">
+                    <span aria-hidden
+                          className="flex size-10 shrink-0 items-center justify-center rounded-lg
+                                     bg-primary/12 text-primary">
+                      <Building2 className="size-5" />
+                    </span>
+                    <div className="min-w-0">
+                      <p className="font-semibold">{selected.business_name}</p>
+                      <p className="mt-0.5 text-sm text-muted-foreground">
+                        {[selected.customer_number, selected.trading_name]
+                          .filter(Boolean).join(" · ")}
+                      </p>
+                    </div>
+                  </div>
                   <button type="button" onClick={() => { setCustomerId(""); setQuery(""); }}
-                          className="text-xs font-medium text-primary hover:underline">
-                    Choose someone else
+                          className="inline-flex min-h-10 items-center rounded-lg border
+                                     border-strong bg-surface px-3 text-sm font-medium shadow-xs
+                                     transition hover:bg-surface-muted">
+                    Change customer
                   </button>
                 </div>
-                <dl className="mt-2 grid gap-x-6 gap-y-1 text-xs sm:grid-cols-2">
-                  <Detail label="Customer no." value={selected.customer_number} />
-                  <Detail label="Trading as" value={selected.trading_name} />
+                <dl className="mt-4 grid gap-x-8 gap-y-2 border-t border-primary/20 pt-3 text-sm
+                               sm:grid-cols-2">
                   <Detail label="Phone" value={selected.phone} />
                   <Detail label="Email" value={selected.billing_email} />
                   <Detail label="Billing address" value={selected.billing_address} />
@@ -235,40 +253,76 @@ export function JobForm({
                 </dl>
               </div>
             ) : (
-              <div className="border">
-                <ul className="max-h-64 divide-y overflow-y-auto">
-                  {matches.map((customer) => (
-                    <li key={customer.id}>
-                      <button type="button" onClick={() => setCustomerId(customer.id)}
-                              className="flex min-h-9 w-full flex-col items-start px-3 py-2 text-left hover:bg-surface-muted">
-                        <span className="text-[12.5px] font-medium">{customer.business_name}</span>
-                        <span className="font-mono text-3xs text-muted-foreground">
-                          {[customer.customer_number, customer.phone, customer.billing_email]
-                            .filter(Boolean).join(" · ")}
-                        </span>
-                      </button>
-                    </li>
-                  ))}
-                  {matches.length === 0 ? (
-                    <li className="px-3 py-3 text-xs text-muted-foreground">
-                      No customer matches that. Check the spelling, or add them below.
-                    </li>
-                  ) : null}
-                </ul>
+              /*
+                Not yet chosen: one search box, and *nothing else* until they
+                type. This screen used to open with a scrolling list of the first
+                twelve customers, which made the first thing on the page the
+                largest and least useful thing on it. Results now float over the
+                form as a short list, the way a picker should behave.
+              */
+              <div className="relative">
+                <Field label="Customer" name="customer_search">
+                  <div className="relative">
+                    <Search className="pointer-events-none absolute left-3 top-1/2 size-4
+                                       -translate-y-1/2 text-muted-foreground" aria-hidden />
+                    <input
+                      id="customer_search" type="search" autoComplete="off"
+                      className={cx(CONTROL, "pl-9")}
+                      placeholder="Search customer by name, phone or email"
+                      role="combobox" aria-expanded={query.trim().length > 0}
+                      aria-controls="customer-results"
+                      value={query} onChange={(event) => setQuery(event.target.value)}
+                    />
+                  </div>
+                </Field>
+
+                {query.trim() ? (
+                  <ul id="customer-results"
+                      className="absolute inset-x-0 top-full z-20 mt-1 max-h-72 overflow-y-auto
+                                 rounded-xl border bg-surface py-1 shadow-lg">
+                    {matches.map((customer) => (
+                      <li key={customer.id}>
+                        <button type="button" onClick={() => setCustomerId(customer.id)}
+                                className="flex min-h-12 w-full flex-col items-start justify-center
+                                           px-4 py-2 text-left transition hover:bg-surface-muted">
+                          <span className="text-sm font-medium">{customer.business_name}</span>
+                          <span className="text-xs text-muted-foreground">
+                            {[customer.customer_number, customer.phone, customer.billing_email]
+                              .filter(Boolean).join(" · ")}
+                          </span>
+                        </button>
+                      </li>
+                    ))}
+                    {matches.length === 0 ? (
+                      <li className="px-4 py-3 text-sm text-muted-foreground">
+                        No customer found. Try another search, or add a new customer below.
+                      </li>
+                    ) : null}
+                  </ul>
+                ) : (
+                  <p className="mt-1.5 text-xs text-muted-foreground">
+                    Start typing to find them — business name, customer number, phone or email.
+                  </p>
+                )}
               </div>
             )}
 
             <button type="button" onClick={() => setQuickCreate((open) => !open)}
-                    className="min-h-9 text-xs font-medium text-primary hover:underline">
-              {quickCreate ? "Never mind — pick an existing customer" : "+ Add new customer"}
+                    className="inline-flex min-h-10 items-center gap-1.5 rounded-lg px-2 text-sm
+                               font-medium text-primary transition hover:bg-primary/8">
+              {quickCreate
+                ? "Never mind — pick an existing customer"
+                : <><Plus className="size-4" aria-hidden /> Add new customer</>}
             </button>
 
             {quickCreate ? (
-              <div className="space-y-3 border border-l-[5px] border-l-primary p-3">
-                <p className="text-[12.5px] font-medium">New customer — four fields is all it takes.</p>
+              <div className="space-y-4 rounded-xl border bg-surface-muted/50 p-4">
+                <p className="text-sm font-semibold">New customer — four fields is all it takes.</p>
                 <CustomerEssentials formId={QUICK_CREATE_FORM} />
                 <button type="submit" form={QUICK_CREATE_FORM}
-                        className="min-h-9 bg-action px-3 py-1.5 text-[12.5px] font-medium text-action-foreground hover:opacity-90">
+                        className="inline-flex min-h-11 items-center rounded-lg bg-action px-5
+                                   text-sm font-medium text-action-foreground shadow-xs transition
+                                   hover:brightness-110">
                   Create customer and come back
                 </button>
                 <p className="text-xs text-muted-foreground">
@@ -278,10 +332,11 @@ export function JobForm({
               </div>
             ) : null}
           </div>
-        </Card>
+        </FormSection>
 
         {/* ------------------------------------------------------ received --- */}
-        <Card title="Order received" description="When the laundry actually arrived.">
+        <FormSection title="Order received" description="When the laundry actually arrived."
+                     icon={<CalendarClock className="size-[1.15rem]" />}>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <Field label="Received date" name="received_date" required
                    hint={canBackdate ? undefined : "Today. A manager can record an earlier day."}>
@@ -317,22 +372,25 @@ export function JobForm({
               </>
             ) : null}
           </div>
-        </Card>
+        </FormSection>
 
         {/* -------------------------------------------------------- laundry --- */}
-        <Card
-          title="Laundry"
+        <FormSection
+          title="Laundry details"
           description="What is in the bag. Count it, or take it as a bulk lot."
+          icon={<Shirt className="size-[1.15rem]" />}
           actions={
             <button type="button" onClick={addRow}
-                    className="min-h-9 border border-strong bg-surface px-3 py-1.5 text-[12.5px] font-medium hover:bg-surface-muted">
-              + Add item
+                    className="inline-flex min-h-10 items-center gap-1.5 rounded-lg border
+                               border-strong bg-surface px-3.5 text-sm font-medium shadow-xs
+                               transition hover:bg-surface-muted">
+              <Plus className="size-4" aria-hidden /> Add item
             </button>
           }
         >
           <ul className="space-y-3">
             {rows.map((row, index) => (
-              <li key={row.key} className="border p-3">
+              <li key={row.key} className="rounded-lg border p-3">
                 <div className="mb-2 flex items-baseline justify-between gap-2">
                   <Eyebrow>Item {index + 1}</Eyebrow>
                   {rows.length > 1 ? (
@@ -346,7 +404,7 @@ export function JobForm({
 
                 <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                   <label className="space-y-1">
-                    <span className="block font-mono text-2xs uppercase tracking-[0.1em] text-muted-foreground">
+                    <span className="block text-sm font-medium text-foreground">
                       Item type
                     </span>
                     <select className={CONTROL} value={row.itemType}
@@ -358,7 +416,7 @@ export function JobForm({
                   </label>
 
                   <label className="space-y-1">
-                    <span className="block font-mono text-2xs uppercase tracking-[0.1em] text-muted-foreground">
+                    <span className="block text-sm font-medium text-foreground">
                       Quantity type
                     </span>
                     <select className={CONTROL} value={row.quantityType}
@@ -373,7 +431,7 @@ export function JobForm({
 
                   {row.itemType === "other" ? (
                     <label className="space-y-1 sm:col-span-2">
-                      <span className="block font-mono text-2xs uppercase tracking-[0.1em] text-muted-foreground">
+                      <span className="block text-sm font-medium text-foreground">
                         What is it
                       </span>
                       <input className={CONTROL} value={row.customDescription}
@@ -384,7 +442,7 @@ export function JobForm({
 
                   {row.quantityType === "exact" ? (
                     <label className="space-y-1">
-                      <span className="block font-mono text-2xs uppercase tracking-[0.1em] text-muted-foreground">
+                      <span className="block text-sm font-medium text-foreground">
                         How many
                       </span>
                       <input className={CONTROL} type="number" min={1} step={1} inputMode="numeric"
@@ -394,7 +452,7 @@ export function JobForm({
                   ) : (
                     <>
                       <label className="space-y-1">
-                        <span className="block font-mono text-2xs uppercase tracking-[0.1em] text-muted-foreground">
+                        <span className="block text-sm font-medium text-foreground">
                           Bags / lots
                         </span>
                         <input className={CONTROL} type="number" min={1} step={1} inputMode="numeric"
@@ -402,7 +460,7 @@ export function JobForm({
                                onChange={(event) => patch(row.key, { bagCount: event.target.value })} />
                       </label>
                       <label className="space-y-1">
-                        <span className="block font-mono text-2xs uppercase tracking-[0.1em] text-muted-foreground">
+                        <span className="block text-sm font-medium text-foreground">
                           Rough count
                         </span>
                         <input className={CONTROL} type="number" min={1} step={1} inputMode="numeric"
@@ -413,7 +471,7 @@ export function JobForm({
                   )}
 
                   <label className="space-y-1 sm:col-span-2 lg:col-span-4">
-                    <span className="block font-mono text-2xs uppercase tracking-[0.1em] text-muted-foreground">
+                    <span className="block text-sm font-medium text-foreground">
                       Item notes
                     </span>
                     <input className={CONTROL} value={row.notes}
@@ -425,22 +483,28 @@ export function JobForm({
             ))}
           </ul>
 
-          <div className="mt-3">
-            {/* The plant's field, kept distinct from each item's own notes:
-                one is how to wash it, the other is what came in the bag. Same
-                `special_instructions` column it has always written to. */}
-            <Field label="Machine instructions" name="special_instructions"
-                   hint="Anything the plant needs to know. Directions to the door go under Delivery.">
-              <Textarea name="special_instructions" rows={2}
-                        defaultValue={order?.special_instructions}
-                        placeholder="Separate the whites; no fabric softener." />
-            </Field>
-          </div>
-        </Card>
+        </FormSection>
+
+        {/* --------------------------------------------------- instructions --- */}
+        {/* The plant's field, kept distinct from each item's own notes: one is
+            how to wash it, the other is what came in the bag. Same
+            `special_instructions` column it has always written to, and its own
+            section now because it is the one free-text answer on the form. */}
+        <FormSection title="Instructions"
+                     description="Anything the plant needs to know before it goes in."
+                     icon={<MessageSquareText className="size-[1.15rem]" />}>
+          <Field label="Machine instructions" name="special_instructions"
+                 hint="Directions to the door go under Delivery instructions instead.">
+            <Textarea name="special_instructions" rows={3}
+                      defaultValue={order?.special_instructions}
+                      placeholder="Separate the whites; no fabric softener." />
+          </Field>
+        </FormSection>
 
         {/* ------------------------------------------------------- delivery --- */}
-        <Card title="Delivery or pickup"
-              description="Are we taking it back to them, or are they coming for it?">
+        <FormSection title="Delivery"
+                     description="Are we taking it back to them, or are they coming for it?"
+                     icon={<Truck className="size-[1.15rem]" />}>
           <div className="space-y-3">
             {/* Re-deliver leads and is the default: it is the normal job, and
                 selecting it every time was a step that was almost always the
@@ -477,14 +541,14 @@ export function JobForm({
 
                 <div className="sm:col-span-2">
                   <Eyebrow>Delivery address</Eyebrow>
-                  <p className="mt-1 text-[12.5px]">
+                  <p className="mt-1 text-sm">
                     {customAddress
                       ? "A one-off address for this job only."
                       : selected?.delivery_address
                         ?? selected?.billing_address
                         ?? "Select a customer to see their address."}
                   </p>
-                  <label className="mt-1 flex min-h-9 items-center gap-2 text-[12.5px]">
+                  <label className="mt-1 flex min-h-9 items-center gap-2 text-sm">
                     <input type="checkbox" checked={customAddress}
                            onChange={(event) => setCustomAddress(event.target.checked)}
                            className="h-4 w-4 border border-strong accent-primary" />
@@ -527,10 +591,11 @@ export function JobForm({
               </div>
             )}
           </div>
-        </Card>
+        </FormSection>
 
         {/* ------------------------------------------ priority + assignment --- */}
-        <Card title="Priority and who is on it">
+        <FormSection title="Job management" description="Priority, and who is looking after it."
+                     icon={<ClipboardList className="size-[1.15rem]" />}>
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Priority" name="priority">
               <Select name="priority" defaultValue={order?.priority ?? "normal"}
@@ -551,7 +616,7 @@ export function JobForm({
               automatically. There is nothing else to set.
             </p>
           )}
-        </Card>
+        </FormSection>
 
         <FormActions>
           <SubmitButton pendingLabel={editing ? "Saving…" : "Creating…"}>
@@ -560,7 +625,7 @@ export function JobForm({
           {editing
             ? <ButtonLink href={`/orders/${order.id}`}>Cancel</ButtonLink>
             : <ButtonLink href="/orders">Cancel</ButtonLink>}
-          <span className="text-xs text-muted-foreground">
+          <span className="ml-auto hidden text-sm text-muted-foreground sm:inline">
             {rows.length === 1 ? "1 laundry item" : `${rows.length} laundry items`}
             {rows[0] ? ` · ${describeItem({
               item_type: rows[0].itemType,
@@ -574,11 +639,6 @@ export function JobForm({
         </FormActions>
       </form>
 
-      {editing ? null : (
-        <p className="mt-4 text-xs text-muted-foreground">
-          Looking for an existing one? <Link href="/orders" className="text-primary hover:underline">All jobs</Link>
-        </p>
-      )}
     </>
   );
 }
@@ -599,11 +659,25 @@ function ChoiceButton({
   return (
     <button type="button" onClick={onClick} aria-pressed={selected}
             className={cx(
-              "min-h-9 flex-1 border px-3 py-2 text-left transition",
-              selected ? "border-primary bg-primary/10" : "border-strong hover:bg-surface-muted",
+              "flex min-h-16 flex-1 items-start gap-2.5 rounded-xl border px-4 py-3 text-left",
+              "shadow-xs transition",
+              selected
+                ? "border-primary bg-primary/8 ring-1 ring-primary/30"
+                : "border-strong bg-surface hover:bg-surface-muted",
             )}>
-      <span className={cx("block text-[12.5px] font-medium", selected && "text-primary")}>{label}</span>
-      <span className="block text-xs text-muted-foreground">{detail}</span>
+      {/* A tick, not just a fill: the chosen option must survive being read in
+          greyscale or by someone who cannot separate the two tints. */}
+      <span aria-hidden
+            className={cx(
+              "mt-0.5 flex size-[1.15rem] shrink-0 items-center justify-center rounded-full border",
+              selected ? "border-primary bg-primary text-primary-foreground" : "border-strong",
+            )}>
+        {selected ? <Check className="size-3" strokeWidth={3} /> : null}
+      </span>
+      <span className="min-w-0">
+        <span className={cx("block text-sm font-semibold", selected && "text-primary")}>{label}</span>
+        <span className="mt-0.5 block text-xs text-muted-foreground">{detail}</span>
+      </span>
     </button>
   );
 }
