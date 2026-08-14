@@ -7,32 +7,41 @@ import { createClient } from "@/lib/supabase/server";
 import { can } from "@/lib/roles";
 import { recordAudit } from "@/lib/audit";
 import {
-  describeDbError, done, fail, firstIssue, optionalText, optionalUuid,
+  describeDbError, done, fail, firstIssue, optionalText,
   requiredDate, returnTo, toObject,
 } from "@/lib/actions";
-import { checkAssignable } from "@/lib/domain/run-assignment";
+import {
+  checkAssignable, checkAssignmentRemovable, checkConfirmLoad, checkStartRoute,
+} from "@/lib/domain/run-assignment";
 import { formatAdelaideDate, getAdelaideNow } from "@/lib/domain/timezone";
 import { logOrderActivity } from "@/lib/orders/activity";
 import { completeLaundryOrder } from "@/lib/orders/complete";
+import { loadDriverDayJobs } from "@/lib/runs/my-runs";
 import type { OrderStatus } from "@/lib/domain/laundry-orders";
 
 /**
- * Writes for My Runs: putting a Job on a Run, taking it off, and finishing it.
+ * Writes for the assignment workflow: giving a job to a driver for a day, taking
+ * it back, confirming the load, starting the route, and finishing a delivery.
  *
  * Same shape as every other action file here — tenant from the session, Zod at
  * the edge, `return fail(...)` / `return done(...)` so the message rides the
- * flash cookie. Three rules are specific to this module:
+ * flash cookie. Four rules are specific to this module:
  *
- * - **Assignment writes one column.** `laundry_orders.stop_id`, and nothing
- *   else. No status is touched, no laundry is touched, no customer record is
- *   touched. If you find yourself adding a second field to an assignment update
- *   here, the model has drifted.
- * - **Every guard is checked twice on purpose.** `checkAssignable()` runs here
- *   so the user gets a sentence; `guard_laundry_order_assignment()` runs in the
+ * - **The assignment the user makes is a driver and a date.** Nobody names a
+ *   run. `resolveRun`/`findOrCreateStop` below keep the internal `daily_routes`
+ *   and `jobs` rows in step because the depot load, the inventory unload sweep
+ *   and the offline capture screen are all built on them — but that resolution
+ *   is bookkeeping, it is never a question put to a person, and no run code
+ *   appears in any message this file produces.
+ * - **Assignment never touches the laundry.** Driver, date, status and the
+ *   internal placement. No customer, no items, no instructions, no priority, no
+ *   address. If you find yourself adding one of those to an update here, the
+ *   model has drifted.
+ * - **Every guard is checked twice on purpose.** The `check*` helpers run here
+ *   so the user gets a sentence; the guard triggers in migration 0016 run in the
  *   database because this action is not the boundary.
- * - **Assignment is `routes.write`.** That is the existing "plan and assign"
- *   capability — the dispatcher's. No new capability and no new role were
- *   introduced for this feature.
+ * - **Assignment is `routes.write`.** The existing "plan and assign" capability.
+ *   No new capability and no new role was introduced for this feature.
  */
 
 const MY_RUNS = "/my-runs";
@@ -49,127 +58,180 @@ type AssignableOrder = {
   customer_id: string;
   stop_id: string | null;
   due_date: string | null;
+  assigned_driver_id: string | null;
+  assigned_delivery_date: string | null;
 };
+
+const ASSIGNABLE_COLUMNS =
+  "id, order_number, status, delivery_required, customer_id, stop_id, due_date, " +
+  "assigned_driver_id, assigned_delivery_date";
 
 async function loadAssignable(supabase: Supabase, id: string): Promise<AssignableOrder | null> {
   const { data } = await supabase
     .from("laundry_orders")
-    .select("id, order_number, status, delivery_required, customer_id, stop_id, due_date")
+    .select(ASSIGNABLE_COLUMNS)
     .eq("id", id)
     .maybeSingle<AssignableOrder>();
   return data ?? null;
+}
+
+/** Every screen that shows an assignment, refreshed together. */
+function revalidateAssignmentScreens(orderId?: string): void {
+  revalidatePath(MY_RUNS);
+  revalidatePath("/orders");
+  if (orderId) {
+    revalidatePath(`/orders/${orderId}`);
+    revalidatePath(`${MY_RUNS}/jobs/${orderId}`);
+  }
 }
 
 /* ------------------------------------------------------------ assignment */
 
 const assignSchema = z.object({
   order_id: z.string().uuid("That job could not be found."),
-  driver_id: z.string().uuid("Please choose a driver."),
-  run_date: requiredDate,
-  /** A specific run, when the driver has more than one on the day. */
-  run_id: optionalUuid,
+  driver_id: z.string().uuid("Please select a Driver."),
+  assigned_delivery_date: requiredDate,
   note: optionalText,
 });
 
 /**
- * Put a job on a driver's run for a date — creating the run and the stop if the
- * day does not have them yet, and reusing both when it does.
+ * Give a job to a driver for a delivery date.
  *
- * The find-or-create is the whole point of §23 and §27: a dispatcher assigning
- * six jobs to one customer on one morning must end up with one run, one stop and
- * six jobs under it, not six runs. So the lookups come first and creation is the
- * fallback, never the default.
+ * The whole user-facing action is the two answers in the schema above. What
+ * happens underneath — finding the driver's run for that day or opening one,
+ * finding the stop that run already makes at this customer or adding one — is
+ * resolved here so that assigning six jobs for one customer to one morning
+ * produces one run, one stop and six jobs under it rather than six of each.
+ *
+ * Handles reassignment through the same path: the job keeps its identity, its
+ * status and its history, and only the driver, the date and the internal
+ * placement move.
  */
-export async function assignJobToRun(formData: FormData): Promise<void> {
+export async function assignJobToDriver(formData: FormData): Promise<void> {
   const session = await assertCapability("routes.write");
   const parsed = assignSchema.safeParse(toObject(formData));
   const backTo = returnTo(formData, MY_RUNS);
   if (!parsed.success) return fail(backTo, firstIssue(parsed.error));
 
-  const { order_id: orderId, driver_id: driverId, run_date: runDate } = parsed.data;
+  const { order_id: orderId, driver_id: driverId } = parsed.data;
+  const deliveryDate = parsed.data.assigned_delivery_date;
   const supabase = await createClient();
 
   const order = await loadAssignable(supabase, orderId);
   if (!order) return fail(backTo, "That job could not be found.");
 
-  const reassigning = !!order.stop_id;
+  const reassigning = !!order.assigned_driver_id;
+
+  // Reassigning a job that has already left is a management override, not an
+  // ordinary dispatch decision: the driver is holding it somewhere.
+  if (order.status === "out_for_delivery" && !can(session.role, "orders.manage")) {
+    return fail(backTo,
+      `Job ${order.order_number} is already out for delivery. Only a manager can move it now.`);
+  }
+
   const eligible = checkAssignable(order, { allowAssigned: true });
   if (!eligible.ok) return fail(backTo, eligible.reason);
 
   const driver = await activeDriver(supabase, driverId);
   if ("error" in driver) return fail(backTo, driver.error);
 
-  const run = await resolveRun(supabase, session, {
-    driverId, runDate, runId: parsed.data.run_id ?? null,
-  });
-  if ("error" in run) return fail(backTo, run.error);
-
-  // Already exactly where it is being sent — say so rather than writing a
-  // no-op and a misleading timeline entry.
-  const previous = order.stop_id ? await describeAssignment(supabase, order.stop_id) : null;
-  if (previous?.runId === run.id) {
+  if (order.assigned_driver_id === driverId && order.assigned_delivery_date === deliveryDate) {
     return fail(backTo,
-      `Job ${order.order_number} is already on ${driver.full_name}'s ${run.code} run.`);
+      `Job ${order.order_number} is already with ${driver.full_name} for `
+      + `${formatAdelaideDate(deliveryDate, "medium")}.`);
   }
 
-  const stop = await findOrCreateStop(supabase, session, {
-    run, customerId: order.customer_id,
-  });
+  const previousDriverName = order.assigned_driver_id
+    ? (await driverName(supabase, order.assigned_driver_id))
+    : null;
+  const previousStopId = order.stop_id;
+
+  // ---- the internal bookkeeping, which no user ever sees ------------------
+  const run = await resolveRun(supabase, session, { driverId, runDate: deliveryDate });
+  if ("error" in run) return fail(backTo, run.error);
+
+  const stop = await findOrCreateStop(supabase, session, { run, customerId: order.customer_id });
   if ("error" in stop) return fail(backTo, stop.error);
 
-  // The conditional filter is the race guard (§27): two dispatchers pressing
-  // Assign on the same job at the same moment cannot both win, because the
-  // second one's UPDATE matches no row and returns nothing.
+  // The conditional filter is the race guard: two people pressing Assign on the
+  // same job at the same moment cannot both win, because the second one's
+  // UPDATE matches no row and returns nothing.
   const base = supabase
     .from("laundry_orders")
-    .update({ stop_id: stop.id })
+    .update({
+      assigned_driver_id: driverId,
+      assigned_delivery_date: deliveryDate,
+      assigned_at: getAdelaideNow().toISOString(),
+      assigned_by: session.userId,
+      stop_id: stop.id,
+      // A job that changes hands has not been loaded onto the new van.
+      load_confirmed_at: null,
+      load_confirmed_by: null,
+      // Only a fresh assignment moves the status; a reassignment of a job that
+      // is already out keeps it out.
+      ...(order.status === "ready_for_delivery" ? { status: "assigned" as const } : {}),
+    })
     .eq("id", order.id)
     .eq("tenant_id", session.tenantId);
+
   const { data: updated, error } = await (
-    reassigning ? base.eq("stop_id", order.stop_id as string) : base.is("stop_id", null)
+    reassigning
+      ? base.eq("assigned_driver_id", order.assigned_driver_id as string)
+      : base.is("assigned_driver_id", null)
   ).select("id");
   if (error) return fail(backTo, describeDbError(error));
   if (!updated?.length) {
     return fail(backTo,
-      "Somebody else changed this job's run a moment ago. Open it again to see where it is now.");
+      "Somebody else changed this job's driver a moment ago. Open it again to see where it is now.");
+  }
+
+  // A stop the job has just left, with nothing else to do at it, is a visit to
+  // nowhere on somebody's morning. Retired quietly, and only when demonstrably
+  // empty and untouched.
+  if (previousStopId && previousStopId !== stop.id) {
+    await retireStopIfEmpty(supabase, session, previousStopId);
   }
 
   await logOrderActivity(supabase, session, order.id, {
     activity_type: reassigning ? "run_reassigned" : "run_assigned",
-    previous: previous
-      ? { driver: previous.driverName, run: previous.runCode, run_date: previous.runDate }
-      : { driver: null, run: null },
-    next: { driver: driver.full_name, run: run.code, run_date: runDate, stop: stop.job_number },
+    previous: {
+      driver: previousDriverName,
+      assigned_delivery_date: order.assigned_delivery_date,
+    },
+    next: { driver: driver.full_name, assigned_delivery_date: deliveryDate },
     note: parsed.data.note ?? null,
   });
   await recordAudit(session, {
     entity: "laundry_order", entityId: order.id,
     action: reassigning ? "reassign" : "assign",
-    summary: `${order.order_number} → ${driver.full_name} ${run.code} ${runDate}`,
-    metadata: { runId: run.id, stopId: stop.id, driverId, runDate, reassigning },
+    summary: `${order.order_number} → ${driver.full_name} ${deliveryDate}`,
+    metadata: { driverId, deliveryDate, reassigning, runId: run.id, stopId: stop.id },
   });
 
-  revalidatePath(MY_RUNS);
-  revalidatePath("/orders");
-  revalidatePath(`/orders/${order.id}`);
-  revalidatePath(`/routes/daily/${run.id}`);
+  revalidateAssignmentScreens(order.id);
 
-  const when = formatAdelaideDate(runDate, "medium");
+  const when = formatAdelaideDate(deliveryDate, "medium");
   return done(backTo,
     reassigning
-      ? `Job ${order.order_number} moved to ${driver.full_name} — ${run.code}, ${when}.`
-      : `Job ${order.order_number} assigned to ${driver.full_name} — ${run.code}, ${when}.`,
-    { href: `${MY_RUNS}?date=${runDate}&driver=${driverId}`, label: "See the run" });
+      ? `Job ${order.order_number} moved to ${driver.full_name} for ${when}.`
+      : `Job ${order.order_number} assigned to ${driver.full_name} for ${when}.`,
+    { href: `${MY_RUNS}?date=${deliveryDate}&driver=${driverId}`, label: "See the day" });
 }
 
 /**
- * Take a job off a run.
+ * Take a job's driver and date away.
  *
- * Dispatch only. The job keeps its status, its laundry, its customer and its
- * whole history — §28 is emphatic that this must not read as a cancellation,
- * and the only column that changes is the one that says which van it is on.
+ * The job goes back to Ready for delivery and into the unassigned queue with its
+ * laundry, its customer and its whole history intact. This must never read as a
+ * cancellation, which is why nothing here writes a reason, a cancelled state or
+ * a completion — the only thing that changes is who was going to take it.
+ *
+ * The status move is what clears the assignment: `guard_laundry_order_transition`
+ * nulls the four columns and the stop on `assigned → ready_for_delivery`, so the
+ * database cannot be left holding half an assignment even if this action is
+ * wrong about what it is writing.
  */
-export async function removeJobFromRun(formData: FormData): Promise<void> {
+export async function removeJobAssignment(formData: FormData): Promise<void> {
   const session = await assertCapability("routes.write");
   const parsed = z.object({
     order_id: z.string().uuid(),
@@ -181,60 +243,191 @@ export async function removeJobFromRun(formData: FormData): Promise<void> {
   const supabase = await createClient();
   const order = await loadAssignable(supabase, parsed.data.order_id);
   if (!order) return fail(backTo, "That job could not be found.");
-  if (!order.stop_id) return fail(backTo, "That job is not on a run.");
 
-  const previous = await describeAssignment(supabase, order.stop_id);
+  const removable = checkAssignmentRemovable(order);
+  if (!removable.ok) return fail(backTo, removable.reason);
+
+  const previousDriverName = await driverName(supabase, order.assigned_driver_id as string);
+  const previousStopId = order.stop_id;
 
   const { error } = await supabase
     .from("laundry_orders")
-    .update({ stop_id: null })
+    .update({ status: "ready_for_delivery" })
     .eq("id", order.id)
     .eq("tenant_id", session.tenantId);
   if (error) return fail(backTo, describeDbError(error));
 
+  if (previousStopId) await retireStopIfEmpty(supabase, session, previousStopId);
+
   await logOrderActivity(supabase, session, order.id, {
     activity_type: "run_removed",
-    previous: previous
-      ? { driver: previous.driverName, run: previous.runCode, run_date: previous.runDate }
-      : null,
-    next: { driver: null, run: null },
+    previous: {
+      driver: previousDriverName,
+      assigned_delivery_date: order.assigned_delivery_date,
+      status: order.status,
+    },
+    next: { driver: null, assigned_delivery_date: null, status: "ready_for_delivery" },
     note: parsed.data.note ?? null,
   });
   await recordAudit(session, {
     entity: "laundry_order", entityId: order.id, action: "unassign",
-    summary: `${order.order_number} taken off ${previous?.runCode ?? "its run"}`,
+    summary: `${order.order_number} taken off ${previousDriverName ?? "its driver"}`,
   });
 
-  revalidatePath(MY_RUNS);
-  revalidatePath("/orders");
-  revalidatePath(`/orders/${order.id}`);
+  revalidateAssignmentScreens(order.id);
   return done(backTo,
-    `Job ${order.order_number} is off the run and back in the unassigned queue. `
+    `Job ${order.order_number} is back in the ready-for-delivery queue. `
     + "Nothing else about it changed.");
 }
 
-/** An empty run for a driver on a date, for a day the templates did not cover. */
-export async function createRunForDriver(formData: FormData): Promise<void> {
-  const session = await assertCapability("routes.write");
-  const parsed = z.object({
-    driver_id: z.string().uuid("Please choose a driver."),
-    run_date: requiredDate,
-  }).safeParse(toObject(formData));
+/* -------------------------------------------------- the driver's own day */
+
+const daySchema = z.object({
+  driver_id: z.string().uuid(),
+  date: requiredDate,
+});
+
+/**
+ * Who may act on this driver's day, re-derived from the database every time.
+ *
+ * A driver may only ever act on their own — the `driver_id` in the form is
+ * checked against the drivers row behind their login, so posting somebody
+ * else's id is refused rather than merely not offered. `routes.write` (dispatch
+ * and management) may act on anyone's, which is the existing convention for
+ * looking at another driver's day.
+ */
+async function mayWorkTheDay(
+  supabase: Supabase, session: Session, driverId: string,
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  if (can(session.role, "routes.write")) return { ok: true };
+  if (!can(session.role, "run.execute")) {
+    return { ok: false, reason: `Your role (${session.role}) cannot work a delivery run.` };
+  }
+
+  const { data: own } = await supabase
+    .from("drivers").select("id").eq("user_id", session.userId)
+    .is("deleted_at", null).maybeSingle<{ id: string }>();
+  if (!own) return { ok: false, reason: "Your login is not linked to a driver record." };
+  if (own.id !== driverId) return { ok: false, reason: "That is somebody else's day." };
+  return { ok: true };
+}
+
+/**
+ * "Everything for this day is on the van."
+ *
+ * Replaces the vehicle inspection as the driver's start-of-day action, and it is
+ * deliberately not one: no checklist, no pass/fail, no defect capture, no
+ * vehicle status. It records that the assigned laundry was loaded — a driver,
+ * a date, an instant and the jobs it covered.
+ *
+ * One activity row per job, and only for jobs it actually changed, so pressing
+ * it twice adds nothing. The internal run for the day is stamped alongside,
+ * because that is what the depot screen and the unload sweep read.
+ */
+export async function confirmDayLoad(formData: FormData): Promise<void> {
+  const session = await requireSession();
+  const parsed = daySchema.safeParse(toObject(formData));
   const backTo = returnTo(formData, MY_RUNS);
   if (!parsed.success) return fail(backTo, firstIssue(parsed.error));
 
   const supabase = await createClient();
-  const driver = await activeDriver(supabase, parsed.data.driver_id);
-  if ("error" in driver) return fail(backTo, driver.error);
+  const permitted = await mayWorkTheDay(supabase, session, parsed.data.driver_id);
+  if (!permitted.ok) return fail(backTo, permitted.reason);
 
-  const created = await createRun(supabase, session, parsed.data.driver_id, parsed.data.run_date);
-  if ("error" in created) return fail(backTo, created.error);
+  const jobs = await loadDriverDayJobs(supabase, parsed.data.driver_id, parsed.data.date);
+  const loadable = checkConfirmLoad(jobs);
+  if (!loadable.ok) return fail(backTo, loadable.reason);
 
-  revalidatePath(MY_RUNS);
-  revalidatePath("/routes/daily");
+  const at = getAdelaideNow().toISOString();
+  const { error } = await supabase
+    .from("laundry_orders")
+    .update({ load_confirmed_at: at, load_confirmed_by: session.userId })
+    .in("id", loadable.jobs.map((job) => job.id))
+    .eq("tenant_id", session.tenantId);
+  if (error) return fail(backTo, describeDbError(error));
+
+  await stampRunsForDay(supabase, session, parsed.data, {
+    load_confirmed_at: at, load_confirmed_by: session.userId, status: "load_confirmed",
+  });
+
+  for (const job of loadable.jobs) {
+    await logOrderActivity(supabase, session, job.id, {
+      activity_type: "status_changed",
+      previous: { load_confirmed_at: null },
+      next: { load_confirmed_at: at },
+      note: "Confirmed as loaded for the day's deliveries.",
+    });
+  }
+  await recordAudit(session, {
+    entity: "laundry_order", entityId: parsed.data.driver_id, action: "status_change",
+    summary: `load confirmed: ${loadable.jobs.length} job(s) for ${parsed.data.date}`,
+    metadata: { driverId: parsed.data.driver_id, date: parsed.data.date, jobs: loadable.jobs.length },
+  });
+
+  revalidateAssignmentScreens();
+  revalidatePath("/run");
   return done(backTo,
-    `Created run ${created.code} for ${driver.full_name} on `
-    + `${formatAdelaideDate(parsed.data.run_date, "medium")}.`);
+    `Load confirmed — ${loadable.jobs.length} ${loadable.jobs.length === 1 ? "job" : "jobs"} `
+    + `ready to go out for ${formatAdelaideDate(parsed.data.date, "medium")}.`);
+}
+
+/**
+ * "I'm on the road."
+ *
+ * Moves the day's *load-confirmed* jobs from Assigned to Out for delivery, which
+ * is what removes the need for anybody in the office to press "mark out for
+ * delivery". Work assigned after the load was confirmed is deliberately left
+ * behind — it is not on the van, and sweeping it out would record a departure
+ * that did not happen. The driver confirms the load again to pick it up.
+ */
+export async function startDayRoute(formData: FormData): Promise<void> {
+  const session = await requireSession();
+  const parsed = daySchema.safeParse(toObject(formData));
+  const backTo = returnTo(formData, MY_RUNS);
+  if (!parsed.success) return fail(backTo, firstIssue(parsed.error));
+
+  const supabase = await createClient();
+  const permitted = await mayWorkTheDay(supabase, session, parsed.data.driver_id);
+  if (!permitted.ok) return fail(backTo, permitted.reason);
+
+  const jobs = await loadDriverDayJobs(supabase, parsed.data.driver_id, parsed.data.date);
+  const startable = checkStartRoute(jobs);
+  if (!startable.ok) return fail(backTo, startable.reason);
+
+  const { error } = await supabase
+    .from("laundry_orders")
+    .update({ status: "out_for_delivery" })
+    .in("id", startable.jobs.map((job) => job.id))
+    .eq("tenant_id", session.tenantId)
+    // Re-asserted at the write: the set was read a moment ago and the guard
+    // trigger would refuse anything else anyway, but a filtered UPDATE cannot
+    // move a job somebody else has just cancelled.
+    .eq("status", "assigned");
+  if (error) return fail(backTo, describeDbError(error));
+
+  await stampRunsForDay(supabase, session, parsed.data, {
+    status: "in_progress", started_at: getAdelaideNow().toISOString(),
+  });
+
+  for (const job of startable.jobs) {
+    await logOrderActivity(supabase, session, job.id, {
+      activity_type: "status_changed",
+      previous: { status: "assigned" },
+      next: { status: "out_for_delivery" },
+      note: "The driver started the route for this day.",
+    });
+  }
+  await recordAudit(session, {
+    entity: "laundry_order", entityId: parsed.data.driver_id, action: "status_change",
+    summary: `route started: ${startable.jobs.length} job(s) out for ${parsed.data.date}`,
+    metadata: { driverId: parsed.data.driver_id, date: parsed.data.date },
+  });
+
+  revalidateAssignmentScreens();
+  revalidatePath("/run");
+  return done(backTo,
+    `Route started — ${startable.jobs.length} `
+    + `${startable.jobs.length === 1 ? "job is" : "jobs are"} out for delivery. Drive safely.`);
 }
 
 /* ------------------------------------------------------- driver's delivery */
@@ -244,14 +437,13 @@ export async function createRunForDriver(formData: FormData): Promise<void> {
  *
  * The permission model here is the one place this feature does anything
  * unusual, so it is worth being explicit. A driver holds no `orders.*`
- * capability at all — their world is their own run, and that is the existing
+ * capability at all — their world is their own work, and that is the existing
  * design, not an oversight. Rather than inventing a capability (and with it a
- * second permission system, which §3 forbids), authorisation is *resource*
- * based, exactly as `daily_routes` RLS already is:
+ * second permission system), authorisation is *resource* based, exactly as
+ * `daily_routes` RLS already is:
  *
  *   - anyone holding `orders.status` may do this from any screen, as before; or
- *   - the caller holds `run.execute` **and** the job sits on a stop of a run
- *     whose driver is them.
+ *   - the caller holds `run.execute` **and** the job is assigned to them.
  *
  * The second branch is re-derived from the database on every call, never from
  * the form, so a driver posting another driver's order id is refused rather
@@ -278,19 +470,17 @@ export async function markJobDelivered(formData: FormData): Promise<void> {
     handledBy: session.userId,
     note: parsed.data.note ?? null,
     // On the road the laundry is demonstrably off the shelf and at the door, so
-    // a job still sitting at "ready" is stepped through rather than refused.
+    // a job still sitting at "assigned" is stepped through rather than refused.
     dispatchIfNeeded: true,
   });
   if (!result.ok) return fail(backTo, result.error);
 
   await recordAudit(session, {
     entity: "laundry_order", entityId: order.id, action: "status_change",
-    summary: `${order.order_number} delivered on the run`,
+    summary: `${order.order_number} delivered`,
   });
 
-  revalidatePath(MY_RUNS);
-  revalidatePath("/orders");
-  revalidatePath(`/orders/${order.id}`);
+  revalidateAssignmentScreens(order.id);
   return done(backTo, `Job ${order.order_number} marked delivered.`);
 }
 
@@ -302,18 +492,16 @@ async function mayCompleteOnTheRoad(
   if (!can(session.role, "run.execute")) {
     return { ok: false, reason: `Your role (${session.role}) cannot complete a delivery.` };
   }
-  if (!order.stop_id) {
-    return { ok: false, reason: "That job is not on a run, so it cannot be delivered from here." };
+  if (!order.assigned_driver_id) {
+    return { ok: false, reason: "That job is not assigned to a driver, so it cannot be delivered from here." };
   }
 
   const { data: driver } = await supabase
     .from("drivers").select("id").eq("user_id", session.userId)
     .is("deleted_at", null).maybeSingle<{ id: string }>();
   if (!driver) return { ok: false, reason: "Your login is not linked to a driver record." };
-
-  const assignment = await describeAssignment(supabase, order.stop_id);
-  if (assignment?.driverId !== driver.id) {
-    return { ok: false, reason: "That job is on somebody else's run." };
+  if (order.assigned_driver_id !== driver.id) {
+    return { ok: false, reason: "That job is assigned to somebody else." };
   }
   return { ok: true };
 }
@@ -334,45 +522,44 @@ async function activeDriver(
   return { id: data.id, full_name: data.full_name };
 }
 
-type ResolvedRun = { id: string; code: string; route_date: string; depot_id: string | null;
-                     driver_id: string | null; vehicle_id: string | null };
+async function driverName(supabase: Supabase, driverId: string): Promise<string | null> {
+  const { data } = await supabase
+    .from("drivers").select("full_name").eq("id", driverId)
+    .maybeSingle<{ full_name: string }>();
+  return data?.full_name ?? null;
+}
+
+type ResolvedRun = {
+  id: string; code: string; route_date: string; depot_id: string | null;
+  driver_id: string | null; vehicle_id: string | null;
+};
 
 /**
- * The run a job is going on: the one that was chosen, the day's only open one,
- * or a new one.
+ * The internal run for a driver on a date — reused if one is open, opened if not.
  *
- * When a driver has several open runs on the date and none was named, this
- * refuses rather than guessing — "morning" and "afternoon" are different
- * promises to the customer, and picking one silently is how linen arrives at
- * 4pm for a gym that closes at noon.
+ * **Nobody is ever asked about this.** The run used to be a choice put to the
+ * dispatcher when a driver had more than one open on a day; under the simplified
+ * model there is no run in the user's vocabulary to choose between, so the
+ * earliest open one wins deterministically. A driver working a morning and an
+ * afternoon van still has both runs — the day's work simply gathers on the first
+ * of them, which is the same answer the old screen defaulted to when there was
+ * only one.
  */
 async function resolveRun(
   supabase: Supabase, session: Session,
-  { driverId, runDate, runId }: { driverId: string; runDate: string; runId: string | null },
+  { driverId, runDate }: { driverId: string; runDate: string },
 ): Promise<ResolvedRun | { error: string }> {
   const { data: open } = await supabase
     .from("daily_routes")
-    .select("id, code, route_date, depot_id, driver_id, vehicle_id, status")
+    .select("id, code, route_date, depot_id, driver_id, vehicle_id")
     .eq("driver_id", driverId).eq("route_date", runDate)
     .is("deleted_at", null)
     .not("status", "in", "(closed,cancelled)")
     .order("code")
-    .returns<Array<ResolvedRun & { status: string }>>();
+    .limit(1)
+    .returns<ResolvedRun[]>();
 
-  const runs = open ?? [];
-
-  if (runId) {
-    const chosen = runs.find((run) => run.id === runId);
-    if (!chosen) {
-      return { error: "That run is not open for this driver on this date. Choose another." };
-    }
-    return chosen;
-  }
-
-  if (runs.length === 1) return runs[0]!;
-  if (runs.length > 1) {
-    return { error: `That driver has ${runs.length} runs on this date — choose which one.` };
-  }
+  if (open?.length) return open[0]!;
   return createRun(supabase, session, driverId, runDate);
 }
 
@@ -380,8 +567,8 @@ async function createRun(
   supabase: Supabase, session: Session, driverId: string, runDate: string,
 ): Promise<ResolvedRun | { error: string }> {
   // Numbered by the same atomic sequence every other number in this app uses,
-  // so two dispatchers creating a run at the same moment cannot collide on
-  // `uq_daily_routes_day`.
+  // so two people assigning at the same moment cannot collide on
+  // `uq_daily_routes_day`. The code is internal — it is never shown.
   const { data: code, error: numberError } = await supabase
     .rpc("next_number", { t: session.tenantId, k: "run", p: "RUN" });
   if (numberError) return { error: describeDbError(numberError) };
@@ -408,18 +595,18 @@ async function createRun(
 
   await recordAudit(session, {
     entity: "daily_route", entityId: run.id, action: "create",
-    summary: `${run.code} for ${runDate}`,
+    summary: `${run.code} for ${runDate} (created automatically on assignment)`,
   });
   return run;
 }
 
 /**
  * The stop this customer is visited at on this run — reused if the run already
- * calls there, created at the end of the route if it does not.
+ * calls there, added at the end of the route if it does not.
  *
- * This is what makes §16 work: several jobs for one business gather under one
- * stop card rather than producing a duplicate visit each. The lookup is by
- * customer, because a stop is a visit to a business and the driver knocks once.
+ * Several jobs for one business gather under one visit rather than producing a
+ * duplicate call each. The lookup is by customer, because a stop is a visit to a
+ * business and the driver knocks once.
  */
 async function findOrCreateStop(
   supabase: Supabase, session: Session,
@@ -427,22 +614,22 @@ async function findOrCreateStop(
 ): Promise<{ id: string; job_number: string } | { error: string }> {
   const { data: existing } = await supabase
     .from("jobs")
-    .select("id, job_number, sequence, status")
+    .select("id, job_number")
     .eq("route_id", run.id).eq("customer_id", customerId)
     .is("deleted_at", null)
     .not("status", "in", "(cancelled)")
     .order("sequence")
-    .returns<Array<{ id: string; job_number: string; sequence: number; status: string }>>();
+    .limit(1)
+    .returns<Array<{ id: string; job_number: string }>>();
 
-  if (existing?.length) return { id: existing[0]!.id, job_number: existing[0]!.job_number };
+  if (existing?.length) return existing[0]!;
 
   const { data: number, error: numberError } = await supabase
     .rpc("next_number", { t: session.tenantId, k: "job", p: "JOB" });
   if (numberError) return { error: describeDbError(numberError) };
 
   // Where the run currently ends. A new call goes on the end rather than being
-  // slotted into the middle — resequencing somebody's planned morning is the
-  // dispatch planner's job, not a side effect of assigning one job.
+  // slotted into the middle.
   const { data: last } = await supabase
     .from("jobs").select("sequence")
     .eq("route_id", run.id).is("deleted_at", null)
@@ -451,7 +638,7 @@ async function findOrCreateStop(
 
   const { data: location } = await supabase
     .from("customer_locations")
-    .select("id, is_primary")
+    .select("id")
     .eq("customer_id", customerId).eq("is_delivery", true)
     .is("deleted_at", null)
     .order("is_primary", { ascending: false })
@@ -482,30 +669,78 @@ async function findOrCreateStop(
   return stop;
 }
 
-/** Who currently has this job, read back through the one authoritative chain. */
-async function describeAssignment(
-  supabase: Supabase, stopId: string,
-): Promise<{ runId: string; runCode: string; runDate: string;
-             driverId: string | null; driverName: string } | null> {
-  const { data } = await supabase
-    .from("jobs")
-    .select("route_id, daily_routes(id, code, route_date, driver_id, drivers(id, full_name))")
-    .eq("id", stopId)
-    .maybeSingle<{
-      route_id: string | null;
-      daily_routes: {
-        id: string; code: string; route_date: string; driver_id: string | null;
-        drivers: { id: string; full_name: string } | null;
-      } | null;
-    }>();
+/**
+ * Soft-delete a stop a job has just left, but only if it is demonstrably empty.
+ *
+ * "Empty" is strict on purpose: no other laundry order points at it, the driver
+ * has not started it, and no paperwork has been recorded against it. Anything
+ * else is a real visit with a real history, and it stays. A failure here is
+ * cosmetic — a stale empty stop is untidy, a lost one is not recoverable — so it
+ * is logged rather than surfaced.
+ */
+async function retireStopIfEmpty(
+  supabase: Supabase, session: Session, stopId: string,
+): Promise<void> {
+  const { count: remaining } = await supabase
+    .from("laundry_orders")
+    .select("id", { count: "exact", head: true })
+    .eq("stop_id", stopId);
+  if ((remaining ?? 0) > 0) return;
 
-  const run = data?.daily_routes;
-  if (!run) return null;
-  return {
-    runId: run.id,
-    runCode: run.code,
-    runDate: run.route_date,
-    driverId: run.driver_id,
-    driverName: run.drivers?.full_name ?? "an unassigned run",
-  };
+  const { data: stop } = await supabase
+    .from("jobs")
+    .select("id, status, progress_status, arrived_at, completed_at, service_type")
+    .eq("id", stopId).is("deleted_at", null)
+    .maybeSingle<{
+      id: string; status: string; progress_status: string;
+      arrived_at: string | null; completed_at: string | null; service_type: string;
+    }>();
+  if (!stop) return;
+  // Only the stops this feature creates, and only untouched ones.
+  if (stop.service_type !== "delivery") return;
+  if (stop.progress_status !== "not_started") return;
+  if (stop.arrived_at || stop.completed_at) return;
+  if (!["scheduled", "assigned"].includes(stop.status)) return;
+
+  const { count: paperwork } = await supabase
+    .from("deliveries")
+    .select("id", { count: "exact", head: true })
+    .eq("job_id", stopId);
+  if ((paperwork ?? 0) > 0) return;
+
+  const { error } = await supabase
+    .from("jobs")
+    .update({ deleted_at: new Date().toISOString() })
+    .eq("id", stopId).eq("tenant_id", session.tenantId);
+  if (error) console.error("retiring an emptied stop failed", { stopId, error: error.message });
+}
+
+/**
+ * Carry a day-level driver action down onto the internal run rows.
+ *
+ * The run is what `/run`, the run sheet and — crucially — the inventory unload
+ * sweep read, so a load confirmed or a route started on My Runs has to be true
+ * there too. Failures are logged rather than surfaced: the jobs are the record
+ * the driver and the office both work from, and refusing a driver's Start Route
+ * because a bookkeeping row would not move is the wrong trade.
+ */
+async function stampRunsForDay(
+  supabase: Supabase, session: Session,
+  day: { driver_id: string; date: string },
+  patch: Record<string, unknown>,
+): Promise<void> {
+  const { error } = await supabase
+    .from("daily_routes")
+    .update(patch)
+    .eq("driver_id", day.driver_id)
+    .eq("route_date", day.date)
+    .eq("tenant_id", session.tenantId)
+    .is("deleted_at", null)
+    // A run already closed or cancelled is finished business; `guard_route_
+    // transition` would refuse the move anyway and take the whole statement —
+    // and the other runs of the day — down with it.
+    .not("status", "in", "(closed,cancelled)");
+  if (error) {
+    console.error("stamping the day's runs failed", { date: day.date, error: error.message });
+  }
 }

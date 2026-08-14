@@ -49,6 +49,13 @@ The master spec names a .NET 9 Web API; this build follows the supplied skeleton
   goes in a plain module with a test, never in the action. Mind what such a module imports:
   `plan.ts` is in the client bundle, so it may not reach `lib/actions` (→ `next/headers`), and
   that failure shows up only at `next build`.
+- **The assignment model is `Job → Driver → Delivery Date`, and it lives on the job.**
+  `laundry_orders.assigned_driver_id` + `assigned_delivery_date` (0016) are the user-facing
+  truth and what My Runs queries. `stop_id → jobs.route_id → daily_routes` (0015) survives as
+  the *operational placement* — the depot load, the run sheet and the inventory unload sweep are
+  all built on it — and is resolved by the server action, never chosen by a person. No run code
+  appears in any office or driver screen. Two copies of one fact is normally the bug 0015 was
+  written to avoid, which is why the guard trigger refuses every way they could contradict.
 - Pure domain logic lives in `src/lib/domain/` with no database access: the service calendar,
   pricing, recurring invoicing (`invoicing.ts` — one contract's charges, and the
   `consolidate()` rule for header fields two contracts disagree on), ABN validation, date
@@ -88,8 +95,8 @@ Resource-scoped beyond tenancy:
 - `pickups` / `deliveries` / `*_lines` / `vehicle_inspections`: scoped through the parent's
   own RLS, so a driver never reaches another driver's paperwork.
 - `laundry_orders` (+ its items and activity, through the parent): tenant-wide for office
-  roles; for a **driver-only** member, narrowed by 0015 to jobs sitting on a stop of one of
-  their own runs. My Runs is the first screen to give a driver a reason to read the table, and
+  roles; for a **driver-only** member, narrowed by 0015/0016 to jobs **assigned to them** or
+  sitting on a stop of one of their own runs. My Runs is the first screen to give a driver a reason to read the table, and
   a tenant-wide policy would have handed them every customer's laundry through PostgREST at
   the same moment. No non-driver role's predicate changed.
 - `invoices` and friends: readable by any member, writable only by
@@ -126,22 +133,27 @@ run — and to `customer_service`, so a stuck run is not waiting on a dispatcher
   kilograms and the same lost towels once per contract. Each contract's minimum, levy and
   surcharges are still computed against its own services only; every line keeps its
   `agreement_id` (null for replacement charges, which belong to no contract).
-- **A laundry job's six statuses are enforced by `guard_laundry_order_transition`**, not just
+- **A laundry job's seven statuses are enforced by `guard_laundry_order_transition`**, not just
   by the screen: no skipping the middle, no going backwards, `completed`/`cancelled` terminal,
-  a customer pickup never reaches `out_for_delivery`, and a delivery job cannot be completed
-  off the shelf. The trigger stamps `completed_at`/`cancelled_at`, so no client can record a
+  a customer pickup never reaches `assigned` or `out_for_delivery`, a delivery job must be
+  assigned to a driver before it goes out, and it cannot be completed off the shelf. The one
+  backwards edge is `assigned → ready_for_delivery`, which is Remove Assignment: the trigger
+  clears the four assignment columns and the stop with it, so no half-assignment can survive. The trigger stamps `completed_at`/`cancelled_at`, so no client can record a
   finished job with no finishing time. Overdue is **not** among the statuses — it is
   `due_date < today and status not in (completed, cancelled)`, computed every time it is
   asked, where `due_date` is a generated column (delivery date, or collection date for a
   pickup job). A job's laundry list is replaced through `save_laundry_order_items()`, one
   transaction, because a delete-then-insert over PostgREST has a window with no items in it.
-- **A job goes on a run only if it is delivery work that is ready to leave**
-  (`guard_laundry_order_assignment`, 0015): a customer pickup is refused outright, so is a job
-  still in the plant and a completed or cancelled one, and the stop has to belong to the same
-  tenant *and* the same customer — a job cannot be filed under a visit to a different
-  business. The guard fires only when `stop_id` itself changes, so completing an assigned job
-  never re-runs eligibility. Assignment writes that one column and nothing else: it is a
-  relationship, never a status.
+- **A job is assigned to a Driver and a Delivery Date, and the two records of that cannot
+  disagree** (`guard_laundry_order_assignment`, 0016). Eligibility first: a customer pickup is
+  refused outright, so is a job still in the plant and a completed or cancelled one, the driver
+  must be an active driver of the same tenant, and the stop has to belong to the same tenant
+  *and* the same customer. Then coherence: the stop's run must name the same driver and the
+  same date, and — the case worth naming — **a job on a crewed run must name a driver**, since
+  otherwise it sits on somebody's route sheet and on nobody's My Runs. Three check constraints
+  hold the rest: `assigned` requires both columns, both columns require a non-ready status, and
+  a driver without a date is refused. The guard fires only when the stop or the assignment
+  changes, so completing an assigned job never re-runs eligibility.
 - A production batch cannot start with an empty manifest, cannot be completed except from
   `ready_for_dispatch`, and cannot be reopened once finished (`guard_batch_transition`). Its
   manifest freezes when it leaves receiving — only `rejected_quantity` and notes stay writable
@@ -163,14 +175,21 @@ branches deploy. Never force-push `Prod`.
 `/invoices[/:id]` · `/reports` · `/search` · `/help` · `/notifications` ·
 `/admin` (redirects) `[/depots|/users|/holidays|/audit|/notifications]`
 
-**"My runs" (`/my-runs`) and "Runs" (`/routes/daily`) are two different things**, the same
-way Jobs and Stops are. Runs is the management view of everybody's day; My runs is one
-person's own work for a date they choose, and it is gated on `routes.read` so a dispatcher can
-open it for a driver. The old single-run row was *evolved* into it rather than left beside it
-(§6 of the brief) — `/run` survives as the second tab in the area, because it owns the offline
-outbox and the service worker and is the one screen that must work with no signal. A rail with
-both "My run" and "My runs" is exactly the confusion to avoid; `nav.test.ts` asserts there is
-never more than one.
+**There is no user-facing Runs module.** `/routes/daily`, `/routes/planner` and
+`/routes/templates` still exist, still work and still hold their history, but **no rail row
+points at them** and no office or driver screen links to one. Nobody creates, opens or manages
+a run: a job is given straight to a driver and a date, and the `daily_routes` row underneath is
+found-or-created by `assignJobToDriver`. `nav.test.ts` asserts, for every role, that no
+navigation href starts with `/routes/`. Drivers and Vehicles were tabs under the old Runs area
+and are not run management, so they moved to their own **Fleet** area rather than vanishing
+with it.
+
+**"My Runs" (`/my-runs`) is the driver's whole workspace**: the jobs assigned to them for a
+date they choose, grouped To deliver / Out for delivery / Completed, with Confirm Load and
+Start Route in front of them. Gated on `routes.read` so a manager can open it for a driver.
+`/run` survives as the second tab ("At the depot") because it owns the offline outbox, the
+service worker and the unload inventory sweep, and is the one screen that must work with no
+signal.
 
 **Navigation is data** (`src/lib/nav.ts`): eleven areas, each with optional `children`
 rendered as a tab strip (`SectionNav` in the layout, not per page). An area is visible
@@ -215,6 +234,12 @@ renders no tab strip. Tested in `src/lib/__tests__/nav.test.ts`.
 - `0015_run_assignment` — `laundry_orders.stop_id` (the one link between the counter's Job
   and a driver's Stop), its two indexes, three new `laundry_order_activity` verbs, the
   eligibility guard, and the driver clause on the three laundry policies. One column; no table.
+- `0016_job_assignment` — the seventh status `assigned`; `assigned_driver_id`,
+  `assigned_delivery_date`, `assigned_at`, `assigned_by`, `load_confirmed_at`,
+  `load_confirmed_by` on `laundry_orders`; four integrity constraints; two indexes; rewritten
+  transition and assignment guards; the driver RLS clause widened to include a direct
+  assignment. **Adds no table and drops nothing** — `vehicle_inspections`, `daily_routes`,
+  `jobs` and every historical row on them are untouched.
 - `0013_notifications` — `tenants.settings jsonb` (AD-3) and the `notifications` table
   (AD-4). Beware the numbering drift: the unmerged branch
   `claude/warehouse-inventory-flow-psooyq` carries its own `0012_return_count.sql`, which
@@ -222,7 +247,7 @@ renders no tab strip. Tested in `src/lib/__tests__/nav.test.ts`.
 
 Proofs in `supabase/tests/`: `rls_isolation`, `rls_coverage`, `driver_scope`,
 `business_rules`, `media_scope`, `warehouse_rules`, `notifications_scope`, `laundry_orders`,
-`run_assignment` (102 assertions). Demo data in `supabase/seed.sql` — not applied by migrations.
+`run_assignment` (118 assertions). Demo data in `supabase/seed.sql` — not applied by migrations.
 
 **Do not re-add `grant execute on all functions in schema public to anon`.** That
 boilerplate in 0002–0009 is what exposed every SECURITY DEFINER helper on
@@ -362,12 +387,21 @@ column carries `relative` for exactly that reason.
 
 ## 11. Hosted project
 `laundrymart-syd` · ref `xujhwljrmogenhvqpkrf` · ap-southeast-2 (Sydney) · org `ysm-prog`.
-Deployed on Vercel at `ats.coreit.com.au`. All migrations through `0015_run_assignment`
-applied (0014 on 2026-08-13, 0015 on 2026-08-14), each verified by rolled-back probe rather
-than trusted: for 0015 that was the nine eligibility and workflow cases, the driver RLS
-narrowing proven from both sides with a temporary driver login, and no new security advisor
-(still the same 7 warnings — 5 documented SECURITY DEFINER helpers, `park_number_sequence`
-from another branch, and the auth leaked-password toggle).
+Deployed on Vercel at `ats.coreit.com.au`. All migrations through `0016_job_assignment`
+applied (0014 on 2026-08-13, 0015 and 0016 on 2026-08-14), each verified by rolled-back probe
+rather than trusted. For **0016** that was: the three existing jobs backfilled from the run
+chain and read back (LJ00004/5 `ready_for_delivery → assigned` under Sam Okoye for 16 Aug,
+LJ00003 keeping its driver as the record of who delivered it); five guard probes all refused
+in one rolled-back block — Assigned with no assignment data, a driver with no date, ready
+straight to out-for-delivery, a job on a crewed run naming no driver, and reopening a completed
+job; and no new security advisor (still the same 7 warnings — 5 documented SECURITY DEFINER
+helpers, `park_number_sequence` from another branch, and the auth leaked-password toggle).
+
+**0016 carries a backfill, so its statement order is load-bearing**: the transition guard is
+replaced *before* the backfill (which performs `ready_for_delivery → assigned` and needs the
+new function to permit it), and the check constraints and the new assignment guard come
+*after* it, over data that is already consistent. Re-running it against an empty database is
+a no-op on that UPDATE; re-ordering it would break the next project it is applied to.
 
 **The number 0015 is used twice against this project.** The live ledger already carried
 `0015_import_activation` and `0015_import_activation_grants` (applied 2026-08-13 from an
@@ -414,6 +448,70 @@ Both are compositions over existing tables — neither added a migration.
   are edited and invoices voided.
 
 ## 18. Changelog
+### 2026-08-14 · Job → Driver → Delivery Date: the Runs mental model is gone
+The operational simplification. The office now gives a job to a driver and a date; the driver
+opens My Runs, confirms the load, starts the route and marks each job delivered. **Nobody
+creates, opens or manages a run, and no run number appears on any screen.** One migration
+(`0016`), no new table, no new role, no new capability, nothing dropped.
+
+- **`assigned` is the seventh job status**, and it is a real one: `ready_for_delivery →
+  assigned → out_for_delivery → completed`. A delivery job can no longer jump straight out —
+  it needs a driver and a date first, and `chk_laundry_orders_assigned_has_driver` means a row
+  cannot claim otherwise. `assigned → ready_for_delivery` is the one backwards edge and it is
+  Remove Assignment: the trigger clears the four assignment columns *and* the stop, so a
+  careless caller cannot leave half an assignment behind. A customer pickup never reaches
+  either delivery state.
+- **The assignment lives on the job** — `assigned_driver_id` + `assigned_delivery_date`, a
+  DATE and never a timestamp a timezone could shift. 0015's `stop_id` chain survives as the
+  operational placement, because the depot load, the run sheet and the inventory unload sweep
+  are built on it, and `assignJobToDriver` finds-or-creates the run and the stop silently. Two
+  copies of one fact is the bug 0015 was written to avoid, so the guard refuses every way they
+  could disagree: another driver's run, another day's run, and **a job on a crewed run naming
+  no driver** — which would be on somebody's route sheet and on nobody's My Runs.
+- **My Runs is a list of jobs, not a tree of runs and stops.** No run cards, no RUN-001, no
+  sequence numbers, no Show button and no Load Runs button — the date arrows are plain anchors
+  and the date and driver controls submit themselves on change. Grouped To deliver / Out for
+  delivery / Completed, with completed work staying on the day it was done so an earlier date
+  still shows what happened on it.
+- **Confirm Load replaced the vehicle inspection, and is emphatically not one**: no checklist,
+  no pass/fail, no defect capture, no vehicle status. It records that the day's assigned
+  laundry is on the van. Start Route then sends out **only load-confirmed jobs** — work
+  assigned after the load stays Assigned, because it is not on the van and sweeping it out
+  would record a departure that did not happen. That is why load confirmation is tracked per
+  job as well as per run.
+- **Inspection is out of the workflow; none of its data was touched.** `submitInspection`,
+  `inspection-checklist.tsx` and `checklist.ts` are deleted and `/run` lost its first stage.
+  `vehicle_inspections`, `daily_routes.inspection_id`, the two inspection route statuses and
+  the `inspection_failed` notification kind all stay, so historical runs still read correctly.
+- **Received Via defaults to Pickup by driver** on a new job; an existing job still answers
+  with its own stored value, so an edit cannot re-record how the laundry arrived. **Pickup Time
+  is gone** from the form, the Zod schema, every write and the detail page — the column stays
+  nullable with its history in it, because a destructive migration to delete a field nobody
+  reads is the wrong trade. Pickup Date stays, optional and unasterisked.
+- **"Re-deliver" is "Deliver to customer"** everywhere it faces a person. Internal identifiers
+  (`delivery_required`, `expected_delivery_date`) are untouched.
+- **`laundry_orders` now has two foreign keys to `drivers`**, so every `drivers(...)` embed on
+  it must be disambiguated by constraint name. `/orders/:id` had a bare one and would have died
+  at request time with PGRST201 — compile-clean, test-clean, dead in production, exactly the
+  failure the 2026-08-05 changelog records. Both call sites are now explicit.
+- **The office cannot bypass the driver.** "Mark out for delivery" moved from `orders.status`
+  to `orders.manage` and is labelled "Send out (override)"; `advanceOrder` refuses
+  `status=assigned` outright (it would create an Assigned job with no assignment) and routes
+  `assigned → ready_for_delivery` to Remove Assignment.
+- Nav: the **Runs area is gone**; Drivers and Vehicles moved to a new **Fleet** area. The
+  dashboard's "Runs today" panel is now a job-status board, "Plan my day" is gone, and the
+  getting-started checklist ends at "add a driver" and "take in your first job". The
+  `routesToday` badge and its per-request query went with the row. `/help` rewritten around the
+  new vocabulary.
+- 286 unit tests (was 266) and **118 pgTAP assertions (was 102)**. `verify` green; migrations
+  applied to a fresh Postgres 16 and the whole pgTAP suite plus the seed run against it. My
+  Runs screenshotted light and dark and asserted at 320/360/375/390/430/768/820/1024/1280/1440
+  — no horizontal overflow and no sub-36px target in it.
+
+**Not verified against a live project.** This container has no Supabase credentials, so the
+authenticated screens were checked by migration-against-real-Postgres, pgTAP, unit tests,
+build, typecheck, lint and the component gallery — not by being opened with real rows in them.
+
 ### 2026-08-14 · The job number was drawn and thrown away; `no-unused-vars` now on
 Found by taking a real job in on the deployed app, which is the only way it could have been
 found. The two fixes below cleared the way to the insert, and the insert then failed with

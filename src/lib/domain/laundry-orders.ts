@@ -22,6 +22,7 @@ export const ORDER_STATUSES = [
   "new",
   "in_progress",
   "ready_for_delivery",
+  "assigned",
   "out_for_delivery",
   "completed",
   "cancelled",
@@ -38,6 +39,7 @@ export const ORDER_STATUS_LABELS: Record<OrderStatus, string> = {
   new: "New",
   in_progress: "In progress",
   ready_for_delivery: "Ready for delivery",
+  assigned: "Assigned",
   out_for_delivery: "Out for delivery",
   completed: "Completed",
   cancelled: "Cancelled",
@@ -51,25 +53,34 @@ export function isOrderStatus(value: string): value is OrderStatus {
 
 /**
  * The transition table. Mirrored exactly by `guard_laundry_order_transition()`
- * in migration 0014 — the database is the boundary, this is the explanation.
+ * in migration 0016 — the database is the boundary, this is the explanation.
  *
  * `ready_for_delivery` is the one state with a fork, and it is the fork the
- * whole module turns on: a job we deliver goes out on a van first, a job the
+ * whole module turns on: a job we deliver is given to a driver first, a job the
  * customer collects is finished the moment they walk out with it.
+ *
+ * `assigned -> ready_for_delivery` is the one backwards edge, and it is Remove
+ * Assignment rather than a mistake. Taking a job off a driver puts it back in
+ * the queue with its laundry, its customer and its history — it is emphatically
+ * not a cancellation, and modelling it as one is how work quietly disappears.
  */
 const TRANSITIONS: Record<OrderStatus, readonly OrderStatus[]> = {
   new: ["in_progress", "cancelled"],
   in_progress: ["ready_for_delivery", "cancelled"],
-  ready_for_delivery: ["out_for_delivery", "completed", "cancelled"],
+  ready_for_delivery: ["assigned", "completed", "cancelled"],
+  assigned: ["out_for_delivery", "ready_for_delivery", "cancelled"],
   out_for_delivery: ["completed", "cancelled"],
   completed: [],
   cancelled: [],
 };
 
+/** Statuses that only a delivery job ever reaches. A pickup never leaves the shop. */
+const DELIVERY_ONLY: readonly OrderStatus[] = ["assigned", "out_for_delivery"];
+
 /** The statuses a job may move to next, given which workflow it is on. */
 export function nextStatuses(from: OrderStatus, deliveryRequired: boolean): OrderStatus[] {
   return TRANSITIONS[from].filter((to) => {
-    if (to === "out_for_delivery") return deliveryRequired;
+    if (DELIVERY_ONLY.includes(to)) return deliveryRequired;
     if (to === "completed" && from === "ready_for_delivery") return !deliveryRequired;
     return true;
   });
@@ -91,11 +102,17 @@ export function checkTransition(
         : "This job was cancelled. A cancelled job cannot be moved again.",
     };
   }
-  if (to === "out_for_delivery" && !deliveryRequired) {
-    return { ok: false, reason: "The customer is collecting this job, so it never goes out for delivery." };
+  if (DELIVERY_ONLY.includes(to) && !deliveryRequired) {
+    return { ok: false, reason: "The customer is collecting this job, so it never goes out on a run." };
   }
   if (to === "completed" && from === "ready_for_delivery" && deliveryRequired) {
-    return { ok: false, reason: "Mark this job out for delivery before completing it." };
+    return {
+      ok: false,
+      reason: "Assign this job to a driver and send it out before completing it.",
+    };
+  }
+  if (to === "out_for_delivery" && from === "ready_for_delivery") {
+    return { ok: false, reason: "Assign this job to a driver before it goes out." };
   }
   if (!nextStatuses(from, deliveryRequired).includes(to)) {
     return {
@@ -124,21 +141,37 @@ export type OrderAction = {
 
 export const ORDER_ACTIONS: readonly OrderAction[] = [
   { key: "start", label: "Mark in progress", to: "in_progress", capability: "orders.status", confirms: false },
-  { key: "ready", label: "Mark ready", to: "ready_for_delivery", capability: "orders.status", confirms: false },
-  { key: "dispatch", label: "Mark out for delivery", to: "out_for_delivery", capability: "orders.status", confirms: false },
+  { key: "ready", label: "Mark ready for delivery", to: "ready_for_delivery", capability: "orders.status", confirms: false },
+  // Sending a job out is the *driver's* Start Route, not an office button. It
+  // stays here only as the management override the brief allows for the run
+  // that never got started, which is why it sits on `orders.manage` rather than
+  // the counter's `orders.status`: an ordinary office user pressing this would
+  // silently step around the driver's load confirmation.
+  { key: "dispatch", label: "Send out (override)", to: "out_for_delivery", capability: "orders.manage", confirms: false },
   { key: "deliver", label: "Mark as delivered", to: "completed", capability: "orders.status", confirms: true },
   { key: "collect", label: "Mark as collected", to: "completed", capability: "orders.status", confirms: true },
   // Cancelling is the supervisor's call, so it sits on the wider capability.
   { key: "cancel", label: "Cancel job", to: "cancelled", capability: "orders.manage", confirms: true },
 ];
 
-/** Which actions this job's state permits, before capabilities are considered. */
+/**
+ * Which actions this job's state permits, before capabilities are considered.
+ *
+ * Assignment is deliberately absent: giving a job to a driver captures a driver
+ * and a date, so it is a form rather than a status button, and it lives in
+ * `AssignForm`. Un-assigning is likewise its own action — a status control
+ * offering "ready for delivery" on an assigned job would read as a step
+ * backwards through the plant rather than as taking it off a van.
+ */
 export function actionsFor(status: OrderStatus, deliveryRequired: boolean): OrderAction[] {
   const reachable = nextStatuses(status, deliveryRequired);
   return ORDER_ACTIONS.filter((action) => {
     if (!reachable.includes(action.to)) return false;
     if (action.key === "deliver") return deliveryRequired;
     if (action.key === "collect") return !deliveryRequired;
+    // `ready_for_delivery` is reachable from `assigned`, but only as Remove
+    // Assignment — never as the plain "mark ready" button.
+    if (action.key === "ready") return status !== "assigned";
     return true;
   });
 }
@@ -169,7 +202,19 @@ export const RECEIVED_VIA_LABELS: Record<ReceivedVia, string> = {
 };
 
 /** The two ways laundry actually arrives, and the only two a new job is offered. */
-export const RECEIVED_VIA_OPTIONS: readonly ReceivedVia[] = ["customer_dropoff", "driver_pickup"];
+export const RECEIVED_VIA_OPTIONS: readonly ReceivedVia[] = ["driver_pickup", "customer_dropoff"];
+
+/**
+ * The default on a new job, and the stored answer on an existing one.
+ *
+ * Most laundry is collected by a driver rather than carried in, so that is what
+ * the form now opens on — the same reasoning that put the delivery fork on
+ * "Deliver". An existing job answers with its own value: opening a drop-off to
+ * fix a quantity must never quietly re-record how it arrived.
+ */
+export function initialReceivedVia(order?: { received_via: string } | null): string {
+  return order?.received_via ?? "driver_pickup";
+}
 
 /**
  * The received-via choices to render, given what the job already holds.
@@ -186,12 +231,17 @@ export function receivedViaOptions(current?: string | null): string[] {
 }
 
 /**
- * Whether the delivery/pickup choice starts on "Re-deliver".
+ * Whether the delivery/pickup choice starts on "Deliver".
  *
  * New jobs do: taking it back to the customer is the normal job, and making the
  * counter select it every time was a step that was almost always the same. An
  * existing job answers with its own stored value, so editing one never moves it
  * onto the other workflow.
+ *
+ * The label is "Deliver", not "Re-deliver". The customer-facing word for taking
+ * clean laundry to a customer is delivery; "re-delivery" is what a courier calls
+ * a second attempt after a failed one, which is a different event this system
+ * does not model and should not appear to.
  */
 export function initialDeliveryRequired(order?: { delivery_required: boolean } | null): boolean {
   return order ? order.delivery_required : true;

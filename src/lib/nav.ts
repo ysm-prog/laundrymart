@@ -25,7 +25,7 @@ import { can, type Capability, type Role } from "@/lib/roles";
 
 /** Counts the rail can surface. Resolved once per request in the layout. */
 export type NavCountKey =
-  | "routesToday" | "exceptions" | "batches" | "unpaidInvoices" | "overdueJobs";
+  | "exceptions" | "batches" | "unpaidInvoices" | "overdueJobs";
 
 /**
  * The rail's icon, named rather than imported.
@@ -71,45 +71,43 @@ export const NAVIGATION: NavItem[] = [
     // one part of the app that has to work in a car park with no signal.
     //
     // Gated on `routes.read` rather than `run.execute`, because the area is not
-    // only the driver's: a dispatcher opens it to see what they have given
-    // someone. `/run` keeps `run.execute`, so a dispatcher sees the area with
-    // one tab and a driver sees it with two.
-    label: "My runs",
+    // only the driver's: a manager opens it to see what they have given
+    // someone. `/run` keeps `run.execute`, so a manager sees the area with one
+    // tab and a driver sees it with two.
+    label: "My Runs",
     href: "/my-runs",
     icon: "myRun",
     capability: "routes.read",
-    blurb: "The work assigned to you, for any day you choose.",
+    blurb: "The deliveries assigned to you, for any day you choose.",
     children: [
       {
-        label: "My runs", href: "/my-runs", capability: "routes.read",
-        blurb: "Your runs for a day, the stops on them and the laundry at each stop.",
+        label: "My Runs", href: "/my-runs", capability: "routes.read",
+        blurb: "The jobs assigned to you for a day: confirm the load, start the route, deliver.",
       },
       {
-        label: "At the stop", href: "/run", capability: "run.execute",
+        label: "At the depot", href: "/run", capability: "run.execute",
         blurb: "Record a collection or delivery where you are standing. Works without signal.",
       },
     ],
   },
   {
-    label: "Runs",
-    href: "/routes/daily",
+    // **There is no "Runs" area any more.** Planning a day used to mean opening
+    // Runs, creating RUN-001 and putting stops on it; a job is now given
+    // straight to a driver and a date from the Jobs screen, and the
+    // `daily_routes` row underneath is created by the action. `/routes/daily`,
+    // `/routes/planner` and `/routes/templates` still exist and still work —
+    // nothing was deleted and no history was lost — but they are no longer part
+    // of the normal operator's map, so no rail row points at them.
+    //
+    // Drivers and Vehicles were children of that area and are emphatically not
+    // run management, so they keep their place under their own heading rather
+    // than disappearing with it.
+    label: "Fleet",
+    href: "/drivers",
     icon: "runs",
-    capability: "routes.read",
-    count: "routesToday",
-    blurb: "Who is driving where, today and every week.",
+    capability: "fleet.read",
+    blurb: "The people who drive, and what they drive.",
     children: [
-      {
-        label: "Today's runs", href: "/routes/daily", capability: "routes.read",
-        blurb: "Every run for a chosen day, and how far along it is.",
-      },
-      {
-        label: "Plan the day", href: "/routes/planner", capability: "routes.write",
-        blurb: "Drag stops between runs, then apply the whole day at once.",
-      },
-      {
-        label: "Weekly runs", href: "/routes/templates", capability: "routes.read",
-        blurb: "The repeating week each day's runs are built from.",
-      },
       {
         label: "Drivers", href: "/drivers", capability: "fleet.read",
         blurb: "The people who drive, and the login each one uses.",

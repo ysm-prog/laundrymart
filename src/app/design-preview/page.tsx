@@ -10,7 +10,6 @@ import { OverlayDemo } from "./overlay-demo";
 import { CompleteJob } from "@/app/(app)/orders/complete-job";
 import { NotificationBell } from "@/components/notification-bell";
 import { NotificationList, type NotificationListItem } from "@/components/notification-list";
-import { InspectionChecklist } from "@/app/(app)/run/inspection-checklist";
 import { ExceptionCapture } from "@/components/offline-capture";
 import { AgreementWizard } from "@/app/(app)/agreements/agreement-wizard";
 import { CustomerEssentials, FormDisclosure } from "@/app/(app)/customers/customer-form";
@@ -21,9 +20,9 @@ import {
 } from "@/lib/domain/laundry-orders";
 import { UNASSIGNED } from "@/app/(app)/routes/planner/plan";
 import { DateNav } from "@/app/(app)/my-runs/date-nav";
-import { StopCard, Summary } from "@/app/(app)/my-runs/run-view";
+import { DaySummary, JobCard, JobGroup } from "@/app/(app)/my-runs/run-view";
 import { AssignForm } from "@/app/(app)/my-runs/assign-form";
-import type { RunStop } from "@/lib/runs/my-runs";
+import type { DayJob } from "@/lib/runs/my-runs";
 import {
   PlannerBoard, type Option, type PlannerColumn, type PlannerJob,
 } from "@/app/(app)/routes/planner/planner-board";
@@ -53,7 +52,7 @@ export const metadata = { title: "Design preview" };
 const ITEMS: NavItem[] = navigationFor("super_admin");
 
 const COUNTS = {
-  routesToday: 3, exceptions: 4, batches: 12, unpaidInvoices: 9, overdueJobs: 2,
+  exceptions: 4, batches: 12, unpaidInvoices: 9, overdueJobs: 2,
 };
 
 /* ---------------------------------------------------- laundry jobs fixture */
@@ -210,63 +209,48 @@ const PREVIEW_REGISTER = [
  * shapes that matter — one customer with several jobs under a single stop, and
  * one already done.
  */
-const PREVIEW_STOPS: RunStop[] = [
+const PREVIEW_DAY_JOBS: DayJob[] = [
   {
-    id: "s1", job_number: "JOB01041", sequence: 1, service_type: "delivery",
-    status: "assigned", progress_status: "not_started",
-    arrived_at: null, completed_at: null, notes: null,
-    customers: {
-      id: "c1", business_name: "ABC Fitness", phone: "08 1234 5678",
-      special_instructions: "Use the rear loading entrance.",
-    },
-    customer_locations: {
-      name: "Main Road", address_line1: "123 Main Road", suburb: "Adelaide",
-      state: "SA", postcode: "5000", access_notes: null,
-    },
-    jobs: [
-      {
-        id: "j1", order_number: "LJ01041", status: "out_for_delivery", priority: "urgent",
-        delivery_required: true, due_date: "2026-08-14", delivery_window: "morning",
-        expected_delivery_time: null, delivery_address: "123 Main Road, Adelaide SA 5000",
-        delivery_instructions: "Ring the bell at the roller door.",
-        special_instructions: null, customer_id: "c1", stop_id: "s1",
-        laundry_order_items: [
-          { item_type: "towels", custom_description: null, quantity_type: "exact",
-            exact_quantity: 250, bag_count: null, estimated_quantity: null, notes: null },
-        ],
-      },
-      {
-        id: "j2", order_number: "LJ01045", status: "out_for_delivery", priority: "normal",
-        delivery_required: true, due_date: "2026-08-14", delivery_window: null,
-        expected_delivery_time: null, delivery_address: null, delivery_instructions: null,
-        special_instructions: null, customer_id: "c1", stop_id: "s1",
-        laundry_order_items: [
-          { item_type: "bath_mats", custom_description: null, quantity_type: "exact",
-            exact_quantity: 80, bag_count: null, estimated_quantity: null, notes: null },
-        ],
-      },
+    id: "j1", order_number: "LJ01041", status: "assigned", priority: "urgent",
+    delivery_required: true, due_date: "2026-08-16", expected_delivery_date: "2026-08-16",
+    assigned_delivery_date: "2026-08-16", assigned_driver_id: "d1",
+    load_confirmed_at: null, completed_at: null,
+    delivery_window: "morning", expected_delivery_time: null,
+    delivery_address: "123 Main Street, Adelaide SA 5000",
+    delivery_instructions: "Ring the bell at the roller door.",
+    special_instructions: null, customer_id: "c1",
+    customers: { id: "c1", business_name: "ABC Fitness", phone: "08 1234 5678" },
+    laundry_order_items: [
+      { item_type: "towels", custom_description: null, quantity_type: "exact",
+        exact_quantity: 250, bag_count: null, estimated_quantity: null, notes: null },
     ],
   },
   {
-    id: "s2", job_number: "JOB01042", sequence: 2, service_type: "both",
-    status: "completed", progress_status: "completed",
-    arrived_at: "2026-08-13T23:45:00Z", completed_at: "2026-08-14T00:05:00Z", notes: null,
-    customers: { id: "c2", business_name: "XYZ Physio", phone: null, special_instructions: null },
-    customer_locations: {
-      name: "Clinic", address_line1: "8 Grote Street", suburb: "Adelaide",
-      state: "SA", postcode: "5000", access_notes: null,
-    },
-    jobs: [
-      {
-        id: "j3", order_number: "LJ01052", status: "completed", priority: "normal",
-        delivery_required: true, due_date: "2026-08-14", delivery_window: "afternoon",
-        expected_delivery_time: null, delivery_address: null, delivery_instructions: null,
-        special_instructions: null, customer_id: "c2", stop_id: "s2",
-        laundry_order_items: [
-          { item_type: "sheets", custom_description: null, quantity_type: "bulk_lot",
-            exact_quantity: null, bag_count: 4, estimated_quantity: 60, notes: null },
-        ],
-      },
+    id: "j2", order_number: "LJ01045", status: "out_for_delivery", priority: "normal",
+    delivery_required: true, due_date: "2026-08-16", expected_delivery_date: "2026-08-16",
+    assigned_delivery_date: "2026-08-16", assigned_driver_id: "d1",
+    load_confirmed_at: "2026-08-15T22:10:00Z", completed_at: null,
+    delivery_window: null, expected_delivery_time: null,
+    delivery_address: "55 North Terrace, Adelaide SA 5000",
+    delivery_instructions: null, special_instructions: null, customer_id: "c2",
+    customers: { id: "c2", business_name: "XYZ Medical", phone: "08 8888 1010" },
+    laundry_order_items: [
+      { item_type: "sheets", custom_description: null, quantity_type: "bulk_lot",
+        exact_quantity: null, bag_count: 5, estimated_quantity: 60, notes: null },
+    ],
+  },
+  {
+    id: "j3", order_number: "LJ01051", status: "completed", priority: "normal",
+    delivery_required: true, due_date: "2026-08-16", expected_delivery_date: "2026-08-16",
+    assigned_delivery_date: "2026-08-16", assigned_driver_id: "d1",
+    load_confirmed_at: "2026-08-15T22:10:00Z", completed_at: "2026-08-16T01:12:00Z",
+    delivery_window: null, expected_delivery_time: null,
+    delivery_address: "19 King William Street, Adelaide SA 5000",
+    delivery_instructions: null, special_instructions: null, customer_id: "c3",
+    customers: { id: "c3", business_name: "City Gym", phone: null },
+    laundry_order_items: [
+      { item_type: "bath_towels", custom_description: null, quantity_type: "exact",
+        exact_quantity: 80, bag_count: null, estimated_quantity: null, notes: null },
     ],
   },
 ];
@@ -699,16 +683,6 @@ export default function DesignPreviewPage() {
                     />
                   </form>
                 </Card>
-                <Card title="Inspection checklist" description="Starts unchecked — ticking is an act, with a one-tap fast path.">
-                  <form action={previewApply}>
-                    <InspectionChecklist items={[
-                      { name: "p_tyres", label: "Tyres and wheels" },
-                      { name: "p_lights", label: "Lights and indicators" },
-                      { name: "p_brakes", label: "Brakes" },
-                      { name: "p_load", label: "Load area clean and secure" },
-                    ]} />
-                  </form>
-                </Card>
                 <Card title="Flash toast" description="Success dismisses itself in 5 s; an error stays until closed. A prerequisite failure links the screen that fixes it.">
                   <div className="space-y-2">
                     <div className="rounded-lg flex max-w-[440px] items-start gap-2.5 border border-l-[5px] border-success/40 border-l-success bg-surface px-3 py-2 text-sm text-success shadow-sm">
@@ -882,63 +856,56 @@ export default function DesignPreviewPage() {
           </div>
 
           {/* ------------------------------------------------------ my runs --- */}
-          <section className="space-y-4 border-t pt-8">
+          <section id="my-runs-preview" className="space-y-4 border-t pt-8">
             <PageHeader
-              eyebrow="Friday, 14 August 2026"
-              title="My runs"
+              eyebrow="Sunday, 16 August 2026"
+              title="My Runs"
               description="Good morning, John. Here is your work for the day."
             />
 
             <DateNav
-              date="2026-08-14"
+              date="2026-08-16"
               driverParam="me"
               drivers={PREVIEW_RUN_DRIVERS}
               canChooseDriver
             />
 
-            <Summary
+            <DaySummary
               driverName="John Smith"
-              date="2026-08-14"
-              runs={2}
-              stops={{ total: 8, done: 3 }}
-              jobs={{ total: 12, done: 5 }}
+              date="2026-08-16"
+              toDeliver={1}
+              outForDelivery={1}
+              completed={1}
             />
 
-            <Card
-              title="RUN00024 · Morning"
-              description="On the road · 3 of 8 stops completed · started 14 Aug 2026, 7:45 am"
-              actions={<StatusBadge status="in_progress" />}
-            >
-              <ol className="space-y-4">
-                {PREVIEW_STOPS.map((stop) => (
-                  <StopCard
-                    key={stop.id}
-                    stop={stop}
-                    runStatus="in_progress"
-                    returnTo="/my-runs"
-                    canDeliver
-                    dispatches
-                    showCapture={false}
-                  />
-                ))}
-              </ol>
-            </Card>
+            <JobGroup title="To deliver" count={1}>
+              {PREVIEW_DAY_JOBS.filter((job) => job.status === "assigned").map((job) => (
+                <JobCard key={job.id} job={job} actionable />
+              ))}
+            </JobGroup>
+
+            <JobGroup title="Out for delivery" count={1}>
+              {PREVIEW_DAY_JOBS.filter((job) => job.status === "out_for_delivery").map((job) => (
+                <JobCard key={job.id} job={job} actionable />
+              ))}
+            </JobGroup>
+
+            <JobGroup title="Completed" count={1}>
+              {PREVIEW_DAY_JOBS.filter((job) => job.status === "completed").map((job) => (
+                <JobCard key={job.id} job={job} actionable />
+              ))}
+            </JobGroup>
 
             <Card
-              title="Ready for delivery, on nobody's run"
-              description="Customer pickups are not listed — they never go on a delivery run."
+              title="Ready for delivery, assigned to nobody"
+              description="Customer pickups are not listed — they are never assigned for delivery."
             >
               <AssignForm
                 orderId="preview"
                 defaultDriverId="d1"
-                defaultDriverName="John Smith"
-                defaultDate="2026-08-14"
-                dueDate="2026-08-14"
+                defaultDate="2026-08-16"
+                expectedDeliveryDate="2026-08-16"
                 drivers={PREVIEW_RUN_DRIVERS}
-                runs={[
-                  { id: "r1", code: "RUN00024", name: "Morning" },
-                  { id: "r2", code: "RUN00025", name: "Afternoon" },
-                ]}
                 returnTo="/design-preview"
               />
             </Card>

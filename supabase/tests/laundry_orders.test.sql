@@ -12,7 +12,7 @@
 -- on a van" and "a finished job stays finished" are asserted here, against the
 -- trigger, rather than trusted to the screen.
 begin;
-select plan(27);
+select plan(32);
 
 insert into auth.users (id, email) values
   ('11111111-1111-1111-1111-111111111111','a@example.com'),
@@ -38,6 +38,13 @@ insert into public.laundry_orders
   (id, tenant_id, customer_id, order_number, delivery_required, expected_collection_date) values
   ('d0000000-0000-0000-0000-00000000000b','bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
    'c0000000-0000-0000-0000-00000000000b','LJ00001', false, '2026-08-21');
+
+-- A driver for tenant A, so the assignment step below has somebody to give the
+-- job to. Deliberately only in A: the guard's "that driver could not be found"
+-- branch is what stops a job naming another tenant's driver.
+insert into public.drivers (id, tenant_id, full_name, status) values
+  ('44444444-4444-4444-4444-44444444444a','aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+   'Michael Driver','active');
 
 insert into public.laundry_order_items
   (tenant_id, order_id, item_type, quantity_type, exact_quantity) values
@@ -128,13 +135,41 @@ select throws_ok(
   $$update public.laundry_orders set status = 'completed'
      where id = 'd0000000-0000-0000-0000-00000000000a'$$,
   'P0001',
-  'a delivery job must go out for delivery before it is completed',
+  'a delivery job must be assigned to a driver and go out before it is completed',
   'a delivery job cannot be completed off the shelf');
+
+-- Since 0016 a delivery job cannot jump the assignment step either: it needs a
+-- driver and a date before it can go out.
+select throws_ok(
+  $$update public.laundry_orders set status = 'out_for_delivery'
+     where id = 'd0000000-0000-0000-0000-00000000000a'$$,
+  'P0001',
+  'a job cannot go from ready_for_delivery to out_for_delivery',
+  'a delivery job must be assigned before it goes out');
+
+select throws_ok(
+  $$update public.laundry_orders set status = 'assigned'
+     where id = 'd0000000-0000-0000-0000-00000000000a'$$,
+  '23514',
+  null,
+  'a job cannot be Assigned without a driver and a delivery date');
+
+select lives_ok(
+  $$update public.laundry_orders
+       set status = 'assigned',
+           assigned_driver_id = '44444444-4444-4444-4444-44444444444a',
+           assigned_delivery_date = '2026-08-20'
+     where id = 'd0000000-0000-0000-0000-00000000000a'$$,
+  'a ready delivery job takes a driver and a date');
+
+select isnt((select assigned_at from public.laundry_orders
+              where id = 'd0000000-0000-0000-0000-00000000000a'), null,
+            'assigning stamps assigned_at even when the client forgets');
 
 select lives_ok(
   $$update public.laundry_orders set status = 'out_for_delivery'
      where id = 'd0000000-0000-0000-0000-00000000000a'$$,
-  'a delivery job goes out on a van');
+  'an assigned delivery job goes out on a van');
 
 update public.laundry_orders set status = 'completed'
  where id = 'd0000000-0000-0000-0000-00000000000a';
@@ -168,8 +203,15 @@ select throws_ok(
   $$update public.laundry_orders set status = 'out_for_delivery'
      where id = 'd0000000-0000-0000-0000-00000000000b'$$,
   'P0001',
-  'this job is a customer pickup, so it is never out for delivery',
+  'this job is a customer pickup, so it is never sent out on a run',
   'a customer pickup never goes out on a van');
+
+select throws_ok(
+  $$update public.laundry_orders set status = 'assigned'
+     where id = 'd0000000-0000-0000-0000-00000000000b'$$,
+  'P0001',
+  'this job is a customer pickup, so it is never sent out on a run',
+  'a customer pickup is never assigned to a delivery driver');
 
 select lives_ok(
   $$update public.laundry_orders set status = 'completed'

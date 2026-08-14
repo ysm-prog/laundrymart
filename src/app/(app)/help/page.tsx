@@ -21,14 +21,19 @@ export const metadata = { title: "Help" };
 
 const DAY = [
   {
-    title: "Plan the day",
-    body: "One button on Today builds the day's runs from your weekly runs and puts the usual driver and truck on each. You only get sent to the planning board if something needs your call.",
-    href: "/dashboard", link: "Go to Today",
+    title: "Take the laundry in",
+    body: "Create a Job for the customer: what they brought, when they want it back, and whether you are delivering it or they are collecting. It moves New \u2192 In progress \u2192 Ready for delivery as the plant works on it.",
+    href: "/orders/new", link: "Create a job",
   },
   {
-    title: "The driver drives",
-    body: "The driver opens My run on their phone. It works with no signal — everything they record is held on the device and sent when the phone is back on the network.",
-    href: "/run", link: "Open My run",
+    title: "Give it to a driver",
+    body: "Once a job is Ready for delivery, choose a driver and a delivery date. That is the whole handover \u2014 there is no run to create and no run to open. The job becomes Assigned and appears in that driver's My Runs for that day.",
+    href: "/orders?run=ready-unassigned", link: "See what needs a driver",
+  },
+  {
+    title: "The driver delivers",
+    body: "The driver opens My Runs on their phone, confirms the load, starts the route, and marks each job delivered at the door. Dates and times on it are Adelaide dates and times.",
+    href: "/my-runs", link: "Open My Runs",
   },
   {
     title: "Deal with problems",
@@ -60,28 +65,40 @@ const GLOSSARY: Array<{ term: string; also?: string; meaning: string }> = [
     meaning: "A kind of linen you handle — a queen sheet, a bath towel, a floor mat. Prices set here apply unless a contract overrides them.",
   },
   {
-    term: "Weekly run", also: "route template",
-    meaning: "The repeating week: which customers one driver visits, in what order, on which weekdays. You set it up once.",
+    term: "My Runs",
+    meaning: "A driver's own jobs for a day they choose, grouped into what is still to deliver, what is out, and what is done. It is the driver's whole workspace: confirm the load, start the route, open a job, mark it delivered. Dates on it are Adelaide dates.",
   },
   {
-    term: "Run", also: "daily route",
-    meaning: "One driver's actual work for one day, built from a weekly run. It has a driver, a truck, and a list of stops. A driver can have more than one run in a day — a morning van and an afternoon van are two runs, not one.",
+    term: "Assigned driver",
+    meaning: "The person delivering a job. Chosen from your existing drivers when the job is Ready for delivery. You never create or open a run to do it \u2014 the system arranges the driver's day behind the scenes.",
   },
   {
-    term: "My runs",
-    meaning: "Your own runs for a day you choose, with the stops in order and the laundry at each one. It is the same runs the Runs screen manages — this is just your side of them, on your phone. Runs is where the day is planned for everybody; My runs is where it gets done. Dates on it are Adelaide dates.",
+    term: "Confirm Load",
+    meaning: "The driver saying the day's assigned laundry is on the van. It replaced the old vehicle inspection and is not one: no checklist, no pass or fail. A job assigned after the load is confirmed stays Assigned until the driver confirms again, so nothing is recorded as leaving the depot that did not.",
+  },
+  {
+    term: "Start Route",
+    meaning: "The driver saying they are on the road. Every loaded job moves from Assigned to Out for delivery, so nobody in the office has to mark them out by hand.",
   },
   {
     term: "Stop",
-    meaning: "One visit to one customer on one day, on a driver's run. A stop can be a collection, a delivery, or both. A stop is not a Job — see below.",
+    meaning: "One visit to one customer on one day, used by the linen collection paperwork \u2014 what was picked up, what was handed over, the signature at the door. A stop is not a Job: a Job is a customer's laundry, a stop is a visit. Drivers no longer work from stops; they work from their jobs in My Runs.",
   },
   {
     term: "Job", also: "laundry order, ticket, docket",
-    meaning: "One customer's laundry, from the moment it lands on the counter to the moment it goes back: what they brought in, when they get it back, and where it is up to. A Job is the work; a Stop is a visit a driver makes. A job can be delivered on a stop, or the customer can collect it themselves.",
+    meaning: "One customer's laundry, from the moment it lands on the counter to the moment it goes back: what they brought in, when they get it back, and where it is up to. Its seven states are New, In progress, Ready for delivery, Assigned, Out for delivery, Completed and Cancelled.",
   },
   {
-    term: "Assigned to a run",
-    meaning: "A job has been given to a driver for a particular day. It is not a status — the job stays Ready for delivery until it actually goes out. Assigning changes nothing about the laundry, the customer or the price, and taking a job off a run does not cancel it.",
+    term: "Assigned",
+    meaning: "A job that has been given to a driver for a particular delivery date. It is a real state, and a job cannot be in it without both. Assigning changes nothing about the laundry, the customer, the instructions or the price, and removing an assignment simply puts the job back to Ready for delivery \u2014 it does not cancel it.",
+  },
+  {
+    term: "Expected delivery date",
+    meaning: "The day the customer was promised their laundry back. Set when the job is taken in.",
+  },
+  {
+    term: "Assigned delivery date",
+    meaning: "The day a job is scheduled to a driver. It starts as the expected delivery date and is usually the same, but an authorised user can move the schedule without moving the promise.",
   },
   {
     term: "Overdue",
@@ -126,8 +143,8 @@ const GLOSSARY: Array<{ term: string; also?: string; meaning: string }> = [
 ];
 
 const SAFE = [
-  "Creating anything — a customer, a contract, a weekly run. Nothing is charged or sent to anyone until you issue an invoice.",
-  "Planning a day. Runs can be replanned, and stops moved between runs, right up until a driver starts.",
+  "Creating anything — a customer, a contract, a job. Nothing is charged or sent to anyone until you issue an invoice.",
+  "Assigning a job to a driver, changing the driver, changing the date, or removing the assignment. None of it touches the laundry, the customer or the price, and none of it cancels anything.",
   "Archiving a customer. They drop out of lists; their history, stops and invoices are all kept.",
   "Creating a job and moving it along. Every step is recorded on the job with your name and the time.",
 ];
@@ -135,7 +152,6 @@ const SAFE = [
 const FINAL = [
   "Issuing an invoice. After that it can only be voided with a reason, or corrected with a credit note.",
   "Emailing an invoice. The email leaves immediately.",
-  "Closing a run. It stops accepting stop updates from the driver.",
   "Voiding an invoice. The number is kept forever so your books have no gaps.",
   "Completing a job — marking it delivered or collected. A finished job cannot be moved again.",
   "Cancelling a job. It stops appearing in the day's work. Nothing is deleted, but it cannot be reopened.",

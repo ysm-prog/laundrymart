@@ -1,38 +1,43 @@
 import Link from "next/link";
 import { MapPin, Phone } from "lucide-react";
-import {
-  Badge, ButtonLink, Card, StatusBadge, cx, humanise,
-} from "@/components/ui";
-import { SubmitButton } from "@/components/form";
-import { formatAdelaideDate, formatAdelaideDateTime } from "@/lib/domain/timezone";
+import { Badge, ButtonLink, Card, cx, humanise } from "@/components/ui";
+import { formatAdelaideDate, formatAdelaideTime } from "@/lib/domain/timezone";
 import { ORDER_STATUS_LABELS, summariseItems, type OrderStatus } from "@/lib/domain/laundry-orders";
-import { describeProgress } from "@/lib/domain/run-assignment";
-import type { RunJob, RunStop } from "@/lib/runs/my-runs";
-import { markJobDelivered, removeJobFromRun } from "./actions";
+import type { DayJob } from "@/lib/runs/my-runs";
 
 /**
- * The three things a driver actually reads: the day's totals, a stop, and the
- * laundry at it.
+ * What a driver reads: the day's totals, and one card per job.
+ *
+ * There is no run card, no stop card and no sequence number here any more. A
+ * driver's day is a list of deliveries — the run underneath is bookkeeping and
+ * naming it on screen only ever made the driver responsible for understanding
+ * it. What is left is the four things they need at a glance: who, where, what,
+ * and whether it is done.
  *
  * Exported rather than kept private to `page.tsx` for one reason worth stating:
- * `/design-preview` renders them against fixtures. Every real screen in this app
- * is an async server component that reads Supabase, so none of them can be
+ * `/design-preview` renders these against fixtures. Every real screen in this
+ * app is an async server component reading Supabase, so none of them can be
  * *looked at* without a live project — which is how a doubled hairline and an
  * invisible dark-mode edge both survived a green `verify` once already. These
  * are the leaf components, they take plain props, and the gallery renders the
  * same ones the driver gets.
  */
 
-export function Summary({
-  driverName, date, runs, stops, jobs,
+/* ---------------------------------------------------------------- summary */
+
+export function DaySummary({
+  driverName, date, toDeliver, outForDelivery, completed,
 }: {
-  driverName: string; date: string; runs: number;
-  stops: { total: number; done: number }; jobs: { total: number; done: number };
+  driverName: string; date: string;
+  toDeliver: number; outForDelivery: number; completed: number;
 }) {
+  const total = toDeliver + outForDelivery + completed;
+  const done = completed;
+
   const figures = [
-    { label: runs === 1 ? "Run" : "Runs", value: runs },
-    { label: stops.total === 1 ? "Stop" : "Stops", value: stops.total },
-    { label: jobs.total === 1 ? "Job" : "Jobs", value: jobs.total },
+    { label: "To deliver", value: toDeliver },
+    { label: "Out", value: outForDelivery },
+    { label: "Completed", value: completed },
   ];
 
   return (
@@ -52,12 +57,11 @@ export function Summary({
         </div>
       </div>
 
-      {stops.total > 0 ? (
+      {total > 0 ? (
         <div className="mt-4">
-          <ProgressBar done={stops.done} total={stops.total} />
+          <ProgressBar done={done} total={total} />
           <p className="mt-1.5 text-sm text-muted-foreground">
-            {describeProgress(stops, "stop")}
-            {jobs.total > 0 ? ` · ${describeProgress(jobs, "job", "delivered")}` : null}
+            {done} of {total} {total === 1 ? "job" : "jobs"} delivered
           </p>
         </div>
       ) : null}
@@ -66,210 +70,165 @@ export function Summary({
 }
 
 /**
- * A subtle bar, not a chart. §34 asks for progress, and the number beside it is
- * the actual answer — the bar exists so the shape of the day is readable at a
- * glance, which is why it carries no percentage label of its own.
+ * A subtle bar, not a chart. The number beside it is the actual answer — the bar
+ * exists so the shape of the day is readable at a glance, which is why it
+ * carries no percentage label of its own.
  */
 function ProgressBar({ done, total }: { done: number; total: number }) {
   const pct = total === 0 ? 0 : Math.round((done / total) * 100);
   return (
     <div className="h-2 w-full overflow-hidden rounded-full bg-surface-sunken"
          role="progressbar" aria-valuenow={done} aria-valuemin={0} aria-valuemax={total}
-         aria-label={`${done} of ${total} stops completed`}>
+         aria-label={`${done} of ${total} jobs delivered`}>
       <div className="h-full rounded-full bg-primary transition-[width]" style={{ width: `${pct}%` }} />
     </div>
   );
 }
 
-/* ----------------------------------------------------------------- stops */
+/* ------------------------------------------------------------- job cards */
 
-export function StopCard({
-  stop, runStatus, returnTo, canDeliver, dispatches, showCapture,
+/**
+ * One delivery, as a card.
+ *
+ * Cards rather than a table at every width, not just on a phone: a driver's list
+ * is never wide, and the address — the thing they are actually navigating by —
+ * has to be the second most prominent line on it. The address and the phone are
+ * real links, so a tap opens maps or dials rather than selecting text.
+ */
+export function JobCard({
+  job, actionable,
 }: {
-  stop: RunStop; runStatus: string; returnTo: string;
-  canDeliver: boolean; dispatches: boolean; showCapture: boolean;
+  job: DayJob;
+  /** The driver may open and work this job, rather than merely view it. */
+  actionable: boolean;
 }) {
-  const done = stop.progress_status === "completed" || stop.status === "completed";
-  const address = [
-    stop.customer_locations?.address_line1,
-    stop.customer_locations?.suburb,
-    stop.customer_locations?.state,
-    stop.customer_locations?.postcode,
-  ].filter(Boolean).join(", ");
-
-  const instructions = [
-    stop.customer_locations?.access_notes,
-    stop.customers?.special_instructions,
-    stop.notes,
-  ].filter(Boolean);
+  const finished = job.status === "completed";
+  const address = job.delivery_address;
+  const detailHref = `/my-runs/jobs/${job.id}?date=${job.assigned_delivery_date ?? ""}`;
 
   return (
     <li className={cx(
       "rounded-xl border p-4",
-      done ? "border-success/30 bg-success/5" : "bg-surface",
+      finished ? "border-success/30 bg-success/5" : "bg-surface",
     )}>
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div className="flex min-w-0 items-start gap-3">
-          <span aria-hidden
-                className={cx(
-                  "flex size-8 shrink-0 items-center justify-center rounded-full text-sm font-semibold",
-                  done ? "bg-success text-on-status" : "bg-primary/10 text-primary",
-                )}>
-            {stop.sequence}
-          </span>
-          <div className="min-w-0">
-            <p className="text-base font-semibold">
-              <span className="sr-only">Stop {stop.sequence}: </span>
-              {stop.customers?.business_name ?? "Unknown customer"}
-            </p>
-            {address ? (
-              <p className="mt-0.5 text-sm text-muted-foreground">{address}</p>
-            ) : (
-              <p className="mt-0.5 text-sm text-muted-foreground">No site address recorded</p>
-            )}
-            <p className="mt-1 text-sm text-muted-foreground">
-              {humanise(stop.service_type)}
-              {stop.jobs.length > 0
-                ? ` · ${stop.jobs.length} ${stop.jobs.length === 1 ? "job" : "jobs"}`
-                : null}
-              {stop.arrived_at ? ` · arrived ${formatAdelaideDateTime(stop.arrived_at)}` : null}
-            </p>
-          </div>
-        </div>
+        <div className="min-w-0">
+          <p className="flex flex-wrap items-center gap-2">
+            <span className="text-base font-semibold">{job.order_number}</span>
+            {job.priority === "urgent" ? <Badge tone="warning">Urgent</Badge> : null}
+          </p>
+          <p className="mt-0.5 text-base font-semibold">
+            {job.customers?.business_name ?? "Unknown customer"}
+          </p>
 
-        <div className="flex flex-wrap items-center gap-2 sm:shrink-0">
-          <StatusBadge status={stop.progress_status} />
-          {stop.customers?.phone ? (
-            <a href={`tel:${stop.customers.phone.replace(/\s+/g, "")}`}
-               className="inline-flex min-h-11 items-center gap-1.5 rounded-lg border border-strong
-                          bg-surface px-3 text-sm font-medium shadow-xs transition
-                          hover:bg-surface-muted">
-              <Phone className="size-4" aria-hidden />
-              {stop.customers.phone}
-            </a>
-          ) : null}
+          {/* The address leads, because it is what the next ten minutes are
+              about. Whole-address tap target, not an icon beside it. */}
           {address ? (
             <a
               href={`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(address)}`}
               target="_blank"
               rel="noreferrer"
-              className="inline-flex min-h-11 items-center gap-1.5 rounded-lg border border-strong
-                         bg-surface px-3 text-sm font-medium shadow-xs transition
-                         hover:bg-surface-muted"
-            >
-              <MapPin className="size-4" aria-hidden />
-              Navigate
-            </a>
-          ) : null}
-          {showCapture ? (
-            <ButtonLink href={`/run?stop=${stop.id}`} size="sm" variant="secondary">
-              Record at the stop
-            </ButtonLink>
-          ) : (
-            <ButtonLink href={`/jobs/${stop.id}`} size="sm" variant="secondary">
-              View stop
-            </ButtonLink>
-          )}
-        </div>
-      </div>
-
-      {instructions.length > 0 ? (
-        <div className="mt-3 rounded-lg bg-surface-sunken px-3 py-2">
-          <p className="text-sm font-medium">Delivery instructions</p>
-          {instructions.map((line, index) => (
-            <p key={index} className="mt-0.5 text-sm text-muted-foreground">{line}</p>
-          ))}
-        </div>
-      ) : null}
-
-      {stop.jobs.length > 0 ? (
-        <ul className="mt-3 space-y-2">
-          {stop.jobs.map((job) => (
-            <JobRow
-              key={job.id}
-              job={job}
-              returnTo={returnTo}
-              canDeliver={canDeliver}
-              dispatches={dispatches}
-              runStatus={runStatus}
-            />
-          ))}
-        </ul>
-      ) : null}
-    </li>
-  );
-}
-
-/* ------------------------------------------------------------------ jobs */
-
-function JobRow({
-  job, returnTo, canDeliver, dispatches, runStatus,
-}: {
-  job: RunJob; returnTo: string; canDeliver: boolean; dispatches: boolean; runStatus: string;
-}) {
-  const finished = job.status === "completed" || job.status === "cancelled";
-  // The run has to be moving before a delivery can be recorded against it —
-  // the same rule `/run`'s capture card applies, for the same reason: a stop
-  // completed before the van left is a record of something that did not happen.
-  const rolling = ["in_progress", "returning", "unloading"].includes(runStatus);
-
-  return (
-    <li className="rounded-lg border bg-surface-muted/40 px-3 py-2.5">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-        <div className="min-w-0">
-          {/* The link is the way into the job, and it is pressed with a thumb
-              in a van. `min-h-11` gives it the 44px target the rest of the app
-              uses; the negative margin keeps the row as tight as it looks. */}
-          <p className="flex flex-wrap items-center gap-2 text-sm font-semibold">
-            <Link
-              href={`/my-runs/jobs/${job.id}`}
-              className="-my-2 inline-flex min-h-11 items-center rounded-lg py-2 hover:underline
+              className="mt-1.5 inline-flex min-h-11 items-start gap-1.5 rounded-lg py-1 pr-2
+                         text-sm font-medium text-primary hover:underline
                          focus:outline-none focus:ring-2 focus:ring-primary/25"
             >
-              {job.order_number}
-            </Link>
-            {job.priority === "urgent" ? <Badge tone="warning">Urgent</Badge> : null}
-          </p>
-          <p className="mt-0.5 text-sm text-muted-foreground">
+              <MapPin className="mt-0.5 size-4 shrink-0" aria-hidden />
+              <span className="min-w-0">{address}</span>
+            </a>
+          ) : (
+            <p className="mt-1.5 text-sm text-muted-foreground">No delivery address recorded</p>
+          )}
+
+          <p className="mt-1 text-sm text-muted-foreground">
             {summariseItems(job.laundry_order_items, 3)}
           </p>
-          {job.delivery_window ? (
-            <p className="mt-0.5 text-sm text-muted-foreground">
-              Delivery: {humanise(job.delivery_window)}
-              {job.expected_delivery_time ? ` at ${job.expected_delivery_time.slice(0, 5)}` : ""}
+
+          <p className="mt-0.5 text-sm text-muted-foreground">
+            {job.expected_delivery_date
+              ? `Expected: ${formatAdelaideDate(job.expected_delivery_date, "short")}`
+              : "No expected delivery date"}
+            {job.assigned_delivery_date
+              && job.assigned_delivery_date !== job.expected_delivery_date
+              ? ` · Assigned: ${formatAdelaideDate(job.assigned_delivery_date, "short")}`
+              : ""}
+            {job.delivery_window && job.delivery_window !== "no_specific_time"
+              ? ` · ${humanise(job.delivery_window)}`
+                + (job.expected_delivery_time ? ` at ${job.expected_delivery_time.slice(0, 5)}` : "")
+              : ""}
+          </p>
+
+          {finished && job.completed_at ? (
+            <p className="mt-0.5 text-sm font-medium text-success">
+              Completed {formatAdelaideTime(job.completed_at)}
             </p>
           ) : null}
         </div>
 
         <div className="flex flex-wrap items-center gap-2 sm:shrink-0">
-          <Badge tone={finished ? "success" : "info"}>
+          <Badge tone={finished ? "success" : job.status === "out_for_delivery" ? "info" : "neutral"}>
             {ORDER_STATUS_LABELS[job.status as OrderStatus] ?? humanise(job.status)}
           </Badge>
-
-          {!finished && canDeliver && rolling ? (
-            <form action={markJobDelivered}>
-              <input type="hidden" name="order_id" value={job.id} />
-              <input type="hidden" name="return_to" value={returnTo} />
-              <SubmitButton size="lg" pendingLabel="Recording…">Mark delivered</SubmitButton>
-            </form>
+          {job.customers?.phone ? (
+            <a href={`tel:${job.customers.phone.replace(/\s+/g, "")}`}
+               className="inline-flex min-h-11 items-center gap-1.5 rounded-lg border border-strong
+                          bg-surface px-3 text-sm font-medium shadow-xs transition
+                          hover:bg-surface-muted">
+              <Phone className="size-4" aria-hidden />
+              <span className="sr-only">Call </span>{job.customers.phone}
+            </a>
           ) : null}
-
-          {!finished && dispatches ? (
-            <form action={removeJobFromRun}>
-              <input type="hidden" name="order_id" value={job.id} />
-              <input type="hidden" name="return_to" value={returnTo} />
-              <SubmitButton size="md" variant="secondary" pendingLabel="Removing…">Remove</SubmitButton>
-            </form>
-          ) : null}
+          <ButtonLink href={detailHref} size="md" variant={finished ? "secondary" : "primary"}>
+            {actionable && !finished ? "Open Job" : "View Job"}
+          </ButtonLink>
         </div>
       </div>
 
       {job.delivery_instructions ? (
-        <p className="mt-1.5 text-sm text-muted-foreground">
-          Note: {job.delivery_instructions}
+        <p className="mt-2.5 rounded-lg bg-surface-sunken px-3 py-2 text-sm text-muted-foreground">
+          {job.delivery_instructions}
         </p>
       ) : null}
     </li>
   );
 }
 
+/** A named group of job cards — To deliver, Out for delivery, Completed. */
+export function JobGroup({
+  title, count, children,
+}: {
+  title: string; count: number; children: React.ReactNode;
+}) {
+  if (count === 0) return null;
+  return (
+    <section className="space-y-3">
+      <h2 className="text-base font-semibold">
+        {title} <span className="font-normal text-muted-foreground">({count})</span>
+      </h2>
+      <ul className="space-y-3">{children}</ul>
+    </section>
+  );
+}
+
+/** The office's read-only view of who has a job, used on the Jobs screens. */
+export function AssignmentSummary({
+  driverName, deliveryDate,
+}: {
+  driverName: string; deliveryDate: string | null;
+}) {
+  return (
+    <div className="rounded-lg bg-surface-sunken px-4 py-3">
+      <p className="text-sm">
+        Assigned to: <span className="font-semibold">{driverName}</span>
+      </p>
+      <p className="mt-0.5 text-sm">
+        Assigned delivery date:{" "}
+        <span className="font-semibold">{formatAdelaideDate(deliveryDate, "medium")}</span>
+      </p>
+    </div>
+  );
+}
+
+/** A plain link back into a job, for lists that are not the driver's own day. */
+export function JobLink({ id, label }: { id: string; label: string }) {
+  return <Link href={`/orders/${id}`} className="hover:underline">{label}</Link>;
+}

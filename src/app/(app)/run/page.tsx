@@ -8,14 +8,11 @@ import {
   Card, EmptyState, Notice, PageHeader, SkeletonRows,
   Stage, StatusBadge, humanise,
 } from "@/components/ui";
-import { Field, Input, Select, SubmitButton } from "@/components/form";
+import { Field, Input, SubmitButton } from "@/components/form";
 import { ConfirmSubmit } from "@/components/confirm-submit";
-import { InspectionChecklist } from "./inspection-checklist";
 import { ExceptionCapture, OfflineCapture, ServiceWorkerRegistrar } from "@/components/offline-capture";
 import { EXCEPTION_REASONS } from "@/app/(app)/jobs/exception-reasons";
-import { MediaUploadField } from "@/components/media-upload-field";
-import { CHECKLIST_KEYS, CHECKLIST_LABELS } from "./checklist";
-import { closeRun, confirmLoad, markReturning, startRun, submitInspection, unloadRun } from "./actions";
+import { closeRun, confirmLoad, markReturning, startRun, unloadRun } from "./actions";
 
 export const metadata = { title: "My run" };
 export const dynamic = "force-dynamic";
@@ -88,56 +85,27 @@ export default async function RunPage({
 }
 
 /**
- * The guided workflow from spec §7.8, in order, with the next step actionable.
+ * The depot workflow, in order, with the next step actionable.
  *
- * The inspection is step 1 and stays the expected start of the day, but it no
- * longer blocks the load confirmation — a run whose inspection went on paper,
- * or whose driver is not linked to a driver record, used to be unstartable by
- * anyone. The database rule went with it (migration 0012).
+ * **The vehicle inspection used to be step one and is gone.** It stopped being a
+ * gate in migration 0012 and is now out of the workflow altogether: no
+ * checklist, no pass/fail, no defect capture. Confirming the load is the
+ * driver's start-of-day action and it is not an inspection — it records that the
+ * laundry is on the van, nothing about the van itself. Historical
+ * `vehicle_inspections` rows and `daily_routes.inspection_id` are untouched.
+ *
+ * This screen keeps the depot sequence because it owns the offline outbox and
+ * because Unload is what sweeps remaining stock back into depot receiving. The
+ * driver's day-to-day work — what to deliver and where — is on My Runs.
  */
 function RunWorkflow({ route }: { route: DailyRoute }) {
-  const inspectionDone = !!route.inspection_id;
   const loadDone = !!route.load_confirmed_at;
   const started = !!route.started_at;
 
   return (
     <Card title={`${route.code} · ${route.name}`}>
       <ol className="space-y-3">
-        <Stage index={1} label="Vehicle inspection" done={inspectionDone}
-               detail={inspectionDone ? "Recorded" : "Record it before you set off"}>
-          {!inspectionDone && !started ? (
-            route.vehicle_id ? (
-              <form action={submitInspection} className="space-y-3">
-                <input type="hidden" name="route_id" value={route.id} />
-                <input type="hidden" name="vehicle_id" value={route.vehicle_id} />
-                <InspectionChecklist
-                  items={CHECKLIST_KEYS.map((key) => ({ name: `check_${key}`, label: CHECKLIST_LABELS[key] }))}
-                />
-                <div className="grid gap-3 sm:grid-cols-3">
-                  <Field label="Odometer (km)" name="odometer_km">
-                    <Input name="odometer_km" type="number" min={0} inputMode="numeric" />
-                  </Field>
-                  <Field label="Result" name="result">
-                    <Select name="result" defaultValue="pass" options={[
-                      { value: "pass", label: "Pass" },
-                      { value: "pass_with_defects", label: "Pass with defects" },
-                      { value: "fail", label: "Fail — do not drive" },
-                    ]} />
-                  </Field>
-                  <Field label="Defects" name="defects">
-                    <Input name="defects" placeholder="Nearside indicator intermittent" />
-                  </Field>
-                </div>
-                <MediaUploadField scope="inspection" photosName="photo_paths" photoLabel="Defect photos" />
-                <SubmitButton>Submit inspection</SubmitButton>
-              </form>
-            ) : (
-              <Notice tone="warning">No vehicle is assigned to this run yet — contact your dispatcher.</Notice>
-            )
-          ) : null}
-        </Stage>
-
-        <Stage index={2} label="Load clean linen" done={loadDone}
+        <Stage index={1} label="Load clean linen" done={loadDone}
                detail={loadDone ? `Confirmed ${dateTime(route.load_confirmed_at)}` : "Confirm once the van is loaded"}>
           {!loadDone ? (
             <form action={confirmLoad}>
@@ -147,7 +115,7 @@ function RunWorkflow({ route }: { route: DailyRoute }) {
           ) : null}
         </Stage>
 
-        <Stage index={3} label="Start route" done={started}
+        <Stage index={2} label="Start route" done={started}
                detail={started ? `Started ${dateTime(route.started_at)}` : "Available once the load is confirmed"}>
           {loadDone && !started ? (
             <form action={startRun}>
@@ -157,7 +125,7 @@ function RunWorkflow({ route }: { route: DailyRoute }) {
           ) : null}
         </Stage>
 
-        <Stage index={4} label="Return to depot" done={!!route.returned_at}
+        <Stage index={3} label="Return to depot" done={!!route.returned_at}
                detail={route.returned_at ? dateTime(route.returned_at) : "Mark when you head back"}>
           {started && !route.returned_at ? (
             <form action={markReturning}>
@@ -167,7 +135,7 @@ function RunWorkflow({ route }: { route: DailyRoute }) {
           ) : null}
         </Stage>
 
-        <Stage index={5} label="Unload" done={!!route.unloaded_at}
+        <Stage index={4} label="Unload" done={!!route.unloaded_at}
                detail={route.unloaded_at
                  ? dateTime(route.unloaded_at)
                  : "Moves everything still on the vehicle into depot receiving"}>
@@ -182,7 +150,7 @@ function RunWorkflow({ route }: { route: DailyRoute }) {
           ) : null}
         </Stage>
 
-        <Stage index={6} label="Close run" done={!!route.closed_at}
+        <Stage index={5} label="Close run" done={!!route.closed_at}
                detail={route.closed_at ? dateTime(route.closed_at) : "Final step for the day"}>
           {route.unloaded_at && !route.closed_at ? (
             <form action={closeRun}>

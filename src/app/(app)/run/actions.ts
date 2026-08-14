@@ -2,26 +2,25 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { assertCapability, type Session } from "@/lib/auth/context";
+import { assertCapability } from "@/lib/auth/context";
 import { createClient } from "@/lib/supabase/server";
 import { recordAudit } from "@/lib/audit";
 import {
-  describeDbError, done, fail, firstIssue, mediaPaths, optionalText, returnTo, toObject,
+  describeDbError, done, fail, firstIssue, returnTo, toObject,
 } from "@/lib/actions";
-import { isTenantPath } from "@/lib/media";
-import { notify } from "@/lib/notifications/notify";
 import { sweepVehicleToDepot } from "@/lib/routes/unload";
-import { dispatchRunJobs } from "@/lib/orders/complete";
-import { CHECKLIST_KEYS } from "./checklist";
+import { confirmRunJobsLoaded, dispatchRunJobs } from "@/lib/orders/complete";
 
 /**
  * Where these actions land when the caller does not say.
  *
- * They are posted from two screens now: `/run`, the offline stop-capture screen
- * they were written for, and `/my-runs`, which renders the same six-stage
- * workflow for the day it is showing. Rather than duplicating the workflow — the
- * load rule, the unload sweep and the close guard are all real business logic —
- * each form carries a `return_to` and the action comes back to whichever screen
+ * These belong to `/run`, the depot screen: the load, the road, the return, the
+ * unload sweep and the close. My Runs has its own Confirm Load and Start Route,
+ * shaped around a driver's *day* rather than a run — but both end up writing the
+ * same facts through `confirmRunJobsLoaded` and `dispatchRunJobs`, so the two
+ * screens cannot disagree about what is on the van.
+ *
+ * Each form carries a `return_to` and the action comes back to whichever screen
  * pressed it. `returnTo()` only honours a plain same-site path.
  */
 const DEFAULT_BACK = "/run";
@@ -32,112 +31,24 @@ function revalidateRunScreens(): void {
   revalidatePath("/my-runs");
 }
 
-async function currentDriver(session: Session) {
-  const supabase = await createClient();
-  const { data } = await supabase
-    .from("drivers").select("id, full_name").eq("user_id", session.userId).maybeSingle();
-  return data;
-}
-
-const inspectionSchema = z.object({
-  route_id: z.string().uuid(),
-  vehicle_id: z.string().uuid("This route has no vehicle assigned yet"),
-  odometer_km: z.preprocess(
-    (v) => (v === "" || v == null ? undefined : Number(v)),
-    z.number().int().min(0).optional(),
-  ),
-  result: z.enum(["pass", "pass_with_defects", "fail"]),
-  defects: optionalText,
-  photo_paths: mediaPaths,
-});
-
-export async function submitInspection(formData: FormData): Promise<void> {
-  const BACK = returnTo(formData, DEFAULT_BACK);
-  const session = await assertCapability("run.execute");
-  const parsed = inspectionSchema.safeParse(toObject(formData));
-  if (!parsed.success) return fail(BACK, firstIssue(parsed.error));
-
-  const driver = await currentDriver(session);
-  if (!driver) return fail(BACK, "Your login is not linked to a driver record.");
-
-  const checklist = Object.fromEntries(
-    CHECKLIST_KEYS.map((key) => [key, formData.get(`check_${key}`) === "on"]),
-  );
-
-  const supabase = await createClient();
-  const { data: inspection, error } = await supabase
-    .from("vehicle_inspections")
-    .insert({
-      tenant_id: session.tenantId,
-      created_by: session.userId,
-      vehicle_id: parsed.data.vehicle_id,
-      route_id: parsed.data.route_id,
-      driver_id: driver.id,
-      odometer_km: parsed.data.odometer_km ?? null,
-      result: parsed.data.result,
-      defects: parsed.data.defects ?? null,
-      checklist,
-      // Storage enforced the boundary on upload; this keeps another tenant's
-      // key from being recorded against our inspection.
-      photo_urls: parsed.data.photo_paths.filter((path) => isTenantPath(path, session.tenantId)),
-    })
-    .select("id")
-    .single();
-
-  if (error) return fail(BACK, describeDbError(error));
-
-  if (parsed.data.result === "fail") {
-    // A failed inspection takes the vehicle off the road rather than silently
-    // letting the run continue.
-    await supabase.from("vehicles")
-      .update({ maintenance_status: "out_of_service" })
-      .eq("id", parsed.data.vehicle_id).eq("tenant_id", session.tenantId);
-
-    await recordAudit(session, {
-      entity: "vehicle_inspection", entityId: inspection.id, action: "create",
-      summary: "inspection failed — vehicle taken out of service",
-    });
-
-    // The driver is told on their own screen; this is how the office finds out.
-    // Without it a run goes quiet and the vehicle is off the road with nobody at
-    // a desk any the wiser.
-    await notify(session, {
-      kind: "inspection_failed",
-      subjectId: parsed.data.vehicle_id,
-      title: "A driver failed a vehicle inspection and the vehicle is off the road."
-        + " Reassign the run or clear the vehicle.",
-      href: "/vehicles",
-    });
-
-    revalidateRunScreens();
-    return fail(BACK, "Inspection failed. The vehicle is out of service — contact your dispatcher.");
-  }
-
-  // The inspection no longer gates the start (migration 0012), so it can now
-  // legitimately arrive on a run that is already moving. Recording it must not
-  // then walk the status backwards.
-  const { data: route } = await supabase
-    .from("daily_routes").select("status")
-    .eq("id", parsed.data.route_id).eq("tenant_id", session.tenantId).maybeSingle();
-
-  const { error: routeError } = await supabase
-    .from("daily_routes")
-    .update({
-      inspection_id: inspection.id,
-      odometer_start_km: parsed.data.odometer_km ?? null,
-      ...(["planned", "inspection_pending"].includes(route?.status ?? "")
-        ? { status: "inspection_complete" }
-        : {}),
-    })
-    .eq("id", parsed.data.route_id).eq("tenant_id", session.tenantId);
-  if (routeError) return fail(BACK, describeDbError(routeError));
-
-  await recordAudit(session, {
-    entity: "vehicle_inspection", entityId: inspection.id, action: "create", summary: parsed.data.result,
-  });
-  revalidateRunScreens();
-  return done(BACK, "Inspection recorded.");
-}
+/**
+ * The vehicle inspection is gone from the workflow.
+ *
+ * It stopped gating the run start in migration 0012 — only a driver on this
+ * screen could create one, so a run whose inspection went on paper had no legal
+ * transition out of `inspection_pending`. It is now removed from the driver's
+ * day entirely: no checklist, no pass/fail, no defect capture, no action.
+ *
+ * **Nothing was deleted to achieve that.** `vehicle_inspections`,
+ * `daily_routes.inspection_id`, the `inspection_pending`/`inspection_complete`
+ * route statuses, the `inspection_failed` notification kind and every historical
+ * row on all of them are untouched, so old runs still read correctly and no
+ * report loses its source. What went is the way to create a new one.
+ *
+ * `confirmLoad` below is the replacement start-of-day action and is deliberately
+ * *not* an inspection: it records that the laundry is on the van, and says
+ * nothing about the van.
+ */
 
 export async function confirmLoad(formData: FormData): Promise<void> {
   const BACK = returnTo(formData, DEFAULT_BACK);
@@ -146,10 +57,11 @@ export async function confirmLoad(formData: FormData): Promise<void> {
   if (!id.success) return fail(BACK, "That run could not be found.");
 
   const supabase = await createClient();
+  const at = new Date().toISOString();
   const { error } = await supabase
     .from("daily_routes")
     .update({
-      load_confirmed_at: new Date().toISOString(),
+      load_confirmed_at: at,
       load_confirmed_by: session.userId,
       status: "load_confirmed",
     })
@@ -157,9 +69,18 @@ export async function confirmLoad(formData: FormData): Promise<void> {
 
   if (error) return fail(BACK, describeDbError(error));
 
+  // The jobs riding on this run are confirmed with it. Without this the depot
+  // screen and My Runs would disagree about what is on the van — and Start Route
+  // dispatches only load-confirmed jobs, so confirming here and starting there
+  // would send nothing out.
+  const confirmed = await confirmRunJobsLoaded(supabase, session, id.data, at);
+
   await recordAudit(session, { entity: "daily_route", entityId: id.data, action: "status_change", summary: "load confirmed" });
   revalidateRunScreens();
-  return done(BACK, "Load confirmed.");
+  revalidatePath("/orders");
+  return done(BACK, confirmed > 0
+    ? `Load confirmed — ${confirmed} job(s) ready to go out.`
+    : "Load confirmed.");
 }
 
 export async function startRun(formData: FormData): Promise<void> {
@@ -170,8 +91,8 @@ export async function startRun(formData: FormData): Promise<void> {
 
   const supabase = await createClient();
   // The database refuses this transition without a confirmed load — the rule
-  // lives there so no client can route around it. The inspection is recorded
-  // and shown, but no longer gates the start (migration 0012).
+  // lives there so no client can route around it. Nothing else gates the start:
+  // the inspection stopped doing so in 0012 and is out of the workflow entirely.
   const { error } = await supabase
     .from("daily_routes").update({ status: "in_progress" })
     .eq("id", id.data).eq("tenant_id", session.tenantId);
@@ -180,9 +101,9 @@ export async function startRun(formData: FormData): Promise<void> {
 
   await recordAudit(session, { entity: "daily_route", entityId: id.data, action: "status_change", summary: "started" });
 
-  // The laundry on this run has physically left the depot, so the counter jobs
+  // The laundry on this run has physically left the depot, so the loaded jobs
   // riding on it move to "out for delivery". A statement of fact, not a
-  // shortcut: leaving them at "ready" would have the Jobs screen claiming the
+  // shortcut: leaving them at "assigned" would have the Jobs screen claiming the
   // linen is still on the shelf all morning. Nothing is *completed* here — a
   // job is only delivered when somebody says it was.
   const dispatched = await dispatchRunJobs(supabase, session, id.data);
