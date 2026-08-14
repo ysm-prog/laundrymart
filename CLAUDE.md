@@ -32,6 +32,14 @@ The master spec names a .NET 9 Web API; this build follows the supplied skeleton
   auto-dismisses, errors stick) then deletes it. The one
   URL-param survivor is the auth gate's `?error=forbidden`, set during render where a cookie
   cannot be. `/api/sync` stays the one API exception for the offline outbox.
+  **A rejection redirects, so the browser's copy of the form is gone**: an action that refuses
+  a post is responsible for handing back the answers that cost real work to give. The job form
+  does this for the customer, via the `?customer=` parameter its quick-create already uses.
+- **`optionalText`/`optionalUuid`/`optionalDate` accept `null` as well as `""`.** An empty HTML
+  input posts `""`, but a field composed in the browser and posted as JSON — the
+  compose-locally-commit-once hidden field used by the job form, the contract wizard and the
+  planner — spells the same absence `null`, because `JSON.stringify` drops `undefined` keys.
+  `z.string().optional()` refuses `null`, and one such field took down a whole array parse.
 - Pure domain logic lives in `src/lib/domain/` with no database access: the service calendar,
   pricing, recurring invoicing (`invoicing.ts` — one contract's charges, and the
   `consolidate()` rule for header fields two contracts disagree on), ABN validation, date
@@ -386,6 +394,46 @@ Both are compositions over existing tables — neither added a migration.
   are edited and invoices voided.
 
 ## 18. Changelog
+### 2026-08-14 · No job could be saved: "add at least one laundry item", on a job that had one
+The Jobs module was unusable from the day it shipped. Every create and every edit was refused
+with **"Please add at least one laundry item."** — including the one in the screenshot, with
+2332 towels on it — and the refusal also dropped the customer, so each attempt cost the counter
+the search as well. No migration; no schema, RLS, capability or workflow change.
+
+- **One `null` failed the whole laundry list.** The form posts its items as JSON, and spells
+  every unanswered field `null` (`JSON.stringify` drops `undefined` keys, so it cannot spell it
+  any other way). `optionalText` only ever mapped `""` → absent, and `z.string().optional()`
+  accepts `undefined` but **refuses `null`** — so an item with no *Item notes* failed to parse,
+  `z.array(itemSchema)` failed with it, and the caller was handed an empty list. `optionalText`,
+  `optionalUuid` and `optionalDate` now share one `absent()` preprocessor that reads both
+  spellings. The blast radius was every laundry row: only a job where *every* item had both a
+  custom description and a note typed in could ever have been saved.
+- **An unreadable list no longer poses as an empty one.** `parseOrderItems` returns the reason
+  it could not read the payload instead of `[]`, so a parse fault can never again surface as a
+  sentence about adding an item. That distinction is the whole reason this went unnoticed: the
+  message named a problem the operator could see was untrue, and named nothing they could act on.
+- **The parser moved out of `"use server"`** into `orders/order-items.ts`. A `"use server"`
+  module can export nothing but server actions, so the parser was unreachable from a unit test
+  — which is exactly why `verify` stayed green over a module nobody could use. It is now
+  covered by 8 tests written against the payload `JobForm` actually builds; 4 of them fail
+  against the old preprocessor.
+- **A rejected save keeps the customer.** `fail()` redirects, so the browser's copy of the form
+  is gone — the customer, found by search, was being thrown away on every validation message.
+  Both actions now return through `?customer=<id>`, the door the quick-create already uses, and
+  `JobForm` adopts a changed `defaultCustomerId` during render (no effect) so it works whether
+  or not React kept the component mounted across the redirect. The one deliberate exception is
+  the customer itself being unusable — carrying that id back would re-open the form still
+  claiming a selection the database will not stand behind.
+- **The picker can no longer show "nothing selected" while posting a customer.**
+  `loadJobFormData(ensureCustomerId?)` fetches that one row when the capped 500-name list did
+  not carry them — a customer past the 500th by name, or one since put on hold under an
+  existing job. If they are genuinely gone, the form says so instead of rendering an untouched
+  search box over a hidden field that still points at them. `truncated` is now measured against
+  what the search box covers, so the appended row cannot make a capped list look complete.
+- 254 unit tests (was 245). `verify` green. **Not verified against a live project** — this
+  container has no Supabase credentials, so the fix is proven by the payload-level tests, the
+  typecheck, the lint and the build rather than by taking a job in at a real counter.
+
 ### 2026-08-14 · My Runs: a driver's day, and putting a job on it
 The counter's Jobs and the driver's Runs were two islands — a job could be marked "out for
 delivery" with nothing anywhere recording whose van it went out on. This joins them, adds the

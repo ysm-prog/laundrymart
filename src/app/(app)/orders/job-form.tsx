@@ -109,10 +109,22 @@ export function JobForm({
 }) {
   const editing = order !== undefined;
 
-  // `defaultCustomerId` wins over the saved one: it is only ever set when the
-  // customer quick-create has just come back with a brand new customer, and
-  // that is the one the user meant.
+  // `defaultCustomerId` wins over the saved one: it is set when the customer
+  // quick-create has just come back with a brand new customer, and when a
+  // rejected save is coming back with the customer already chosen. Either way
+  // it is the one the user meant.
   const [customerId, setCustomerId] = useState(defaultCustomerId ?? order?.customer_id ?? "");
+
+  // Both of those arrive as a *navigation*, not a fresh page load, so React may
+  // keep this component mounted and `useState`'s initial value would never be
+  // read again. Adjusting during render on a changed prop is what keeps the
+  // selection in step — and it is the one pattern that does not need an effect,
+  // which the react-hooks rules here rightly refuse.
+  const [lastDefault, setLastDefault] = useState(defaultCustomerId);
+  if (defaultCustomerId !== lastDefault) {
+    setLastDefault(defaultCustomerId);
+    if (defaultCustomerId) setCustomerId(defaultCustomerId);
+  }
   const [query, setQuery] = useState("");
   const [quickCreate, setQuickCreate] = useState(false);
   const [receivedVia, setReceivedVia] = useState<string>(order?.received_via ?? "customer_dropoff");
@@ -259,52 +271,70 @@ export function JobForm({
                 twelve customers, which made the first thing on the page the
                 largest and least useful thing on it. Results now float over the
                 form as a short list, the way a picker should behave.
-              */
-              <div className="relative">
-                <Field label="Customer" name="customer_search">
-                  <div className="relative">
-                    <Search className="pointer-events-none absolute left-3 top-1/2 size-4
-                                       -translate-y-1/2 text-muted-foreground" aria-hidden />
-                    <input
-                      id="customer_search" type="search" autoComplete="off"
-                      className={cx(CONTROL, "pl-9")}
-                      placeholder="Search customer by name, phone or email"
-                      role="combobox" aria-expanded={query.trim().length > 0}
-                      aria-controls="customer-results"
-                      value={query} onChange={(event) => setQuery(event.target.value)}
-                    />
-                  </div>
-                </Field>
 
-                {query.trim() ? (
-                  <ul id="customer-results"
-                      className="absolute inset-x-0 top-full z-20 mt-1 max-h-72 overflow-y-auto
-                                 rounded-xl border bg-surface py-1 shadow-lg">
-                    {matches.map((customer) => (
-                      <li key={customer.id}>
-                        <button type="button" onClick={() => setCustomerId(customer.id)}
-                                className="flex min-h-12 w-full flex-col items-start justify-center
-                                           px-4 py-2 text-left transition hover:bg-surface-muted">
-                          <span className="text-sm font-medium">{customer.business_name}</span>
-                          <span className="text-xs text-muted-foreground">
-                            {[customer.customer_number, customer.phone, customer.billing_email]
-                              .filter(Boolean).join(" · ")}
-                          </span>
-                        </button>
-                      </li>
-                    ))}
-                    {matches.length === 0 ? (
-                      <li className="px-4 py-3 text-sm text-muted-foreground">
-                        No customer found. Try another search, or add a new customer below.
-                      </li>
-                    ) : null}
-                  </ul>
-                ) : (
-                  <p className="mt-1.5 text-xs text-muted-foreground">
-                    Start typing to find them — business name, customer number, phone or email.
-                  </p>
-                )}
-              </div>
+                Reached with a `customerId` still set, this is a customer the
+                server could not resolve — a record since deleted. Said out loud
+                above the box, because the alternative is a picker that looks
+                untouched while the form still carries that id, and a save that
+                then fails on it for no visible reason. The warning sits outside
+                the `relative` wrapper: that wrapper is the floating results
+                list's containing block, and anything added inside it pushes the
+                list down the page.
+              */
+              <>
+                {customerId ? (
+                  <Notice tone="warning" title="That customer is no longer on file">
+                    The customer this job was pointed at cannot be opened any more.
+                    Please search for the right one and save again.
+                  </Notice>
+                ) : null}
+
+                <div className="relative">
+                  <Field label="Customer" name="customer_search">
+                    <div className="relative">
+                      <Search className="pointer-events-none absolute left-3 top-1/2 size-4
+                                         -translate-y-1/2 text-muted-foreground" aria-hidden />
+                      <input
+                        id="customer_search" type="search" autoComplete="off"
+                        className={cx(CONTROL, "pl-9")}
+                        placeholder="Search customer by name, phone or email"
+                        role="combobox" aria-expanded={query.trim().length > 0}
+                        aria-controls="customer-results"
+                        value={query} onChange={(event) => setQuery(event.target.value)}
+                      />
+                    </div>
+                  </Field>
+
+                  {query.trim() ? (
+                    <ul id="customer-results"
+                        className="absolute inset-x-0 top-full z-20 mt-1 max-h-72 overflow-y-auto
+                                   rounded-xl border bg-surface py-1 shadow-lg">
+                      {matches.map((customer) => (
+                        <li key={customer.id}>
+                          <button type="button" onClick={() => setCustomerId(customer.id)}
+                                  className="flex min-h-12 w-full flex-col items-start justify-center
+                                             px-4 py-2 text-left transition hover:bg-surface-muted">
+                            <span className="text-sm font-medium">{customer.business_name}</span>
+                            <span className="text-xs text-muted-foreground">
+                              {[customer.customer_number, customer.phone, customer.billing_email]
+                                .filter(Boolean).join(" · ")}
+                            </span>
+                          </button>
+                        </li>
+                      ))}
+                      {matches.length === 0 ? (
+                        <li className="px-4 py-3 text-sm text-muted-foreground">
+                          No customer found. Try another search, or add a new customer below.
+                        </li>
+                      ) : null}
+                    </ul>
+                  ) : (
+                    <p className="mt-1.5 text-xs text-muted-foreground">
+                      Start typing to find them — business name, customer number, phone or email.
+                    </p>
+                  )}
+                </div>
+              </>
             )}
 
             <button type="button" onClick={() => setQuickCreate((open) => !open)}

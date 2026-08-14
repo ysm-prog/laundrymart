@@ -1,6 +1,26 @@
 # MEMORY — working session handoff
 > Auto-loaded each session. Canonical state is CLAUDE.md; this is the live delta.
 
+**IN FLIGHT — the Jobs module was unusable; fixed on `claude/customer-fix-drops-v0uunk`.**
+Not merged, not deployed. Every job create and edit was refused with "Please add at least one
+laundry item." on a job that had items, and the refusal also dropped the selected customer.
+`verify` green (254 unit tests, was 245). CLAUDE.md §18 (top entry) has the full account.
+- **Root cause: `optionalText` refused a JSON `null`.** The form posts items as JSON and spells
+  every unanswered field `null`; `optionalText` only mapped `""` → absent, and
+  `z.string().optional()` refuses `null`. One blank *Item notes* failed its row, failed the
+  whole `z.array()`, and the empty list that came out was reported as "add an item".
+  `optionalText`/`optionalUuid`/`optionalDate` now share one `absent()` that reads both.
+  **Watch for this shape anywhere a hidden JSON field feeds a Zod schema** — the contract
+  wizard's `lines` and the planner's payload are the same idiom.
+- **The parser now lives outside `"use server"`** (`orders/order-items.ts`) purely so it can be
+  unit-tested; that was why a green `verify` sat on top of a module nobody could use. 8 tests
+  written against `JobForm`'s real payload; 4 fail against the old preprocessor.
+- **A failed save keeps the customer** via `?customer=<id>` (the quick-create's own door), and
+  `JobForm` adopts a changed `defaultCustomerId` during render so it works whether or not React
+  kept the component mounted across the redirect.
+- **Never verified at a real counter** — no Supabase credentials in this container. Take one
+  job in on the deployed app before calling this closed.
+
 **SHIPPED — My Runs + run assignment.** Merged to `Prod` (`8fd851d`, feature commit
 `23499b5`) and **`0015_run_assignment` is applied to `laundrymart-syd`**. Joins the counter's
 Jobs to the driver's Runs, adds `/my-runs`, and gives dispatch somewhere to hand work out.

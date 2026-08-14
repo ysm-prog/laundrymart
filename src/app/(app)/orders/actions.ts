@@ -10,9 +10,10 @@ import {
   checkbox, describeDbError, done, fail, firstIssue,
   optionalDate, optionalText, optionalUuid, returnTo, toObject,
 } from "@/lib/actions";
+import { parseOrderItems } from "./order-items";
 import {
   DELIVERY_WINDOWS, ORDER_PRIORITIES, RECEIVED_VIA,
-  checkTransition, isBlankItem, isOrderStatus, receivedInstant, validateItem,
+  checkTransition, isOrderStatus, receivedInstant, validateItem,
   type OrderItemInput, type OrderStatus,
 } from "@/lib/domain/laundry-orders";
 import { businessToday, isClockTime, toInstant } from "@/lib/domain/timezone";
@@ -46,42 +47,6 @@ const optionalTime = z.preprocess(
 );
 
 const requiredTime = z.string().refine(isClockTime, "Use the time picker");
-
-/** A count that may legitimately be absent — distinct from `count`, which is 0. */
-const optionalCount = z.preprocess(
-  (value) => {
-    if (value === "" || value === null || value === undefined) return undefined;
-    const parsed = typeof value === "number" ? value : Number(value);
-    return Number.isFinite(parsed) ? parsed : value;
-  },
-  z.number().int("Whole numbers only").min(1, "Must be at least 1").optional(),
-);
-
-const itemSchema = z.object({
-  item_type: z.string(),
-  custom_description: optionalText,
-  quantity_type: z.string(),
-  exact_quantity: optionalCount,
-  bag_count: optionalCount,
-  estimated_quantity: optionalCount,
-  notes: optionalText,
-});
-
-/**
- * The items arrive as JSON in one hidden field — the compose-locally, commit-once
- * shape the dispatch planner and the contract wizard already use. Malformed JSON
- * is treated as "no items", which the caller then rejects with the same sentence
- * an empty list gets; there is no reading of a half-parsed laundry list.
- */
-const itemsField = z.preprocess((value) => {
-  if (typeof value !== "string" || value.trim() === "") return [];
-  try {
-    const parsed: unknown = JSON.parse(value);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}, z.array(itemSchema).max(40, "That is more laundry items than one job can hold."));
 
 const orderSchema = z.object({
   customer_id: z.string().uuid("Please select a customer."),
@@ -143,23 +108,6 @@ function crossFieldProblem(input: OrderInput, items: OrderItemInput[]): string |
     return "The driver cannot have collected the laundry after it was received.";
   }
   return null;
-}
-
-/** Drop the blank rows the form always carries, keep the rest in order. */
-function itemsFrom(formData: FormData): OrderItemInput[] {
-  const parsed = itemsField.safeParse(formData.get("items"));
-  if (!parsed.success) return [];
-  return parsed.data
-    .map((item) => ({
-      item_type: item.item_type,
-      custom_description: item.custom_description ?? null,
-      quantity_type: item.quantity_type,
-      exact_quantity: item.exact_quantity ?? null,
-      bag_count: item.bag_count ?? null,
-      estimated_quantity: item.estimated_quantity ?? null,
-      notes: item.notes ?? null,
-    }))
-    .filter((item) => !isBlankItem(item));
 }
 
 /**
@@ -247,6 +195,25 @@ async function resolveDeliveryAddress(
   return billing || null;
 }
 
+/**
+ * Where a rejected post goes back to, carrying the customer already chosen.
+ *
+ * A failure redirects — that is the flash-cookie convention — so the form is
+ * re-rendered by the server and anything held only in the browser is gone. The
+ * customer is the one answer that costs a search to give again, and the form
+ * already reads `?customer=` (it is how the quick-create returns), so the same
+ * door is used rather than a second mechanism. The id is re-validated here
+ * because it came off a form: only a well-formed uuid is ever put in the URL.
+ */
+function backWithCustomer(path: string, formData: FormData): string {
+  const posted = formData.get("customer_id");
+  if (typeof posted !== "string" || !z.string().uuid().safeParse(posted).success) return path;
+  const [base, existing] = path.split("?");
+  const query = new URLSearchParams(existing);
+  query.set("customer", posted);
+  return `${base}?${query.toString()}`;
+}
+
 /** The job as it is now, with the two facts every guard here needs. */
 async function loadOrder(
   supabase: Awaited<ReturnType<typeof createClient>>,
@@ -271,19 +238,25 @@ async function loadOrder(
 export async function createOrder(formData: FormData): Promise<void> {
   const session = await assertCapability("orders.write");
   const backTo = returnTo(formData, "/orders/new");
+  // Every rejection below comes back with the customer still chosen; the one
+  // exception is the customer itself being unusable, which is handled there.
+  const backToForm = backWithCustomer(backTo, formData);
 
   const parsed = orderSchema.safeParse(toObject(formData));
-  if (!parsed.success) return fail(backTo, firstIssue(parsed.error));
+  if (!parsed.success) return fail(backToForm, firstIssue(parsed.error));
 
-  const items = itemsFrom(formData);
+  const parsedItems = parseOrderItems(formData.get("items"));
+  if (!parsedItems.ok) return fail(backToForm, parsedItems.problem);
+  const items = parsedItems.items;
+
   const problem = crossFieldProblem(parsed.data, items);
-  if (problem) return fail(backTo, problem);
+  if (problem) return fail(backToForm, problem);
 
   // Backdating a receipt changes what the day's takings and the overdue list
   // say, so it is a supervisor's action rather than a counter one.
   if (parsed.data.received_date < businessToday()
       && !can(session.role, "orders.manage")) {
-    return fail(backTo, "Only a manager can record a job as received on an earlier day.");
+    return fail(backToForm, "Only a manager can record a job as received on an earlier day.");
   }
 
   const supabase = await createClient();
@@ -294,8 +267,10 @@ export async function createOrder(formData: FormData): Promise<void> {
     .eq("id", parsed.data.customer_id)
     .is("deleted_at", null)
     .maybeSingle<{ id: string; business_name: string; depot_id: string | null }>();
-  if (customerError) return fail(backTo, describeDbError(customerError));
+  if (customerError) return fail(backToForm, describeDbError(customerError));
   if (!customer) {
+    // Deliberately *without* the customer: carrying an id the database will not
+    // stand behind would re-open the form still claiming that selection.
     return fail(backTo, "That customer could not be found — please select one from the list.");
   }
 
@@ -305,7 +280,7 @@ export async function createOrder(formData: FormData): Promise<void> {
   // same moment cannot be handed the same number.
   const { data: orderNumber, error: numberError } = await supabase
     .rpc("next_number", { t: session.tenantId, k: "laundry_order", p: "LJ" });
-  if (numberError) return fail(backTo, describeDbError(numberError));
+  if (numberError) return fail(backToForm, describeDbError(numberError));
 
   const { data: order, error } = await supabase
     .from("laundry_orders")
@@ -318,7 +293,7 @@ export async function createOrder(formData: FormData): Promise<void> {
     })
     .select("id, order_number")
     .single();
-  if (error) return fail(backTo, describeDbError(error));
+  if (error) return fail(backToForm, describeDbError(error));
 
   // One transaction inside Postgres — see save_laundry_order_items in 0014.
   const { error: itemsError } = await supabase
@@ -333,7 +308,7 @@ export async function createOrder(formData: FormData): Promise<void> {
       return fail(`/orders/${order.id}`,
         `Job ${order.order_number} was created but its laundry list could not be saved: ${describeDbError(itemsError)}`);
     }
-    return fail(backTo, describeDbError(itemsError));
+    return fail(backToForm, describeDbError(itemsError));
   }
 
   await logOrderActivity(supabase, session, order.id, {
@@ -360,12 +335,15 @@ export async function updateOrder(formData: FormData): Promise<void> {
   const session = await assertCapability("orders.write");
   const id = z.string().uuid().safeParse(formData.get("id"));
   if (!id.success) return fail(LIST, "That job could not be found.");
-  const backTo = `/orders/${id.data}/edit`;
+  const backTo = backWithCustomer(`/orders/${id.data}/edit`, formData);
 
   const parsed = orderSchema.safeParse(toObject(formData));
   if (!parsed.success) return fail(backTo, firstIssue(parsed.error));
 
-  const items = itemsFrom(formData);
+  const parsedItems = parseOrderItems(formData.get("items"));
+  if (!parsedItems.ok) return fail(backTo, parsedItems.problem);
+  const items = parsedItems.items;
+
   const problem = crossFieldProblem(parsed.data, items);
   if (problem) return fail(backTo, problem);
 

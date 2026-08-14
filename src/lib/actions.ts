@@ -73,19 +73,29 @@ export function firstIssue(error: z.ZodError): string {
 
 /* ------------------------------------------------------------- zod helpers */
 
-/** Empty form inputs arrive as "" — treat them as absent, not as a value. */
-export const optionalText = z.preprocess(
-  (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
-  z.string().trim().optional(),
-);
+/**
+ * "Not answered", in the two shapes it actually arrives in.
+ *
+ * An empty HTML input posts `""`. A field composed in the browser and posted as
+ * JSON — the compose-locally, commit-once hidden field the job form, the
+ * contract wizard and the dispatch planner all use — spells the same absence
+ * `null`, because `JSON.stringify` drops `undefined` keys entirely. Both mean
+ * the same thing to every action here, so both are normalised at the door.
+ *
+ * Leaving `null` out of this was a real outage: `z.string().optional()` accepts
+ * `undefined` and refuses `null`, so a laundry item with no note failed to
+ * parse, took its whole array down with it, and surfaced to the counter as
+ * "Please add at least one laundry item" on a job that plainly had one.
+ */
+const absent = (value: unknown) =>
+  value === null || (typeof value === "string" && value.trim() === "") ? undefined : value;
 
-export const optionalUuid = z.preprocess(
-  (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
-  z.string().uuid().optional(),
-);
+export const optionalText = z.preprocess(absent, z.string().trim().optional());
+
+export const optionalUuid = z.preprocess(absent, z.string().uuid().optional());
 
 export const optionalDate = z.preprocess(
-  (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
+  absent,
   z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use the date picker").optional(),
 );
 
