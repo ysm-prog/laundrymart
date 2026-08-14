@@ -40,6 +40,15 @@ The master spec names a .NET 9 Web API; this build follows the supplied skeleton
   compose-locally-commit-once hidden field used by the job form, the contract wizard and the
   planner — spells the same absence `null`, because `JSON.stringify` drops `undefined` keys.
   `z.string().optional()` refuses `null`, and one such field took down a whole array parse.
+- **Every compose-locally-commit-once payload schema lives outside its `"use server"` file**,
+  in `orders/order-items.ts`, `agreements/wizard-lines.ts` and `routes/planner/plan.ts`, each
+  with tests written against the shape its producer really emits. This is not tidiness: a
+  `"use server"` module can export nothing but server actions, so these contracts used to be
+  unreachable from a unit test — and **two of the three shipped broken and stayed broken behind
+  a green `verify`** (the job form's items, the planner's whole board). A new hidden JSON field
+  goes in a plain module with a test, never in the action. Mind what such a module imports:
+  `plan.ts` is in the client bundle, so it may not reach `lib/actions` (→ `next/headers`), and
+  that failure shows up only at `next build`.
 - Pure domain logic lives in `src/lib/domain/` with no database access: the service calendar,
   pricing, recurring invoicing (`invoicing.ts` — one contract's charges, and the
   `consolidate()` rule for header fields two contracts disagree on), ABN validation, date
@@ -383,7 +392,11 @@ Both are compositions over existing tables — neither added a migration.
   action both obey (a stop is frozen once `progress_status` leaves `not_started`; a closed or
   cancelled run neither gains nor loses stops) — the browser enforces them so a plan is never
   composed that the action will reject, and the action re-enforces them because the browser is
-  not the boundary. The load meter averages the customer's own recent weighed collections and
+  not the boundary. `plan.ts` also owns the **posted payload** (`planSchema` /
+  `parseDispatchPlan` / `DispatchPlan`), and `toPlan` in the board is typed to that inferred
+  type — because the two disagreed for the feature's whole shipped life: the board sent `id`
+  and no date, the schema wanted `routeId` and a date, and not one plan was ever applied.
+  The load meter averages the customer's own recent weighed collections and
   says how many stops it actually covers; there is no promised weight per stop in the schema,
   so it never implies one.
 - `/invoices` is the register + working pane. The left list is a chase queue, the right pane
@@ -394,6 +407,37 @@ Both are compositions over existing tables — neither added a migration.
   are edited and invoices voided.
 
 ## 18. Changelog
+### 2026-08-14 · The planner had never applied a plan: the board and the action disagreed
+Swept the other three compose-locally-commit-once payloads after the job-form outage below.
+One of them was broken the same way and just as completely. No migration.
+
+- **`/routes/planner` "Apply plan" was refused every single time.** The board posted
+  `{columns:[{id,…}]}` with **no date on it at all**; `planSchema` read
+  `{date, columns:[{routeId,…}]}`. So `date: Invalid input: expected string, received undefined`
+  came back on every attempt and no plan was ever committed. The server side was right
+  throughout — `applyDispatchPlan` has always read `column.routeId` — so the fix is entirely
+  in the producer: `PlannerBoard` takes the day as a prop and `toPlan` emits `routeId` and
+  `date`.
+- **`toPlan` now returns `DispatchPlan`**, the type inferred from the action's own schema, so
+  this particular disagreement is a compile error from here on. It caught the `/design-preview`
+  call site the moment it was introduced.
+- **The two survivors are sound, and are now pinned rather than assumed.** The contract
+  wizard's `lines` and the offline outbox's records both parse cleanly against the shapes their
+  producers really build — `/api/sync` had used `.nullish()` throughout from the start, which
+  is precisely what the job form's schema lacked.
+- **All three payload contracts moved out of `"use server"`**: `orders/order-items.ts`,
+  `agreements/wizard-lines.ts` and the planner's existing pure `plan.ts`. Such a module can
+  export nothing but server actions, so each contract had been unreachable from a unit test —
+  and two of the three were broken in production behind a green `verify`. Each now has tests
+  written against the payload its producer actually emits.
+- **`plan.ts` restates the ISO-date rule instead of importing `requiredDate`.** It is in the
+  *client* bundle via `planner-board`, and `lib/actions` reaches for `next/headers`. That import
+  typechecked, linted and tested clean and failed only at `next build` — worth remembering
+  before moving anything else into a module a client component imports.
+- 266 unit tests (was 254). Board re-rendered at 1440 in `/design-preview`: correct payload
+  keys, no console errors, no horizontal overflow, and the dirty/Apply-plan gate still
+  correct after a crew change.
+
 ### 2026-08-14 · No job could be saved: "add at least one laundry item", on a job that had one
 The Jobs module was unusable from the day it shipped. Every create and every edit was refused
 with **"Please add at least one laundry item."** — including the one in the screenshot, with

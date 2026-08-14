@@ -1,10 +1,27 @@
 # MEMORY — working session handoff
 > Auto-loaded each session. Canonical state is CLAUDE.md; this is the live delta.
 
-**IN FLIGHT — the Jobs module was unusable; fixed on `claude/customer-fix-drops-v0uunk`.**
-Not merged, not deployed. Every job create and edit was refused with "Please add at least one
-laundry item." on a job that had items, and the refusal also dropped the selected customer.
-`verify` green (254 unit tests, was 245). CLAUDE.md §18 (top entry) has the full account.
+**IN FLIGHT — two shipped features could never save; fixed on `claude/customer-fix-drops-v0uunk`.**
+Not merged, not deployed. `verify` green (266 unit tests, was 245). CLAUDE.md §18 (top two
+entries) has the full account. Both bugs were the same class: **a hidden JSON field whose
+schema lived in a `"use server"` module, where nothing could unit-test the contract.**
+- **`/routes/planner` had never applied a plan.** The board posted `{columns:[{id,…}]}` with no
+  date; `planSchema` wanted `{date, columns:[{routeId,…}]}`. Every "Apply plan" was refused.
+  The server was right all along — the fix is entirely in `PlannerBoard`, which now takes the
+  date as a prop and whose `toPlan` returns the action's own inferred `DispatchPlan` type, so
+  the disagreement is a compile error from here on.
+- **All three payload schemas now sit outside `"use server"`** (`orders/order-items.ts`,
+  `agreements/wizard-lines.ts`, `routes/planner/plan.ts`), each with tests written against what
+  its producer really emits. **Put any new hidden-JSON contract there too, with a test.**
+  Careful what those modules import: `plan.ts` is in the client bundle, so it cannot reach
+  `lib/actions` (→ `next/headers`) — that mistake typechecks, lints and tests clean and blows
+  up only at `next build`.
+- The contract wizard's `lines` and `/api/sync` were swept and are sound; sync had used
+  `.nullish()` from the start, which is exactly what the job form's schema lacked.
+
+**The Jobs module was unusable** — same branch. Every job create and edit was refused with
+"Please add at least one laundry item." on a job that had items, and the refusal also dropped
+the selected customer.
 - **Root cause: `optionalText` refused a JSON `null`.** The form posts items as JSON and spells
   every unanswered field `null`; `optionalText` only mapped `""` → absent, and
   `z.string().optional()` refuses `null`. One blank *Item notes* failed its row, failed the

@@ -10,6 +10,7 @@ import {
   checkbox, count, describeDbError, done, fail, firstIssue, money, optionalDate,
   optionalText, optionalUuid, percent, requiredDate, toObject, weekdaysFrom,
 } from "@/lib/actions";
+import { parseWizardLines } from "./wizard-lines";
 
 /**
  * Patterns arrive as a handful of flat form fields (`<prefix>_type`, weekday
@@ -69,37 +70,6 @@ const agreementSchema = z.object({
   notes: optionalText,
 });
 
-/**
- * Priced lines posted by the wizard as JSON in one hidden field — the same
- * compose-locally-commit-once shape the dispatch planner uses. Malformed JSON
- * degrades to "no lines" rather than losing the agreement: billing then falls
- * back to item defaults, which the detail page says out loud.
- */
-const wizardLinesSchema = z.array(z.object({
-  item_id: optionalUuid,
-  charge_type: z.enum([
-    "rental", "wash_only", "replacement", "minimum_service_fee", "fuel_levy",
-    "emergency_delivery", "weekend_surcharge", "holiday_surcharge", "bag_charge",
-    "weight_charge", "monthly_fee", "other",
-  ]),
-  pricing_model: z.enum(["per_item", "per_kg", "per_collection", "monthly", "percentage"]),
-  unit_price: z.number().finite().min(0),
-  standard_quantity: z.number().finite().min(0),
-  included_quantity: z.number().finite().min(0),
-  taxable: z.boolean(),
-})).max(50);
-
-function wizardLines(formData: FormData): z.infer<typeof wizardLinesSchema> | null {
-  const raw = formData.get("lines");
-  if (typeof raw !== "string" || raw.trim() === "") return [];
-  try {
-    const parsed = wizardLinesSchema.safeParse(JSON.parse(raw));
-    return parsed.success ? parsed.data : null;
-  } catch {
-    return null;
-  }
-}
-
 export async function createAgreement(formData: FormData): Promise<void> {
   const session = await assertCapability("agreements.write");
   const backTo = "/agreements/new";
@@ -116,7 +86,7 @@ export async function createAgreement(formData: FormData): Promise<void> {
   if (!pickup) return fail(backTo, "The pickup pattern is incomplete — pick at least one service day.");
   if (!delivery) return fail(backTo, "The delivery pattern is incomplete — pick at least one service day.");
 
-  const lines = wizardLines(formData);
+  const lines = parseWizardLines(formData.get("lines"));
   if (lines === null) {
     return fail(backTo, "The priced items could not be read. Check step 3 and try again.");
   }

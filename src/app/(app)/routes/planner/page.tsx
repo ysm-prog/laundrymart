@@ -204,6 +204,7 @@ async function Board({ routeDate }: { routeDate: string }) {
 
       <div className={cx("rounded-lg border bg-surface p-3")}>
         <PlannerBoard
+          date={routeDate}
           columns={columns}
           jobs={jobsById}
           drivers={driverOptions}
