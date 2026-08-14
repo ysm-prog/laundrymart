@@ -3,7 +3,7 @@ import { requireCapability } from "@/lib/auth/context";
 import { createClient } from "@/lib/supabase/server";
 import { can } from "@/lib/roles";
 import { dateTime } from "@/lib/format";
-import type { Customer, Depot, Item } from "@/lib/db/types";
+import type { Customer, Item } from "@/lib/db/types";
 import {
   Button, ButtonLink, Card, DataTable, EmptyState, Notice,
   PageHeader, StatusBadge,
