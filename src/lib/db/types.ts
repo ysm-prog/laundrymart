@@ -422,6 +422,14 @@ export type LaundryOrder = {
   updated_at: string | null;
   /** Generated: the delivery date, or the collection date for a pickup job. */
   due_date: string | null;
+  /**
+   * The stop on a driver's run that will deliver this job (migration 0015).
+   *
+   * The authoritative dispatch relationship, and the only one: driver and run
+   * date are read through `jobs.route_id → daily_routes`, never copied here.
+   * Null means the job is on nobody's run.
+   */
+  stop_id: Uuid | null;
 };
 
 export type LaundryOrderItem = {

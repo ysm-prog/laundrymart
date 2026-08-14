@@ -35,9 +35,17 @@ The master spec names a .NET 9 Web API; this build follows the supplied skeleton
 - Pure domain logic lives in `src/lib/domain/` with no database access: the service calendar,
   pricing, recurring invoicing (`invoicing.ts` — one contract's charges, and the
   `consolidate()` rule for header fields two contracts disagree on), ABN validation, date
-  helpers, the laundry-job workflow (`laundry-orders.ts`) and the business-timezone
-  conversion (`timezone.ts`). Unit-tested; shared by preview, route generation, invoicing and
-  the jobs module so they cannot diverge.
+  helpers, the laundry-job workflow (`laundry-orders.ts`), the run-assignment rules
+  (`run-assignment.ts`) and the timezone conversion (`timezone.ts`). Unit-tested; shared by
+  preview, route generation, invoicing, the jobs module and My Runs so they cannot diverge.
+- **Two timezones, on purpose.** `BUSINESS_TIMEZONE` is `Australia/Sydney` and is what
+  composes a stored instant (`received_at`), an invoice period and a notification's
+  `occurred_on` — every row written since 0001 carries that decision, so it does not move.
+  `OPERATIONS_TIMEZONE` is `Australia/Adelaide` and is the *operational day*: My Runs' default
+  date, its arrows, and the day boundary a `timestamptz` is filtered against when answering
+  "what happened on the 14th". Both live in `timezone.ts` and both read their offset out of
+  `Intl`, so neither hard-codes +9:30/+10:30/+10/+11. `getAdelaideDayRange()` is the one to
+  reach for when filtering a timestamp column by an operational day.
 - Invoice PDFs render server-side with `@react-pdf/renderer` (`src/lib/pdf/`), streamed from
   `/api/invoices/:id/pdf` and attached to the Resend email. `serverExternalPackages` keeps the
   renderer out of the client bundle.
@@ -62,6 +70,11 @@ Resource-scoped beyond tenancy:
   `drivers.id` via `current_driver_id()`.
 - `pickups` / `deliveries` / `*_lines` / `vehicle_inspections`: scoped through the parent's
   own RLS, so a driver never reaches another driver's paperwork.
+- `laundry_orders` (+ its items and activity, through the parent): tenant-wide for office
+  roles; for a **driver-only** member, narrowed by 0015 to jobs sitting on a stop of one of
+  their own runs. My Runs is the first screen to give a driver a reason to read the table, and
+  a tenant-wide policy would have handed them every customer's laundry through PostgREST at
+  the same moment. No non-driver role's predicate changed.
 - `invoices` and friends: readable by any member, writable only by
   super_admin / operations_manager / finance / dispatcher.
 - `storage.objects` in the `run-media` bucket: the object key starts with the tenant id, and
@@ -105,6 +118,13 @@ run — and to `customer_service`, so a stuck run is not waiting on a dispatcher
   asked, where `due_date` is a generated column (delivery date, or collection date for a
   pickup job). A job's laundry list is replaced through `save_laundry_order_items()`, one
   transaction, because a delete-then-insert over PostgREST has a window with no items in it.
+- **A job goes on a run only if it is delivery work that is ready to leave**
+  (`guard_laundry_order_assignment`, 0015): a customer pickup is refused outright, so is a job
+  still in the plant and a completed or cancelled one, and the stop has to belong to the same
+  tenant *and* the same customer — a job cannot be filed under a visit to a different
+  business. The guard fires only when `stop_id` itself changes, so completing an assigned job
+  never re-runs eligibility. Assignment writes that one column and nothing else: it is a
+  relationship, never a status.
 - A production batch cannot start with an empty manifest, cannot be completed except from
   `ready_for_dispatch`, and cannot be reopened once finished (`guard_batch_transition`). Its
   manifest freezes when it leaves receiving — only `rejected_quantity` and notes stay writable
@@ -118,13 +138,22 @@ branches deploy. Never force-push `Prod`.
 ## 6. Routes
 `/` landing · `/login` · `/offline` · `/api/sync` · `/api/media` · `/api/invoices/:id/pdf` ·
 `/api/notifications/sweep` (cron, bearer-token authed, no session)
-`(app)`: `/dashboard` · `/customers[/new|/:id|/:id/edit]` · `/agreements[/new|/:id]` ·
+`(app)`: `/dashboard` · `/my-runs[/jobs/:id]` · `/customers[/new|/:id|/:id/edit]` · `/agreements[/new|/:id]` ·
 `/orders[/new|/:id|/:id/edit]` ·
 `/items[/:id]` · `/drivers` · `/vehicles` · `/routes/templates[/:id]` ·
 `/routes/daily[/:id|/:id/sheet]` · `/routes/planner` · `/jobs[/:id]` ·
 `/operations/{pickups,deliveries,exceptions}` · `/run` · `/warehouse[/:id]` · `/inventory` ·
 `/invoices[/:id]` · `/reports` · `/search` · `/help` · `/notifications` ·
 `/admin` (redirects) `[/depots|/users|/holidays|/audit|/notifications]`
+
+**"My runs" (`/my-runs`) and "Runs" (`/routes/daily`) are two different things**, the same
+way Jobs and Stops are. Runs is the management view of everybody's day; My runs is one
+person's own work for a date they choose, and it is gated on `routes.read` so a dispatcher can
+open it for a driver. The old single-run row was *evolved* into it rather than left beside it
+(§6 of the brief) — `/run` survives as the second tab in the area, because it owns the offline
+outbox and the service worker and is the one screen that must work with no signal. A rail with
+both "My run" and "My runs" is exactly the confusion to avoid; `nav.test.ts` asserts there is
+never more than one.
 
 **Navigation is data** (`src/lib/nav.ts`): eleven areas, each with optional `children`
 rendered as a tab strip (`SectionNav` in the layout, not per page). An area is visible
@@ -166,14 +195,17 @@ renders no tab strip. Tested in `src/lib/__tests__/nav.test.ts`.
 - `0014_laundry_orders` — the counter's job: `laundry_orders` (+ generated `due_date`),
   `laundry_order_items`, `laundry_order_activity`, the transition and cancelled-items guards,
   and `save_laundry_order_items()` for the atomic child-set replace. Adds nothing to 0001–0013.
+- `0015_run_assignment` — `laundry_orders.stop_id` (the one link between the counter's Job
+  and a driver's Stop), its two indexes, three new `laundry_order_activity` verbs, the
+  eligibility guard, and the driver clause on the three laundry policies. One column; no table.
 - `0013_notifications` — `tenants.settings jsonb` (AD-3) and the `notifications` table
   (AD-4). Beware the numbering drift: the unmerged branch
   `claude/warehouse-inventory-flow-psooyq` carries its own `0012_return_count.sql`, which
   has to be renumbered when it lands.
 
 Proofs in `supabase/tests/`: `rls_isolation`, `rls_coverage`, `driver_scope`,
-`business_rules`, `media_scope`, `warehouse_rules`, `notifications_scope`, `laundry_orders`
-(83 assertions). Demo data in `supabase/seed.sql` — not applied by migrations.
+`business_rules`, `media_scope`, `warehouse_rules`, `notifications_scope`, `laundry_orders`,
+`run_assignment` (102 assertions). Demo data in `supabase/seed.sql` — not applied by migrations.
 
 **Do not re-add `grant execute on all functions in schema public to anon`.** That
 boilerplate in 0002–0009 is what exposed every SECURITY DEFINER helper on
@@ -344,6 +376,62 @@ Both are compositions over existing tables — neither added a migration.
   are edited and invoices voided.
 
 ## 18. Changelog
+### 2026-08-14 · My Runs: a driver's day, and putting a job on it
+The counter's Jobs and the driver's Runs were two islands — a job could be marked "out for
+delivery" with nothing anywhere recording whose van it went out on. This joins them, adds the
+operational screen a driver actually works from, and gives dispatch somewhere to hand work
+out. **One migration, one new column, no new table, no new role and no new capability.**
+
+- **`laundry_orders.stop_id` is the whole data model** (`0015`). Job → Stop → Run → Driver,
+  and deliberately no `driver_id` on the job: a second copy of the answer is a second thing to
+  keep in step, and the failure mode is the one the brief names — the job says John, the run
+  says Mark, and nothing says which is true. Reassigning is one UPDATE of one column.
+- **Assignment is a relationship, not a status.** Nothing here adds to the six statuses of
+  0014, and assigning touches no laundry, no customer and no price. Eligibility —
+  delivery work, ready to leave, not already on a run, stop belongs to the same customer — is
+  stated in `src/lib/domain/run-assignment.ts` for the screen and enforced by
+  `guard_laundry_order_assignment` for everything else. A **customer pickup is refused
+  outright**, in the queue, in the form and in the database.
+- **Runs and stops are found before they are created.** Assigning six jobs for one customer to
+  one morning produces one run, one stop and six jobs under it. A driver with two open runs on
+  a date is *asked* rather than guessed at — a morning van and an afternoon van are different
+  promises to the customer. Multiple runs per driver per day were always supported by the
+  schema; `/run` merely hid the second one behind a `maybeSingle()`.
+- **`/my-runs`** — date arrows and a native date picker, a driver selector for `routes.write`
+  only, a summary with a progress bar, one card per run, stops in their existing `sequence`,
+  and the laundry grouped under each stop with phone and navigation links. The run controls
+  post to the very actions `/run` posts to (`confirmLoad` → `startRun` → `markReturning` →
+  `unloadRun` → `closeRun`), which gained a `return_to` and nothing else, so the load-before-
+  start rule and the unload sweep cannot drift between the two screens.
+- **`/my-runs/jobs/:id`** is the driver's read-only job view. It is a kindness on top of three
+  real boundaries, not a substitute for one: `/orders/:id/edit` is still `orders.write`,
+  `cancelOrder` is still `orders.manage`, and since 0015 RLS refuses the read outright unless
+  the job is on one of the driver's own stops.
+- **Delivery completion has one implementation.** `lib/orders/complete.ts` is called both by
+  the counter's `completeOrder` and by the driver's `markJobDelivered`; what differs is the
+  guard in front. The driver's branch is *resource*-based — `run.execute` plus "this job is on
+  a stop of a run whose driver is you", re-derived from the database on every call — so no new
+  capability was invented and posting somebody else's order id is refused, not merely hidden.
+  Starting a run moves its ready jobs to `out_for_delivery`, which is a statement of fact;
+  **closing a run never marks anything delivered.**
+- **Adelaide, beside Sydney rather than instead of it.** `OPERATIONS_TIMEZONE` and the
+  `getAdelaide*` helpers live in the existing `timezone.ts` on the existing offset lookup. The
+  global `BUSINESS_TIMEZONE` was left alone on purpose: flipping it would silently re-date
+  every invoice period and every stored `received_at`. 14 tests cover the day boundary in both
+  directions, both changeovers (23-hour and 25-hour days) and the fact that the machine's own
+  timezone cannot move the answer.
+- **Jobs screen integration only where it earns it**: a "Delivery run" card on `/orders/:id`,
+  a Run column and a "Ready for delivery — unassigned" filter on the list. The embed is
+  disambiguated by constraint name (`jobs!laundry_orders_stop_id_fkey`) — this repo has been
+  bitten once by an ambiguous embed that was compile-clean and dead in production.
+- 245 unit tests (was 204) and 102 pgTAP assertions (was 83). `/design-preview` gained the
+  module; screenshotted light and dark and asserted at 320/360/375/390/430/768/820/1024/1280/
+  1440 — no horizontal overflow and no sub-36px target anywhere in it.
+
+**Not verified against a live project.** This container has no Supabase credentials, so the
+authenticated screens were checked by migration-against-real-Postgres, pgTAP, unit tests,
+build, typecheck, lint and the component gallery — not by being opened with real rows in them.
+
 ### 2026-08-13 · Electro Services: full UI/UX redesign
 A visual, usability and responsiveness pass over the whole application. **No schema, server
 action, RLS policy, capability, query or business rule changed** — no migration, and the 204

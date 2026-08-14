@@ -18,6 +18,7 @@ import {
 import { Select, SubmitButton } from "@/components/form";
 import { ConfirmSubmit } from "@/components/confirm-submit";
 import { CompleteJob } from "../complete-job";
+import { DispatchCard } from "./dispatch-card";
 import { advanceOrder, assignOrder, cancelOrder, completeOrder } from "../actions";
 
 export const dynamic = "force-dynamic";
@@ -188,6 +189,11 @@ export default async function JobDetailPage({
       )}
 
       <div className="grid gap-4 lg:grid-cols-3">
+        {/* -------------------------------------------------------- dispatch --- */}
+        {/* Which van is taking it, and when. `routes.write` is the existing
+            plan-and-assign capability — this screen introduces no new one. */}
+        <DispatchCard order={order} canAssign={can(session.role, "routes.write")} />
+
         {/* ------------------------------------------------------ customer --- */}
         <Card
           title="Customer"

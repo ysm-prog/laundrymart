@@ -16,6 +16,8 @@ import {
   type OrderItemInput, type OrderStatus,
 } from "@/lib/domain/laundry-orders";
 import { businessToday, isClockTime, toInstant } from "@/lib/domain/timezone";
+import { logOrderActivity } from "@/lib/orders/activity";
+import { completeLaundryOrder } from "@/lib/orders/complete";
 
 /**
  * Writes for the laundry-jobs module.
@@ -245,47 +247,6 @@ async function resolveDeliveryAddress(
   return billing || null;
 }
 
-/* -------------------------------------------------------------- activity */
-
-type ActivityEntry = {
-  activity_type:
-    | "created" | "status_changed" | "updated" | "items_changed"
-    | "assigned" | "delivered" | "collected" | "cancelled";
-  previous?: Record<string, unknown> | null;
-  next?: Record<string, unknown> | null;
-  note?: string | null;
-};
-
-/**
- * One line of the job's timeline, written beside the change that caused it.
- *
- * Failures are logged and swallowed, exactly as `recordAudit()` does: a job that
- * was delivered must not report itself as failed because the note about it could
- * not be written. The audit log remains the tamper-evident record; this is the
- * human-readable one on the page.
- */
-async function logActivity(
-  supabase: Awaited<ReturnType<typeof createClient>>,
-  session: Session,
-  orderId: string,
-  entry: ActivityEntry,
-): Promise<void> {
-  try {
-    const { error } = await supabase.from("laundry_order_activity").insert({
-      tenant_id: session.tenantId,
-      order_id: orderId,
-      actor_id: session.userId,
-      activity_type: entry.activity_type,
-      previous_value: entry.previous ?? null,
-      new_value: entry.next ?? null,
-      note: entry.note ?? null,
-    });
-    if (error) console.error("job activity insert failed", { orderId, error: error.message });
-  } catch (cause) {
-    console.error("job activity insert threw", cause);
-  }
-}
-
 /** The job as it is now, with the two facts every guard here needs. */
 async function loadOrder(
   supabase: Awaited<ReturnType<typeof createClient>>,
@@ -375,7 +336,7 @@ export async function createOrder(formData: FormData): Promise<void> {
     return fail(backTo, describeDbError(itemsError));
   }
 
-  await logActivity(supabase, session, order.id, {
+  await logOrderActivity(supabase, session, order.id, {
     activity_type: "created",
     next: {
       status: "new",
@@ -465,7 +426,7 @@ export async function updateOrder(formData: FormData): Promise<void> {
       `The job details were saved but the laundry list was not: ${describeDbError(itemsError)}`);
   }
 
-  await logActivity(supabase, session, id.data, {
+  await logOrderActivity(supabase, session, id.data, {
     activity_type: "updated",
     previous: before ?? null,
     next: {
@@ -529,7 +490,7 @@ export async function advanceOrder(formData: FormData): Promise<void> {
     .eq("tenant_id", session.tenantId);
   if (error) return fail(detail, describeDbError(error));
 
-  await logActivity(supabase, session, parsed.data.id, {
+  await logOrderActivity(supabase, session, parsed.data.id, {
     activity_type: "status_changed",
     previous: { status: existing.status },
     next: { status: target },
@@ -574,31 +535,19 @@ export async function completeOrder(formData: FormData): Promise<void> {
   const existing = await loadOrder(supabase, parsed.data.id);
   if (!existing) return fail(LIST, "That job could not be found.");
 
-  const allowed = checkTransition(existing.status, "completed", existing.delivery_required);
-  if (!allowed.ok) return fail(detail, allowed.reason);
-
-  const at = toInstant(parsed.data.completed_date, parsed.data.completed_time);
-  const delivered = existing.delivery_required;
-
-  const { error } = await supabase
-    .from("laundry_orders")
-    .update({
-      status: "completed",
-      completed_at: at,
-      ...(delivered
-        ? { delivered_at: at, delivered_by: parsed.data.handled_by }
-        : { collected_at: at, collected_by: parsed.data.handled_by }),
-    })
-    .eq("id", parsed.data.id)
-    .eq("tenant_id", session.tenantId);
-  if (error) return fail(detail, describeDbError(error));
-
-  await logActivity(supabase, session, parsed.data.id, {
-    activity_type: delivered ? "delivered" : "collected",
-    previous: { status: existing.status },
-    next: { status: "completed", at, by: parsed.data.handled_by },
+  // The write itself lives in `lib/orders/complete.ts`, shared with the driver's
+  // own "mark delivered" on My Runs — one implementation of finishing a job,
+  // two guards in front of it. `dispatchIfNeeded` is deliberately not passed
+  // here: at the counter, a delivery job still sitting at "ready" means somebody
+  // forgot to record that the van left, and that is worth being told about.
+  const result = await completeLaundryOrder(supabase, session, existing, {
+    at: toInstant(parsed.data.completed_date, parsed.data.completed_time),
+    handledBy: parsed.data.handled_by,
     note: parsed.data.note ?? null,
   });
+  if (!result.ok) return fail(detail, result.error);
+  const { delivered } = result;
+
   await recordAudit(session, {
     entity: "laundry_order", entityId: parsed.data.id, action: "status_change",
     summary: `${existing.order_number} ${delivered ? "delivered" : "collected"}`,
@@ -640,7 +589,7 @@ export async function cancelOrder(formData: FormData): Promise<void> {
     .eq("tenant_id", session.tenantId);
   if (error) return fail(detail, describeDbError(error));
 
-  await logActivity(supabase, session, parsed.data.id, {
+  await logOrderActivity(supabase, session, parsed.data.id, {
     activity_type: "cancelled",
     previous: { status: existing.status },
     next: { status: "cancelled" },
@@ -686,7 +635,7 @@ export async function assignOrder(formData: FormData): Promise<void> {
     .eq("tenant_id", session.tenantId);
   if (error) return fail(detail, describeDbError(error));
 
-  await logActivity(supabase, session, parsed.data.id, {
+  await logOrderActivity(supabase, session, parsed.data.id, {
     activity_type: "assigned",
     previous: { assigned_to: before?.assigned_to ?? null },
     next: { assigned_to: parsed.data.assigned_to ?? null },

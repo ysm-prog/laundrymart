@@ -20,6 +20,10 @@ import {
   ORDER_STATUSES, isOverdue, summariseItems,
 } from "@/lib/domain/laundry-orders";
 import { UNASSIGNED } from "@/app/(app)/routes/planner/plan";
+import { DateNav } from "@/app/(app)/my-runs/date-nav";
+import { StopCard, Summary } from "@/app/(app)/my-runs/run-view";
+import { AssignForm } from "@/app/(app)/my-runs/assign-form";
+import type { RunStop } from "@/lib/runs/my-runs";
 import {
   PlannerBoard, type Option, type PlannerColumn, type PlannerJob,
 } from "@/app/(app)/routes/planner/planner-board";
@@ -196,6 +200,81 @@ const PREVIEW_REGISTER = [
     status: "overdue", when: "72 day(s) past terms", chasing: true, selected: true },
   { number: "INV00006", customer: "Wentworth Aged Care", balance: "$8,412.00", total: "$8,412.00",
     status: "draft", when: "issued 01/08/2026", chasing: false, selected: false },
+];
+
+/* --------------------------------------------------------- my runs fixture */
+
+/**
+ * A driver's morning, fixed. The date is the day the redesign fixtures use, so
+ * the screenshots are byte-stable across builds; the two stops are the two
+ * shapes that matter — one customer with several jobs under a single stop, and
+ * one already done.
+ */
+const PREVIEW_STOPS: RunStop[] = [
+  {
+    id: "s1", job_number: "JOB01041", sequence: 1, service_type: "delivery",
+    status: "assigned", progress_status: "not_started",
+    arrived_at: null, completed_at: null, notes: null,
+    customers: {
+      id: "c1", business_name: "ABC Fitness", phone: "08 1234 5678",
+      special_instructions: "Use the rear loading entrance.",
+    },
+    customer_locations: {
+      name: "Main Road", address_line1: "123 Main Road", suburb: "Adelaide",
+      state: "SA", postcode: "5000", access_notes: null,
+    },
+    jobs: [
+      {
+        id: "j1", order_number: "LJ01041", status: "out_for_delivery", priority: "urgent",
+        delivery_required: true, due_date: "2026-08-14", delivery_window: "morning",
+        expected_delivery_time: null, delivery_address: "123 Main Road, Adelaide SA 5000",
+        delivery_instructions: "Ring the bell at the roller door.",
+        special_instructions: null, customer_id: "c1", stop_id: "s1",
+        laundry_order_items: [
+          { item_type: "towels", custom_description: null, quantity_type: "exact",
+            exact_quantity: 250, bag_count: null, estimated_quantity: null, notes: null },
+        ],
+      },
+      {
+        id: "j2", order_number: "LJ01045", status: "out_for_delivery", priority: "normal",
+        delivery_required: true, due_date: "2026-08-14", delivery_window: null,
+        expected_delivery_time: null, delivery_address: null, delivery_instructions: null,
+        special_instructions: null, customer_id: "c1", stop_id: "s1",
+        laundry_order_items: [
+          { item_type: "bath_mats", custom_description: null, quantity_type: "exact",
+            exact_quantity: 80, bag_count: null, estimated_quantity: null, notes: null },
+        ],
+      },
+    ],
+  },
+  {
+    id: "s2", job_number: "JOB01042", sequence: 2, service_type: "both",
+    status: "completed", progress_status: "completed",
+    arrived_at: "2026-08-13T23:45:00Z", completed_at: "2026-08-14T00:05:00Z", notes: null,
+    customers: { id: "c2", business_name: "XYZ Physio", phone: null, special_instructions: null },
+    customer_locations: {
+      name: "Clinic", address_line1: "8 Grote Street", suburb: "Adelaide",
+      state: "SA", postcode: "5000", access_notes: null,
+    },
+    jobs: [
+      {
+        id: "j3", order_number: "LJ01052", status: "completed", priority: "normal",
+        delivery_required: true, due_date: "2026-08-14", delivery_window: "afternoon",
+        expected_delivery_time: null, delivery_address: null, delivery_instructions: null,
+        special_instructions: null, customer_id: "c2", stop_id: "s2",
+        laundry_order_items: [
+          { item_type: "sheets", custom_description: null, quantity_type: "bulk_lot",
+            exact_quantity: null, bag_count: 4, estimated_quantity: 60, notes: null },
+        ],
+      },
+    ],
+  },
+];
+
+/** The planner's driver fixture is `{value,label}`; My Runs wants real rows. */
+const PREVIEW_RUN_DRIVERS = [
+  { id: "d1", full_name: "John Smith", status: "active", phone: "0400 000 111" },
+  { id: "d2", full_name: "Mel Nguyen", status: "active", phone: null },
 ];
 
 export default function DesignPreviewPage() {
@@ -800,6 +879,69 @@ export default function DesignPreviewPage() {
               </div>
             </div>
           </div>
+
+          {/* ------------------------------------------------------ my runs --- */}
+          <section className="space-y-4 border-t pt-8">
+            <PageHeader
+              eyebrow="Friday, 14 August 2026"
+              title="My runs"
+              description="Good morning, John. Here is your work for the day."
+            />
+
+            <DateNav
+              date="2026-08-14"
+              driverParam="me"
+              drivers={PREVIEW_RUN_DRIVERS}
+              canChooseDriver
+            />
+
+            <Summary
+              driverName="John Smith"
+              date="2026-08-14"
+              runs={2}
+              stops={{ total: 8, done: 3 }}
+              jobs={{ total: 12, done: 5 }}
+            />
+
+            <Card
+              title="RUN00024 · Morning"
+              description="On the road · 3 of 8 stops completed · started 14 Aug 2026, 7:45 am"
+              actions={<StatusBadge status="in_progress" />}
+            >
+              <ol className="space-y-4">
+                {PREVIEW_STOPS.map((stop) => (
+                  <StopCard
+                    key={stop.id}
+                    stop={stop}
+                    runStatus="in_progress"
+                    returnTo="/my-runs"
+                    canDeliver
+                    dispatches
+                    showCapture={false}
+                  />
+                ))}
+              </ol>
+            </Card>
+
+            <Card
+              title="Ready for delivery, on nobody's run"
+              description="Customer pickups are not listed — they never go on a delivery run."
+            >
+              <AssignForm
+                orderId="preview"
+                defaultDriverId="d1"
+                defaultDriverName="John Smith"
+                defaultDate="2026-08-14"
+                dueDate="2026-08-14"
+                drivers={PREVIEW_RUN_DRIVERS}
+                runs={[
+                  { id: "r1", code: "RUN00024", name: "Morning" },
+                  { id: "r2", code: "RUN00025", name: "Afternoon" },
+                ]}
+                returnTo="/design-preview"
+              />
+            </Card>
+          </section>
         </main>
       </div>
     </div>

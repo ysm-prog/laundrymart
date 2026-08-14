@@ -9,7 +9,9 @@ import {
   ORDER_PRIORITIES, ORDER_STATUSES, ORDER_STATUS_LABELS, PRIORITY_LABELS,
   isOverdue, summariseItems,
 } from "@/lib/domain/laundry-orders";
-import { addDays, businessToday, toInstant, weekBounds } from "@/lib/domain/timezone";
+import {
+  addDays, businessToday, formatAdelaideDate, toInstant, weekBounds,
+} from "@/lib/domain/timezone";
 import {
   Badge, ButtonLink, CONTROL, DataTable, EmptyState, Notice,
   PageHeader, SkeletonRows, SkeletonStats, Stat, StatusBadge, cx,
@@ -26,6 +28,8 @@ type Search = {
   customer?: string;
   when?: string;
   date?: string;
+  /** Dispatch state: "unassigned", "assigned", or "ready-unassigned". */
+  run?: string;
   page?: string;
 };
 
@@ -38,6 +42,19 @@ type Row = {
   due_date: string | null;
   delivery_required: boolean;
   assigned_to: string | null;
+  stop_id: string | null;
+  /**
+   * The run this job is going out on, read through the one authoritative chain
+   * (§12): job → stop → run → driver. Nothing about the driver is stored on the
+   * job itself, so this embed cannot disagree with the run sheet.
+   */
+  jobs: {
+    job_number: string;
+    daily_routes: {
+      id: string; code: string; route_date: string;
+      drivers: { full_name: string } | null;
+    } | null;
+  } | null;
   customers: { id: string; business_name: string; trading_name: string | null } | null;
   laundry_order_items: Array<{
     item_type: string;
@@ -145,6 +162,13 @@ const WHEN_OPTIONS = [
   { value: "overdue", label: "Overdue" },
 ];
 
+const RUN_OPTIONS = [
+  { value: "", label: "Any run" },
+  { value: "ready-unassigned", label: "Ready for delivery — unassigned" },
+  { value: "unassigned", label: "Not on a run" },
+  { value: "assigned", label: "On a run" },
+];
+
 /**
  * One GET form carrying every filter, so the filtered list lives in the URL and
  * survives a bookmark, a share and a page of results.
@@ -216,6 +240,16 @@ async function Filters({ params }: { params: Search }) {
       </div>
 
       <div>
+        <label htmlFor="run" className="sr-only">Delivery run</label>
+        <select id="run" name="run" defaultValue={params.run ?? ""}
+                className={cx(CONTROL, "w-auto")}>
+          {RUN_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>{option.label}</option>
+          ))}
+        </select>
+      </div>
+
+      <div>
         <label htmlFor="date" className="sr-only">Due on a specific date</label>
         <input id="date" name="date" type="date" defaultValue={params.date}
                className={cx(CONTROL, "w-auto")} />
@@ -226,7 +260,8 @@ async function Filters({ params }: { params: Search }) {
  text-sm font-medium transition hover:bg-surface-muted">
         Search
       </button>
-      {params.q || params.status || params.priority || params.customer || params.when || params.date ? (
+      {params.q || params.status || params.priority || params.customer
+        || params.when || params.date || params.run ? (
         <Link href="/orders"
               className="inline-flex min-h-9 items-center px-2 text-sm text-primary hover:underline">
           Clear
@@ -248,7 +283,13 @@ async function JobList({ params, canCreate }: { params: Search; canCreate: boole
     .from("laundry_orders")
     .select(
       "id, order_number, status, priority, received_at, due_date, delivery_required, " +
-      "assigned_to, customers(id, business_name, trading_name), " +
+      "assigned_to, stop_id, customers(id, business_name, trading_name), " +
+      // Disambiguated by constraint name on purpose. `laundry_orders` has more
+      // than one foreign key pointing into the routing module, and an ambiguous
+      // embed is rejected by PostgREST at request time — compile-clean,
+      // test-clean and dead in production (see the 2026-08-05 changelog).
+      "jobs!laundry_orders_stop_id_fkey(job_number, " +
+      "daily_routes(id, code, route_date, drivers(full_name))), " +
       "laundry_order_items(item_type, custom_description, quantity_type, exact_quantity, " +
       "bag_count, estimated_quantity)",
       { count: "exact" },
@@ -273,6 +314,17 @@ async function JobList({ params, canCreate }: { params: Search; canCreate: boole
   }
   if (params.date && /^\d{4}-\d{2}-\d{2}$/.test(params.date)) {
     query = query.eq("due_date", params.date);
+  }
+
+  // Dispatch state. "Ready for delivery, unassigned" is one option rather than
+  // two filters the user has to know to combine, because it is *the* question
+  // dispatch asks every morning: what is ready to go out and on nobody's van?
+  if (params.run === "unassigned") query = query.is("stop_id", null);
+  else if (params.run === "assigned") query = query.not("stop_id", "is", null);
+  else if (params.run === "ready-unassigned") {
+    query = query.is("stop_id", null)
+      .eq("delivery_required", true)
+      .eq("status", "ready_for_delivery");
   }
 
   if (params.q) {
@@ -311,7 +363,8 @@ async function JobList({ params, canCreate }: { params: Search; canCreate: boole
   const staff = await listStaff();
   const names = staffNames(staff);
   const filtered = Boolean(
-    params.q || params.status || params.priority || params.customer || params.when || params.date,
+    params.q || params.status || params.priority || params.customer
+    || params.when || params.date || params.run,
   );
 
   return (
@@ -370,9 +423,33 @@ async function JobList({ params, canCreate }: { params: Search; canCreate: boole
             cell: (row) => (row.assigned_to ? names.get(row.assigned_to) ?? "—" : "—"),
             hideBelow: "lg",
           },
+          {
+            // Who is delivering it, and when. A pickup job says so instead of
+            // reading as work nobody has picked up — it is not delivery work
+            // and never will be.
+            header: "Run",
+            cell: (row) => <RunCell row={row} />,
+            hideBelow: "md",
+          },
         ]}
       />
       <Pagination page={page} total={count ?? 0} params={params} basePath="/orders" />
     </>
+  );
+}
+
+function RunCell({ row }: { row: Row }) {
+  if (!row.delivery_required) return <span className="text-muted-foreground">Pickup</span>;
+
+  const run = row.jobs?.daily_routes;
+  if (!run) return <Badge>Unassigned</Badge>;
+
+  return (
+    <span className="flex flex-col">
+      <span>{run.drivers?.full_name ?? "No driver yet"}</span>
+      <span className="text-sm text-muted-foreground">
+        {run.code} · {formatAdelaideDate(run.route_date, "short")}
+      </span>
+    </span>
   );
 }

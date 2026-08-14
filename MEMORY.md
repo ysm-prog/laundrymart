@@ -1,6 +1,37 @@
 # MEMORY — working session handoff
 > Auto-loaded each session. Canonical state is CLAUDE.md; this is the live delta.
 
+**IN FLIGHT — My Runs + run assignment** (branch `claude/my-runs-driver-assignment-dnjo8n`,
+not merged). Joins the counter's Jobs to the driver's Runs, adds `/my-runs`, and gives dispatch
+somewhere to hand work out. `verify` green (245 unit tests, was 204), 102 pgTAP assertions
+(was 83) against a real local Postgres. See CLAUDE.md §18 (2026-08-14) for the full account.
+- **`0015_run_assignment` — one column, `laundry_orders.stop_id`.** Job → Stop → Run → Driver
+  and nothing else; there is deliberately no `driver_id` on a laundry order. Do not add one:
+  the whole point is that "who is delivering this" has exactly one answer.
+- **Assignment never touches status.** The six statuses of 0014 are closed and untouched.
+  `guard_laundry_order_assignment` refuses a customer pickup, an unready job, a finished one,
+  and a stop belonging to another customer or tenant. It fires only when `stop_id` changes, so
+  completing an assigned job does not re-run eligibility.
+- **0015 also narrows the three laundry policies** so a *driver-only* member sees a job only
+  while it is on one of their own stops. Non-driver predicates are unchanged. This closes a
+  REST surface that `/orders` never exposed to drivers anyway (they hold no `orders.*`).
+- **Two timezones now.** `BUSINESS_TIMEZONE` stays Sydney (stored instants, invoice periods,
+  `occurred_on`); `OPERATIONS_TIMEZONE` is Adelaide and governs the operational day on My Runs.
+  Do not "unify" them without re-dating history — that is a data decision, not a tidy-up.
+- **`/run` was kept, not replaced.** It is the second tab inside the "My runs" area and still
+  owns the offline outbox and the service worker. `nav.test.ts` asserts a role never sees both
+  "My run" and "My runs".
+- **Delivery completion has one implementation** (`src/lib/orders/complete.ts`), called by the
+  counter's `completeOrder` and the driver's `markJobDelivered`. The driver's authorisation is
+  resource-based (`run.execute` + the run is theirs), re-derived from the DB each call — **no
+  new capability and no new role were added by this feature.**
+- **Pre-existing, found while screenshotting, not fixed** (unrelated to this work): the
+  `/design-preview` document overflows horizontally by 16px at **320px and 1024px**. At 1024
+  the culprit is the planner board's columns escaping their `overflow-x-auto` once the
+  `lg:grid` sidebar layout kicks in; at 320 it is the gallery's own static shell mock. The
+  2026-08-13 pass only ever checked 390/820/1440. Worth a look on the real screens.
+- **Not seen with real data** — no Supabase credentials in this container.
+
 **IN FLIGHT — Electro Services redesign** (branch `claude/electro-services-redesign-6o2q4f`,
 not yet merged to `Dev`/`Prod`). Full UI/UX pass: new token palette, Inter, restored radius and
 shadow scales, light icon rail with a collapsible desktop mode and a real phone drawer, header
@@ -204,7 +235,11 @@ server-side extension, so its `.control` file has to sit in the postmaster's own
 and apt on the runner cannot reach into a container.
 
 **Next up**
-0. **Click through `/orders` on the deployed app** once Vercel has built `Prod`. The schema
+0. **Apply `0015_run_assignment` to `laundrymart-syd`** and probe it the way 0014 was probed:
+   assign a ready job, confirm `status` did not move, confirm the pickup/unready/wrong-customer
+   refusals, confirm a driver-only session reads only their own stops' jobs, and check for a
+   new security advisor. Then open `/my-runs` as the seeded driver login on a phone.
+0b. **Click through `/orders` on the deployed app** once Vercel has built `Prod`. The schema
    and the workflow are proven on the live project by SQL probe; the screens themselves have
    never been rendered against real data from anywhere.
 1. Stage 4, once the four decisions above are made.

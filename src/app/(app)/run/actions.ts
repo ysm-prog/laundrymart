@@ -6,14 +6,31 @@ import { assertCapability, type Session } from "@/lib/auth/context";
 import { createClient } from "@/lib/supabase/server";
 import { recordAudit } from "@/lib/audit";
 import {
-  describeDbError, done, fail, firstIssue, mediaPaths, optionalText, toObject,
+  describeDbError, done, fail, firstIssue, mediaPaths, optionalText, returnTo, toObject,
 } from "@/lib/actions";
 import { isTenantPath } from "@/lib/media";
 import { notify } from "@/lib/notifications/notify";
 import { sweepVehicleToDepot } from "@/lib/routes/unload";
+import { dispatchRunJobs } from "@/lib/orders/complete";
 import { CHECKLIST_KEYS } from "./checklist";
 
-const BACK = "/run";
+/**
+ * Where these actions land when the caller does not say.
+ *
+ * They are posted from two screens now: `/run`, the offline stop-capture screen
+ * they were written for, and `/my-runs`, which renders the same six-stage
+ * workflow for the day it is showing. Rather than duplicating the workflow — the
+ * load rule, the unload sweep and the close guard are all real business logic —
+ * each form carries a `return_to` and the action comes back to whichever screen
+ * pressed it. `returnTo()` only honours a plain same-site path.
+ */
+const DEFAULT_BACK = "/run";
+
+/** Both screens that show a run, so a status move refreshes whichever is open. */
+function revalidateRunScreens(): void {
+  revalidatePath(DEFAULT_BACK);
+  revalidatePath("/my-runs");
+}
 
 async function currentDriver(session: Session) {
   const supabase = await createClient();
@@ -35,6 +52,7 @@ const inspectionSchema = z.object({
 });
 
 export async function submitInspection(formData: FormData): Promise<void> {
+  const BACK = returnTo(formData, DEFAULT_BACK);
   const session = await assertCapability("run.execute");
   const parsed = inspectionSchema.safeParse(toObject(formData));
   if (!parsed.success) return fail(BACK, firstIssue(parsed.error));
@@ -91,7 +109,7 @@ export async function submitInspection(formData: FormData): Promise<void> {
       href: "/vehicles",
     });
 
-    revalidatePath(BACK);
+    revalidateRunScreens();
     return fail(BACK, "Inspection failed. The vehicle is out of service — contact your dispatcher.");
   }
 
@@ -117,11 +135,12 @@ export async function submitInspection(formData: FormData): Promise<void> {
   await recordAudit(session, {
     entity: "vehicle_inspection", entityId: inspection.id, action: "create", summary: parsed.data.result,
   });
-  revalidatePath(BACK);
+  revalidateRunScreens();
   return done(BACK, "Inspection recorded.");
 }
 
 export async function confirmLoad(formData: FormData): Promise<void> {
+  const BACK = returnTo(formData, DEFAULT_BACK);
   const session = await assertCapability("run.execute");
   const id = z.string().uuid().safeParse(formData.get("route_id"));
   if (!id.success) return fail(BACK, "That run could not be found.");
@@ -139,11 +158,12 @@ export async function confirmLoad(formData: FormData): Promise<void> {
   if (error) return fail(BACK, describeDbError(error));
 
   await recordAudit(session, { entity: "daily_route", entityId: id.data, action: "status_change", summary: "load confirmed" });
-  revalidatePath(BACK);
+  revalidateRunScreens();
   return done(BACK, "Load confirmed.");
 }
 
 export async function startRun(formData: FormData): Promise<void> {
+  const BACK = returnTo(formData, DEFAULT_BACK);
   const session = await assertCapability("run.execute");
   const id = z.string().uuid().safeParse(formData.get("route_id"));
   if (!id.success) return fail(BACK, "That run could not be found.");
@@ -159,11 +179,23 @@ export async function startRun(formData: FormData): Promise<void> {
   if (error) return fail(BACK, describeDbError(error));
 
   await recordAudit(session, { entity: "daily_route", entityId: id.data, action: "status_change", summary: "started" });
-  revalidatePath(BACK);
-  return done(BACK, "Run started. Drive safely.");
+
+  // The laundry on this run has physically left the depot, so the counter jobs
+  // riding on it move to "out for delivery". A statement of fact, not a
+  // shortcut: leaving them at "ready" would have the Jobs screen claiming the
+  // linen is still on the shelf all morning. Nothing is *completed* here — a
+  // job is only delivered when somebody says it was.
+  const dispatched = await dispatchRunJobs(supabase, session, id.data);
+
+  revalidateRunScreens();
+  revalidatePath("/orders");
+  return done(BACK, dispatched > 0
+    ? `Run started, and ${dispatched} job(s) are now out for delivery. Drive safely.`
+    : "Run started. Drive safely.");
 }
 
 export async function markReturning(formData: FormData): Promise<void> {
+  const BACK = returnTo(formData, DEFAULT_BACK);
   const session = await assertCapability("run.execute");
   const id = z.string().uuid().safeParse(formData.get("route_id"));
   if (!id.success) return fail(BACK, "That run could not be found.");
@@ -175,7 +207,7 @@ export async function markReturning(formData: FormData): Promise<void> {
     .eq("id", id.data).eq("tenant_id", session.tenantId);
 
   if (error) return fail(BACK, describeDbError(error));
-  revalidatePath(BACK);
+  revalidateRunScreens();
   return done(BACK, "Marked as returning to depot.");
 }
 
@@ -184,6 +216,7 @@ export async function markReturning(formData: FormData): Promise<void> {
  * (acceptance criterion §10) and stamps the run as unloaded.
  */
 export async function unloadRun(formData: FormData): Promise<void> {
+  const BACK = returnTo(formData, DEFAULT_BACK);
   const session = await assertCapability("run.execute");
   const parsed = z.object({
     route_id: z.string().uuid(),
@@ -211,11 +244,12 @@ export async function unloadRun(formData: FormData): Promise<void> {
   await recordAudit(session, {
     entity: "daily_route", entityId: parsed.data.route_id, action: "status_change", summary: "unloaded",
   });
-  revalidatePath(BACK);
+  revalidateRunScreens();
   return done(BACK, "Vehicle unloaded into depot receiving.");
 }
 
 export async function closeRun(formData: FormData): Promise<void> {
+  const BACK = returnTo(formData, DEFAULT_BACK);
   const session = await assertCapability("run.execute");
   const id = z.string().uuid().safeParse(formData.get("route_id"));
   if (!id.success) return fail(BACK, "That run could not be found.");
@@ -228,6 +262,6 @@ export async function closeRun(formData: FormData): Promise<void> {
   if (error) return fail(BACK, describeDbError(error));
 
   await recordAudit(session, { entity: "daily_route", entityId: id.data, action: "status_change", summary: "closed" });
-  revalidatePath(BACK);
+  revalidateRunScreens();
   return done(BACK, "Run closed. Have a good evening.");
 }

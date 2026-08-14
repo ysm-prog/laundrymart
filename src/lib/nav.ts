@@ -65,11 +65,30 @@ export const NAVIGATION: NavItem[] = [
     blurb: "What needs a decision right now.",
   },
   {
-    label: "My run",
-    href: "/run",
+    // Was a single row pointing at `/run`: today's run, no date, one run only.
+    // It is now the area, with `/run` kept inside it rather than replaced —
+    // that screen owns the offline outbox and the service worker, and it is the
+    // one part of the app that has to work in a car park with no signal.
+    //
+    // Gated on `routes.read` rather than `run.execute`, because the area is not
+    // only the driver's: a dispatcher opens it to see what they have given
+    // someone. `/run` keeps `run.execute`, so a dispatcher sees the area with
+    // one tab and a driver sees it with two.
+    label: "My runs",
+    href: "/my-runs",
     icon: "myRun",
-    capability: "run.execute",
-    blurb: "Your stops for today. Works without signal.",
+    capability: "routes.read",
+    blurb: "The work assigned to you, for any day you choose.",
+    children: [
+      {
+        label: "My runs", href: "/my-runs", capability: "routes.read",
+        blurb: "Your runs for a day, the stops on them and the laundry at each stop.",
+      },
+      {
+        label: "At the stop", href: "/run", capability: "run.execute",
+        blurb: "Record a collection or delivery where you are standing. Works without signal.",
+      },
+    ],
   },
   {
     label: "Runs",
