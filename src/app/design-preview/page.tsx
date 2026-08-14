@@ -510,6 +510,7 @@ export default function DesignPreviewPage() {
             </div>
             <div className="rounded-lg mt-4 border bg-surface p-3">
               <PlannerBoard
+                date="2026-08-14"
                 columns={PREVIEW_COLUMNS}
                 jobs={PREVIEW_JOBS}
                 drivers={PREVIEW_DRIVERS}

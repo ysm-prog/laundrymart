@@ -13,6 +13,17 @@ describe("form coercion helpers", () => {
     expect(optionalText.parse("")).toBeUndefined();
     expect(optionalText.parse("  x  ")).toBe("x");
   });
+  /**
+   * The regression that made every laundry job unsaveable. A field composed in
+   * the browser and posted as JSON spells "not answered" `null`, not `""`, and
+   * `z.string().optional()` refuses `null` — so one empty item note failed the
+   * whole items array and the counter was told to add an item it could see.
+   */
+  it("treats a JSON null as absent, the same as an empty input", () => {
+    expect(optionalText.parse(null)).toBeUndefined();
+    expect(optionalUuid.parse(null)).toBeUndefined();
+    expect(optionalDate.parse(null)).toBeUndefined();
+  });
   it("accepts a blank select but rejects a malformed id", () => {
     expect(optionalUuid.parse("")).toBeUndefined();
     expect(() => optionalUuid.parse("nope")).toThrow();

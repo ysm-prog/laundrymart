@@ -26,7 +26,8 @@ export default async function EditJobPage({
   searchParams: Promise<{ customer?: string }>;
 }) {
   const { id } = await params;
-  // Set only when the customer quick-create has just returned; see JobForm.
+  // Set when the customer quick-create has just returned, and when a rejected
+  // `updateOrder` is coming back with the customer still chosen; see JobForm.
   const { customer } = await searchParams;
   const session = await requireCapability("orders.write");
 
@@ -43,7 +44,7 @@ export default async function EditJobPage({
   if (order.status === "cancelled") redirect(`/orders/${id}`);
   if (order.status === "completed" && !can(session.role, "orders.manage")) redirect(`/orders/${id}`);
 
-  const { customers, drivers, staff } = await loadJobFormData();
+  const { customers, drivers, staff } = await loadJobFormData(customer ?? order.customer_id);
 
   return (
     <PageContainer width="form">

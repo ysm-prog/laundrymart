@@ -32,6 +32,23 @@ The master spec names a .NET 9 Web API; this build follows the supplied skeleton
   auto-dismisses, errors stick) then deletes it. The one
   URL-param survivor is the auth gate's `?error=forbidden`, set during render where a cookie
   cannot be. `/api/sync` stays the one API exception for the offline outbox.
+  **A rejection redirects, so the browser's copy of the form is gone**: an action that refuses
+  a post is responsible for handing back the answers that cost real work to give. The job form
+  does this for the customer, via the `?customer=` parameter its quick-create already uses.
+- **`optionalText`/`optionalUuid`/`optionalDate` accept `null` as well as `""`.** An empty HTML
+  input posts `""`, but a field composed in the browser and posted as JSON — the
+  compose-locally-commit-once hidden field used by the job form, the contract wizard and the
+  planner — spells the same absence `null`, because `JSON.stringify` drops `undefined` keys.
+  `z.string().optional()` refuses `null`, and one such field took down a whole array parse.
+- **Every compose-locally-commit-once payload schema lives outside its `"use server"` file**,
+  in `orders/order-items.ts`, `agreements/wizard-lines.ts` and `routes/planner/plan.ts`, each
+  with tests written against the shape its producer really emits. This is not tidiness: a
+  `"use server"` module can export nothing but server actions, so these contracts used to be
+  unreachable from a unit test — and **two of the three shipped broken and stayed broken behind
+  a green `verify`** (the job form's items, the planner's whole board). A new hidden JSON field
+  goes in a plain module with a test, never in the action. Mind what such a module imports:
+  `plan.ts` is in the client bundle, so it may not reach `lib/actions` (→ `next/headers`), and
+  that failure shows up only at `next build`.
 - Pure domain logic lives in `src/lib/domain/` with no database access: the service calendar,
   pricing, recurring invoicing (`invoicing.ts` — one contract's charges, and the
   `consolidate()` rule for header fields two contracts disagree on), ABN validation, date
@@ -375,7 +392,11 @@ Both are compositions over existing tables — neither added a migration.
   action both obey (a stop is frozen once `progress_status` leaves `not_started`; a closed or
   cancelled run neither gains nor loses stops) — the browser enforces them so a plan is never
   composed that the action will reject, and the action re-enforces them because the browser is
-  not the boundary. The load meter averages the customer's own recent weighed collections and
+  not the boundary. `plan.ts` also owns the **posted payload** (`planSchema` /
+  `parseDispatchPlan` / `DispatchPlan`), and `toPlan` in the board is typed to that inferred
+  type — because the two disagreed for the feature's whole shipped life: the board sent `id`
+  and no date, the schema wanted `routeId` and a date, and not one plan was ever applied.
+  The load meter averages the customer's own recent weighed collections and
   says how many stops it actually covers; there is no promised weight per stop in the schema,
   so it never implies one.
 - `/invoices` is the register + working pane. The left list is a chase queue, the right pane
@@ -386,6 +407,77 @@ Both are compositions over existing tables — neither added a migration.
   are edited and invoices voided.
 
 ## 18. Changelog
+### 2026-08-14 · The planner had never applied a plan: the board and the action disagreed
+Swept the other three compose-locally-commit-once payloads after the job-form outage below.
+One of them was broken the same way and just as completely. No migration.
+
+- **`/routes/planner` "Apply plan" was refused every single time.** The board posted
+  `{columns:[{id,…}]}` with **no date on it at all**; `planSchema` read
+  `{date, columns:[{routeId,…}]}`. So `date: Invalid input: expected string, received undefined`
+  came back on every attempt and no plan was ever committed. The server side was right
+  throughout — `applyDispatchPlan` has always read `column.routeId` — so the fix is entirely
+  in the producer: `PlannerBoard` takes the day as a prop and `toPlan` emits `routeId` and
+  `date`.
+- **`toPlan` now returns `DispatchPlan`**, the type inferred from the action's own schema, so
+  this particular disagreement is a compile error from here on. It caught the `/design-preview`
+  call site the moment it was introduced.
+- **The two survivors are sound, and are now pinned rather than assumed.** The contract
+  wizard's `lines` and the offline outbox's records both parse cleanly against the shapes their
+  producers really build — `/api/sync` had used `.nullish()` throughout from the start, which
+  is precisely what the job form's schema lacked.
+- **All three payload contracts moved out of `"use server"`**: `orders/order-items.ts`,
+  `agreements/wizard-lines.ts` and the planner's existing pure `plan.ts`. Such a module can
+  export nothing but server actions, so each contract had been unreachable from a unit test —
+  and two of the three were broken in production behind a green `verify`. Each now has tests
+  written against the payload its producer actually emits.
+- **`plan.ts` restates the ISO-date rule instead of importing `requiredDate`.** It is in the
+  *client* bundle via `planner-board`, and `lib/actions` reaches for `next/headers`. That import
+  typechecked, linted and tested clean and failed only at `next build` — worth remembering
+  before moving anything else into a module a client component imports.
+- 266 unit tests (was 254). Board re-rendered at 1440 in `/design-preview`: correct payload
+  keys, no console errors, no horizontal overflow, and the dirty/Apply-plan gate still
+  correct after a crew change.
+
+### 2026-08-14 · No job could be saved: "add at least one laundry item", on a job that had one
+The Jobs module was unusable from the day it shipped. Every create and every edit was refused
+with **"Please add at least one laundry item."** — including the one in the screenshot, with
+2332 towels on it — and the refusal also dropped the customer, so each attempt cost the counter
+the search as well. No migration; no schema, RLS, capability or workflow change.
+
+- **One `null` failed the whole laundry list.** The form posts its items as JSON, and spells
+  every unanswered field `null` (`JSON.stringify` drops `undefined` keys, so it cannot spell it
+  any other way). `optionalText` only ever mapped `""` → absent, and `z.string().optional()`
+  accepts `undefined` but **refuses `null`** — so an item with no *Item notes* failed to parse,
+  `z.array(itemSchema)` failed with it, and the caller was handed an empty list. `optionalText`,
+  `optionalUuid` and `optionalDate` now share one `absent()` preprocessor that reads both
+  spellings. The blast radius was every laundry row: only a job where *every* item had both a
+  custom description and a note typed in could ever have been saved.
+- **An unreadable list no longer poses as an empty one.** `parseOrderItems` returns the reason
+  it could not read the payload instead of `[]`, so a parse fault can never again surface as a
+  sentence about adding an item. That distinction is the whole reason this went unnoticed: the
+  message named a problem the operator could see was untrue, and named nothing they could act on.
+- **The parser moved out of `"use server"`** into `orders/order-items.ts`. A `"use server"`
+  module can export nothing but server actions, so the parser was unreachable from a unit test
+  — which is exactly why `verify` stayed green over a module nobody could use. It is now
+  covered by 8 tests written against the payload `JobForm` actually builds; 4 of them fail
+  against the old preprocessor.
+- **A rejected save keeps the customer.** `fail()` redirects, so the browser's copy of the form
+  is gone — the customer, found by search, was being thrown away on every validation message.
+  Both actions now return through `?customer=<id>`, the door the quick-create already uses, and
+  `JobForm` adopts a changed `defaultCustomerId` during render (no effect) so it works whether
+  or not React kept the component mounted across the redirect. The one deliberate exception is
+  the customer itself being unusable — carrying that id back would re-open the form still
+  claiming a selection the database will not stand behind.
+- **The picker can no longer show "nothing selected" while posting a customer.**
+  `loadJobFormData(ensureCustomerId?)` fetches that one row when the capped 500-name list did
+  not carry them — a customer past the 500th by name, or one since put on hold under an
+  existing job. If they are genuinely gone, the form says so instead of rendering an untouched
+  search box over a hidden field that still points at them. `truncated` is now measured against
+  what the search box covers, so the appended row cannot make a capped list look complete.
+- 254 unit tests (was 245). `verify` green. **Not verified against a live project** — this
+  container has no Supabase credentials, so the fix is proven by the payload-level tests, the
+  typecheck, the lint and the build rather than by taking a job in at a real counter.
+
 ### 2026-08-14 · My Runs: a driver's day, and putting a job on it
 The counter's Jobs and the driver's Runs were two islands — a job could be marked "out for
 delivery" with nothing anywhere recording whose van it went out on. This joins them, adds the

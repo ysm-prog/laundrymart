@@ -14,6 +14,10 @@ import type { JobCustomer, JobDriver, JobStaff } from "./job-form";
  */
 const CUSTOMER_LIMIT = 500;
 
+const CUSTOMER_COLUMNS =
+  "id, customer_number, business_name, trading_name, phone, billing_email, " +
+  "billing_address_line1, billing_suburb, billing_state, billing_postcode";
+
 export type JobFormData = {
   customers: JobCustomer[];
   drivers: JobDriver[];
@@ -22,17 +26,20 @@ export type JobFormData = {
   truncated: boolean;
 };
 
-export async function loadJobFormData(): Promise<JobFormData> {
+/**
+ * @param ensureCustomerId a customer the form is about to show as chosen — the
+ *   one on the job being edited, or the one a rejected post is coming back
+ *   with. It is fetched on its own if the capped list above did not include it,
+ *   because a picker that cannot find the id it was handed renders as though
+ *   nothing were selected while the hidden field still posts that customer.
+ */
+export async function loadJobFormData(ensureCustomerId?: string): Promise<JobFormData> {
   const supabase = await createClient();
 
   const [customersResult, locationsResult, driversResult, staff] = await Promise.all([
     supabase
       .from("customers")
-      .select(
-        "id, customer_number, business_name, trading_name, phone, billing_email, " +
-        "billing_address_line1, billing_suburb, billing_state, billing_postcode",
-        { count: "exact" },
-      )
+      .select(CUSTOMER_COLUMNS, { count: "exact" })
       .is("deleted_at", null)
       .in("status", ["active", "prospect", "on_hold"])
       .order("business_name")
@@ -72,7 +79,12 @@ export async function loadJobFormData(): Promise<JobFormData> {
     if (address) deliveryAddress.set(location.customer_id, address);
   }
 
-  const customers: JobCustomer[] = (customersResult.data ?? []).map((customer) => ({
+  const toJobCustomer = (customer: {
+    id: string; customer_number: string; business_name: string;
+    trading_name: string | null; phone: string | null; billing_email: string | null;
+    billing_address_line1: string | null; billing_suburb: string | null;
+    billing_state: string | null; billing_postcode: string | null;
+  }): JobCustomer => ({
     id: customer.id,
     customer_number: customer.customer_number,
     business_name: customer.business_name,
@@ -84,12 +96,31 @@ export async function loadJobFormData(): Promise<JobFormData> {
       customer.billing_state, customer.billing_postcode,
     ].filter(Boolean).join(", ") || null,
     delivery_address: deliveryAddress.get(customer.id) ?? null,
-  }));
+  });
+
+  const customers: JobCustomer[] = (customersResult.data ?? []).map(toJobCustomer);
+  const total = customersResult.count ?? 0;
+
+  // The one the form is about to show as chosen, when the capped, status-filtered
+  // list above did not carry them — a customer past the 500th by name, or one
+  // since put on hold under a job that already exists. One row, only when needed.
+  if (ensureCustomerId && !customers.some((customer) => customer.id === ensureCustomerId)) {
+    const { data: missing } = await supabase
+      .from("customers")
+      .select(CUSTOMER_COLUMNS)
+      .eq("id", ensureCustomerId)
+      .is("deleted_at", null)
+      .maybeSingle<Parameters<typeof toJobCustomer>[0]>();
+    if (missing) customers.push(toJobCustomer(missing));
+  }
 
   return {
     customers,
     drivers: driversResult.data ?? [],
     staff,
-    truncated: (customersResult.count ?? 0) > customers.length,
+    // Measured against what the search box actually covers, not against
+    // `customers` — the row appended above is reachable only by already being
+    // selected, so it must not make a truncated list look complete.
+    truncated: total > (customersResult.data?.length ?? 0),
   };
 }
