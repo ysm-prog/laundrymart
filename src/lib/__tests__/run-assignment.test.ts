@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  ASSIGNABLE_STATUS, checkAssignable, checkAssignmentRemovable, checkConfirmLoad,
+  ASSIGNABLE_STATUS, RUN_NOT_STARTED_STATUSES, checkAssignable, checkAssignmentRemovable, checkConfirmLoad,
   checkRunStart, checkStartRoute, describeProgress, dispatchableJobs, groupDriverDay,
   isUnassignedDeliveryWork, jobProgress, loadableJobs, preferredRunDate, runStage,
   stopProgress,
@@ -220,6 +220,32 @@ describe("runStage", () => {
     expect(runStage("unloading")).toBe("in_progress");
     expect(runStage("closed")).toBe("completed");
     expect(runStage("cancelled")).toBe("cancelled");
+  });
+});
+
+describe("RUN_NOT_STARTED_STATUSES", () => {
+  // These exist as literals only because the filter that uses them runs in the
+  // database, where `runStage` cannot. That duplication is the whole risk, so
+  // it is pinned from both directions.
+  it("contains exactly the statuses runStage calls not started", () => {
+    for (const status of RUN_NOT_STARTED_STATUSES) {
+      expect(runStage(status), status).toBe("not_started");
+    }
+    const everyRunStatus = [
+      "planned", "inspection_pending", "inspection_complete", "load_confirmed",
+      "in_progress", "returning", "unloading", "closed", "cancelled",
+    ];
+    const derived = everyRunStatus.filter((status) => runStage(status) === "not_started");
+    expect(derived).toEqual([...RUN_NOT_STARTED_STATUSES]);
+  });
+
+  it("excludes every status that means the van has gone", () => {
+    // The point of the list: Confirm Load must never touch a run past these,
+    // because `guard_route_transition` does not refuse a backwards move and a
+    // run walked back to `load_confirmed` reads as still at the depot.
+    for (const moving of ["in_progress", "returning", "unloading", "closed", "cancelled"]) {
+      expect([...RUN_NOT_STARTED_STATUSES], moving).not.toContain(moving);
+    }
   });
 });
 

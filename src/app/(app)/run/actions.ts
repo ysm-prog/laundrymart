@@ -58,6 +58,11 @@ export async function confirmLoad(formData: FormData): Promise<void> {
 
   const supabase = await createClient();
   const at = new Date().toISOString();
+  // Only where the load has not already been recorded. The screen only offers
+  // the button in that state, but the screen is not the boundary: without this
+  // a replayed post would rewrite the moment the van was loaded, and — because
+  // `guard_route_transition` does not refuse a backwards move — could set a run
+  // that is already out on the road back to `load_confirmed`.
   const { error } = await supabase
     .from("daily_routes")
     .update({
@@ -65,7 +70,8 @@ export async function confirmLoad(formData: FormData): Promise<void> {
       load_confirmed_by: session.userId,
       status: "load_confirmed",
     })
-    .eq("id", id.data).eq("tenant_id", session.tenantId);
+    .eq("id", id.data).eq("tenant_id", session.tenantId)
+    .is("load_confirmed_at", null);
 
   if (error) return fail(BACK, describeDbError(error));
 
