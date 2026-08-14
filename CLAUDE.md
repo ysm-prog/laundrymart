@@ -448,6 +448,32 @@ Both are compositions over existing tables — neither added a migration.
   are edited and invoices voided.
 
 ## 18. Changelog
+### 2026-08-14 · Confirm Load and Start Route could walk a moving run backwards
+Found by asking what the day-level actions do to a run that has already left — the case the
+empty-database tests never produced and the live data (Sam Okoye's 16 Aug run, `in_progress`)
+does. Two defects, one helper, no migration.
+
+- **`guard_route_transition` refuses a start without a load and a close without an unload, but
+  it does not refuse a *backwards* move.** Nothing in the database stopped Confirm Load from
+  setting a run that was out on the road back to `load_confirmed`. That matters because
+  confirming again is a deliberate part of the design: a job assigned after the van has gone
+  stays Assigned until the driver confirms it (§22). So the ordinary late-work flow walked the
+  run backwards and offered the depot screen a "Start route" button for a van halfway round
+  the suburbs. The load stamp is now filtered to runs still at the depot, and to a
+  `load_confirmed_at` that is still null.
+- **Start Route rewrote `started_at`.** The guard's `coalesce` only protects the column when the
+  *client* leaves it null, and this one passed a value — so a second press moved the recorded
+  departure to the second press. Now filtered to runs that have not started, and to runs whose
+  load is confirmed (a run opened by a late assignment has none, and the guard would refuse it
+  and take the whole statement, including the runs that should have started, with it).
+- `/run`'s own Confirm Load carried the same unconditional write, guarded only by the screen
+  not offering the button. The screen is not the boundary, so it is filtered too.
+- `RUN_NOT_STARTED_STATUSES` exists as literals because the filter is evaluated in the
+  database, where `runStage` cannot run. The unit test pins the two together from both
+  directions, so a tenth run status cannot be added to one and forgotten in the other.
+- 288 unit tests (was 286). Both defects were reproduced against a run loaded at 07:00 and
+  departed at 07:30, and the fix shown to leave both timestamps alone.
+
 ### 2026-08-14 · Job → Driver → Delivery Date: the Runs mental model is gone
 The operational simplification. The office now gives a job to a driver and a date; the driver
 opens My Runs, confirms the load, starts the route and marks each job delivered. **Nobody

@@ -28,6 +28,15 @@ constraint name or PostgREST rejects it with PGRST201 at request time — compil
 in production, the same class as the 2026-08-05 ambiguous-embed outage. `/orders/:id` and
 `/orders` are both explicit now; a new one will not be unless you make it.
 
+**Runs only ever move forward, and the app is what enforces it.**
+`guard_route_transition` refuses a start without a load and a close without an unload, but it
+does **not** refuse a backwards move, and it does not protect `started_at` when the caller
+passes a value. So `stampDepotLoad` filters to runs still at the depot with a null
+`load_confirmed_at`, and `stampRouteStarted` filters to runs with a null `started_at` and a
+confirmed load. Without those, the ordinary late-work flow (assign after the van has gone →
+driver confirms again → starts again) walked a moving run back to `load_confirmed` and rewrote
+the recorded departure time. If you add another day-level action, filter it the same way.
+
 **Load confirmation is per job, not just per run.** Start Route dispatches only load-confirmed
 jobs, so work assigned after the driver loaded the van stays `assigned` rather than being swept
 out. `confirmRunJobsLoaded` (depot screen) and `confirmDayLoad` (My Runs) both write it, so the

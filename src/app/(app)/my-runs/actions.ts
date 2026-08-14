@@ -11,7 +11,8 @@ import {
   requiredDate, returnTo, toObject,
 } from "@/lib/actions";
 import {
-  checkAssignable, checkAssignmentRemovable, checkConfirmLoad, checkStartRoute,
+  RUN_NOT_STARTED_STATUSES, checkAssignable, checkAssignmentRemovable,
+  checkConfirmLoad, checkStartRoute,
 } from "@/lib/domain/run-assignment";
 import { formatAdelaideDate, getAdelaideNow } from "@/lib/domain/timezone";
 import { logOrderActivity } from "@/lib/orders/activity";
@@ -346,9 +347,7 @@ export async function confirmDayLoad(formData: FormData): Promise<void> {
     .eq("tenant_id", session.tenantId);
   if (error) return fail(backTo, describeDbError(error));
 
-  await stampRunsForDay(supabase, session, parsed.data, {
-    load_confirmed_at: at, load_confirmed_by: session.userId, status: "load_confirmed",
-  });
+  await stampDepotLoad(supabase, session, parsed.data, at);
 
   for (const job of loadable.jobs) {
     await logOrderActivity(supabase, session, job.id, {
@@ -405,9 +404,7 @@ export async function startDayRoute(formData: FormData): Promise<void> {
     .eq("status", "assigned");
   if (error) return fail(backTo, describeDbError(error));
 
-  await stampRunsForDay(supabase, session, parsed.data, {
-    status: "in_progress", started_at: getAdelaideNow().toISOString(),
-  });
+  await stampRouteStarted(supabase, session, parsed.data, getAdelaideNow().toISOString());
 
   for (const job of startable.jobs) {
     await logOrderActivity(supabase, session, job.id, {
@@ -724,23 +721,66 @@ async function retireStopIfEmpty(
  * the driver and the office both work from, and refusing a driver's Start Route
  * because a bookkeeping row would not move is the wrong trade.
  */
-async function stampRunsForDay(
+/**
+ * Record the depot load on the day's internal runs.
+ *
+ * **Only runs still at the depot, and only a timestamp that is not already
+ * there.** `guard_route_transition` (0012) refuses a start without a confirmed
+ * load and a close without an unload, but it does *not* refuse a backwards
+ * move — so without the status filter, a driver confirming a job assigned after
+ * they had already left would set their moving run back to `load_confirmed`,
+ * and the depot screen would offer to start a run that is halfway round the
+ * suburbs. Confirming again for late work is deliberate (§22); falsifying the
+ * first confirmation is not, which is why `load_confirmed_at` is written only
+ * where it is still null — the same rule `setRouteStatus` has always used.
+ */
+async function stampDepotLoad(
   supabase: Supabase, session: Session,
-  day: { driver_id: string; date: string },
-  patch: Record<string, unknown>,
+  day: { driver_id: string; date: string }, at: string,
 ): Promise<void> {
   const { error } = await supabase
     .from("daily_routes")
-    .update(patch)
+    .update({ load_confirmed_at: at, load_confirmed_by: session.userId, status: "load_confirmed" })
     .eq("driver_id", day.driver_id)
     .eq("route_date", day.date)
     .eq("tenant_id", session.tenantId)
     .is("deleted_at", null)
-    // A run already closed or cancelled is finished business; `guard_route_
-    // transition` would refuse the move anyway and take the whole statement —
-    // and the other runs of the day — down with it.
+    .in("status", [...RUN_NOT_STARTED_STATUSES])
+    .is("load_confirmed_at", null);
+  if (error) {
+    console.error("recording the depot load failed", { date: day.date, error: error.message });
+  }
+}
+
+/**
+ * Mark the day's internal runs as away.
+ *
+ * Filtered to runs that have **not already started**, so a second Start Route —
+ * which the late-work flow above makes an ordinary thing to press — cannot
+ * rewrite the moment the driver actually left. `started_at` is a record of
+ * something that happened, and the guard's own `coalesce` does not protect it
+ * when the caller passes a value.
+ *
+ * Also filtered to runs whose load *is* confirmed. A run opened by an
+ * assignment made after the load has none, and `guard_route_transition` would
+ * refuse it — taking the whole statement, and with it the runs that legitimately
+ * should have started, down with it.
+ */
+async function stampRouteStarted(
+  supabase: Supabase, session: Session,
+  day: { driver_id: string; date: string }, at: string,
+): Promise<void> {
+  const { error } = await supabase
+    .from("daily_routes")
+    .update({ status: "in_progress", started_at: at })
+    .eq("driver_id", day.driver_id)
+    .eq("route_date", day.date)
+    .eq("tenant_id", session.tenantId)
+    .is("deleted_at", null)
+    .is("started_at", null)
+    .not("load_confirmed_at", "is", null)
     .not("status", "in", "(closed,cancelled)");
   if (error) {
-    console.error("stamping the day's runs failed", { date: day.date, error: error.message });
+    console.error("starting the day's runs failed", { date: day.date, error: error.message });
   }
 }

@@ -250,6 +250,18 @@ export function checkStartRoute<T extends DriverDayJob>(
  */
 export type RunStage = "not_started" | "in_progress" | "completed" | "cancelled";
 
+/**
+ * The run statuses that mean "still at the depot".
+ *
+ * Held as literals as well as being derivable from `runStage`, because the one
+ * place that needs them is a filter evaluated *in the database*, where
+ * `runStage` cannot run. The unit test pins the two together, so a tenth run
+ * status cannot be added to one and forgotten in the other.
+ */
+export const RUN_NOT_STARTED_STATUSES = [
+  "planned", "inspection_pending", "inspection_complete", "load_confirmed",
+] as const;
+
 export function runStage(status: string): RunStage {
   if (status === "cancelled") return "cancelled";
   if (status === "closed") return "completed";
