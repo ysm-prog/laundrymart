@@ -65,7 +65,11 @@ const GLOSSARY: Array<{ term: string; also?: string; meaning: string }> = [
   },
   {
     term: "Run", also: "daily route",
-    meaning: "One driver's actual work for one day, built from a weekly run. It has a driver, a truck, and a list of stops.",
+    meaning: "One driver's actual work for one day, built from a weekly run. It has a driver, a truck, and a list of stops. A driver can have more than one run in a day — a morning van and an afternoon van are two runs, not one.",
+  },
+  {
+    term: "My runs",
+    meaning: "Your own runs for a day you choose, with the stops in order and the laundry at each one. It is the same runs the Runs screen manages — this is just your side of them, on your phone. Runs is where the day is planned for everybody; My runs is where it gets done. Dates on it are Adelaide dates.",
   },
   {
     term: "Stop",
@@ -74,6 +78,10 @@ const GLOSSARY: Array<{ term: string; also?: string; meaning: string }> = [
   {
     term: "Job", also: "laundry order, ticket, docket",
     meaning: "One customer's laundry, from the moment it lands on the counter to the moment it goes back: what they brought in, when they get it back, and where it is up to. A Job is the work; a Stop is a visit a driver makes. A job can be delivered on a stop, or the customer can collect it themselves.",
+  },
+  {
+    term: "Assigned to a run",
+    meaning: "A job has been given to a driver for a particular day. It is not a status — the job stays Ready for delivery until it actually goes out. Assigning changes nothing about the laundry, the customer or the price, and taking a job off a run does not cancel it.",
   },
   {
     term: "Overdue",

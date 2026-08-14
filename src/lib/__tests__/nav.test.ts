@@ -73,6 +73,53 @@ describe("navigationFor", () => {
     }
   });
 
+  it("gives the driver My runs, and both screens inside it", () => {
+    const area = navigationFor("driver").find((item) => item.label === "My runs");
+    expect(area).toBeDefined();
+    expect(area?.href).toBe("/my-runs");
+    // `/run` is kept, not replaced: it owns the offline outbox and the service
+    // worker, and it is the one screen that has to work with no signal.
+    expect(area?.children?.map((child) => child.href)).toEqual(["/my-runs", "/run"]);
+  });
+
+  it("gives a dispatcher My runs without the driver's capture screen", () => {
+    const area = navigationFor("dispatcher").find((item) => item.label === "My runs");
+    expect(area?.href).toBe("/my-runs");
+    // `run.execute` is the driver's; a dispatcher gets the overview only.
+    expect(area?.children?.map((child) => child.href)).toEqual(["/my-runs"]);
+  });
+
+  it("never shows My run and My runs as two separate rows", () => {
+    // §6: the old single-run screen was evolved into this area rather than
+    // left beside it. Two rail rows a letter apart is the confusion the brief
+    // is guarding against.
+    for (const role of ROLES) {
+      const rows = navigationFor(role).filter((item) => /^my runs?$/i.test(item.label));
+      expect(rows.length, role).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it("keeps My runs away from roles that do not drive", () => {
+    for (const role of ["finance", "warehouse_operator", "sales"] as const) {
+      expect(navigationFor(role).map((item) => item.label), role).not.toContain("My runs");
+    }
+  });
+
+  it("leaves the existing Runs area exactly where it was", () => {
+    // My Runs is an addition, not a replacement: `/routes/daily` stays the
+    // management view of every run and keeps its own rail row.
+    const runs = navigationFor("dispatcher").find((item) => item.label === "Runs");
+    expect(runs?.href).toBe("/routes/daily");
+    expect(runs?.children?.map((child) => child.href)).toContain("/routes/planner");
+  });
+
+  it("orders the rail the way the day runs", () => {
+    expect(navigationFor("super_admin").map((item) => item.label)).toEqual([
+      "Today", "My runs", "Runs", "Stops", "Jobs", "Customers",
+      "Invoices", "Linen", "Reports", "Settings", "Help",
+    ]);
+  });
+
   it("shows the counter its jobs and keeps them from the driver", () => {
     expect(navigationFor("customer_service").map((item) => item.label)).toContain("Jobs");
     expect(navigationFor("warehouse_operator").map((item) => item.label)).toContain("Jobs");
@@ -103,6 +150,16 @@ describe("sectionFor", () => {
     // Runs; the tab strip must not flip areas on the deeper path.
     expect(label("/routes/templates/tpl-1")).toBe("Runs");
     expect(label("/routes/planner")).toBe("Runs");
+  });
+
+  it("keeps the two run areas apart", () => {
+    // Neither may swallow the other: a driver on /my-runs must not light up
+    // "Runs", and a dispatcher on /routes/daily must not light up "My runs".
+    expect(label("/my-runs")).toBe("My runs");
+    expect(label("/my-runs/jobs/abc-123")).toBe("My runs");
+    expect(label("/run")).toBe("My runs");
+    expect(label("/routes/daily")).toBe("Runs");
+    expect(label("/routes/daily/run-1/sheet")).toBe("Runs");
   });
 
   it("returns nothing for a path off the map", () => {

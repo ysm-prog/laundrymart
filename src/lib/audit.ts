@@ -14,9 +14,13 @@ export async function recordAudit(
     entityId?: string | null;
     // `send_failed` earns its place next to the successes: when a customer says
     // they never got the invoice, the useful record is the attempt, not silence.
+    // `assign` / `reassign` / `unassign` are dispatch: putting a laundry job on
+    // a driver's run, moving it to another, taking it off. Distinct from
+    // `update` because "who was carrying this, and since when" is the question
+    // an audit log gets asked about a delivery that went astray.
     action:
       | "create" | "update" | "delete" | "status_change" | "sync" | "generate"
-      | "send" | "send_failed";
+      | "send" | "send_failed" | "assign" | "reassign" | "unassign";
     summary?: string;
     metadata?: Record<string, unknown>;
   },

@@ -16,6 +16,28 @@
 
 export const BUSINESS_TIMEZONE = "Australia/Sydney";
 
+/**
+ * The zone the *road* runs on.
+ *
+ * Deliberately separate from `BUSINESS_TIMEZONE`, and deliberately not a
+ * replacement for it. Everything downstream of the counter — an invoice period,
+ * the notification sweep's "which day did this event belong to", the instant
+ * composed from a received date — has been computed in Sydney since the first
+ * migration, and rows already stored carry that decision. Moving that constant
+ * would silently re-date historical work.
+ *
+ * What runs on Adelaide time is the *operational day*: which runs a driver is
+ * looking at, which day "today" is on My Runs, and the day boundaries a
+ * timestamptz column is filtered against when answering "what happened on the
+ * 14th". Those are questions about a depot's working day, and the depot is in
+ * Adelaide.
+ *
+ * Both are read out of the platform's tz database via `offsetAt`, so the
+ * October changeover — Adelaide's is a different instant from Sydney's only in
+ * offset, not in date — is never hard-coded as +9:30 or +10:30.
+ */
+export const OPERATIONS_TIMEZONE = "Australia/Adelaide";
+
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const TIME_PATTERN = /^\d{2}:\d{2}(:\d{2})?$/;
 
@@ -108,6 +130,98 @@ export function addDays(date: string, days: number): string {
   const base = Date.parse(`${date}T00:00:00.000Z`);
   if (Number.isNaN(base)) return date;
   return new Date(base + days * 86_400_000).toISOString().slice(0, 10);
+}
+
+/* ------------------------------------------------- the operational day ---- */
+
+/**
+ * The named Adelaide surface. Every one of these is the zone-parameterised
+ * primitive above with `OPERATIONS_TIMEZONE` bound — there is no second
+ * implementation of "what day is it", and no second offset table.
+ */
+
+/** Now. A function rather than a constant so tests can freeze the clock around it. */
+export function getAdelaideNow(): Date {
+  return new Date();
+}
+
+/** Today's calendar date in Adelaide, as `YYYY-MM-DD`. */
+export function getAdelaideToday(): string {
+  return toZonedDate(getAdelaideNow(), OPERATIONS_TIMEZONE);
+}
+
+/** True when `date` (a calendar date) is Adelaide's today. */
+export function isAdelaideToday(date: string): boolean {
+  return date === getAdelaideToday();
+}
+
+/**
+ * A calendar date → the half-open instant range covering that Adelaide day.
+ *
+ * This is the piece that stops a UTC midnight-to-midnight filter from calling
+ * an 8:00am Adelaide delivery "the 13th". `start` is inclusive, `end` exclusive,
+ * so a `gte(start).lt(end)` pair over a `timestamptz` column selects exactly the
+ * rows that happened on that day where the van was.
+ */
+export function getAdelaideDayRange(date: string): { start: string; end: string } {
+  return {
+    start: toInstant(date, "00:00", OPERATIONS_TIMEZONE),
+    end: toInstant(addDays(date, 1), "00:00", OPERATIONS_TIMEZONE),
+  };
+}
+
+const AU_LOCALE = "en-AU";
+
+/**
+ * A calendar date, written the Australian way.
+ *
+ * `long` is the page heading ("Friday, 14 August 2026"), `medium` the date
+ * control's own label ("Fri, 14 Aug 2026"), `short` a table cell ("14 Aug").
+ * Rendered in Adelaide from a UTC-anchored parse, so a date-only value cannot
+ * drift a day whichever machine renders it.
+ */
+export function formatAdelaideDate(
+  value: string | null | undefined, style: "long" | "medium" | "short" = "medium",
+): string {
+  if (!value) return "—";
+  const parsed = new Date(`${value.slice(0, 10)}T00:00:00.000Z`);
+  if (Number.isNaN(parsed.getTime())) return "—";
+
+  const options: Intl.DateTimeFormatOptions =
+    style === "long" ? { weekday: "long", day: "numeric", month: "long", year: "numeric" }
+    : style === "short" ? { day: "numeric", month: "short" }
+    : { weekday: "short", day: "numeric", month: "short", year: "numeric" };
+
+  // Date-only values are calendar facts with no instant behind them, so they are
+  // formatted in UTC — the zone they were parsed in — exactly as format.ts does.
+  const text = new Intl.DateTimeFormat(AU_LOCALE, { ...options, timeZone: "UTC" }).format(parsed);
+
+  // `en-AU` renders "Friday 14 August 2026". A heading reads better with the
+  // comma the brief asks for, and the medium style already has one, so the two
+  // are made to agree rather than left to differ by locale accident.
+  return style === "long" ? text.replace(/^(\w+)\s/, "$1, ") : text;
+}
+
+/** An instant → when it happened in Adelaide. Every timestamp a driver reads. */
+export function formatAdelaideDateTime(value: string | Date | null | undefined): string {
+  if (!value) return "—";
+  const parsed = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "—";
+  return new Intl.DateTimeFormat(AU_LOCALE, {
+    day: "numeric", month: "short", year: "numeric",
+    hour: "numeric", minute: "2-digit",
+    timeZone: OPERATIONS_TIMEZONE,
+  }).format(parsed);
+}
+
+/** Just the clock part of an instant, in Adelaide — for a dense activity row. */
+export function formatAdelaideTime(value: string | Date | null | undefined): string {
+  if (!value) return "—";
+  const parsed = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "—";
+  return new Intl.DateTimeFormat(AU_LOCALE, {
+    hour: "numeric", minute: "2-digit", timeZone: OPERATIONS_TIMEZONE,
+  }).format(parsed);
 }
 
 /**
