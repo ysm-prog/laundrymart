@@ -15,7 +15,7 @@ import {
   Badge, ButtonLink, Card, DataTable, EmptyState, PageHeader,
   SkeletonRows, StatusBadge,
 } from "@/components/ui";
-import { Checkbox, Field, Input, SubmitButton, Textarea } from "@/components/form";
+import { Checkbox, Field, Input, SubmitButton } from "@/components/form";
 import { addContact, addLocation } from "../actions";
 
 export const dynamic = "force-dynamic";

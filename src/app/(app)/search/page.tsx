@@ -3,7 +3,7 @@ import { requireSession } from "@/lib/auth/context";
 import { createClient } from "@/lib/supabase/server";
 import { can, type Role } from "@/lib/roles";
 import { date as formatDate, money } from "@/lib/format";
-import { Card, EmptyState, Eyebrow, Notice, PageHeader, StatusBadge } from "@/components/ui";
+import { Card, EmptyState, Notice, PageHeader, StatusBadge } from "@/components/ui";
 
 export const metadata = { title: "Search" };
 export const dynamic = "force-dynamic";

@@ -8,7 +8,7 @@ import {
   Card, EmptyState, Notice, PageHeader, SkeletonRows,
   Stage, StatusBadge, humanise,
 } from "@/components/ui";
-import { Field, Input, Select, SubmitButton, Textarea } from "@/components/form";
+import { Field, Input, Select, SubmitButton } from "@/components/form";
 import { ConfirmSubmit } from "@/components/confirm-submit";
 import { InspectionChecklist } from "./inspection-checklist";
 import { ExceptionCapture, OfflineCapture, ServiceWorkerRegistrar } from "@/components/offline-capture";

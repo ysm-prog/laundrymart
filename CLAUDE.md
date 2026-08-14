@@ -280,6 +280,13 @@ support TS 7) and ESLint **9** (`eslint-config-next@16` depends on typescript-es
 which targets ESLint 9). Next 16 needs `experimental.useTypeScriptCli` and the auth gate
 lives in `src/proxy.ts`, not `src/middleware.ts`.
 
+`eslint.config.mjs` adds one rule on top of `eslint-config-next`:
+**`@typescript-eslint/no-unused-vars` as an error**, because a value fetched and then dropped
+is how `createOrder` drew a job number, never wrote it, and broke every job creation past a
+green typecheck — `.insert()` takes an untyped object, so `tsc` cannot see a missing column.
+The plugin instance is pulled back out of the Next config rather than declared as its own
+dependency, keeping the pins above the only source; it throws if that registration moves.
+
 ## 10b. Design system
 **Electro Services.** Replaced the Plantline language (flat, square, near-black chrome,
 monospace labels) in the 2026-08-13 redesign — it read as a developer console to the counter
@@ -407,6 +414,30 @@ Both are compositions over existing tables — neither added a migration.
   are edited and invoices voided.
 
 ## 18. Changelog
+### 2026-08-14 · The job number was drawn and thrown away; `no-unused-vars` now on
+Found by taking a real job in on the deployed app, which is the only way it could have been
+found. The two fixes below cleared the way to the insert, and the insert then failed with
+`null value in column "order_number" of relation "laundry_orders" violates not-null
+constraint`. No migration.
+
+- **`createOrder` called `next_number()` and never used the result.** `order_number` is
+  `not null` with no default and no trigger, so every job creation died on the constraint. The
+  fix is one line. Every other `next_number` call site — runs, stops, batches, invoices, credit
+  notes, contracts, customers — was swept and all seven write their number correctly; this was
+  the only one.
+- **Nothing could have caught it, so `@typescript-eslint/no-unused-vars` is now an error.**
+  `eslint-config-next` does not enable it, and `.insert()` on the untyped Supabase client takes
+  any object, so a missing required column is invisible to `tsc`. A value fetched and dropped on
+  the floor is the shape of a real bug, not a tidiness question — re-breaking the line proves
+  the rule now reports it. `_`-prefixed names stay allowed for deliberate skips.
+  The plugin is *reused* from `eslint-config-next` rather than depended on directly, so §10a's
+  pins stay the single source; the config throws rather than silently skipping if that
+  registration ever moves.
+- **17 dead imports cleared** to get there, across 8 files, plus a vestigial `searchParams` on
+  `/customers/new` left over from the flash-cookie migration. No behaviour change in any of them.
+- 266 unit tests, unchanged. **Verified against the live app** for the first time in this
+  sequence — the failure above is what the deployed build actually returned.
+
 ### 2026-08-14 · The planner had never applied a plan: the board and the action disagreed
 Swept the other three compose-locally-commit-once payloads after the job-form outage below.
 One of them was broken the same way and just as completely. No migration.

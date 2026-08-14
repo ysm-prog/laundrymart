@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { assertCapability, type Session } from "@/lib/auth/context";
+import { assertCapability } from "@/lib/auth/context";
 import { createClient } from "@/lib/supabase/server";
 import { can } from "@/lib/roles";
 import { recordAudit } from "@/lib/audit";
@@ -289,6 +289,9 @@ export async function createOrder(formData: FormData): Promise<void> {
       tenant_id: session.tenantId,
       depot_id: session.depotId ?? customer.depot_id,
       created_by: session.userId,
+      // Drawn above and, until now, thrown away: the column is `not null` with
+      // no default, so every single insert died on the constraint instead.
+      order_number: orderNumber as string,
       status: "new",
     })
     .select("id, order_number")

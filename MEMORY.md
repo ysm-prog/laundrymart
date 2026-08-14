@@ -1,42 +1,36 @@
 # MEMORY — working session handoff
 > Auto-loaded each session. Canonical state is CLAUDE.md; this is the live delta.
 
-**IN FLIGHT — two shipped features could never save; fixed on `claude/customer-fix-drops-v0uunk`.**
-Not merged, not deployed. `verify` green (266 unit tests, was 245). CLAUDE.md §18 (top two
-entries) has the full account. Both bugs were the same class: **a hidden JSON field whose
-schema lived in a `"use server"` module, where nothing could unit-test the contract.**
-- **`/routes/planner` had never applied a plan.** The board posted `{columns:[{id,…}]}` with no
-  date; `planSchema` wanted `{date, columns:[{routeId,…}]}`. Every "Apply plan" was refused.
-  The server was right all along — the fix is entirely in `PlannerBoard`, which now takes the
-  date as a prop and whose `toPlan` returns the action's own inferred `DispatchPlan` type, so
-  the disagreement is a compile error from here on.
-- **All three payload schemas now sit outside `"use server"`** (`orders/order-items.ts`,
-  `agreements/wizard-lines.ts`, `routes/planner/plan.ts`), each with tests written against what
-  its producer really emits. **Put any new hidden-JSON contract there too, with a test.**
-  Careful what those modules import: `plan.ts` is in the client bundle, so it cannot reach
-  `lib/actions` (→ `next/headers`) — that mistake typechecks, lints and tests clean and blows
-  up only at `next build`.
-- The contract wizard's `lines` and `/api/sync` were swept and are sound; sync had used
-  `.nullish()` from the start, which is exactly what the job form's schema lacked.
+**Jobs and the planner: three stacked blockers, all fixed.** The first two are merged and live
+on `Prod` (`64bd787`, CI green). The third — below — is on
+`claude/customer-fix-drops-v0uunk` and **not yet merged**. CLAUDE.md §18 has all three.
 
-**The Jobs module was unusable** — same branch. Every job create and edit was refused with
-"Please add at least one laundry item." on a job that had items, and the refusal also dropped
-the selected customer.
-- **Root cause: `optionalText` refused a JSON `null`.** The form posts items as JSON and spells
-  every unanswered field `null`; `optionalText` only mapped `""` → absent, and
-  `z.string().optional()` refuses `null`. One blank *Item notes* failed its row, failed the
-  whole `z.array()`, and the empty list that came out was reported as "add an item".
-  `optionalText`/`optionalUuid`/`optionalDate` now share one `absent()` that reads both.
-  **Watch for this shape anywhere a hidden JSON field feeds a Zod schema** — the contract
-  wizard's `lines` and the planner's payload are the same idiom.
-- **The parser now lives outside `"use server"`** (`orders/order-items.ts`) purely so it can be
-  unit-tested; that was why a green `verify` sat on top of a module nobody could use. 8 tests
-  written against `JobForm`'s real payload; 4 fail against the old preprocessor.
-- **A failed save keeps the customer** via `?customer=<id>` (the quick-create's own door), and
-  `JobForm` adopts a changed `defaultCustomerId` during render so it works whether or not React
-  kept the component mounted across the redirect.
-- **Never verified at a real counter** — no Supabase credentials in this container. Take one
-  job in on the deployed app before calling this closed.
+1. **`optionalText` refused a JSON `null`** → "Please add at least one laundry item." on a job
+   that had one. Every create and edit. Also dropped the customer on the way out.
+2. **`/routes/planner` had never applied a plan** — the board posted `{columns:[{id,…}]}` with
+   no date; `planSchema` wanted `{date, columns:[{routeId,…}]}`.
+3. **`createOrder` drew a job number from `next_number()` and never put it on the insert**
+   → `null value in column "order_number" … violates not-null constraint`. Found only by taking
+   a real job in on the deployed app. One-line fix; the other seven `next_number` call sites
+   were swept and are all correct.
+
+**`@typescript-eslint/no-unused-vars` is now an error** (`eslint.config.mjs`) — that is what
+would have caught #3, and `eslint-config-next` does not enable it. `.insert()` on the untyped
+Supabase client accepts any object, so a missing required column is invisible to `tsc`; treat
+lint as the guard there. The plugin is reused out of the Next config, not depended on directly.
+Clearing it took 17 dead imports across 8 files, plus a vestigial `searchParams` on
+`/customers/new`.
+
+**All three payload schemas sit outside `"use server"`** (`orders/order-items.ts`,
+`agreements/wizard-lines.ts`, `routes/planner/plan.ts`), each tested against what its producer
+really emits. **Put any new hidden-JSON contract there too, with a test.** Careful what those
+modules import: `plan.ts` is in the client bundle, so it cannot reach `lib/actions`
+(→ `next/headers`) — that mistake typechecks, lints and tests clean and blows up at
+`next build`.
+
+**Still to confirm on the deployed app:** one job saved end to end, and one plan applied on
+`/routes/planner`. **`Dev` has diverged from `Prod` both ways** — 6 behind, 2 ahead
+(the `.claude` framework commits, PR #16); reconciling is a merge, not a fast-forward.
 
 **SHIPPED — My Runs + run assignment.** Merged to `Prod` (`8fd851d`, feature commit
 `23499b5`) and **`0015_run_assignment` is applied to `laundrymart-syd`**. Joins the counter's

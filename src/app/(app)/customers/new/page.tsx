@@ -7,12 +7,9 @@ import { createCustomer } from "../actions";
 export const metadata = { title: "New customer" };
 export const dynamic = "force-dynamic";
 
-export default async function NewCustomerPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ error?: string }>;
-}) {
-  const params = await searchParams;
+// No `searchParams`: the `?error=` this page used to read moved to the flash
+// cookie when `fail()` started redirecting clean, and the prop outlived it.
+export default async function NewCustomerPage() {
   await requireCapability("customers.write");
 
   const supabase = await createClient();
