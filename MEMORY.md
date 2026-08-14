@@ -1,10 +1,20 @@
 # MEMORY — working session handoff
 > Auto-loaded each session. Canonical state is CLAUDE.md; this is the live delta.
 
-**IN FLIGHT — My Runs + run assignment** (branch `claude/my-runs-driver-assignment-dnjo8n`,
-not merged). Joins the counter's Jobs to the driver's Runs, adds `/my-runs`, and gives dispatch
-somewhere to hand work out. `verify` green (245 unit tests, was 204), 102 pgTAP assertions
-(was 83) against a real local Postgres. See CLAUDE.md §18 (2026-08-14) for the full account.
+**SHIPPED — My Runs + run assignment.** Merged to `Prod` (`8fd851d`, feature commit
+`23499b5`) and **`0015_run_assignment` is applied to `laundrymart-syd`**. Joins the counter's
+Jobs to the driver's Runs, adds `/my-runs`, and gives dispatch somewhere to hand work out.
+`verify` green on the merged tree (245 unit tests, was 204), 102 pgTAP assertions (was 83).
+See CLAUDE.md §18 (2026-08-14) for the full account.
+- **Verified on the live project, not assumed.** A rolled-back probe covered all nine cases:
+  the happy path leaves `status` untouched, the unready / pickup / wrong-customer / completed
+  attempts are all refused by name, two jobs sit under one stop, a completed job keeps its
+  run, removal is allowed, and the three new activity verbs are accepted. A second rolled-back
+  probe created a temporary driver login and proved the RLS narrowing from both sides — the
+  driver saw 1 job (their own stop) and 0 unassigned; a super_admin still saw both. Nothing
+  persisted from either; `laundry_orders` is still empty.
+- **`Dev` is 2 commits behind `Prod`** — the merge went straight to `Prod` as asked, so `Dev`
+  never received it. Fast-forward it before branching anything new off `Dev`.
 - **`0015_run_assignment` — one column, `laundry_orders.stop_id`.** Job → Stop → Run → Driver
   and nothing else; there is deliberately no `driver_id` on a laundry order. Do not add one:
   the whole point is that "who is delivering this" has exactly one answer.
@@ -235,10 +245,13 @@ server-side extension, so its `.control` file has to sit in the postmaster's own
 and apt on the runner cannot reach into a container.
 
 **Next up**
-0. **Apply `0015_run_assignment` to `laundrymart-syd`** and probe it the way 0014 was probed:
-   assign a ready job, confirm `status` did not move, confirm the pickup/unready/wrong-customer
-   refusals, confirm a driver-only session reads only their own stops' jobs, and check for a
-   new security advisor. Then open `/my-runs` as the seeded driver login on a phone.
+0. **Open `/my-runs` on the deployed app.** The schema, the guards and the RLS narrowing are
+   proven on the live project by probe; the screen itself has never been rendered against real
+   data. Note there is **no driver-role login on the project** — all four memberships are
+   `super_admin` — so to see the driver's own view somebody has to create a `driver` membership
+   and link it to a `drivers` row. As a super_admin, `/my-runs` shows the driver selector and
+   the unassigned queue instead.
+0a. **Fast-forward `Dev` to `Prod`** — it is 2 commits behind after this merge.
 0b. **Click through `/orders` on the deployed app** once Vercel has built `Prod`. The schema
    and the workflow are proven on the live project by SQL probe; the screens themselves have
    never been rendered against real data from anywhere.

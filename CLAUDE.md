@@ -338,11 +338,21 @@ column carries `relative` for exactly that reason.
 
 ## 11. Hosted project
 `laundrymart-syd` · ref `xujhwljrmogenhvqpkrf` · ap-southeast-2 (Sydney) · org `ysm-prog`.
-Deployed on Vercel at `ats.coreit.com.au`. All migrations through `0014_laundry_orders`
-applied (0014 on 2026-08-13, verified by rolled-back probe: the full workflow, the three
-guards, `anon` reading nothing, and no new security advisor). Note the live project also
-carries `0012_return_count`, `purchases`, `supplier_payments` and `import_helpers` from
-branches not yet merged here, so `supabase/migrations/` is not a complete picture of it.
+Deployed on Vercel at `ats.coreit.com.au`. All migrations through `0015_run_assignment`
+applied (0014 on 2026-08-13, 0015 on 2026-08-14), each verified by rolled-back probe rather
+than trusted: for 0015 that was the nine eligibility and workflow cases, the driver RLS
+narrowing proven from both sides with a temporary driver login, and no new security advisor
+(still the same 7 warnings — 5 documented SECURITY DEFINER helpers, `park_number_sequence`
+from another branch, and the auth leaked-password toggle).
+
+**The number 0015 is used twice against this project.** The live ledger already carried
+`0015_import_activation` and `0015_import_activation_grants` (applied 2026-08-13 from an
+unmerged branch) before `0015_run_assignment` went on. Supabase keys migrations on their
+timestamp, not their name, so nothing collided — but when that branch lands here there will be
+two `0015_*` files in `supabase/migrations/` and one of them has to be renumbered. The live
+project also carries `0012_return_count`, `purchases`, `supplier_payments` and
+`import_helpers` from branches not yet merged here, so `supabase/migrations/` is still not a
+complete picture of it.
 Demo tenant seeded
 (`Harbour Commercial Laundry`); two `super_admin` logins, one also linked to the seeded driver.
 Sign-in verified end to end 2026-08-05.
