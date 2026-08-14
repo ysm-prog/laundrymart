@@ -1,8 +1,8 @@
 # MEMORY — working session handoff
 > Auto-loaded each session. Canonical state is CLAUDE.md; this is the live delta.
 
-**The workflow simplification is done and on `claude/electro-workflow-simplify-o32fwv`.**
-Not merged. CLAUDE.md §18 has the full entry; the short version:
+**The workflow simplification is done, applied to `laundrymart-syd` and merged into `Prod`.**
+CLAUDE.md §18 has the full entry; the short version:
 
 ```
 Office:  Job → Driver → Delivery Date → Assigned
@@ -41,6 +41,11 @@ a new **Fleet** area. If a future feature needs run planning back, it is all sti
 **Inspection is out of the workflow, data intact.** `submitInspection`,
 `inspection-checklist.tsx` and `checklist.ts` deleted; the table, the column, the two route
 statuses and the `inspection_failed` notification kind all stay for history.
+
+**0016 is live** (ledger `20260814084223`). Its **statement order is load-bearing** because it
+carries a backfill: transition guard replaced *before* the backfill, constraints and the
+assignment guard *after*. The three pre-existing jobs were backfilled from the run chain and
+verified; five guard probes were refused in one rolled-back block; no new security advisor.
 
 **Verification state.** 286 unit tests, 118 pgTAP assertions, typecheck/lint/build green,
 migrations + pgTAP + seed all applied to a fresh Postgres 16 in-container. My Runs screenshotted

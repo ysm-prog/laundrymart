@@ -387,12 +387,21 @@ column carries `relative` for exactly that reason.
 
 ## 11. Hosted project
 `laundrymart-syd` · ref `xujhwljrmogenhvqpkrf` · ap-southeast-2 (Sydney) · org `ysm-prog`.
-Deployed on Vercel at `ats.coreit.com.au`. All migrations through `0015_run_assignment`
-applied (0014 on 2026-08-13, 0015 on 2026-08-14), each verified by rolled-back probe rather
-than trusted: for 0015 that was the nine eligibility and workflow cases, the driver RLS
-narrowing proven from both sides with a temporary driver login, and no new security advisor
-(still the same 7 warnings — 5 documented SECURITY DEFINER helpers, `park_number_sequence`
-from another branch, and the auth leaked-password toggle).
+Deployed on Vercel at `ats.coreit.com.au`. All migrations through `0016_job_assignment`
+applied (0014 on 2026-08-13, 0015 and 0016 on 2026-08-14), each verified by rolled-back probe
+rather than trusted. For **0016** that was: the three existing jobs backfilled from the run
+chain and read back (LJ00004/5 `ready_for_delivery → assigned` under Sam Okoye for 16 Aug,
+LJ00003 keeping its driver as the record of who delivered it); five guard probes all refused
+in one rolled-back block — Assigned with no assignment data, a driver with no date, ready
+straight to out-for-delivery, a job on a crewed run naming no driver, and reopening a completed
+job; and no new security advisor (still the same 7 warnings — 5 documented SECURITY DEFINER
+helpers, `park_number_sequence` from another branch, and the auth leaked-password toggle).
+
+**0016 carries a backfill, so its statement order is load-bearing**: the transition guard is
+replaced *before* the backfill (which performs `ready_for_delivery → assigned` and needs the
+new function to permit it), and the check constraints and the new assignment guard come
+*after* it, over data that is already consistent. Re-running it against an empty database is
+a no-op on that UPDATE; re-ordering it would break the next project it is applied to.
 
 **The number 0015 is used twice against this project.** The live ledger already carried
 `0015_import_activation` and `0015_import_activation_grants` (applied 2026-08-13 from an

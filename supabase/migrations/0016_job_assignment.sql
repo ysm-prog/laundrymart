@@ -84,54 +84,6 @@ comment on column public.laundry_orders.load_confirmed_at is
   'When the driver confirmed this job was on the van. Start Route dispatches only '
   'load-confirmed jobs, so work assigned after the load is not silently sent out.';
 
--- ------------------------------------------------------------ integrity ------
--- "A Job cannot have status Assigned without valid assignment data" — the rule
--- that was unenforceable while the answer lived two tables away.
-alter table public.laundry_orders
-  add constraint chk_laundry_orders_assigned_has_driver check (
-    status <> 'assigned'
-    or (assigned_driver_id is not null and assigned_delivery_date is not null)
-  );
-
--- And its converse: "A Job with Driver/date assignment must not remain Ready for
--- Delivery." A job holding an assignment has to be at or past `assigned`.
--- Cancelled is included because cancelling must never require unpicking the
--- assignment first — the history of who had it is worth keeping.
-alter table public.laundry_orders
-  add constraint chk_laundry_orders_assignment_status check (
-    assigned_driver_id is null
-    or status in ('assigned','out_for_delivery','completed','cancelled')
-  );
-
--- Driver and date travel together or not at all. Half an assignment is a job
--- that appears on nobody's day and reads as assigned on the list.
-alter table public.laundry_orders
-  add constraint chk_laundry_orders_assignment_pair check (
-    (assigned_driver_id is null) = (assigned_delivery_date is null)
-  );
-
--- A customer pickup is never assigned to a delivery driver. Stated in the form,
--- in the action, and here — where it cannot be talked around.
-alter table public.laundry_orders
-  add constraint chk_laundry_orders_assignment_delivery check (
-    assigned_driver_id is null or delivery_required
-  );
-
--- ------------------------------------------------------------- indexes -------
--- **The** My Runs query: this driver, this day. Everything the screen renders
--- hangs off one index scan, which is what lets the date arrows feel instant.
-create index idx_laundry_orders_driver_day
-  on public.laundry_orders(tenant_id, assigned_driver_id, assigned_delivery_date)
-  where assigned_driver_id is not null;
-
--- The office's "ready to go out and given to nobody" queue. Partial and tiny,
--- replacing 0015's equivalent, which keyed on stop_id — now the wrong question.
-create index idx_laundry_orders_ready_unassigned
-  on public.laundry_orders(tenant_id, expected_delivery_date)
-  where assigned_driver_id is null
-    and delivery_required
-    and status = 'ready_for_delivery';
-
 -- ---------------------------------------------------- transition guard -------
 -- The workflow, with `assigned` in it. Transcribed by
 -- `src/lib/domain/laundry-orders.ts`, which says the same thing in sentences so
@@ -214,6 +166,93 @@ begin
   end if;
   return new;
 end $$;
+
+-- -------------------------------------------------------------- backfill -----
+-- Existing jobs already sitting on a driver's run.
+--
+-- Skipping this would leave every one of them in exactly the state the guard
+-- below is written to forbid: on somebody's route sheet and on nobody's My Runs,
+-- because the screen reads `assigned_driver_id` and the row would have none. The
+-- answer is not invented — it is read back out of the chain that was already the
+-- authority before this migration, `stop_id -> jobs.route_id -> daily_routes`, so
+-- the backfill records what was already true rather than deciding anything.
+--
+-- Ordering matters and is the reason the transition guard is replaced above
+-- rather than below: the `ready_for_delivery -> assigned` move this performs is
+-- only legal against the new function. The *old* assignment guard does not fire,
+-- because `stop_id` is not among the columns being written. The new one is
+-- created after this, over data that is already consistent.
+update public.laundry_orders o
+   set assigned_driver_id = r.driver_id,
+       assigned_delivery_date = r.route_date,
+       -- The row has been assigned since whenever it was put on the run; there
+       -- is no better instant on hand than the one the job was last touched.
+       assigned_at = coalesce(o.updated_at, o.created_at),
+       -- The van's own load confirmation carries down to the work on it, so a
+       -- run already loaded when this migration lands can still be started.
+       load_confirmed_at = r.load_confirmed_at,
+       load_confirmed_by = r.load_confirmed_by,
+       status = case
+                  when o.status = 'ready_for_delivery' then 'assigned'
+                  else o.status
+                end
+  from public.jobs j
+  join public.daily_routes r on r.id = j.route_id
+ where j.id = o.stop_id
+   and o.delivery_required
+   and r.driver_id is not null
+   and o.assigned_driver_id is null
+   -- A pickup, a job still in the plant or a cancelled one never held a real
+   -- assignment, whatever a stray stop_id says. Left exactly as they are.
+   and o.status in ('ready_for_delivery','out_for_delivery','completed');
+
+-- ------------------------------------------------------------ integrity ------
+-- "A Job cannot have status Assigned without valid assignment data" — the rule
+-- that was unenforceable while the answer lived two tables away.
+alter table public.laundry_orders
+  add constraint chk_laundry_orders_assigned_has_driver check (
+    status <> 'assigned'
+    or (assigned_driver_id is not null and assigned_delivery_date is not null)
+  );
+
+-- And its converse: "A Job with Driver/date assignment must not remain Ready for
+-- Delivery." A job holding an assignment has to be at or past `assigned`.
+-- Cancelled is included because cancelling must never require unpicking the
+-- assignment first — the history of who had it is worth keeping.
+alter table public.laundry_orders
+  add constraint chk_laundry_orders_assignment_status check (
+    assigned_driver_id is null
+    or status in ('assigned','out_for_delivery','completed','cancelled')
+  );
+
+-- Driver and date travel together or not at all. Half an assignment is a job
+-- that appears on nobody's day and reads as assigned on the list.
+alter table public.laundry_orders
+  add constraint chk_laundry_orders_assignment_pair check (
+    (assigned_driver_id is null) = (assigned_delivery_date is null)
+  );
+
+-- A customer pickup is never assigned to a delivery driver. Stated in the form,
+-- in the action, and here — where it cannot be talked around.
+alter table public.laundry_orders
+  add constraint chk_laundry_orders_assignment_delivery check (
+    assigned_driver_id is null or delivery_required
+  );
+
+-- ------------------------------------------------------------- indexes -------
+-- **The** My Runs query: this driver, this day. Everything the screen renders
+-- hangs off one index scan, which is what lets the date arrows feel instant.
+create index idx_laundry_orders_driver_day
+  on public.laundry_orders(tenant_id, assigned_driver_id, assigned_delivery_date)
+  where assigned_driver_id is not null;
+
+-- The office's "ready to go out and given to nobody" queue. Partial and tiny,
+-- replacing 0015's equivalent, which keyed on stop_id — now the wrong question.
+create index idx_laundry_orders_ready_unassigned
+  on public.laundry_orders(tenant_id, expected_delivery_date)
+  where assigned_driver_id is null
+    and delivery_required
+    and status = 'ready_for_delivery';
 
 -- ------------------------------------------------- the eligibility guard -----
 -- 0015's guard, extended to police the split of authority described at the top.
