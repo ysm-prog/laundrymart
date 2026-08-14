@@ -1,135 +1,121 @@
-import { Notice, cx } from "@/components/ui";
-import { SubmitButton } from "@/components/form";
+import { Notice } from "@/components/ui";
 import { ConfirmSubmit } from "@/components/confirm-submit";
-import { formatAdelaideDateTime } from "@/lib/domain/timezone";
-import { checkRunStart, runStage } from "@/lib/domain/run-assignment";
-import { closeRun, confirmLoad, markReturning, startRun, unloadRun } from "@/app/(app)/run/actions";
-import type { Run } from "@/lib/runs/my-runs";
+import { formatAdelaideDate, formatAdelaideDateTime } from "@/lib/domain/timezone";
+import { dispatchableJobs, loadableJobs } from "@/lib/domain/run-assignment";
+import type { DayJob } from "@/lib/runs/my-runs";
+import { confirmDayLoad, startDayRoute } from "./actions";
 
 /**
- * The run controls, compact.
+ * The driver's two buttons for a day: Confirm Load, then Start Route.
  *
- * This is **not** a second run workflow. Every button posts to the very actions
- * `/run` posts to — `confirmLoad`, `startRun`, `markReturning`, `unloadRun`,
- * `closeRun` — which carry the load-before-start rule, the depot sweep on
- * unload and the close guard. Those actions gained nothing but a `return_to`
- * when this screen arrived, so the rules cannot drift between the two.
+ * This replaces the six-stage run workflow that used to sit here, and with it
+ * the vehicle inspection that used to be stage one. **Confirm Load is not an
+ * inspection** — there is no checklist, no pass or fail, no defect capture and
+ * no vehicle status. It records one fact: the laundry assigned for this day is
+ * on the van. That is what Start Route then needs to be true.
  *
- * What differs is the shape. `/run` is the guided single-run screen a driver
- * works from at the kerb: six numbered stages, one actionable at a time, with
- * the inspection form and the offline capture card in it. My Runs is the day at
- * a glance and may be showing two runs at once, so it offers only **the next
- * step**, in one row, and sends the driver to `/run` for the inspection and for
- * anything captured at a stop.
+ * Exactly one control is offered at a time. A row of buttons of which most are
+ * refused is a row of ways to be told no, and this screen is read at arm's
+ * length in a vehicle.
  *
- * Every timestamp is Adelaide's.
+ * The two are separate on purpose rather than folded into one "I'm off". Loading
+ * and leaving are minutes apart and the gap is where late work arrives: a job
+ * assigned after the load is confirmed stays Assigned and is deliberately *not*
+ * swept out by Start Route, because it is not on the van. Confirming again picks
+ * it up, which is the honest way to say "I went back for it".
  */
-export function RunWorkflow({ run, returnTo }: { run: Run; returnTo: string }) {
-  const stage = runStage(run.status);
+export function DayWorkflow({
+  jobs, driverId, date, returnTo,
+}: {
+  jobs: DayJob[];
+  driverId: string;
+  date: string;
+  returnTo: string;
+}) {
+  const loadable = loadableJobs(jobs);
+  const dispatchable = dispatchableJobs(jobs);
+  const outForDelivery = jobs.filter((job) => job.status === "out_for_delivery");
+  const assigned = jobs.filter((job) => job.status === "assigned");
 
-  if (stage === "cancelled") {
-    return <Notice tone="warning">This run was cancelled. Nothing more to do on it.</Notice>;
-  }
-  if (stage === "completed") {
+  const row = "flex flex-wrap items-center gap-3 rounded-xl border bg-surface-sunken px-4 py-3";
+  const fields = (
+    <>
+      <input type="hidden" name="driver_id" value={driverId} />
+      <input type="hidden" name="date" value={date} />
+      <input type="hidden" name="return_to" value={returnTo} />
+    </>
+  );
+
+  // Nothing assigned at all, or everything already finished: no controls, and
+  // the page's own empty state or completed list says the rest.
+  if (assigned.length === 0 && outForDelivery.length === 0) return null;
+
+  if (loadable.length > 0) {
+    const confirmedAlready = jobs.filter((job) => job.load_confirmed_at).length;
     return (
-      <Notice tone="success" title="Run closed">
-        {run.closed_at
-          ? `Closed ${formatAdelaideDateTime(run.closed_at)}.`
-          : "This run is finished."}
+      <div className={row}>
+        <p className="min-w-0 flex-1 text-sm">
+          <span className="font-semibold">Next: confirm the load.</span>{" "}
+          {loadable.length} {loadable.length === 1 ? "job is" : "jobs are"} assigned to you for{" "}
+          {formatAdelaideDate(date, "medium")}
+          {confirmedAlready > 0
+            ? ` (${confirmedAlready} already confirmed — this covers the rest).`
+            : "."}
+        </p>
+        <form action={confirmDayLoad}>
+          {fields}
+          <ConfirmSubmit
+            label="Confirm Load"
+            variant="primary"
+            eyebrow="Before you set off"
+            consequence={
+              `You are confirming that the ${loadable.length} `
+              + `${loadable.length === 1 ? "job" : "jobs"} assigned to you for `
+              + `${formatAdelaideDate(date, "medium")} are loaded and ready for delivery.`
+            }
+            pendingLabel="Confirming…"
+          />
+        </form>
+      </div>
+    );
+  }
+
+  if (dispatchable.length > 0) {
+    const confirmedAt = jobs.find((job) => job.load_confirmed_at)?.load_confirmed_at ?? null;
+    return (
+      <div className={row}>
+        <p className="min-w-0 flex-1 text-sm">
+          <span className="font-semibold">Next: start the route.</span>{" "}
+          {dispatchable.length} loaded {dispatchable.length === 1 ? "job" : "jobs"} will go out
+          for delivery
+          {confirmedAt ? `. Load confirmed ${formatAdelaideDateTime(confirmedAt)}.` : "."}
+        </p>
+        <form action={startDayRoute}>
+          {fields}
+          <ConfirmSubmit
+            label="Start Route"
+            variant="primary"
+            eyebrow="On the road"
+            consequence={
+              `This marks the ${dispatchable.length} loaded `
+              + `${dispatchable.length === 1 ? "job" : "jobs"} as out for delivery. `
+              + "Mark each one delivered as you hand it over."
+            }
+            pendingLabel="Starting…"
+          />
+        </form>
+      </div>
+    );
+  }
+
+  if (outForDelivery.length > 0) {
+    return (
+      <Notice tone="info" title="On the road">
+        {outForDelivery.length} {outForDelivery.length === 1 ? "job is" : "jobs are"} out for
+        delivery. Open each one and mark it delivered as you hand it over.
       </Notice>
     );
   }
 
-  const startable = checkRunStart(run);
-  const row = "flex flex-wrap items-center gap-3 rounded-xl border bg-surface-sunken px-4 py-3";
-
-  // Exactly one control, chosen by where the run has got to. A row of five
-  // buttons of which four are refused is a row of five ways to be told no.
-  if (!run.load_confirmed_at) {
-    return (
-      <div className={cx(row)}>
-        <p className="min-w-0 flex-1 text-sm">
-          <span className="font-semibold">Next: confirm the load.</span>{" "}
-          {startable.ok ? null : startable.reason}
-        </p>
-        <form action={confirmLoad}>
-          <input type="hidden" name="route_id" value={run.id} />
-          <input type="hidden" name="return_to" value={returnTo} />
-          <SubmitButton pendingLabel="Confirming…">Confirm load</SubmitButton>
-        </form>
-      </div>
-    );
-  }
-
-  if (!run.started_at) {
-    return (
-      <div className={cx(row)}>
-        <p className="min-w-0 flex-1 text-sm">
-          <span className="font-semibold">Next: start the run.</span>{" "}
-          Load confirmed {formatAdelaideDateTime(run.load_confirmed_at)}.
-          {run.inspection_id ? null : " The vehicle inspection has not been recorded yet."}
-        </p>
-        <form action={startRun}>
-          <input type="hidden" name="route_id" value={run.id} />
-          <input type="hidden" name="return_to" value={returnTo} />
-          <SubmitButton pendingLabel="Starting…">Start run</SubmitButton>
-        </form>
-      </div>
-    );
-  }
-
-  if (!run.returned_at) {
-    return (
-      <div className={cx(row)}>
-        <p className="min-w-0 flex-1 text-sm">
-          <span className="font-semibold">On the road</span> since{" "}
-          {formatAdelaideDateTime(run.started_at)}. Mark this when you head back to the depot.
-        </p>
-        <form action={markReturning}>
-          <input type="hidden" name="route_id" value={run.id} />
-          <input type="hidden" name="return_to" value={returnTo} />
-          <SubmitButton variant="secondary" pendingLabel="Saving…">I&apos;m returning</SubmitButton>
-        </form>
-      </div>
-    );
-  }
-
-  if (!run.unloaded_at) {
-    return (
-      <div className={cx(row)}>
-        <p className="min-w-0 flex-1 text-sm">
-          <span className="font-semibold">Next: unload.</span>{" "}
-          Everything still on the vehicle moves into depot receiving.
-        </p>
-        <form action={unloadRun}>
-          <input type="hidden" name="route_id" value={run.id} />
-          <input type="hidden" name="return_to" value={returnTo} />
-          <SubmitButton pendingLabel="Unloading…">Unload vehicle</SubmitButton>
-        </form>
-      </div>
-    );
-  }
-
-  return (
-    <div className={cx(row, "block sm:flex")}>
-      <p className="min-w-0 flex-1 text-sm">
-        <span className="font-semibold">Last step: close the run.</span>{" "}
-        Unloaded {formatAdelaideDateTime(run.unloaded_at)}.
-      </p>
-      <form action={closeRun} className="mt-3 sm:mt-0">
-        <input type="hidden" name="route_id" value={run.id} />
-        <input type="hidden" name="return_to" value={returnTo} />
-        <ConfirmSubmit
-          label="Close run"
-          variant="primary"
-          eyebrow="Final step"
-          consequence={
-            "This closes the run for the day and it cannot be reopened. "
-            + "Any job still outstanding stays outstanding — closing a run never marks work delivered."
-          }
-          pendingLabel="Closing…"
-        />
-      </form>
-    </div>
-  );
+  return null;
 }

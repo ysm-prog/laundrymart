@@ -397,6 +397,12 @@ export type LaundryOrder = {
   received_at: string;
   received_via: string;
   pickup_date: string | null;
+  /**
+   * **Legacy, and out of the workflow.** Nothing reads or writes this any more:
+   * it is not on the create or edit form, not in the action's schema and not on
+   * any screen. The column and its historical values are kept deliberately
+   * rather than dropped in a destructive migration — see the 2026-08-14 entry.
+   */
   pickup_time: string | null;
   pickup_driver_id: Uuid | null;
   delivery_required: boolean;
@@ -423,13 +429,31 @@ export type LaundryOrder = {
   /** Generated: the delivery date, or the collection date for a pickup job. */
   due_date: string | null;
   /**
-   * The stop on a driver's run that will deliver this job (migration 0015).
+   * The stop on a driver's run that carries this job (migration 0015).
    *
-   * The authoritative dispatch relationship, and the only one: driver and run
-   * date are read through `jobs.route_id → daily_routes`, never copied here.
-   * Null means the job is on nobody's run.
+   * The *operational* placement: which visit on which run, for the depot load,
+   * the run sheet and the inventory sweep. Since 0016 it is no longer where the
+   * assignment is read from — `assigned_driver_id` and `assigned_delivery_date`
+   * below are — and `guard_laundry_order_assignment()` keeps the two from
+   * disagreeing. Null means the job is on nobody's run.
    */
   stop_id: Uuid | null;
+
+  /**
+   * Who is delivering this job, and on which Adelaide day (migration 0016).
+   *
+   * The user-facing assignment, and the pair My Runs queries on. Both are set
+   * together or neither is: a check constraint refuses half an assignment, and
+   * another refuses status `assigned` without them.
+   */
+  assigned_driver_id: Uuid | null;
+  assigned_delivery_date: string | null;
+  assigned_at: string | null;
+  assigned_by: Uuid | null;
+
+  /** When the driver confirmed this job was on the van, and who confirmed it. */
+  load_confirmed_at: string | null;
+  load_confirmed_by: Uuid | null;
 };
 
 export type LaundryOrderItem = {

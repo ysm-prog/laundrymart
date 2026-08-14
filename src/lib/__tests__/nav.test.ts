@@ -53,13 +53,11 @@ describe("navigationFor", () => {
   });
 
   it("keeps an area whose own screen is out of reach but whose children are not", () => {
-    // A dispatcher has fleet.read but not admin.read: "Runs" survives, and its
-    // tabs are only the ones they can open.
-    const runs = navigationFor("dispatcher").find((item) => item.label === "Runs");
-    expect(runs).toBeDefined();
-    expect(runs?.children?.map((child) => child.label)).toEqual([
-      "Today's runs", "Plan the day", "Weekly runs", "Drivers", "Vehicles",
-    ]);
+    // A dispatcher has fleet.read but not admin.read: "Fleet" survives with the
+    // tabs they can open, and Settings stays out of the rail entirely.
+    const fleet = navigationFor("dispatcher").find((item) => item.label === "Fleet");
+    expect(fleet).toBeDefined();
+    expect(fleet?.children?.map((child) => child.label)).toEqual(["Drivers", "Vehicles"]);
     expect(navigationFor("dispatcher").map((item) => item.label)).not.toContain("Settings");
   });
 
@@ -73,8 +71,8 @@ describe("navigationFor", () => {
     }
   });
 
-  it("gives the driver My runs, and both screens inside it", () => {
-    const area = navigationFor("driver").find((item) => item.label === "My runs");
+  it("gives the driver My Runs, and both screens inside it", () => {
+    const area = navigationFor("driver").find((item) => item.label === "My Runs");
     expect(area).toBeDefined();
     expect(area?.href).toBe("/my-runs");
     // `/run` is kept, not replaced: it owns the offline outbox and the service
@@ -82,8 +80,8 @@ describe("navigationFor", () => {
     expect(area?.children?.map((child) => child.href)).toEqual(["/my-runs", "/run"]);
   });
 
-  it("gives a dispatcher My runs without the driver's capture screen", () => {
-    const area = navigationFor("dispatcher").find((item) => item.label === "My runs");
+  it("gives a dispatcher My Runs without the driver's capture screen", () => {
+    const area = navigationFor("dispatcher").find((item) => item.label === "My Runs");
     expect(area?.href).toBe("/my-runs");
     // `run.execute` is the driver's; a dispatcher gets the overview only.
     expect(area?.children?.map((child) => child.href)).toEqual(["/my-runs"]);
@@ -101,21 +99,36 @@ describe("navigationFor", () => {
 
   it("keeps My runs away from roles that do not drive", () => {
     for (const role of ["finance", "warehouse_operator", "sales"] as const) {
-      expect(navigationFor(role).map((item) => item.label), role).not.toContain("My runs");
+      expect(navigationFor(role).map((item) => item.label), role).not.toContain("My Runs");
     }
   });
 
-  it("leaves the existing Runs area exactly where it was", () => {
-    // My Runs is an addition, not a replacement: `/routes/daily` stays the
-    // management view of every run and keeps its own rail row.
-    const runs = navigationFor("dispatcher").find((item) => item.label === "Runs");
-    expect(runs?.href).toBe("/routes/daily");
-    expect(runs?.children?.map((child) => child.href)).toContain("/routes/planner");
+  it("has no user-facing Runs area, for any role", () => {
+    // The whole point of the simplification: nobody creates, opens or manages a
+    // run. The `/routes/*` screens still exist and still work — they are simply
+    // off the map — so this asserts on the rail, not on the routes.
+    for (const role of ROLES) {
+      const labels = navigationFor(role).map((item) => item.label);
+      expect(labels, role).not.toContain("Runs");
+      const hrefs = navigationFor(role).flatMap(
+        (item) => [item.href, ...(item.children ?? []).map((child) => child.href)]);
+      for (const href of hrefs) {
+        expect(href.startsWith("/routes/"), `${role} → ${href}`).toBe(false);
+      }
+    }
+  });
+
+  it("keeps drivers and vehicles reachable after the Runs area went", () => {
+    // They were tabs under Runs and are not run management. Losing them with it
+    // would have been the silent casualty of removing the area.
+    const fleet = navigationFor("dispatcher").find((item) => item.label === "Fleet");
+    expect(fleet?.href).toBe("/drivers");
+    expect(fleet?.children?.map((child) => child.href)).toEqual(["/drivers", "/vehicles"]);
   });
 
   it("orders the rail the way the day runs", () => {
     expect(navigationFor("super_admin").map((item) => item.label)).toEqual([
-      "Today", "My runs", "Runs", "Stops", "Jobs", "Customers",
+      "Today", "My Runs", "Fleet", "Stops", "Jobs", "Customers",
       "Invoices", "Linen", "Reports", "Settings", "Help",
     ]);
   });
@@ -142,24 +155,25 @@ describe("sectionFor", () => {
     expect(label("/agreements")).toBe("Customers");
     expect(label("/operations/exceptions")).toBe("Stops");
     expect(label("/warehouse/batch-1")).toBe("Linen");
-    expect(label("/vehicles")).toBe("Runs");
+    expect(label("/vehicles")).toBe("Fleet");
   });
 
   it("prefers the longest matching destination", () => {
-    // Both /routes/daily (the area) and /routes/templates (a child) live under
-    // Runs; the tab strip must not flip areas on the deeper path.
-    expect(label("/routes/templates/tpl-1")).toBe("Runs");
-    expect(label("/routes/planner")).toBe("Runs");
+    // /orders (the Jobs area) and /operations/* (tabs under Stops) both exist;
+    // the tab strip must not flip areas on the deeper path.
+    expect(label("/orders/abc-123/edit")).toBe("Jobs");
+    expect(label("/operations/pickups")).toBe("Stops");
   });
 
-  it("keeps the two run areas apart", () => {
-    // Neither may swallow the other: a driver on /my-runs must not light up
-    // "Runs", and a dispatcher on /routes/daily must not light up "My runs".
-    expect(label("/my-runs")).toBe("My runs");
-    expect(label("/my-runs/jobs/abc-123")).toBe("My runs");
-    expect(label("/run")).toBe("My runs");
-    expect(label("/routes/daily")).toBe("Runs");
-    expect(label("/routes/daily/run-1/sheet")).toBe("Runs");
+  it("puts every My Runs path in the one area, and leaves /routes off the map", () => {
+    expect(label("/my-runs")).toBe("My Runs");
+    expect(label("/my-runs/jobs/abc-123")).toBe("My Runs");
+    expect(label("/run")).toBe("My Runs");
+    // The run-management screens are still reachable by URL but belong to no
+    // rail area, so opening one highlights nothing rather than resurrecting
+    // "Runs" in the sidebar.
+    expect(label("/routes/daily")).toBeUndefined();
+    expect(label("/routes/planner")).toBeUndefined();
   });
 
   it("returns nothing for a path off the map", () => {

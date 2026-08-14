@@ -12,8 +12,8 @@ import { CustomerEssentials } from "@/app/(app)/customers/customer-form";
 import {
   DELIVERY_WINDOWS, DELIVERY_WINDOW_LABELS, ITEM_TYPES, ITEM_TYPE_LABELS,
   ORDER_PRIORITIES, PRIORITY_LABELS, QUANTITY_TYPES, QUANTITY_TYPE_LABELS,
-  RECEIVED_VIA_LABELS, describeItem, initialDeliveryRequired, receivedViaOptions,
-  type ReceivedVia,
+  RECEIVED_VIA_LABELS, describeItem, initialDeliveryRequired, initialReceivedVia,
+  receivedViaOptions, type ReceivedVia,
 } from "@/lib/domain/laundry-orders";
 import { businessToday, toZonedDate } from "@/lib/domain/timezone";
 import type { LaundryOrder, LaundryOrderItem } from "@/lib/db/types";
@@ -27,13 +27,13 @@ import type { LaundryOrder, LaundryOrderItem } from "@/lib/db/types";
  * conversation at the counter: who is this, what did they bring, when do they
  * want it, anything unusual.
  *
- * Everything that can be a default is one: today's date, a customer drop-off,
- * re-delivery, normal priority, one empty laundry row ready to fill. The time of
- * receipt is not asked for at all — it is the moment the job is being taken in,
- * so the server stamps it. The two branching questions — how it arrived, and
- * whether we deliver it back —
- * *render* their extra fields rather than hiding them, so nothing that is out of
- * play is still in the post.
+ * Everything that can be a default is one: today's date, a driver pickup,
+ * delivery back to the customer, normal priority, one empty laundry row ready to
+ * fill. Neither the time of receipt nor a pickup time is asked for at all — the
+ * first is the moment the job is being taken in, so the server stamps it, and
+ * the second was a field nobody ever read. The two branching questions — how it
+ * arrived, and whether we deliver it back — *render* their extra fields rather
+ * than hiding them, so nothing that is out of play is still in the post.
  *
  * The laundry rows post as JSON in one hidden field: the compose-locally,
  * commit-once shape the dispatch planner and the contract wizard already use,
@@ -127,7 +127,7 @@ export function JobForm({
   }
   const [query, setQuery] = useState("");
   const [quickCreate, setQuickCreate] = useState(false);
-  const [receivedVia, setReceivedVia] = useState<string>(order?.received_via ?? "customer_dropoff");
+  const [receivedVia, setReceivedVia] = useState<string>(() => initialReceivedVia(order));
   const [deliveryRequired, setDeliveryRequired] = useState(() => initialDeliveryRequired(order));
   const [deliveryWindow, setDeliveryWindow] = useState<string>(
     order?.delivery_window ?? "no_specific_time",
@@ -384,14 +384,17 @@ export function JobForm({
               </select>
             </Field>
 
+            {/* Only a driver pickup has pickup details, and the fields are
+                *rendered* conditionally rather than hidden — nothing out of play
+                is still in the post. Pickup date is optional and carries no
+                asterisk: the counter often does not know it yet, and a job that
+                cannot be saved for want of it is a job that does not get taken
+                in. There is no Pickup time field: it was asked for on every
+                collection, used by nothing, and is gone from the workflow. */}
             {receivedVia === "driver_pickup" ? (
               <>
-                <Field label="Pickup date" name="pickup_date">
+                <Field label="Pickup date" name="pickup_date" hint="Optional.">
                   <Input name="pickup_date" type="date" defaultValue={order?.pickup_date ?? undefined} />
-                </Field>
-                <Field label="Pickup time" name="pickup_time">
-                  <Input name="pickup_time" type="time"
-                         defaultValue={order?.pickup_time?.slice(0, 5) ?? undefined} />
                 </Field>
                 <Field label="Collected by" name="pickup_driver_id" className="sm:col-span-2"
                        hint="Your existing drivers.">
@@ -536,12 +539,14 @@ export function JobForm({
                      description="Are we taking it back to them, or are they coming for it?"
                      icon={<Truck className="size-[1.15rem]" />}>
           <div className="space-y-3">
-            {/* Re-deliver leads and is the default: it is the normal job, and
+            {/* Deliver leads and is the default: it is the normal job, and
                 selecting it every time was a step that was almost always the
-                same. Customer pickup is one tap away and unchanged. */}
+                same. Customer pickup is one tap away and unchanged. The word is
+                "Deliver", not "Re-deliver" — re-delivery is a courier's second
+                attempt, which is a different event this system does not model. */}
             <div className="flex flex-wrap gap-2">
               <ChoiceButton selected={deliveryRequired} onClick={() => setDeliveryRequired(true)}
-                            label="Re-deliver" detail="It goes back out to them on a run." />
+                            label="Deliver to customer" detail="We take it back out to them." />
               <ChoiceButton selected={!deliveryRequired} onClick={() => setDeliveryRequired(false)}
                             label="Customer pickup" detail="They collect it from the counter." />
             </div>

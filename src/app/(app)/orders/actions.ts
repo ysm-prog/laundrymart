@@ -57,7 +57,9 @@ const orderSchema = z.object({
   // two the form offers, so a job holding a legacy value can still be edited.
   received_via: z.enum(RECEIVED_VIA),
   pickup_date: optionalDate,
-  pickup_time: optionalTime,
+  // No `pickup_time`. The form no longer asks for it and nothing reads it, so
+  // accepting one here would be a field the schema still required a caller to
+  // understand. The column stays, nullable, holding what history put in it.
   pickup_driver_id: optionalUuid,
   delivery_required: checkbox,
   expected_delivery_date: optionalDate,
@@ -126,7 +128,9 @@ function toRow(input: OrderInput, deliveryAddress: string | null, receivedAt: st
     // Pickup details only mean anything on a driver collection; carrying them
     // over from a changed answer would leave a drop-off claiming a driver.
     pickup_date: input.received_via === "driver_pickup" ? input.pickup_date ?? null : null,
-    pickup_time: input.received_via === "driver_pickup" ? input.pickup_time ?? null : null,
+    // `pickup_time` is deliberately absent from every write. It is out of the
+    // workflow, and a legacy value left on a historical row is invisible rather
+    // than wrong — which is a better trade than a destructive migration.
     pickup_driver_id: input.received_via === "driver_pickup" ? input.pickup_driver_id ?? null : null,
     delivery_required: delivery,
     expected_delivery_date: delivery ? input.expected_delivery_date ?? null : null,
@@ -440,11 +444,15 @@ const statusSchema = z.object({
 });
 
 /**
- * The three plain moves: in progress, ready, out for delivery.
+ * The plain status moves: in progress, ready for delivery, and the management
+ * override that sends a job out without the driver pressing Start Route.
  *
  * Completion and cancellation are not here — both capture more than a status and
  * live in their own actions below, so that "mark delivered" can never be reached
- * by posting `status=completed` at this one.
+ * by posting `status=completed` at this one. Assignment is not here either: it
+ * captures a driver and a date, and lives in `assignJobToDriver`. Posting
+ * `status=assigned` at this action is refused outright, because it would create
+ * exactly the row the brief forbids — an Assigned job with no assignment.
  */
 export async function advanceOrder(formData: FormData): Promise<void> {
   const session = await assertCapability("orders.status");
@@ -456,10 +464,29 @@ export async function advanceOrder(formData: FormData): Promise<void> {
   if (target === "completed" || target === "cancelled") {
     return fail(detail, "Use the delivery, collection or cancel action for that step.");
   }
+  if (target === "assigned") {
+    return fail(detail, "Use Assign Driver to give this job to a driver and a delivery date.");
+  }
+  // Sending a job out without the driver having loaded it is a management
+  // override, and the capability on the action says so. Checked here as well as
+  // hidden on the page, because the button is a courtesy and this is the guard.
+  if (target === "out_for_delivery" && !can(session.role, "orders.manage")) {
+    return fail(detail,
+      "Jobs go out when the driver starts their route. Ask a manager if this one needs "
+      + "sending out from the office.");
+  }
 
   const supabase = await createClient();
   const existing = await loadOrder(supabase, parsed.data.id);
   if (!existing) return fail(LIST, "That job could not be found.");
+
+  // `assigned → ready_for_delivery` is a legal transition, but it is Remove
+  // Assignment — it clears four columns besides the status, and it is dispatch's
+  // action. Routed there rather than allowed to strip an assignment silently
+  // through the status control.
+  if (target === "ready_for_delivery" && existing.status === "assigned") {
+    return fail(detail, "Use Remove Assignment to take this job off its driver.");
+  }
 
   const allowed = checkTransition(existing.status, target, existing.delivery_required);
   if (!allowed.ok) return fail(detail, allowed.reason);

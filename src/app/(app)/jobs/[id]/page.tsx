@@ -70,7 +70,6 @@ export default async function JobDetailPage({
             <StatusBadge status={job.status} />
             <StatusBadge status={job.progress_status} />
             <ButtonLink href={`/customers/${job.customer_id}`}>Customer</ButtonLink>
-            {job.daily_routes ? <ButtonLink href={`/routes/daily/${job.daily_routes.id}`}>Route</ButtonLink> : null}
           </>
         }
       />
