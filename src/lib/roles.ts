@@ -1,6 +1,4 @@
-// Role model from spec §3. Kept in one place so the nav, the page guards and
-// the server actions all agree on who can do what.
-
+// Role model. Financial visibility is deliberately separate from operational job work.
 export const ROLES = [
   "super_admin",
   "operations_manager",
@@ -31,44 +29,23 @@ export const ROLE_LABELS: Record<Role, string> = {
   auditor: "Auditor",
 };
 
-// Capabilities are coarse on purpose — one per navigable area plus a write flag.
-// RLS remains the real boundary; this drives UI and rejects obvious misuse early.
 export const CAPABILITIES = [
-  "customers.read",
-  "customers.write",
-  "agreements.read",
-  "agreements.write",
-  "items.read",
-  "items.write",
-  "fleet.read",
-  "fleet.write",
-  "routes.read",
-  "routes.write",
-  // Advancing a run through its workflow states. Split from `routes.write`
-  // (which plans and assigns) because moving a run that is already out on the
-  // road is a floor decision, not a planning one — see ROLE_CAPABILITIES.
-  "routes.status",
-  "operations.read",
-  "operations.write",
+  "customers.read", "customers.write",
+  "agreements.read", "agreements.write",
+  "items.read", "items.write",
+  "fleet.read", "fleet.write",
+  "routes.read", "routes.write", "routes.status",
+  "operations.read", "operations.write",
   "run.execute",
-  // The counter's laundry jobs (`/orders`, labelled "Jobs"), split the same way
-  // routes are: `write` creates and edits, `status` walks a job through the
-  // workflow — the plant floor advances jobs it does not plan — and `manage` is
-  // the supervisor's set: cancel a job, backdate a receipt, reopen the edit form
-  // on one that is already completed.
-  "orders.read",
-  "orders.write",
-  "orders.status",
-  "orders.manage",
-  "inventory.read",
-  "inventory.write",
-  "warehouse.read",
-  "warehouse.write",
-  "invoices.read",
-  "invoices.write",
+  "orders.read", "orders.write", "orders.status", "orders.manage",
+  "inventory.read", "inventory.write",
+  "warehouse.read", "warehouse.write",
+  "invoices.read", "invoices.write",
+  "invoices.approve", "invoices.send", "invoices.bulk",
+  "pricing.read", "pricing.write",
+  "billing.read", "billing.write",
   "reports.read",
-  "admin.read",
-  "admin.write",
+  "admin.read", "admin.write",
 ] as const;
 
 export type Capability = (typeof CAPABILITIES)[number];
@@ -77,85 +54,55 @@ const ALL: Capability[] = [...CAPABILITIES];
 const READ_ONLY: Capability[] = CAPABILITIES.filter((c) => c.endsWith(".read"));
 
 export const ROLE_CAPABILITIES: Record<Role, readonly Capability[]> = {
-  // Full access.
   super_admin: ALL,
-  // Everything except system settings.
   operations_manager: ALL.filter((c) => c !== "admin.write"),
-  // Customers, routes, jobs, drivers, vehicles, invoices.
+  // Dispatcher remains operational. They can see and assign work but have no
+  // financial read/write capability in the new business split.
   dispatcher: [
-    "customers.read", "customers.write",
-    "agreements.read",
-    "items.read",
-    "fleet.read", "fleet.write",
-    "routes.read", "routes.write", "routes.status",
-    "operations.read", "operations.write",
-    "orders.read", "orders.write", "orders.status",
-    "inventory.read",
-    "warehouse.read",
-    "invoices.read", "invoices.write",
-    "reports.read",
+    "customers.read", "customers.write", "agreements.read", "items.read",
+    "fleet.read", "fleet.write", "routes.read", "routes.write", "routes.status",
+    "operations.read", "operations.write", "orders.read", "orders.write", "orders.status",
+    "inventory.read", "warehouse.read",
   ],
-  // Own run only — RLS confines every routes row to their own `drivers.id`, so
-  // `routes.status` here means "my run", not "any run".
-  driver: ["run.execute", "routes.read", "routes.status", "operations.read", "operations.write"],
-  // Invoices, payments, reports.
+  // Driver is deliberately unable to read pricing/invoices or create financial data.
+  driver: ["run.execute", "routes.read", "routes.status", "operations.read", "operations.write", "orders.read", "orders.write", "orders.status"],
+  // Finance is the non-operational financial role.
   finance: [
-    "customers.read",
-    "agreements.read",
-    "items.read",
-    // Read-only on jobs: "what did we actually take in for them?" is a billing
-    // question, but finance never works the counter or the floor.
-    "orders.read",
-    "invoices.read", "invoices.write",
-    "reports.read",
+    "customers.read", "agreements.read", "items.read", "orders.read",
+    "invoices.read", "invoices.write", "invoices.approve", "invoices.send", "invoices.bulk",
+    "pricing.read", "pricing.write", "billing.read", "billing.write", "reports.read",
   ],
+  // Warehouse/supervisor-style operations never receive financial capabilities.
   warehouse_operator: [
-    "inventory.read", "inventory.write",
-    "warehouse.read", "warehouse.write",
-    "items.read", "operations.read",
-    // The floor is what actually moves a job from new to ready, so it holds
-    // `orders.status` without `orders.write` — it advances work, it does not
-    // take orders or change what was agreed.
-    "orders.read", "orders.status",
+    "inventory.read", "inventory.write", "warehouse.read", "warehouse.write",
+    "items.read", "operations.read", "orders.read", "orders.status",
   ],
   customer_service: [
     "customers.read", "customers.write", "agreements.read", "operations.read",
-    "routes.read", "routes.status",
-    // The counter: takes the laundry in and hands it back.
-    "orders.read", "orders.write", "orders.status",
+    "routes.read", "routes.status", "orders.read", "orders.write", "orders.status",
   ],
   sales: ["customers.read", "customers.write", "agreements.read", "agreements.write", "items.read", "reports.read"],
+  // Branch/regional managers are owner-like financial users for compatibility
+  // with the existing multi-depot role model.
   branch_manager: ALL.filter((c) => !c.startsWith("admin.")),
   regional_manager: ALL.filter((c) => c !== "admin.write"),
-  // Read-only access to compliance and history.
   auditor: READ_ONLY,
 };
 
-/**
- * The four answers that fit a small laundry, in the order an owner would think
- * of them. Eleven job titles is a test a first-timer did not study for — and
- * several of the eleven differ by one capability, so choosing badly between
- * them is easy and the consequence is invisible.
- *
- * These are presets over the existing roles, not a new model: nothing in the
- * database, the RLS policies or the guards changes. The remaining seven roles
- * stay available for the multi-depot operator they were designed for.
- */
 export const COMMON_ROLES = ["super_admin", "operations_manager", "dispatcher", "driver"] as const;
 
-/** What each role can do, said the way an owner would say it. */
 export const ROLE_SUMMARY: Record<Role, string> = {
   super_admin: "Everything, including settings and who can sign in",
-  operations_manager: "Everything day to day, but not the settings",
-  dispatcher: "Customers, runs, stops, drivers, trucks and invoices",
-  driver: "Their own run, on their phone, and nothing else",
-  finance: "Invoices, payments and reports",
+  operations_manager: "Everything day to day, including billing and pricing, but not settings",
+  dispatcher: "Operational jobs, runs, drivers and customers — no financial data",
+  driver: "Their assigned work, on their phone, with no financial data",
+  finance: "Pricing, invoices, billing and reports",
   warehouse_operator: "The plant floor and stock",
-  customer_service: "Customers and the day's stops",
+  customer_service: "Customers and operational jobs",
   sales: "Customers and their contracts",
   branch_manager: "Everything at one site",
   regional_manager: "Everything day to day across sites",
-  auditor: "Can look at everything, can change nothing",
+  auditor: "Can look at read-only information, including permitted financial data",
 };
 
 export function can(role: Role, capability: Capability): boolean {
