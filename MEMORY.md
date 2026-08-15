@@ -1,6 +1,37 @@
 # MEMORY — working session handoff
 > Auto-loaded each session. Canonical state is CLAUDE.md; this is the live delta.
 
+## Latest: roadmap Phase D — an owner can add their own people (no migration)
+Invite by email, remove access, three role presets. CLAUDE.md §10c and the 2026-08-15
+changelog entry have the detail; the parts worth carrying forward:
+
+**The invite lands on `/auth/invite`, never `/auth/callback`.** Supabase returns an accepted
+invitation with the session in the URL **fragment** (never sent to the server), and
+`inviteUserByEmail` cannot use PKCE because the inviting browser is not the accepting one — no
+code verifier is waiting. Pointing it at `/auth/callback` compiles, builds and dead-ends every
+invitee on "link was invalid or expired". `/auth/invite` is therefore **the only
+client-rendered screen in the app** and `src/lib/supabase/client.ts` the **only browser Supabase
+client** — and that one reads `process.env.NEXT_PUBLIC_*` directly, deliberately unlike the
+three server clients, because `lib/env` validates the service-role key and must not be bundled
+for the browser.
+
+**Removing access opened a lockout that granting never could.** Two administrators could each
+demote or remove the other. `updateMembership` and `removeMember` both refuse the last
+`admin.write` holder, counted against `rolesWith("admin.write")` — derived, never hand-listed.
+A failed count reads as "not stranded", so a transient error refuses nothing.
+
+**Role presets are presentation.** `ROLE_PRESETS` carries a `role`, never a capability list;
+the database, `has_role()` and every policy know only the eleven roles. Replaced `COMMON_ROLES`.
+
+**D2 (simple mode) was deliberately not built** — its premise was a 22-row rail, which the
+2026-08-05 audit and the 2026-08-14 workflow change already removed. The `ui_mode` slot in
+`tenants.settings` stays reserved. D3 and D4 shipped 2026-08-05, so Phase D is otherwise done
+and the roadmap's remaining work is Phase E (customer portal, public tracking, Xero, bag scan).
+
+**Untested end to end.** No Supabase credentials here, so the mail → redirect → fragment →
+password round trip has never run. **First thing on a live project: add `<origin>/auth/invite`
+to the allowed redirect URLs, then invite one real address and follow the link.**
+
 **The workflow simplification is done, applied to `laundrymart-syd` and merged into `Prod`.**
 CLAUDE.md §18 has the full entry; the short version:
 

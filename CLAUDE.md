@@ -109,7 +109,11 @@ Resource-scoped beyond tenancy:
   applied in `src/lib/notifications/query.ts`, layered on top of RLS and never instead of it.
 
 Roles and capabilities are declared once in `src/lib/roles.ts` and drive the nav, page guards
-and action guards. `orders.*` follows the same split as routes: `write` creates and edits a
+and action guards. `ROLE_PRESETS` names three of the eleven in an owner's words — Owner
+(`super_admin`), Office (`operations_manager`), Driver — and is **presentation only**: a preset
+carries a `role`, never a capability list, so there is exactly one answer to "what can this
+person do". `rolesWith(capability)` is derived, and is what the People screen uses to refuse the
+change that would leave a tenant with nobody holding `admin.write`. `orders.*` follows the same split as routes: `write` creates and edits a
 laundry job, `status` walks it through the workflow (the plant floor advances work it does not
 plan, so `warehouse_operator` holds `status` without `write`), and `manage` is the supervisor's
 set — cancel a job, backdate a receipt, edit one already completed. `driver` holds none of
@@ -165,7 +169,8 @@ Feature branch → `Dev` → `Prod`. CI (`Prod`/`Dev`) runs verify, gitleaks and
 branches deploy. Never force-push `Prod`.
 
 ## 6. Routes
-`/` landing · `/login` · `/offline` · `/api/sync` · `/api/media` · `/api/invoices/:id/pdf` ·
+`/` landing · `/login` · `/auth/callback` · `/auth/invite` · `/offline` · `/api/sync` ·
+`/api/media` · `/api/invoices/:id/pdf` ·
 `/api/notifications/sweep` (cron, bearer-token authed, no session)
 `(app)`: `/dashboard` · `/my-runs[/jobs/:id]` · `/customers[/new|/:id|/:id/edit]` · `/agreements[/new|/:id]` ·
 `/orders[/new|/:id|/:id/edit]` ·
@@ -385,6 +390,32 @@ that scroller is their containing block. `sr-only` is `position:absolute`, so an
 inside a horizontally scrolling board stretched the document ~230px on a phone; the planner
 column carries `relative` for exactly that reason.
 
+## 10c. Invitations
+`/admin/users` invites by email. `inviteUserByEmail()` on the service-role client creates the
+login (Supabase sends the mail, so this needs no Resend configuration); the **membership** row
+goes in through the caller's own RLS-bound client, so which tenant somebody joins is still the
+database's decision. An address that already has a login is resolved with
+`generateLink({type:"magiclink"})`, which returns the user without sending anything.
+
+**The invite lands on `/auth/invite`, not `/auth/callback`.** Supabase bounces an accepted
+invitation back with the session in the URL **fragment**, which never reaches the server, and
+`inviteUserByEmail` cannot use the PKCE `?code=` flow because the browser that sent the
+invitation is not the one that opens it — there is no code verifier waiting. So `/auth/invite`
+is **the one client-rendered screen in the app**, and `src/lib/supabase/client.ts` is the one
+browser Supabase client (it reads `process.env.NEXT_PUBLIC_*` directly, because `lib/env`
+validates the service-role key and must not enter the client bundle). It handles all three
+shapes a link can arrive in — fragment, `?token_hash=`, `?code=` — and strips the tokens out of
+the address bar once the session is stored.
+
+**Deployment note:** the Supabase project must list `<origin>/auth/invite` under its allowed
+redirect URLs, or invitations fall back to the project's Site URL. The origin is read off the
+request, so a preview deployment invites into itself.
+
+Removing access deletes the membership and nothing else: the login survives (it may be their
+access to another tenant), and every row they wrote still points at them. Both removal and a
+role change refuse the last `admin.write` holder — with two administrators each could otherwise
+demote the other and lock the tenant out of its own People screen.
+
 ## 11. Hosted project
 `laundrymart-syd` · ref `xujhwljrmogenhvqpkrf` · ap-southeast-2 (Sydney) · org `ysm-prog`.
 Deployed on Vercel at `ats.coreit.com.au`. All migrations through `0016_job_assignment`
@@ -448,6 +479,69 @@ Both are compositions over existing tables — neither added a migration.
   are edited and invoices voided.
 
 ## 18. Changelog
+### 2026-08-15 · An owner can add their own people (roadmap Phase D)
+The People screen could only re-role somebody who had *already* signed in, and said so:
+"Accounts are set up by your system administrator for now." For an owner running a three-person
+laundry that meant they could not add their own counter staff or their own driver at all — the
+one setup step the app made impossible. **No migration**; no schema, RLS, capability or
+workflow change.
+
+- **Invite by email (D5).** Email + role + site on `/admin/users`. `inviteUserByEmail()` creates
+  the login on the service-role client — **Supabase sends the mail, so this needs none of the
+  Resend configuration** §10 calls optional and the 2026-08-05 entry records as still unproven.
+  The membership row deliberately goes in through the caller's own RLS-bound client, so which
+  tenant a person joins stays the database's decision and not a server action's. An address that
+  already has a login (another tenant on the same deployment, or somebody being invited back) is
+  resolved with `generateLink({type:"magiclink"})`, which returns the user and sends nothing —
+  a second invitation mail would only invalidate a link they may still be holding. An address
+  already on the list is **refused, not upserted**: someone typing it means to add a person, not
+  to silently re-role the one who is there.
+- **`/auth/invite` is the one client-rendered screen in the app, and it has to be.** Supabase
+  bounces an accepted invitation back with the session in the URL **fragment** — never sent to
+  the server — and `inviteUserByEmail` cannot use the PKCE `?code=` flow the magic link uses,
+  because the browser that sent the invitation is not the browser that opens it, so no code
+  verifier is waiting. Pointing the invite at the existing `/auth/callback` would have compiled,
+  built and dead-ended every invitee on "Sign-in link was invalid or expired." The page handles
+  all three shapes a link can arrive in (fragment, `?token_hash=`, `?code=`), signs the person
+  in, offers a password, and strips the tokens out of the address bar. Skipping the password is
+  safe and says so: the invitation has already signed them in.
+- **`src/lib/supabase/client.ts` is the fourth Supabase client and the only browser one.** It
+  reads `process.env.NEXT_PUBLIC_*` directly rather than `lib/env` — deliberately against the
+  rule the 2026-08-05 entry set for the other three — because `lib/env` validates
+  `SUPABASE_SERVICE_ROLE_KEY`, which must not enter the client bundle and is rightly absent
+  there. A missing variable is still caught, by an explicit throw.
+- **Access can be taken away, and that opened a lockout `updateMembership` never had.** It
+  refused to change *your own* role, which was enough while nobody could remove anybody: with
+  two administrators, each can now demote or remove the other, and the second to act would strand
+  the tenant with no reachable People screen. Both actions now refuse the last `admin.write`
+  holder, counted through the caller's own RLS-bound client and against `rolesWith("admin.write")`
+  rather than a hand-written list. A failed count reads as "not stranded", so a transient error
+  refuses nothing. Removal deletes the membership only: the login survives, and every row they
+  wrote still points at them.
+- **Three role presets (D1), and they are presentation.** Owner (`super_admin`), Office
+  (`operations_manager`), Driver lead the picker; the other eight follow under "Specialist".
+  Each preset carries a *role*, never a capability list — a preset owning capabilities would be
+  a second answer to "what can this person do" and the two would drift. The label pairs both
+  words ("Owner (Super Admin)") because the members list and the activity log show the stored
+  role, and a picker saying only "Owner" would leave an administrator unable to match their
+  choice to the row it made. Replaces the four-role `COMMON_ROLES`.
+- **D2 (simple mode) is deliberately not built.** It was written against a rail of 22 rows; the
+  2026-08-05 audit collapsed that to eleven areas and 2026-08-14 removed the Runs area. Folding
+  the remaining eleven into eight now costs a tenant-wide `ui_mode` toggle and mislabels rows for
+  narrow roles — a dispatcher would get a "Settings" row containing only Drivers and Vehicles,
+  and merging Jobs with Stops contradicts §6. The `ui_mode` slot in `tenants.settings` stays
+  reserved. D3 (global search) and D4 (consolidated invoicing) shipped on 2026-08-05.
+- 297 unit tests (was 288; 9 for the presets and the derived capability lookup). `verify` green.
+  `/auth/invite` is outside the auth gate, so unlike the rest of this phase it could be rendered:
+  screenshotted light and dark in both its states and asserted at 320/360/375/390/430/768/1024/
+  1440 — no horizontal overflow, no console errors, and one sub-36px target found and fixed.
+
+**Not verified against a live project.** This container has no Supabase credentials, so the
+invitation round trip — the mail, the redirect, the fragment, the password — has not been run
+end to end. **Before trusting it: add `<origin>/auth/invite` to the Supabase project's allowed
+redirect URLs, then invite one real address and follow the link.** Everything else was checked
+by typecheck, lint, 297 unit tests, the production build and the rendered page.
+
 ### 2026-08-14 · Confirm Load and Start Route could walk a moving run backwards
 Found by asking what the day-level actions do to a run that has already left — the case the
 empty-database tests never produced and the live data (Sam Okoye's 16 Aug run, `in_progress`)
