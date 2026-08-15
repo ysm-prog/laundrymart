@@ -15,6 +15,7 @@ import { emailIsConfigured } from "@/lib/email/send";
 import {
   createManualInvoice, emailInvoice, generateInvoices, issueInvoice, recordPayment,
 } from "./actions";
+import { SendSelected } from "./send-selected";
 
 export const metadata = { title: "Invoices" };
 export const dynamic = "force-dynamic";
@@ -41,6 +42,9 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
   const params = await searchParams;
   const session = await requireCapability("invoices.read");
   const writable = can(session.role, "invoices.write");
+  // Sending in bulk is two capabilities, not one: putting documents in front of
+  // customers, and doing it to a whole selection at once.
+  const canSendBulk = can(session.role, "invoices.send") && can(session.role, "invoices.bulk");
 
   return (
     <div className="space-y-4">
@@ -48,16 +52,28 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
         eyebrow="Billing"
         title="Invoices"
         description="Most invoices are created from contracts and completed work each month; one-off and credit invoices sit alongside them."
-        actions={writable ? (
+        actions={
           <>
-            <ButtonLink href={hrefWith(params, { tool: "recurring", selected: undefined })}>
-              Create this month&apos;s invoices
-            </ButtonLink>
-            <ButtonLink href={hrefWith(params, { tool: "manual", selected: undefined })}>
-              Manual invoice
-            </ButtonLink>
+            {can(session.role, "billing.read") ? (
+              <ButtonLink href="/invoices/awaiting">Awaiting invoice</ButtonLink>
+            ) : null}
+            {canSendBulk ? (
+              <ButtonLink href={hrefWith(params, { tool: "send", selected: undefined })}>
+                Send invoices
+              </ButtonLink>
+            ) : null}
+            {writable ? (
+              <>
+                <ButtonLink href={hrefWith(params, { tool: "recurring", selected: undefined })}>
+                  Create this month&apos;s invoices
+                </ButtonLink>
+                <ButtonLink href={hrefWith(params, { tool: "manual", selected: undefined })}>
+                  Manual invoice
+                </ButtonLink>
+              </>
+            ) : null}
           </>
-        ) : null}
+        }
       />
 
       <Suspense fallback={<SkeletonStats count={4} />}>
@@ -90,7 +106,7 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
             pane is just the next thing down the page. */}
         <div className="lg:sticky lg:top-4">
           <Suspense key={`${params.selected ?? ""}-${params.tool ?? ""}`} fallback={<SkeletonRows rows={6} />}>
-            <WorkPane params={params} writable={writable} />
+            <WorkPane params={params} writable={writable} canSendBulk={canSendBulk} />
           </Suspense>
         </div>
       </div>
@@ -269,9 +285,12 @@ async function Register({ params }: { params: Search }) {
 
 /* ---------------------------------------------------------------- the pane */
 
-async function WorkPane({ params, writable }: { params: Search; writable: boolean }) {
+async function WorkPane({
+  params, writable, canSendBulk,
+}: { params: Search; writable: boolean; canSendBulk: boolean }) {
   if (writable && params.tool === "recurring") return <GenerateTool params={params} />;
   if (writable && params.tool === "manual") return <ManualTool params={params} />;
+  if (canSendBulk && params.tool === "send") return <SendTool params={params} />;
   if (params.selected) return <InvoicePane params={params} writable={writable} />;
 
   return (
@@ -559,6 +578,70 @@ function PaneSection({ title, children }: { title: string; children: React.React
 }
 
 /* ----------------------------------------------------------------- the tools */
+
+/**
+ * Send Selected.
+ *
+ * Lists what is actually sendable — issued, part paid or overdue, with a
+ * balance and a billing email — rather than the whole register. A draft is
+ * absent because its lines can still change, and a void one because it is not a
+ * document any more. Anything without a billing email is listed as unsendable
+ * rather than silently dropped, so the fix is visible.
+ */
+async function SendTool({ params }: { params: Search }) {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("invoices")
+    .select("id, invoice_number, status, total, emailed_at, customers(business_name, billing_email)")
+    .in("status", ["issued", "part_paid", "overdue"])
+    .is("deleted_at", null)
+    .order("issue_date", { ascending: true })
+    .limit(200)
+    .returns<Array<{
+      id: string; invoice_number: string; status: string; total: number;
+      emailed_at: string | null;
+      customers: { business_name: string; billing_email: string | null } | null;
+    }>>();
+
+  const rows = data ?? [];
+  const sendable = rows.filter((row) => row.customers?.billing_email);
+  const blocked = rows.length - sendable.length;
+
+  return (
+    <Card
+      title="Send invoices"
+      description="Generating an invoice never sends it. This is the step the customer sees."
+      actions={<ButtonLink href={hrefWith(params, { tool: undefined })}>Close</ButtonLink>}
+    >
+      {sendable.length === 0 ? (
+        <EmptyState
+          title="Nothing to send"
+          description="Only issued invoices with a billing email can be sent. Issue a draft first."
+        />
+      ) : (
+        <>
+          <SendSelected
+            returnTo={hrefWith(params, { tool: "send" })}
+            invoices={sendable.map((row) => ({
+              id: row.id,
+              invoiceNumber: row.invoice_number,
+              customerName: row.customers?.business_name ?? "Unknown customer",
+              total: Number(row.total ?? 0),
+              status: row.status,
+              alreadyEmailed: Boolean(row.emailed_at),
+            }))}
+          />
+          {blocked > 0 ? (
+            <p className="mt-4 border-t pt-3 text-sm text-muted-foreground">
+              {blocked} issued invoice(s) have no billing email and are not listed. Add one on the
+              customer to send them.
+            </p>
+          ) : null}
+        </>
+      )}
+    </Card>
+  );
+}
 
 function GenerateTool({ params }: { params: Search }) {
   return (

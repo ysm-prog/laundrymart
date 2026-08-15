@@ -139,6 +139,78 @@ describe("navigationFor", () => {
     // A driver's world is their own run; counter jobs are not on it.
     expect(navigationFor("driver").map((item) => item.label)).not.toContain("Jobs");
   });
+
+  /**
+   * The brief's role rule, asserted at the level a person experiences it.
+   *
+   * Operational users see jobs, runs and a customer's operational information
+   * and never pricing, invoice amounts or Xero. RLS is the real boundary
+   * (migration 0017, proved in `job_billing.test.sql`); these assertions are
+   * about the map — a rail row leading to a screen full of numbers a role is
+   * not meant to see would be a bug even with the data correctly hidden.
+   */
+  const OPERATIONAL: Role[] = ["driver", "dispatcher", "warehouse_operator", "customer_service"];
+
+  it("keeps every money screen off the operational roles' map", () => {
+    for (const role of OPERATIONAL) {
+      const hrefs = navigationFor(role).flatMap(
+        (item) => [item.href, ...(item.children ?? []).map((child) => child.href)],
+      );
+      for (const href of hrefs) {
+        expect(href.startsWith("/invoices"), `${role} → ${href}`).toBe(false);
+      }
+    }
+  });
+
+  it("holds no financial capability for any operational role", () => {
+    // Dispatch is the one that changed: it used to carry invoices.read and
+    // invoices.write. Stated here so putting either back trips a test rather
+    // than quietly re-opening the ledger to the people planning the day.
+    for (const role of OPERATIONAL) {
+      for (const capability of ["pricing.read", "pricing.write", "billing.read", "billing.write",
+                                "invoices.read", "invoices.write", "invoices.approve",
+                                "invoices.send", "invoices.bulk"] as const) {
+        expect(can(role, capability), `${role} must not hold ${capability}`).toBe(false);
+      }
+    }
+  });
+
+  it("gives finance the money and none of the operational write surface", () => {
+    for (const capability of ["billing.read", "billing.write", "invoices.approve",
+                              "invoices.send", "invoices.bulk", "pricing.read"] as const) {
+      expect(can("finance", capability), capability).toBe(true);
+    }
+    // Finance reads jobs to answer "what did we take in for them?" and never
+    // works the counter or the floor.
+    expect(can("finance", "orders.write")).toBe(false);
+    expect(can("finance", "orders.status")).toBe(false);
+    expect(can("finance", "routes.write")).toBe(false);
+  });
+
+  it("lets sales see a price without seeing the ledger", () => {
+    // The reason `pricing.*` is split from `billing.*` at all: sales negotiate
+    // rate cards and have no business in invoices or payments.
+    expect(can("sales", "pricing.read")).toBe(true);
+    expect(can("sales", "pricing.write")).toBe(true);
+    expect(can("sales", "invoices.read")).toBe(false);
+    expect(can("sales", "billing.write")).toBe(false);
+  });
+
+  it("gives the auditor every financial read and no financial write", () => {
+    expect(can("auditor", "pricing.read")).toBe(true);
+    expect(can("auditor", "billing.read")).toBe(true);
+    expect(can("auditor", "invoices.read")).toBe(true);
+    for (const capability of ["billing.write", "invoices.write", "invoices.approve",
+                              "invoices.send", "invoices.bulk"] as const) {
+      expect(can("auditor", capability), capability).toBe(false);
+    }
+  });
+
+  it("puts the awaiting-invoice queue under Invoices, for the roles that bill", () => {
+    const finance = navigationFor("finance");
+    const invoices = finance.find((item) => item.label === "Invoices");
+    expect(invoices?.children?.map((child) => child.href)).toContain("/invoices/awaiting");
+  });
 });
 
 describe("sectionFor", () => {

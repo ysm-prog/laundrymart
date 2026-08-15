@@ -99,8 +99,12 @@ Resource-scoped beyond tenancy:
   sitting on a stop of one of their own runs. My Runs is the first screen to give a driver a reason to read the table, and
   a tenant-wide policy would have handed them every customer's laundry through PostgREST at
   the same moment. No non-driver role's predicate changed.
-- `invoices` and friends: readable by any member, writable only by
-  super_admin / operations_manager / finance / dispatcher.
+- `invoices` and friends (+ `job_charge_snapshots`, `invoice_source_jobs`): **readable only through
+  `can_read_billing()`** and writable through `can_write_billing()` since 0017. They used to be
+  readable by *any* member, which since My Runs meant a driver's session could read every invoice
+  amount off PostgREST. `service_agreement_lines` is narrowed the same way to `can_read_pricing()`
+  — the agreement header stays open to `agreements.read`, because when a customer is served is
+  operational information; only the prices moved. See §20.
 - `storage.objects` in the `run-media` bucket: the object key starts with the tenant id, and
   the policies read it back through `media_tenant()` → `is_member()`. The path is the boundary,
   so it is always written from the session and never from the request.
@@ -109,7 +113,8 @@ Resource-scoped beyond tenancy:
   applied in `src/lib/notifications/query.ts`, layered on top of RLS and never instead of it.
 
 Roles and capabilities are declared once in `src/lib/roles.ts` and drive the nav, page guards
-and action guards. `orders.*` follows the same split as routes: `write` creates and edits a
+and action guards. **The financial ones (`pricing.*`, `billing.*`, `invoices.approve/send/bulk`)
+are backed by RLS as well and held by no operational role — see §20.** `orders.*` follows the same split as routes: `write` creates and edits a
 laundry job, `status` walks it through the workflow (the plant floor advances work it does not
 plan, so `warehouse_operator` holds `status` without `write`), and `manage` is the supervisor's
 set — cancel a job, backdate a receipt, edit one already completed. `driver` holds none of
@@ -168,6 +173,8 @@ branches deploy. Never force-push `Prod`.
 `/` landing · `/login` · `/offline` · `/api/sync` · `/api/media` · `/api/invoices/:id/pdf` ·
 `/api/notifications/sweep` (cron, bearer-token authed, no session)
 `(app)`: `/dashboard` · `/my-runs[/jobs/:id]` · `/customers[/new|/:id|/:id/edit]` · `/agreements[/new|/:id]` ·
+`/invoices/awaiting` (the billing queue — a list of *jobs*, under Invoices because the decision is
+finance's; `sectionFor` takes the longest match so it lands there rather than on the register) ·
 `/orders[/new|/:id|/:id/edit]` ·
 `/items[/:id]` · `/drivers` · `/vehicles` · `/routes/templates[/:id]` ·
 `/routes/daily[/:id|/:id/sheet]` · `/routes/planner` · `/jobs[/:id]` ·
@@ -240,6 +247,16 @@ renders no tab strip. Tested in `src/lib/__tests__/nav.test.ts`.
   transition and assignment guards; the driver RLS clause widened to include a direct
   assignment. **Adds no table and drops nothing** — `vehicle_inspections`, `daily_routes`,
   `jobs` and every historical row on them are untouched.
+- `0017_customer_pricing_billing` — the money half of a job. `customers.billing_method`,
+  `rate_card_agreement_id`, `xero_contact_id/_name`; `service_agreement_lines.laundry_item_type`;
+  `laundry_orders.billing_status` (+ approval stamps and an exclusion reason);
+  `job_charge_snapshots` and `invoice_source_jobs`; `invoices.source_job_id` and four `xero_*`
+  columns; `invoice_lines.laundry_order_id`; four guards, two functions
+  (`save_job_charge_snapshot`, `freeze_job_charges`), three RLS helpers, and narrowed read
+  policies on every billing table. **Adds no operational behaviour and drops nothing.**
+  **Statement order is load-bearing** for the same reason 0016's is: the billing columns are added
+  and backfilled (cancelled → `not_billable`, completed → `awaiting_review`) *before* the guard
+  that polices them, because those are not transitions — they are what was already true.
 - `0013_notifications` — `tenants.settings jsonb` (AD-3) and the `notifications` table
   (AD-4). Beware the numbering drift: the unmerged branch
   `claude/warehouse-inventory-flow-psooyq` carries its own `0012_return_count.sql`, which
@@ -247,7 +264,8 @@ renders no tab strip. Tested in `src/lib/__tests__/nav.test.ts`.
 
 Proofs in `supabase/tests/`: `rls_isolation`, `rls_coverage`, `driver_scope`,
 `business_rules`, `media_scope`, `warehouse_rules`, `notifications_scope`, `laundry_orders`,
-`run_assignment` (118 assertions). Demo data in `supabase/seed.sql` — not applied by migrations.
+`run_assignment`, `job_billing` (164 assertions). Demo data in `supabase/seed.sql` — not applied
+by migrations.
 
 **Do not re-add `grant execute on all functions in schema public to anon`.** That
 boilerplate in 0002–0009 is what exposed every SECURITY DEFINER helper on
@@ -447,7 +465,133 @@ Both are compositions over existing tables — neither added a migration.
   action an open redirect. `/invoices/:id` stays as the printable record and the place lines
   are edited and invoices voided.
 
+## 19. Customer pricing and job billing
+**Two lifecycles on one job, and they meet at exactly one point.** The operational status says
+where the laundry is; `billing_status` says where the money is. Finishing the work sets
+`awaiting_review` and **never generates an invoice** — that stamp is made by
+`guard_laundry_order_transition`, not by a screen, so no client can bill by completing.
+
+```
+operational  new → in_progress → ready_for_delivery → assigned → out_for_delivery → completed
+financial    pending → awaiting_review → approved → invoice_generated → invoice_sent → paid
+```
+
+- **Current price editable, historical price immutable.** A customer's rate card is
+  `customers.rate_card_agreement_id` → a *version* of a service agreement, which is the pricing
+  model 0003 already had — no `rate_cards` table was invented. Approval copies today's rates into
+  `job_charge_snapshots` and stamps `frozen_at`; `guard_job_charge_snapshot` then refuses every
+  update and delete, **including from `super_admin`**. Changing a rate tomorrow cannot move an
+  invoice from yesterday, and `job_billing.test.sql` asserts exactly that sentence.
+- **The vocabulary bridge is one nullable column.** `service_agreement_lines.item_id` names
+  `public.items` (linen the laundry rents out); a counter job's laundry is
+  `laundry_order_items.item_type`. 0017 adds `service_agreement_lines.laundry_item_type` so a rate
+  line can price what actually arrives in a bag. A line without it is invisible to the job pricer,
+  which is correct — it prices a monthly rental, not the bag in front of you.
+- **The contract minimum is never applied per job.** A minimum is a promise about a *period*;
+  applied per job it would bill a customer with fifteen jobs fifteen minimums. The fuel levy *is*
+  on the snapshot, because a levy is genuinely per delivery. The recurring engine still applies the
+  minimum to the period, the only unit it means anything on.
+- **Laundry the rate card cannot price is reported, never billed at zero.** `priceJob` returns it in
+  `unpriced` for a person to decide about — a zero line reads as a decision somebody took.
+- **A completed job is a billable source**, and `customers.billing_method` decides the shape at
+  generation time: `invoice_per_job` → one invoice each; `*_consolidated` → one invoice carrying
+  all of them; `manual` → only ever by explicit selection. Whether August is fifteen invoices or one
+  is a column, not a redesign. The rule is pure in `lib/domain/invoice-grouping.ts` — it lives there
+  rather than beside the writer because `lib/invoices/from-jobs.ts` reaches `lib/env` and would be
+  unreachable from a unit test, the same trap `plan.ts` documents.
+- **Generating never sends.** `generateInvoicesForJobs` writes drafts and tells nobody;
+  `lib/invoices/send.ts` is the deliberate act, carries its own capability, and is what moves each
+  job to `invoice_sent`. Both the single Send and Send Selected go through it.
+- **A job cannot be invoiced twice**, enforced by `uq_invoice_source_jobs_once` — a partial unique
+  index on `(tenant_id, order_id)`. Partial on purpose: **voiding releases the jobs**, because a
+  wrong invoice has to be undoable without stranding the work. That is the only way back out of an
+  invoiced billing state, and the guard checks the *link rows* rather than trusting the caller.
+- **`invoices.source_job_id` and `invoice_source_jobs` are two records of one fact**, the 0016
+  arrangement again: the pointer is set only for a single-job invoice, and
+  `guard_invoice_source_job` refuses any way the two could disagree.
+- **Bulk means one request, not a loop of server actions.** `/invoices/awaiting` posts a whole
+  selection to one action which reads it in one query; partial success reports both numbers and
+  names the reason. Capped at 200 and **refused** rather than truncated past that.
+- **Xero is recorded, not integrated.** `customers.xero_contact_id/_name` and
+  `invoices.xero_invoice_id/_number/_status/_synced_at` are typed in by a person so the two systems
+  can be reconciled. There is no Xero client in this codebase, authentication and invoice-state
+  mapping are unresolved from the previous checkpoint, and the screens say so.
+
+## 20. Financial capabilities, and why RLS carries them
+`pricing.read/write`, `billing.read/write`, `invoices.approve/send/bulk` join `invoices.read/write`
+in `roles.ts`. Split finer than the rest because the question is not "who opens the invoices
+screen" but "who may see a price at all".
+
+**The one role that lost something: `dispatcher` no longer holds `invoices.read`/`invoices.write`.**
+Driver, warehouse operator, customer service and dispatcher hold no financial capability, keep every
+operational one, and `nav.test.ts` asserts both. Sales hold `pricing.*` and not the ledger — which
+is the entire reason pricing is split from billing. Auditor reads all three and writes none.
+
+**Enforced in the database, not only in React.** 0017 replaces the read policies on `invoices`,
+`invoice_lines`, `payments`, `credit_notes`, `credit_note_lines` and `service_agreement_lines`, and
+writes new ones for `job_charge_snapshots` and `invoice_source_jobs`, all through
+`can_read_pricing()` / `can_read_billing()` / `can_write_billing()`. Two traps worth keeping:
+
+- **A `for all` policy's USING half grants SELECT too.** Narrowing only `<t>_read` would have left
+  the hole open through `<t>_write`, so both were replaced and `dispatcher` came out of the write set.
+- **0006's read policy was `is_member` and nothing more**, so since My Runs gave drivers a reason to
+  hold a session, a driver could read every invoice amount straight off PostgREST. `job_billing.test.sql`
+  proves the fix by *reading as a driver and as a dispatcher* and counting zero, rather than by
+  inspecting policy text.
+
+The agreement **header** stays readable to `agreements.read` — when a customer is served and on what
+pattern is operational information. Only the priced lines moved behind `can_read_pricing()`.
+Consequence worth remembering: the money **reports** are filtered out of `/reports` for a role
+without `billing.read`, because a revenue report rendering "$0" is a wrong answer that looks right.
+
 ## 18. Changelog
+### 2026-08-15 · Customer pricing, immutable job prices, and a billing lifecycle
+The money half of a job. One migration (`0017`), two new tables, no table dropped and no
+operational behaviour changed. §19 and §20 hold the design; the short version:
+
+- **`billing_status` runs beside `status` and completion never bills.** The seven operational
+  statuses the business asked for are untouched. Finishing a job sets `awaiting_review` in the
+  transition guard and stops — asserted in pgTAP by completing a job and counting zero invoices.
+- **Approval freezes the price.** `job_charge_snapshots` copies the rate card's numbers *and their
+  provenance*; `frozen_at` makes the row unwritable, and the guard refuses an update and a delete
+  even for `super_admin`. The test raises a rate line to $99 afterwards and asserts the approved
+  job still reads $3.
+- **The rate card is a service agreement version**, not a new pricing system —
+  `customers.rate_card_agreement_id`, plus `service_agreement_lines.laundry_item_type` so a rate
+  line can price the laundry that actually arrives at a counter. A rate card belonging to another
+  customer is refused by trigger, tested *within* one tenant because RLS stops the cross-tenant
+  case long before the guard and would prove nothing about it.
+- **Generation and sending are completely separate**, and a job cannot be invoiced twice
+  (`uq_invoice_source_jobs_once`, partial so **voiding releases the work**). Sending is one shared
+  implementation for the single button and Send Selected, and is what moves jobs to `invoice_sent`.
+- **Bulk operations are server-side**: `/invoices/awaiting` with Select → Approve Selected →
+  Generate Selected, and Send Selected on the register. One request per press, partial success
+  reported honestly, capped at 200 and refused rather than truncated past it.
+- **Financial capabilities are enforced in RLS, not just React.** Nine capabilities; **dispatcher
+  loses `invoices.read`/`invoices.write`** and keeps every operational one. 0006's billing read
+  policy was `is_member` and nothing more, so a driver's session could read every invoice amount off
+  PostgREST — the proof reads *as a driver and as a dispatcher* and counts zero rows.
+  The money reports are filtered out of `/reports` for roles without `billing.read`, because a
+  revenue report showing "$0" is a wrong answer that looks like a right one.
+- **Xero is recorded by hand and nothing more.** Columns on customers and invoices, labelled on
+  screen as reconciliation-only. No API contract was invented: authentication and invoice-state
+  mapping were left unresolved by the previous checkpoint and still are.
+- **A coherence bug in this work, found by writing the void path:** the billing guard as first
+  written forbade `invoice_generated → approved`, which would have made voiding an invoice strand
+  its jobs permanently. Fixed with an explicit rule — a job returns to `approved` exactly when no
+  `invoice_source_jobs` row references it — rather than by working around the guard.
+- **The compose-locally-commit-once rule earned its place again.** The charge editor's payload
+  contract lives in `orders/job-charges.ts` with 12 tests against what the editor really emits, and
+  the invoice grouping rule moved to `lib/domain/invoice-grouping.ts` when the writer's import of
+  `recordAudit` → `lib/env` made it unreachable from a test — the same failure `plan.ts` records.
+- 358 unit tests (was 286) and **164 pgTAP assertions (was 118)**. `verify` green; all seventeen
+  migrations applied to a fresh Postgres 16, the whole pgTAP suite and the seed run against it.
+
+**Not verified against a live project.** This container has no Supabase credentials, so the
+authenticated screens were checked by migration-against-real-Postgres, pgTAP, unit tests, build,
+typecheck and lint — not by pricing a real job at a real counter. **0017 is not yet applied to
+`laundrymart-syd`.**
+
 ### 2026-08-14 · Confirm Load and Start Route could walk a moving run backwards
 Found by asking what the day-level actions do to a run that has already left — the case the
 empty-database tests never produced and the live data (Sam Okoye's 16 Aug run, `in_progress`)

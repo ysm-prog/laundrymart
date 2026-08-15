@@ -129,8 +129,32 @@ const GLOSSARY: Array<{ term: string; also?: string; meaning: string }> = [
     meaning: "How much of each item type you have and where it is — at a site, on a truck, at a customer, or somewhere in the plant.",
   },
   {
+    term: "Rate card", also: "price list, agreement version",
+    meaning: "The prices you have agreed with one customer. It is a version of their contract, so changing a price means a new version — and every job already approved keeps the price it was approved at.",
+  },
+  {
+    term: "Billing method",
+    meaning: "How a customer's finished work becomes invoices: one invoice per job, or everything rolled onto one weekly, fortnightly or monthly bill. Set on the customer. \"Manual\" means you decide each time.",
+  },
+  {
+    term: "Awaiting review",
+    meaning: "A job whose work is finished and whose money is not. Finishing a job never bills anybody — it lands here for somebody to check the charges.",
+  },
+  {
+    term: "Approved",
+    meaning: "The charges on a job have been signed off. This is the moment the price freezes: after it, the job's charges cannot be changed by anyone, and changing the customer's rate card no longer affects it.",
+  },
+  {
     term: "Invoice",
-    meaning: "A bill sent to a customer. A draft can be changed; an issued invoice cannot, and is voided with a reason instead.",
+    meaning: "A bill for a customer. A draft can be changed; an issued invoice cannot, and is voided with a reason instead.",
+  },
+  {
+    term: "Generate",
+    meaning: "Turning approved jobs into draft invoices. It does not send anything — the customer hears nothing until you send.",
+  },
+  {
+    term: "Send",
+    meaning: "Emailing an invoice, with its PDF, to the customer. A separate step from generating on purpose, so nothing reaches a customer by accident.",
   },
   {
     term: "Credit note",
@@ -147,9 +171,14 @@ const SAFE = [
   "Assigning a job to a driver, changing the driver, changing the date, or removing the assignment. None of it touches the laundry, the customer or the price, and none of it cancels anything.",
   "Archiving a customer. They drop out of lists; their history, stops and invoices are all kept.",
   "Creating a job and moving it along. Every step is recorded on the job with your name and the time.",
+  "Completing a job. It never bills anybody — it only puts the job in front of whoever checks the charges.",
+  "Pricing a job, re-pricing it, and editing its charges — right up until you approve them.",
+  "Generating an invoice. It creates a draft; nothing is sent to the customer until you send it.",
+  "Changing a customer's rate card or billing method. No invoice already raised moves, and no job already approved is re-priced.",
 ];
 
 const FINAL = [
+  "Approving a job's charges. That is the moment the price freezes — after it, nobody can change what that job cost, and a mistake is fixed with a credit note rather than by editing history.",
   "Issuing an invoice. After that it can only be voided with a reason, or corrected with a credit note.",
   "Emailing an invoice. The email leaves immediately.",
   "Voiding an invoice. The number is kept forever so your books have no gaps.",

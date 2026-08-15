@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { notFound } from "next/navigation";
 import { requireCapability } from "@/lib/auth/context";
 import { createClient } from "@/lib/supabase/server";
@@ -10,14 +11,16 @@ import {
   type DeliveryWindow, type OrderPriority, type ReceivedVia,
 } from "@/lib/domain/laundry-orders";
 import { businessToday } from "@/lib/domain/timezone";
+import { isBillingStatus } from "@/lib/domain/billing";
 import type { LaundryOrder, LaundryOrderActivity, LaundryOrderItem } from "@/lib/db/types";
 import {
   Badge, Button, ButtonLink, Card, DataTable, EmptyState, Eyebrow,
-  Notice, PageHeader, StatusBadge, humanise,
+  Notice, PageHeader, SkeletonRows, StatusBadge, humanise,
 } from "@/components/ui";
 import { Select, SubmitButton } from "@/components/form";
 import { ConfirmSubmit } from "@/components/confirm-submit";
 import { CompleteJob } from "../complete-job";
+import { ChargesCard } from "./charges-card";
 import { DispatchCard } from "./dispatch-card";
 import { advanceOrder, assignOrder, cancelOrder, completeOrder } from "../actions";
 
@@ -85,6 +88,10 @@ export default async function JobDetailPage({
   ]);
 
   const names = staffNames(staff);
+  // An unrecognised value reads as `pending`, never as something further along:
+  // a billing state nobody knows must not render as "approved".
+  const storedBillingStatus = order.billing_status ?? "";
+  const billingStatus = isBillingStatus(storedBillingStatus) ? storedBillingStatus : "pending";
   const today = businessToday();
   const late = isOverdue(order, today);
   const delivery = order.delivery_required;
@@ -192,6 +199,26 @@ export default async function JobDetailPage({
               : "Your role cannot move this job to its next step."}
         </Notice>
       )}
+
+      {/* ------------------------------------------------------- charges --- */}
+      {/* The money, for the roles that hold money capabilities. Above the
+          operational cards because for a reviewer arriving from the invoice
+          queue this is the only thing on the page they came for; below the
+          workflow banner because the operational state is what decides whether
+          it can be approved at all. RLS makes this empty for anyone else, so
+          the capability check is the courtesy rather than the boundary. */}
+      {can(session.role, "billing.read") ? (
+        <Suspense fallback={<SkeletonRows rows={3} />}>
+          <ChargesCard
+            orderId={order.id}
+            billingStatus={billingStatus}
+            operationalStatus={order.status}
+            customerId={order.customer_id}
+            role={session.role}
+            approvedAt={order.billing_approved_at ?? null}
+          />
+        </Suspense>
+      ) : null}
 
       <div className="grid gap-4 lg:grid-cols-3">
         {/* ------------------------------------------------------ delivery --- */}

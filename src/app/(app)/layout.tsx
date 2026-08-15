@@ -29,7 +29,7 @@ async function navCounts(): Promise<NavCounts> {
 
     // No runs-today count: the rail no longer has a Runs row to hang it on, and
     // querying for a badge nothing renders is a request every page load pays for.
-    const [exceptions, batches, unpaid, overdueJobs] = await Promise.all([
+    const [exceptions, batches, unpaid, overdueJobs, awaitingInvoice] = await Promise.all([
       supabase.from("jobs").select("id", head).eq("status", "exception"),
       supabase.from("production_batches").select("id", head)
         .in("stage", ["received", "washing", "drying", "folding", "packing", "ready_for_dispatch"])
@@ -42,6 +42,12 @@ async function navCounts(): Promise<NavCounts> {
       supabase.from("laundry_orders").select("id", head)
         .lt("due_date", today())
         .not("status", "in", "(completed,cancelled)"),
+      // Work finished and not yet billed. Served by the partial index 0017 adds
+      // on exactly this predicate. For a role with no billing capability the
+      // row this badge hangs on is not rendered at all, so the count is never
+      // shown — but it still costs a query, which is why it is head-only.
+      supabase.from("laundry_orders").select("id", head)
+        .in("billing_status", ["awaiting_review", "approved"]),
     ]);
 
     return {
@@ -49,6 +55,7 @@ async function navCounts(): Promise<NavCounts> {
       batches: batches.count ?? undefined,
       unpaidInvoices: unpaid.count ?? undefined,
       overdueJobs: overdueJobs.count ?? undefined,
+      awaitingInvoice: awaitingInvoice.count ?? undefined,
     };
   } catch {
     return {};

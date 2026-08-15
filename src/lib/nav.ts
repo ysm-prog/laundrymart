@@ -25,7 +25,7 @@ import { can, type Capability, type Role } from "@/lib/roles";
 
 /** Counts the rail can surface. Resolved once per request in the layout. */
 export type NavCountKey =
-  | "exceptions" | "batches" | "unpaidInvoices" | "overdueJobs";
+  | "exceptions" | "batches" | "unpaidInvoices" | "overdueJobs" | "awaitingInvoice";
 
 /**
  * The rail's icon, named rather than imported.
@@ -178,12 +178,31 @@ export const NAVIGATION: NavItem[] = [
     ],
   },
   {
+    // Money, and only money. Since the financial capabilities landed, an
+    // operational role reaches none of this — `invoices.read` is no longer held
+    // by dispatch, and the RLS policies on every billing table say the same
+    // thing independently (migration 0017).
     label: "Invoices",
     href: "/invoices",
     icon: "invoices",
     capability: "invoices.read",
     count: "unpaidInvoices",
     blurb: "Bill the work, chase what is unpaid, record what comes in.",
+    children: [
+      {
+        label: "Invoices", href: "/invoices", capability: "invoices.read",
+        blurb: "Every invoice, what is unpaid, and the pane you work one in.",
+      },
+      {
+        // A queue of *jobs*, living under Invoices rather than under Jobs
+        // because the question it answers is a billing one and the people who
+        // answer it are finance. `sectionFor` takes the longest match, so
+        // `/invoices/awaiting` lands here rather than on the register.
+        label: "Awaiting invoice", href: "/invoices/awaiting", capability: "billing.read",
+        count: "awaitingInvoice",
+        blurb: "Finished work that has not been billed. Approve the charges, then generate.",
+      },
+    ],
   },
   {
     label: "Linen",
