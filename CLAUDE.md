@@ -405,9 +405,42 @@ column carries `relative` for exactly that reason.
 
 ## 11. Hosted project
 `laundrymart-syd` · ref `xujhwljrmogenhvqpkrf` · ap-southeast-2 (Sydney) · org `ysm-prog`.
-Deployed on Vercel at `ats.coreit.com.au`. All migrations through `0016_job_assignment`
-applied (0014 on 2026-08-13, 0015 and 0016 on 2026-08-14), each verified by rolled-back probe
-rather than trusted. For **0016** that was: the three existing jobs backfilled from the run
+Deployed on Vercel at `ats.coreit.com.au`. All migrations through `0017_customer_pricing_billing`
+applied (0014 on 2026-08-13, 0015 and 0016 on 2026-08-14, **0017 on 2026-08-15**), each verified
+by rolled-back probe rather than trusted.
+
+For **0017** that was: preconditions read first (all twelve 0006 policy names, the
+`service_agreement_lines_member` policy and the `invoices_invoice_type_check` constraint present;
+none of the new columns or tables already there); the backfill read back — LJ00003 and LJ00006
+`completed → awaiting_review`, LJ00004/5 left `pending`, and all 512 customers defaulted to
+`monthly_consolidated`; **fourteen guard probes in one rolled-back block** against live rows —
+completing a job set `awaiting_review` and created no invoice, approving unpriced and approving
+incomplete both refused, review could not be skipped, a non-review job could not be priced, a
+frozen charge refused both update and delete, approval succeeded once priced, a second invoice on
+the same job hit 23505, a stray `source_job_id` was refused, release was refused while the job
+was still on an invoice and permitted once the links were gone, and a foreign rate card was
+refused. Then **the RLS claim proved end to end**: one real member was demoted to `driver` inside a
+rolled-back transaction and read *as* that session — **0 of 647 invoices, 0 of 5 rate lines**, 0
+payments, 0 credit notes, 0 job charges, while contract headers (2) and customers (512) stayed
+readable. `anon` reads 0 from every one of them.
+
+Security advisors went **7 → 10 warnings**, and the three new ones are exactly the three helpers
+this migration adds (`can_read_pricing`, `can_read_billing`, `can_write_billing`). Same class as the
+five already accepted: SECURITY DEFINER because they read RLS-protected `memberships`, executable by
+`authenticated` because RLS policies evaluate them as the calling user, and each reveals only a fact
+about the caller. `anon` cannot execute any of them, and `search_path` survived the
+`create or replace` on `guard_laundry_order_transition` (0012's lesson, restated at the end of 0017).
+
+**Pre-existing drift found while verifying, not caused by 0017 and not fixed by it:** on the live
+project `anon` holds table-level SELECT *and INSERT* on **all 49 public tables**, which the repo's
+own migrations never grant — it came in with one of the unmerged import branches. It is currently
+inert: RLS is enabled on all 49 and every policy is `to authenticated`, so a probe as `anon` read 0
+rows from `invoices`, `customers` and `laundry_orders` and its INSERT into `job_charge_snapshots`
+was refused. It is still defence-in-depth that this project does not have — any future table
+shipped without RLS, or any policy written `using (true)` without a role restriction, would be
+publicly readable. Worth a migration of its own; deliberately not bundled into 0017.
+
+For **0016** that was: the three existing jobs backfilled from the run
 chain and read back (LJ00004/5 `ready_for_delivery → assigned` under Sam Okoye for 16 Aug,
 LJ00003 keeping its driver as the record of who delivered it); five guard probes all refused
 in one rolled-back block — Assigned with no assignment data, a driver with no date, ready
@@ -587,10 +620,14 @@ operational behaviour changed. §19 and §20 hold the design; the short version:
 - 358 unit tests (was 286) and **164 pgTAP assertions (was 118)**. `verify` green; all seventeen
   migrations applied to a fresh Postgres 16, the whole pgTAP suite and the seed run against it.
 
-**Not verified against a live project.** This container has no Supabase credentials, so the
-authenticated screens were checked by migration-against-real-Postgres, pgTAP, unit tests, build,
-typecheck and lint — not by pricing a real job at a real counter. **0017 is not yet applied to
-`laundrymart-syd`.**
+**0017 is applied to `laundrymart-syd`** (2026-08-15) and verified there by rolled-back probe —
+the backfill read back, fourteen guard probes against live rows, and the RLS claim proved by
+reading the ledger *as* a demoted driver session (0 of 647 invoices, 0 of 5 rate lines). §11 has
+the full record, including a pre-existing `anon` grant found on the way through.
+
+**The screens themselves are still unopened.** The verification above is all database-level; no
+authenticated page was rendered with real rows in it, and the billing screens have not been
+screenshotted at the ten widths the design system asks for.
 
 ### 2026-08-14 · Confirm Load and Start Route could walk a moving run backwards
 Found by asking what the day-level actions do to a run that has already left — the case the

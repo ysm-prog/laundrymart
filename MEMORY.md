@@ -10,9 +10,27 @@ operational  new → in_progress → ready_for_delivery → assigned → out_for
 financial    pending → awaiting_review → approved → invoice_generated → invoice_sent → paid
 ```
 
-**`0017_customer_pricing_billing` is the only migration, and it is NOT yet applied to
-`laundrymart-syd`.** This container has no Supabase credentials. It was applied to a fresh
-Postgres 16 in-container, with the whole pgTAP suite and the seed run against it.
+**`0017_customer_pricing_billing` is the only migration, and it IS applied to `laundrymart-syd`**
+(2026-08-15, via the Supabase MCP; ledger name `0017_customer_pricing_billing`). It was applied to a
+fresh Postgres 16 in-container first, with the whole pgTAP suite and the seed against it, then to
+the live project after reading its preconditions.
+
+**What the live verification actually proved** (CLAUDE.md §11 has the full record): the backfill —
+LJ00003 and LJ00006 `completed → awaiting_review`, LJ00004/5 left `pending`, 512 customers defaulted
+to `monthly_consolidated`; **fourteen guard probes in one rolled-back block** against real rows, all
+correct; and the security claim end to end — a real member demoted to `driver` inside a rolled-back
+transaction read **0 of 647 invoices and 0 of 5 rate lines** while still reading contract headers and
+customers. Advisors 7 → 10, the three new ones being this migration's own helpers.
+
+**Two things to know before the next live change.**
+1. **`anon` holds SELECT and INSERT on all 49 public tables** of the live project. The repo's
+   migrations never grant that — it arrived with an unmerged import branch. It is inert today
+   (RLS on all 49, every policy `to authenticated`; probed as `anon`: 0 rows read, INSERT refused),
+   but it is missing defence-in-depth and deserves its own migration. Not bundled into 0017.
+2. Probe C in the live run refused with *"a job cannot go from billing state pending to approved"*
+   rather than *"only a completed job can be approved"* — because the job was `pending`, so the
+   transition table rejects it before the completed-job rule is reached. Both are correct refusals;
+   don't read the message as evidence the completed-job rule fired.
 
 **Statement order in 0017 is load-bearing**, same as 0016: the billing columns are added and
 backfilled (cancelled → `not_billable`, completed → `awaiting_review`) *before* the guard that
