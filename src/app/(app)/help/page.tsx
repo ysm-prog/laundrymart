@@ -147,6 +147,7 @@ const SAFE = [
   "Assigning a job to a driver, changing the driver, changing the date, or removing the assignment. None of it touches the laundry, the customer or the price, and none of it cancels anything.",
   "Archiving a customer. They drop out of lists; their history, stops and invoices are all kept.",
   "Creating a job and moving it along. Every step is recorded on the job with your name and the time.",
+  "Inviting somebody, or changing what they can see. Settings › People, and you can change your mind at any time.",
 ];
 
 const FINAL = [
@@ -155,6 +156,7 @@ const FINAL = [
   "Voiding an invoice. The number is kept forever so your books have no gaps.",
   "Completing a job — marking it delivered or collected. A finished job cannot be moved again.",
   "Cancelling a job. It stops appearing in the day's work. Nothing is deleted, but it cannot be reopened.",
+  "Removing somebody's access. They can no longer sign in, and their work stays exactly as it was. You can invite them back, but they will need a new invitation.",
 ];
 
 export default async function HelpPage() {

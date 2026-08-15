@@ -132,16 +132,50 @@ export const ROLE_CAPABILITIES: Record<Role, readonly Capability[]> = {
 };
 
 /**
- * The four answers that fit a small laundry, in the order an owner would think
- * of them. Eleven job titles is a test a first-timer did not study for — and
- * several of the eleven differ by one capability, so choosing badly between
- * them is easy and the consequence is invisible.
+ * The three answers that fit a small laundry, in the order an owner would think
+ * of them (roadmap D1). Eleven job titles is a test a first-timer did not study
+ * for — and several of the eleven differ by one capability, so choosing badly
+ * between them is easy and the consequence is invisible.
  *
- * These are presets over the existing roles, not a new model: nothing in the
- * database, the RLS policies or the guards changes. The remaining seven roles
- * stay available for the multi-depot operator they were designed for.
+ * **A preset is a plain-English name for a role that already exists**, not a
+ * twelfth thing to keep in step. "Owner" is stored, audited, checked by
+ * `has_role()` and enforced by RLS as `super_admin`; nothing in the database,
+ * the policies or the capability model knows the word. That is why each entry
+ * carries its `role` rather than its own capability list: a preset that owned a
+ * set of capabilities would be a second answer to "what can this person do",
+ * and the two would drift.
+ *
+ * The label pairs both words — "Owner (Super Admin)" — because the members list
+ * and the activity log show the stored role. A picker that said only "Owner"
+ * would leave an administrator unable to match their choice to the row it made.
+ *
+ * The other eight roles stay exactly as they were, one group further down the
+ * picker, for the multi-depot operator they were designed for.
  */
-export const COMMON_ROLES = ["super_admin", "operations_manager", "dispatcher", "driver"] as const;
+export const ROLE_PRESETS = [
+  { key: "owner", role: "super_admin", label: "Owner" },
+  { key: "office", role: "operations_manager", label: "Office" },
+  { key: "driver", role: "driver", label: "Driver" },
+] as const satisfies readonly { key: string; role: Role; label: string }[];
+
+export type RolePreset = (typeof ROLE_PRESETS)[number];
+
+/** The roles the three presets cover, in preset order. */
+export const PRESET_ROLES: readonly Role[] = ROLE_PRESETS.map((preset) => preset.role);
+
+/** The preset a stored role answers to, if any. Used to label a member's row. */
+export function presetForRole(role: Role): RolePreset | undefined {
+  return ROLE_PRESETS.find((preset) => preset.role === role);
+}
+
+/**
+ * Every role holding a capability. The people screen needs this to refuse the
+ * change that would leave a tenant with nobody able to manage its logins —
+ * a lockout only reachable now that access can be removed as well as granted.
+ */
+export function rolesWith(capability: Capability): Role[] {
+  return ROLES.filter((role) => can(role, capability));
+}
 
 /** What each role can do, said the way an owner would say it. */
 export const ROLE_SUMMARY: Record<Role, string> = {
