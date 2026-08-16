@@ -40,7 +40,11 @@ export function BrandMark({ className }: { className?: string }) {
     <span aria-hidden
           className={cx(
             "flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary",
-            "text-sm font-bold text-primary-foreground",
+            /* The monogram is the one place the shell spends mono, and it is
+               where YSM Hub spends it too (`.side-shop .av`). A single letter
+               in a teal tile is a mark, not prose — the objection that retired
+               mono from labels does not apply to it. */
+            "font-mono text-sm font-bold text-primary-foreground",
             className,
           )}>
       E

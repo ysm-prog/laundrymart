@@ -1,7 +1,58 @@
 # MEMORY — working session handoff
 > Auto-loaded each session. Canonical state is CLAUDE.md; this is the live delta.
 
-## Latest: a role above the laundry — platform admins (`0019_platform_admin`)
+## Latest: the app wears the YSM Hub design language (no migration)
+Presentation only. **No schema, action, RLS policy, capability, query, route or business rule
+moved**, and the 332 unit tests pass untouched. CLAUDE.md §10b and the 2026-08-16 entry have the
+detail; what to carry forward:
+
+**The source of truth is `ysm-prog/ysm-hub`, `src/index.css`** — attached to that session via
+`add_repo` and cloned to `/workspace/ysm-hub`. If you need to re-check a value, read that file
+rather than this app's tokens. Their design is "paper and ink with accent": warm paper
+`#f4f1ea` with an 18px dot grid, ink `#121a19`, teal `#01696f`, Instrument Sans + Instrument
+Serif italic + JetBrains Mono.
+
+**The whole re-skin is in `globals.css`'s token layer** because `src/` carries zero literal
+Tailwind palette classes and zero hard-coded hex outside the email templates. Keep it that way:
+the moment a screen hard-codes a colour, the next re-skin stops being a one-file change.
+
+**Palette values are pinned to one decimal place on purpose.** Integer HSL percentages drift
+1–2 per channel — the first pass rendered `#f4f2eb` instead of `#f4f1ea`. If you add a token,
+carry the decimal and verify by reading the computed colour out of the browser.
+
+**Two places this app knowingly departs from YSM, both documented in §10b — do not "fix" them
+back:**
+1. **Mono labels.** YSM spends mono on eyebrows, table headers and badges. Adopting that would
+   reverse the 2026-08-13 sweep of 74 `font-mono` and every uppercase tracked label across 28
+   files, done because counter staff and drivers read the result as a developer console. Only
+   `BrandMark` uses mono.
+2. **Comfort metrics.** 15px body and 44px controls, against YSM's 14px/36px — this is a counter
+   tablet and a driver's phone, and YSM itself lifts its scale under `@media (pointer: coarse)`.
+
+**The dark theme is derived, not copied.** YSM never contrast-checked its own dark accent
+(`#00898f` = 4.4:1 on page, 4.0:1 on card) and leaves its semantic four at light values that are
+unreadable on `#141412`. Every dark colour here keeps YSM's hue exactly and moves only lightness
+until it clears AA on page, on card, and as a fill under `--on-status`.
+
+**`/design-preview` cannot show the active rail row** — its pathname matches no nav area, so no
+row is ever active there. The active state is an ink pill with paper text (inverted on dark) and
+must be verified by probing the `--sidebar-*` tokens, not by screenshot.
+
+**Verification.** `verify` green; asserted light and dark at eight widths with no console errors.
+The pre-existing dispatch-planner overflow was measured against a stash-and-rebuild baseline
+rather than assumed: **16px at 320/1024 before, 7px after**, same 135/33 overflowing elements and
+the same 16px smallest tap target. **Never opened against a live project** — no Supabase
+credentials in this container, so the authenticated screens have not been seen with real rows.
+
+**Two traps that cost time in this session, both environmental:**
+- Copying `.env.example` verbatim does **not** boot: `SENTRY_DSN=`, `RESEND_API_KEY=` and
+  `CRON_SECRET=` are present-but-empty, which Zod rejects rather than treating as absent, and the
+  anon-key placeholder is under the 20-char minimum. Omit the optionals entirely.
+- `pkill -f "next start"` does **not** match the running process, which is named `next-server`.
+  A survivor kept serving a stale build and returned CSS as `text/plain`, which renders the
+  gallery completely unstyled and silently invalidates every measurement taken against it.
+
+## Also live: a role above the laundry — platform admins (`0019_platform_admin`)
 `platform_admin` is the twelfth role and the only one that is **not a membership**. CLAUDE.md
 §3/§7 and the 2026-08-16 entry have the detail; what to carry forward:
 
@@ -43,7 +94,7 @@ stops short — CI and the Supabase console own DDL. Don't "finish" it without a
 reads an `active_tenant` cookie and orders the membership query. The old `.limit(1)` with no
 ordering (the §11 bug) is gone.
 
-## Previous: monthly invoices bill the counter's laundry (`0018_laundry_pricing`)
+## Previously: monthly invoices bill the counter's laundry (`0018_laundry_pricing`)
 The Jobs module carried no money since 0014, so a drop-off customer was never billed. Now the
 monthly run makes one draft invoice per customer carrying **every item of every job completed
 in the period, at that customer's price**, beside the contract charges it already produced.
