@@ -1,7 +1,42 @@
 # MEMORY — working session handoff
 > Auto-loaded each session. Canonical state is CLAUDE.md; this is the live delta.
 
-## Latest: roadmap Phase D — an owner can add their own people (no migration)
+## Latest: monthly invoices bill the counter's laundry (`0017_laundry_pricing`)
+The Jobs module carried no money since 0014, so a drop-off customer was never billed. Now the
+monthly run makes one draft invoice per customer carrying **every item of every job completed
+in the period, at that customer's price**, beside the contract charges it already produced.
+CLAUDE.md §4/§7 and the 2026-08-16 entry have the detail; what to carry forward:
+
+**Prices live in `laundry_prices`, one row per kind of laundry per scope.** `customer_id is
+null` is the tenant default and a customer row overrides it — **there is no third fallback**.
+The unique index is `(tenant_id, customer_id, item_type) nulls not distinct`, because under the
+default NULL rule the *default* list is exactly the row that could be duplicated. Writes are
+role-gated like 0006 and `apply_tenant_policy` is deliberately **not** used: its permissive
+`for all` policy would OR with the role gate and let any member re-price the work.
+
+**Unpriced is a reported outcome, never a zero.** `buildLaundryCharges` returns lines *and*
+unpriced items with the reason and job number; the run reports them in a sticky toast linking
+to `/invoices/prices`. The form parser (`prices/price-form.ts`, outside `"use server"`, tested)
+holds the matching rule: **blank clears the row, it does not store zero.** If you touch either,
+keep that distinction — a zero bills silently, a missing price is visible.
+
+**A job is billed once, marked by `invoice_lines.laundry_order_id`.** The run skips any job
+already on a non-void invoice. Voiding an invoice makes its work billable again, on purpose.
+
+**Contracts are no longer a precondition of `generateInvoices`.** It used to refuse the whole
+period when no contract covered it, which would now hold back every counter-only customer. The
+customer set is contract customers ∪ customers with unbilled completed jobs.
+
+**Period edges are composed in `BUSINESS_TIMEZONE`** (`toInstant(start)` … `toInstant(end+1)`),
+because `completed_at` is a timestamptz and a 9pm finish on the 31st belongs to that month.
+
+**Verification.** 325 unit tests, 131 pgTAP assertions, `verify` green, all migrations + pgTAP
++ seed applied to a fresh Postgres 16 in-container, price table asserted at eight widths in
+`/design-preview` light and dark. **No live project** — no invoice has been generated with real
+jobs on it. First thing on a live project: apply 0017, set the usual prices at
+Invoices › Laundry prices, run one month, read the draft.
+
+## Previously: roadmap Phase D — an owner can add their own people (no migration)
 Invite by email, remove access, three role presets. CLAUDE.md §10c and the 2026-08-15
 changelog entry have the detail; the parts worth carrying forward:
 

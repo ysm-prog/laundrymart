@@ -184,6 +184,20 @@ export const NAVIGATION: NavItem[] = [
     capability: "invoices.read",
     count: "unpaidInvoices",
     blurb: "Bill the work, chase what is unpaid, record what comes in.",
+    children: [
+      {
+        label: "Invoices", href: "/invoices", capability: "invoices.read",
+        count: "unpaidInvoices",
+        blurb: "Every invoice, and the one you are working on beside it.",
+      },
+      {
+        // The price list belongs to billing, not to Settings: it is what the
+        // monthly run charges for the laundry taken in at the counter, and it
+        // is gated on the same capability as the invoices it produces.
+        label: "Laundry prices", href: "/invoices/prices", capability: "invoices.read",
+        blurb: "What each kind of laundry costs, before a customer's own price.",
+      },
+    ],
   },
   {
     label: "Linen",

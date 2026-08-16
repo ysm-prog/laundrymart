@@ -54,6 +54,12 @@ export default async function CustomerDetailPage({
           <>
             <StatusBadge status={customer.status} />
             {writable ? <ButtonLink href={`/customers/${id}/edit`}>Edit</ButtonLink> : null}
+            {/* Their laundry prices, beside Edit rather than buried in it: what
+                a customer is charged is a finance decision on its own screen,
+                and it is what the monthly run bills their jobs at. */}
+            {can(session.role, "invoices.read")
+              ? <ButtonLink href={`/customers/${id}/prices`} variant="secondary">Laundry prices</ButtonLink>
+              : null}
             {can(session.role, "agreements.write")
               ? <ButtonLink href={`/agreements/new?customer=${id}`} variant="primary">New agreement</ButtonLink>
               : null}

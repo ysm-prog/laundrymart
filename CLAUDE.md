@@ -58,7 +58,9 @@ The master spec names a .NET 9 Web API; this build follows the supplied skeleton
   written to avoid, which is why the guard trigger refuses every way they could contradict.
 - Pure domain logic lives in `src/lib/domain/` with no database access: the service calendar,
   pricing, recurring invoicing (`invoicing.ts` — one contract's charges, and the
-  `consolidate()` rule for header fields two contracts disagree on), ABN validation, date
+  `consolidate()` rule for header fields two contracts disagree on), laundry-job billing
+  (`laundry-billing.ts` — a customer's effective price list, and one invoice line per item of
+  laundry), ABN validation, date
   helpers, the laundry-job workflow (`laundry-orders.ts`), the run-assignment rules
   (`run-assignment.ts`) and the timezone conversion (`timezone.ts`). Unit-tested; shared by
   preview, route generation, invoicing, the jobs module and My Runs so they cannot diverge.
@@ -100,7 +102,10 @@ Resource-scoped beyond tenancy:
   a tenant-wide policy would have handed them every customer's laundry through PostgREST at
   the same moment. No non-driver role's predicate changed.
 - `invoices` and friends: readable by any member, writable only by
-  super_admin / operations_manager / finance / dispatcher.
+  super_admin / operations_manager / finance / dispatcher. `laundry_prices` (0017) takes the
+  same shape and the same four roles — a price list is a finance record, and
+  `apply_tenant_policy` is deliberately *not* used on it because its permissive `for all`
+  policy would OR with the role gate and let any member re-price the work.
 - `storage.objects` in the `run-media` bucket: the object key starts with the tenant id, and
   the policies read it back through `media_tenant()` → `is_member()`. The path is the boundary,
   so it is always written from the session and never from the request.
@@ -132,11 +137,26 @@ run — and to `customer_service`, so a stuck run is not waiting on a dispatcher
   writes the ledger row in one transaction.
 - `recalculate_invoice()` keeps invoice totals consistent with lines and payments.
 - **Recurring invoicing is one invoice per customer per period**, carrying every contract
-  they hold. Not a preference: the weighed collections and the damaged/missing linen are
-  recorded against the *customer*, so one invoice per contract would bill the same
-  kilograms and the same lost towels once per contract. Each contract's minimum, levy and
-  surcharges are still computed against its own services only; every line keeps its
-  `agreement_id` (null for replacement charges, which belong to no contract).
+  they hold **and every laundry job they had completed in it**. Not a preference: the weighed
+  collections and the damaged/missing linen are recorded against the *customer*, so one
+  invoice per contract would bill the same kilograms and the same lost towels once per
+  contract. Each contract's minimum, levy and surcharges are still computed against its own
+  services only; every line keeps its `agreement_id` (null for replacement and laundry
+  charges, which belong to no contract) and a laundry line keeps its `laundry_order_id`.
+  **A customer with no contract at all is invoiced when they handed laundry over the counter**,
+  which is why contracts are no longer a precondition of the run.
+- **Laundry is priced per customer, and a missing price is reported rather than billed at
+  zero.** `laundry_prices` (0017) holds one row per kind of laundry either for a customer or
+  for the tenant (`customer_id is null`); the customer's own row wins, the default is the only
+  fallback, and there is no third. A kind of laundry nobody has priced comes back from
+  `buildLaundryCharges` as *unpriced*, with the reason and the job number, and the monthly run
+  says so in a toast that sticks — a silently missing line looks exactly like laundry that was
+  never taken in. A bulk lot bills by the bag when a bag rate is set and the bags were counted,
+  otherwise by the counter's estimate; a lot with neither cannot be priced and says so.
+- **A laundry job is billed exactly once.** `invoice_lines.laundry_order_id` is the record of
+  it: the generator skips any job already carried on an invoice that is not void, so a job
+  finished near a period boundary cannot be billed by two runs. Voiding an invoice makes its
+  work billable again, which is what voiding is for.
 - **A laundry job's seven statuses are enforced by `guard_laundry_order_transition`**, not just
   by the screen: no skipping the middle, no going backwards, `completed`/`cancelled` terminal,
   a customer pickup never reaches `assigned` or `out_for_delivery`, a delivery job must be
@@ -172,12 +192,13 @@ branches deploy. Never force-push `Prod`.
 `/` landing · `/login` · `/auth/callback` · `/auth/invite` · `/offline` · `/api/sync` ·
 `/api/media` · `/api/invoices/:id/pdf` ·
 `/api/notifications/sweep` (cron, bearer-token authed, no session)
-`(app)`: `/dashboard` · `/my-runs[/jobs/:id]` · `/customers[/new|/:id|/:id/edit]` · `/agreements[/new|/:id]` ·
+`(app)`: `/dashboard` · `/my-runs[/jobs/:id]` ·
+`/customers[/new|/:id|/:id/edit|/:id/prices]` · `/agreements[/new|/:id]` ·
 `/orders[/new|/:id|/:id/edit]` ·
 `/items[/:id]` · `/drivers` · `/vehicles` · `/routes/templates[/:id]` ·
 `/routes/daily[/:id|/:id/sheet]` · `/routes/planner` · `/jobs[/:id]` ·
 `/operations/{pickups,deliveries,exceptions}` · `/run` · `/warehouse[/:id]` · `/inventory` ·
-`/invoices[/:id]` · `/reports` · `/search` · `/help` · `/notifications` ·
+`/invoices[/:id|/prices]` · `/reports` · `/search` · `/help` · `/notifications` ·
 `/admin` (redirects) `[/depots|/users|/holidays|/audit|/notifications]`
 
 **There is no user-facing Runs module.** `/routes/daily`, `/routes/planner` and
@@ -207,7 +228,11 @@ single capability is held by all eleven roles. **"Jobs" (`/orders`) and "Stops" 
 row**: a stop is a visit on a driver's run, a job is a customer's laundry from counter to
 hand-back. The route path is `/orders` because 0004 already took `/jobs` — the same
 label-is-not-the-route arrangement as Contracts (`/agreements`) and Linen (`/inventory`), and
-`/help` defines both words. `/notifications` (the bell's list) is
+`/help` defines both words. **Invoices is now an area with two tabs** — the register and
+`/invoices/prices`, the tenant's laundry price list — because what the monthly run charges is a
+billing decision, not a setting. A customer's own prices live on their record
+(`/customers/:id/prices`), reached from the customer page rather than from a tab, since it is
+one customer's exception to the list. `/notifications` (the bell's list) is
 deliberately off the map — the bell is its entry point, so it needs no rail row and
 renders no tab strip. Tested in `src/lib/__tests__/nav.test.ts`.
 
@@ -245,6 +270,10 @@ renders no tab strip. Tested in `src/lib/__tests__/nav.test.ts`.
   transition and assignment guards; the driver RLS clause widened to include a direct
   assignment. **Adds no table and drops nothing** — `vehicle_inspections`, `daily_routes`,
   `jobs` and every historical row on them are untouched.
+- `0017_laundry_pricing` — `laundry_prices` (one row per kind of laundry per customer, or per
+  tenant when `customer_id is null`; unique `nulls not distinct`, so the default list cannot
+  hold two prices for one kind) and `invoice_lines.laundry_order_id`, the billed-once link.
+  Role-gated writes like 0006. **Adds no trigger, drops nothing and touches no existing row.**
 - `0013_notifications` — `tenants.settings jsonb` (AD-3) and the `notifications` table
   (AD-4). Beware the numbering drift: the unmerged branch
   `claude/warehouse-inventory-flow-psooyq` carries its own `0012_return_count.sql`, which
@@ -252,7 +281,8 @@ renders no tab strip. Tested in `src/lib/__tests__/nav.test.ts`.
 
 Proofs in `supabase/tests/`: `rls_isolation`, `rls_coverage`, `driver_scope`,
 `business_rules`, `media_scope`, `warehouse_rules`, `notifications_scope`, `laundry_orders`,
-`run_assignment` (118 assertions). Demo data in `supabase/seed.sql` — not applied by migrations.
+`run_assignment`, `laundry_pricing` (131 assertions). Demo data in `supabase/seed.sql` — not
+applied by migrations.
 
 **Do not re-add `grant execute on all functions in schema public to anon`.** That
 boilerplate in 0002–0009 is what exposed every SECURITY DEFINER helper on
@@ -479,6 +509,57 @@ Both are compositions over existing tables — neither added a migration.
   are edited and invoices voided.
 
 ## 18. Changelog
+### 2026-08-16 · The counter's laundry is billed: monthly invoices, at each customer's price
+The Jobs module has recorded what a customer handed over since 0014 and carried **no money at
+all** — `laundry_order_items` has a quantity and no price, and the monthly run billed contracts
+only. So a customer who simply drops laundry at the counter was never billed by the app, and a
+customer with a contract was billed for the pattern but not for the extra bag they brought in.
+One migration (`0017`), no new role, no new capability, nothing dropped.
+
+- **A price list, per customer, with the tenant's own list behind it.** `laundry_prices` holds
+  one row per kind of laundry either for a customer or for the tenant (`customer_id is null`).
+  One table rather than two: two would have doubled every read and left "which one wins" to be
+  re-decided at each call site. Its own table rather than a column on `items`, for the reason
+  0014 already gave for the item vocabulary — `items` is the linen *the laundry owns and rents
+  out*, and a counter hand must not have to create a stock record before they can take in a bag
+  of sheets. The unique index is `nulls not distinct`, because under the default rule the
+  default list — the row every unpriced customer falls back to — is precisely the one that
+  could have been duplicated, and which copy answered would have depended on the plan.
+- **A missing price is reported, never billed at nothing.** `buildLaundryCharges` returns the
+  lines it could price *and* the items it could not, each with the reason and the job number,
+  and the run says so in a toast that sticks with a link to the price list. This is the whole
+  safety property: a silently missing line looks exactly like laundry that was never taken in.
+  The form obeys the same rule — **blank clears the row, it does not store zero** — which is why
+  the parser lives in `prices/price-form.ts` with tests rather than inside the action.
+- **A bulk lot is billed on what was actually measured**: by the bag when a bag rate is set and
+  the bags were counted, otherwise on the counter's estimate at the piece rate. 0014 allows a
+  lot recorded as a note and nothing else; that one cannot be priced and says which job it is.
+- **Contracts are no longer a precondition of the monthly run.** It used to refuse the whole
+  period with "No active contracts cover that period", which would now hold back every
+  counter-only customer. The run is one invoice per customer as before, carrying contract
+  charges, replacement charges and laundry lines together.
+- **A job is billed exactly once**, marked by `invoice_lines.laundry_order_id`: the run skips
+  any job already on an invoice that is not void, so a job completed near a period boundary
+  cannot be billed by two runs, and voiding an invoice makes its work billable again.
+- **Two screens, both gated on `invoices.read`/`invoices.write`** — the same capability as the
+  invoices the prices produce, and the same four roles 0017 lets touch the table. Invoices
+  gained a "Laundry prices" tab; a customer's own list is a button on their record. The counter
+  can read prices and cannot change them, which is asserted against the database rather than
+  trusted to the screen.
+- **The save is read → update / insert / delete, not an upsert.** Inferring a `nulls not
+  distinct` index through PostgREST's `on_conflict=` is the sort of thing that works in testing
+  and surprises in production; diffing also means a save never has a window with no prices in it.
+- 325 unit tests (was 297; 19 for the billing rules, 9 for the form parser) and **131 pgTAP
+  assertions (was 118)**. `verify` green; every migration applied to a fresh Postgres 16 with
+  the whole pgTAP suite and the seed run against it. The price table was added to
+  `/design-preview` and asserted light and dark at 320/360/375/390/430/768/1024/1440 — no
+  console errors and nothing in it overflows (the 16px at 320 and 1024 is the pre-existing
+  dispatch-planner fixture, unchanged by this branch).
+
+**Not verified against a live project.** This container has no Supabase credentials, so no
+invoice has been generated with real jobs on it. **Before trusting it: apply 0017, set your
+usual prices at Invoices › Laundry prices, then run one month and read the draft.**
+
 ### 2026-08-15 · An owner can add their own people (roadmap Phase D)
 The People screen could only re-role somebody who had *already* signed in, and said so:
 "Accounts are set up by your system administrator for now." For an owner running a three-person

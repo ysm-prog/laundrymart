@@ -42,7 +42,7 @@ const DAY = [
   },
   {
     title: "Bill the work",
-    body: "At the end of a billing period, Create this month's invoices turns completed work and contract prices into draft invoices. You check them, issue them, and email them out.",
+    body: "At the end of the month, Create this month's invoices makes one draft invoice per customer: every item of every job you finished for them, at their price, plus anything their contract charges. You check them, issue them, and email them out.",
     href: "/invoices", link: "Go to invoices",
   },
 ];
@@ -129,8 +129,12 @@ const GLOSSARY: Array<{ term: string; also?: string; meaning: string }> = [
     meaning: "How much of each item type you have and where it is — at a site, on a truck, at a customer, or somewhere in the plant.",
   },
   {
+    term: "Laundry price", also: "price list, rate",
+    meaning: "What you charge for each kind of laundry — per piece, and optionally per bag for bulk lots. Invoices › Laundry prices holds your usual prices; a customer who has agreed something different has their own list on their page. A kind of laundry with no price is left off the invoice and reported when you run the month, rather than being billed at nothing.",
+  },
+  {
     term: "Invoice",
-    meaning: "A bill sent to a customer. A draft can be changed; an issued invoice cannot, and is voided with a reason instead.",
+    meaning: "A bill sent to a customer. One a month per customer, carrying every job you completed for them in the period and anything their contract charges. A draft can be changed; an issued invoice cannot, and is voided with a reason instead.",
   },
   {
     term: "Credit note",
@@ -148,6 +152,8 @@ const SAFE = [
   "Archiving a customer. They drop out of lists; their history, stops and invoices are all kept.",
   "Creating a job and moving it along. Every step is recorded on the job with your name and the time.",
   "Inviting somebody, or changing what they can see. Settings › People, and you can change your mind at any time.",
+  "Changing a laundry price. It applies to invoices you create from then on; invoices already made keep the prices they were made with.",
+  "Creating this month's invoices. They arrive as drafts: you can add and remove lines, and nothing goes to a customer until you issue and email it.",
 ];
 
 const FINAL = [

@@ -21,6 +21,10 @@ import {
 import { UNASSIGNED } from "@/app/(app)/routes/planner/plan";
 import { DateNav } from "@/app/(app)/my-runs/date-nav";
 import { DaySummary, JobCard, JobGroup } from "@/app/(app)/my-runs/run-view";
+import { PriceTable } from "@/app/(app)/invoices/prices/price-table";
+import {
+  defaultPriceList, priceListFor, type LaundryPriceRow,
+} from "@/lib/domain/laundry-billing";
 import { AssignForm } from "@/app/(app)/my-runs/assign-form";
 import type { DayJob } from "@/lib/runs/my-runs";
 import {
@@ -260,6 +264,27 @@ const PREVIEW_RUN_DRIVERS = [
   { id: "d1", full_name: "John Smith", status: "active", phone: "0400 000 111" },
   { id: "d2", full_name: "Mel Nguyen", status: "active", phone: null },
 ];
+
+/**
+ * A price list, resolved the way the real screens resolve one: the customer's
+ * own rows for the fields, the tenant default for the hint under each label —
+ * so this gallery shows an override and an inherited price side by side, which
+ * is the layout worth looking at.
+ */
+const PREVIEW_PRICE_ROWS: LaundryPriceRow[] = [
+  { customer_id: null, item_type: "towels", unit_price: 2, bag_price: 15, taxable: true },
+  { customer_id: null, item_type: "sheets", unit_price: 4.5, bag_price: null, taxable: true },
+  { customer_id: null, item_type: "uniforms", unit_price: 6, bag_price: null, taxable: true },
+  { customer_id: "preview", item_type: "towels", unit_price: 1.75, bag_price: 12, taxable: true },
+];
+const toPriceValues = (source: ReturnType<typeof priceListFor>) =>
+  new Map([...source].map(([itemType, price]) => [itemType, {
+    unitPrice: price.unitPrice, bagPrice: price.bagPrice, taxable: price.taxable,
+  }]));
+const PREVIEW_CUSTOMER_PRICES = toPriceValues(
+  priceListFor("preview", PREVIEW_PRICE_ROWS.filter((row) => row.customer_id === "preview")),
+);
+const PREVIEW_DEFAULT_PRICES = toPriceValues(defaultPriceList(PREVIEW_PRICE_ROWS));
 
 export default function DesignPreviewPage() {
   if (process.env.VERCEL_ENV === "production") notFound();
@@ -909,6 +934,26 @@ export default function DesignPreviewPage() {
                 returnTo="/design-preview"
               />
             </Card>
+          </section>
+
+          {/* ------------------------------------------------ laundry prices --- */}
+          {/* Nine rows of three inputs is the widest form in the app on a phone,
+              and it is a real screen behind the auth gate — which means this
+              gallery is the only place its layout can be looked at. */}
+          <section id="laundry-prices-preview" className="space-y-4 border-t pt-8">
+            <PageHeader
+              title="Laundry prices"
+              description="What each kind of laundry costs. Used to bill the jobs you take in at the counter."
+            />
+            <PriceTable
+              title="Prices for Harbourview Hotel"
+              description="Blank means the usual price, shown under each kind of laundry."
+              values={PREVIEW_CUSTOMER_PRICES}
+              defaults={PREVIEW_DEFAULT_PRICES}
+              customerId="preview"
+              writable
+              submitLabel="Save their prices"
+            />
           </section>
         </main>
       </div>
