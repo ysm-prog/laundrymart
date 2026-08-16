@@ -15,7 +15,7 @@ export const dynamic = "force-dynamic";
  *
  * Lives under Invoices rather than under Settings because it is a finance
  * record — it is gated on `invoices.write`, exactly like the table it writes
- * (0017), and the monthly run links here by name when it finds laundry it could
+ * (0018), and the monthly run links here by name when it finds laundry it could
  * not price.
  */
 export default async function LaundryPricesPage() {

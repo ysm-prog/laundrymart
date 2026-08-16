@@ -6,7 +6,7 @@
 -- The obvious one is tenancy: what one laundry charges is commercially private,
 -- and the `with check` half has to refuse a row addressed to another tenant.
 --
--- The second is the role gate. 0017 gives `laundry_prices` the same shape 0006
+-- The second is the role gate. 0018 gives `laundry_prices` the same shape 0006
 -- gives the invoice tables — every member may read, only a finance/admin role
 -- may write — because anyone holding a session and the anon key can POST to
 -- /rest/v1/laundry_prices directly. A counter hand who can re-price the work is

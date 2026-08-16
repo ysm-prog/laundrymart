@@ -50,7 +50,7 @@ import { sendEmail } from "@/lib/email/send";
  *     contract must not reach another contract's services;
  *  3. adds the period's replacement charges once, for the customer;
  *  4. lines up every item of every laundry job the customer had **completed** in
- *     the period, priced from their own laundry price list (0017);
+ *     the period, priced from their own laundry price list (0018);
  *  5. writes one invoice whose lines each keep their `agreement_id` and
  *     `location_id` — and, for a laundry line, the `laundry_order_id` of the job
  *     it bills — so every charge still says where it came from.

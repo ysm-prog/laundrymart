@@ -12,7 +12,7 @@ import { parsePriceForm } from "./price-form";
  *
  * Both screens post the same nine rows to this one action; `customer_id` is
  * what says which list is being written. Guarded by `invoices.write`, matching
- * the four roles 0017 lets touch the table: a price list is a finance record,
+ * the four roles 0018 lets touch the table: a price list is a finance record,
  * and the screen must not offer what the database will refuse.
  *
  * Written as read → update / insert / delete rather than as an upsert. The

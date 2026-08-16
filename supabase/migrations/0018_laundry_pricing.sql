@@ -1,5 +1,5 @@
 -- ============================================================================
--- 0017_laundry_pricing — what a customer pays for the laundry they hand over,
+-- 0018_laundry_pricing — what a customer pays for the laundry they hand over,
 -- and the link that lets a job be billed exactly once.
 --
 -- Until now the counter's Jobs (0014) carried no money at all: a job records
