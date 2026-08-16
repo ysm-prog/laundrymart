@@ -27,8 +27,9 @@ async function navCounts(): Promise<NavCounts> {
     const supabase = await createClient();
     const head = { count: "exact" as const, head: true };
 
-    const [routes, exceptions, batches, unpaid, overdueJobs] = await Promise.all([
-      supabase.from("daily_routes").select("id", head).eq("route_date", today()),
+    // No runs-today count: the rail no longer has a Runs row to hang it on, and
+    // querying for a badge nothing renders is a request every page load pays for.
+    const [exceptions, batches, unpaid, overdueJobs] = await Promise.all([
       supabase.from("jobs").select("id", head).eq("status", "exception"),
       supabase.from("production_batches").select("id", head)
         .in("stage", ["received", "washing", "drying", "folding", "packing", "ready_for_dispatch"])
@@ -44,7 +45,6 @@ async function navCounts(): Promise<NavCounts> {
     ]);
 
     return {
-      routesToday: routes.count ?? undefined,
       exceptions: exceptions.count ?? undefined,
       batches: batches.count ?? undefined,
       unpaidInvoices: unpaid.count ?? undefined,

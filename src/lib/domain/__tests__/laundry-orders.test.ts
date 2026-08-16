@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   ORDER_ACTIONS, ORDER_STATUSES, RECEIVED_VIA, RECEIVED_VIA_OPTIONS, TERMINAL_STATUSES,
-  actionsFor, checkTransition, describeItem, initialDeliveryRequired, isBlankItem,
+  actionsFor, checkTransition, describeItem, initialDeliveryRequired, initialReceivedVia,
+  isBlankItem,
   isOrderStatus, isOverdue, nextStatuses, receivedInstant, receivedViaOptions,
   summariseItems, validateItem,
   type OrderStatus,
@@ -12,14 +13,24 @@ const DELIVERY = true;
 const PICKUP = false;
 
 describe("the status list", () => {
-  it("is exactly the six the workflow allows", () => {
+  it("is exactly the seven the workflow allows", () => {
     // Named individually rather than snapshotted: the point of the test is that
-    // a seventh ("processing", "awaiting pickup", "overdue") cannot be added
-    // without someone deliberately editing this line.
+    // an eighth ("processing", "awaiting pickup", "overdue", "delivered") cannot
+    // be added without someone deliberately editing this line.
     expect([...ORDER_STATUSES]).toEqual([
-      "new", "in_progress", "ready_for_delivery", "out_for_delivery",
+      "new", "in_progress", "ready_for_delivery", "assigned", "out_for_delivery",
       "completed", "cancelled",
     ]);
+  });
+
+  it("does not model overdue, inspection or delivery as statuses", () => {
+    // Overdue is a calculation about today's date; inspection is gone from the
+    // workflow entirely; "delivered" is what `completed` means for a delivery
+    // job. Each of these has been proposed and each would be a duplicate.
+    for (const rejected of ["overdue", "inspection", "awaiting_inspection", "delivered",
+                            "assigned_to_run", "run_started"]) {
+      expect(isOrderStatus(rejected), rejected).toBe(false);
+    }
   });
 
   it("recognises its own members and nothing else", () => {
@@ -30,17 +41,20 @@ describe("the status list", () => {
 });
 
 describe("nextStatuses", () => {
-  it("walks a delivery job out on a van before it is finished", () => {
+  it("gives a delivery job to a driver before it goes out", () => {
     expect(nextStatuses("new", DELIVERY)).toEqual(["in_progress", "cancelled"]);
     expect(nextStatuses("in_progress", DELIVERY)).toEqual(["ready_for_delivery", "cancelled"]);
-    expect(nextStatuses("ready_for_delivery", DELIVERY)).toEqual(["out_for_delivery", "cancelled"]);
+    expect(nextStatuses("ready_for_delivery", DELIVERY)).toEqual(["assigned", "cancelled"]);
+    expect(nextStatuses("assigned", DELIVERY))
+      .toEqual(["out_for_delivery", "ready_for_delivery", "cancelled"]);
     expect(nextStatuses("out_for_delivery", DELIVERY)).toEqual(["completed", "cancelled"]);
   });
 
   it("finishes a customer pickup straight off the shelf", () => {
     expect(nextStatuses("ready_for_delivery", PICKUP)).toEqual(["completed", "cancelled"]);
-    // A job nobody is delivering never has an out-for-delivery step at all.
+    // A job nobody is delivering is never assigned and never goes out.
     expect(nextStatuses("in_progress", PICKUP)).not.toContain("out_for_delivery");
+    expect(nextStatuses("ready_for_delivery", PICKUP)).not.toContain("assigned");
   });
 
   it("leaves the two terminal statuses with nowhere to go", () => {
@@ -55,9 +69,28 @@ describe("checkTransition", () => {
   it("allows the moves the workflow defines", () => {
     expect(checkTransition("new", "in_progress", DELIVERY).ok).toBe(true);
     expect(checkTransition("in_progress", "ready_for_delivery", PICKUP).ok).toBe(true);
-    expect(checkTransition("ready_for_delivery", "out_for_delivery", DELIVERY).ok).toBe(true);
+    expect(checkTransition("ready_for_delivery", "assigned", DELIVERY).ok).toBe(true);
+    expect(checkTransition("assigned", "out_for_delivery", DELIVERY).ok).toBe(true);
     expect(checkTransition("out_for_delivery", "completed", DELIVERY).ok).toBe(true);
     expect(checkTransition("ready_for_delivery", "completed", PICKUP).ok).toBe(true);
+  });
+
+  it("lets an assigned job go back to the ready queue — Remove Assignment", () => {
+    // The one backwards edge in the table, and it is not a cancellation: the
+    // job keeps its laundry, its customer and its history.
+    expect(checkTransition("assigned", "ready_for_delivery", DELIVERY).ok).toBe(true);
+  });
+
+  it("will not send a job out before it has a driver", () => {
+    const wrong = checkTransition("ready_for_delivery", "out_for_delivery", DELIVERY);
+    expect(wrong.ok).toBe(false);
+    expect(wrong.ok === false && wrong.reason).toMatch(/assign this job to a driver/i);
+  });
+
+  it("will not assign a customer pickup to a driver", () => {
+    const wrong = checkTransition("ready_for_delivery", "assigned", PICKUP);
+    expect(wrong.ok).toBe(false);
+    expect(wrong.ok === false && wrong.reason).toMatch(/collecting/i);
   });
 
   it("refuses to skip the middle of the workflow", () => {
@@ -69,6 +102,8 @@ describe("checkTransition", () => {
   it("refuses to go backwards", () => {
     expect(checkTransition("ready_for_delivery", "in_progress", DELIVERY).ok).toBe(false);
     expect(checkTransition("out_for_delivery", "ready_for_delivery", DELIVERY).ok).toBe(false);
+    expect(checkTransition("out_for_delivery", "assigned", DELIVERY).ok).toBe(false);
+    expect(checkTransition("assigned", "in_progress", DELIVERY).ok).toBe(false);
   });
 
   it("will not send a customer pickup out on a van", () => {
@@ -80,7 +115,8 @@ describe("checkTransition", () => {
   it("will not complete a delivery job that never left", () => {
     const wrong = checkTransition("ready_for_delivery", "completed", DELIVERY);
     expect(wrong.ok).toBe(false);
-    expect(wrong.ok === false && wrong.reason).toMatch(/out for delivery/i);
+    expect(wrong.ok === false && wrong.reason).toMatch(/assign this job to a driver/i);
+    expect(checkTransition("assigned", "completed", DELIVERY).ok).toBe(false);
   });
 
   it("treats completed and cancelled as final", () => {
@@ -91,7 +127,8 @@ describe("checkTransition", () => {
   });
 
   it("cancels from every live status", () => {
-    for (const from of ["new", "in_progress", "ready_for_delivery", "out_for_delivery"] as OrderStatus[]) {
+    for (const from of ["new", "in_progress", "ready_for_delivery", "assigned",
+                        "out_for_delivery"] as OrderStatus[]) {
       expect(checkTransition(from, "cancelled", DELIVERY).ok, from).toBe(true);
     }
   });
@@ -105,9 +142,18 @@ describe("checkTransition", () => {
 
 describe("actionsFor", () => {
   it("offers delivery and pickup jobs their own last step", () => {
-    const delivery = actionsFor("ready_for_delivery", DELIVERY).map((action) => action.key);
-    expect(delivery).toContain("dispatch");
-    expect(delivery).not.toContain("collect");
+    // A ready delivery job has no status button of its own any more: it needs a
+    // driver and a date, which is a form, not a status move.
+    const ready = actionsFor("ready_for_delivery", DELIVERY).map((action) => action.key);
+    expect(ready).not.toContain("dispatch");
+    expect(ready).not.toContain("collect");
+    expect(ready).not.toContain("deliver");
+
+    const assigned = actionsFor("assigned", DELIVERY).map((action) => action.key);
+    expect(assigned).toContain("dispatch");
+    // "Mark ready" must not appear on an assigned job: that edge exists, but it
+    // is Remove Assignment and it clears four columns besides the status.
+    expect(assigned).not.toContain("ready");
 
     const pickup = actionsFor("ready_for_delivery", PICKUP).map((action) => action.key);
     expect(pickup).toContain("collect");
@@ -120,29 +166,43 @@ describe("actionsFor", () => {
     expect(actionsFor("cancelled", PICKUP)).toEqual([]);
   });
 
-  it("puts cancelling behind the wider capability", () => {
-    const cancel = ORDER_ACTIONS.find((action) => action.key === "cancel");
-    expect(cancel?.capability).toBe("orders.manage");
+  it("puts cancelling and the send-out override behind the wider capability", () => {
+    // Sending a job out from the office steps around the driver's load
+    // confirmation, so it is a management override rather than a counter action.
+    for (const key of ["cancel", "dispatch"]) {
+      expect(ORDER_ACTIONS.find((action) => action.key === key)?.capability, key)
+        .toBe("orders.manage");
+    }
     // Everything else a counter hand does day to day sits on orders.status.
-    for (const action of ORDER_ACTIONS.filter((entry) => entry.key !== "cancel")) {
+    for (const action of ORDER_ACTIONS.filter(
+      (entry) => !["cancel", "dispatch"].includes(entry.key))) {
       expect(action.capability, action.key).toBe("orders.status");
     }
   });
 });
 
 describe("how the laundry arrived", () => {
-  it("offers a new job the two real answers and nothing else", () => {
-    expect(receivedViaOptions()).toEqual(["customer_dropoff", "driver_pickup"]);
+  it("offers a new job the two real answers, driver pickup first", () => {
+    expect(receivedViaOptions()).toEqual(["driver_pickup", "customer_dropoff"]);
     expect(receivedViaOptions(null)).not.toContain("other");
-    expect([...RECEIVED_VIA_OPTIONS]).toEqual(["customer_dropoff", "driver_pickup"]);
+    expect([...RECEIVED_VIA_OPTIONS]).toEqual(["driver_pickup", "customer_dropoff"]);
+  });
+
+  it("defaults a new job to pickup by driver, and an existing one to its own value", () => {
+    // Most laundry is collected rather than carried in. An existing job answers
+    // with what is stored, so an edit cannot re-record how it arrived.
+    expect(initialReceivedVia()).toBe("driver_pickup");
+    expect(initialReceivedVia(null)).toBe("driver_pickup");
+    expect(initialReceivedVia({ received_via: "customer_dropoff" })).toBe("customer_dropoff");
+    expect(initialReceivedVia({ received_via: "other" })).toBe("other");
   });
 
   it("keeps a job's own value in the list, so an edit cannot rewrite it", () => {
     // A job taken in before the choice was narrowed still opens showing how it
     // actually arrived; saving it back writes the same value.
-    expect(receivedViaOptions("other")).toEqual(["customer_dropoff", "driver_pickup", "other"]);
+    expect(receivedViaOptions("other")).toEqual(["driver_pickup", "customer_dropoff", "other"]);
     // One that already holds an offered value is not listed twice.
-    expect(receivedViaOptions("driver_pickup")).toEqual(["customer_dropoff", "driver_pickup"]);
+    expect(receivedViaOptions("driver_pickup")).toEqual(["driver_pickup", "customer_dropoff"]);
   });
 
   it("still accepts every value the column holds", () => {
@@ -181,7 +241,7 @@ describe("the received instant", () => {
 });
 
 describe("the delivery / pickup default", () => {
-  it("starts a new job on re-delivery", () => {
+  it("starts a new job on delivery back to the customer", () => {
     expect(initialDeliveryRequired()).toBe(true);
     expect(initialDeliveryRequired(null)).toBe(true);
   });

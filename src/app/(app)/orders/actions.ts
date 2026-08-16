@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { assertCapability, type Session } from "@/lib/auth/context";
+import { assertCapability } from "@/lib/auth/context";
 import { createClient } from "@/lib/supabase/server";
 import { can } from "@/lib/roles";
 import { recordAudit } from "@/lib/audit";
@@ -10,12 +10,15 @@ import {
   checkbox, describeDbError, done, fail, firstIssue,
   optionalDate, optionalText, optionalUuid, returnTo, toObject,
 } from "@/lib/actions";
+import { parseOrderItems } from "./order-items";
 import {
   DELIVERY_WINDOWS, ORDER_PRIORITIES, RECEIVED_VIA,
-  checkTransition, isBlankItem, isOrderStatus, receivedInstant, validateItem,
+  checkTransition, isOrderStatus, receivedInstant, validateItem,
   type OrderItemInput, type OrderStatus,
 } from "@/lib/domain/laundry-orders";
 import { businessToday, isClockTime, toInstant } from "@/lib/domain/timezone";
+import { logOrderActivity } from "@/lib/orders/activity";
+import { completeLaundryOrder } from "@/lib/orders/complete";
 
 /**
  * Writes for the laundry-jobs module.
@@ -45,42 +48,6 @@ const optionalTime = z.preprocess(
 
 const requiredTime = z.string().refine(isClockTime, "Use the time picker");
 
-/** A count that may legitimately be absent — distinct from `count`, which is 0. */
-const optionalCount = z.preprocess(
-  (value) => {
-    if (value === "" || value === null || value === undefined) return undefined;
-    const parsed = typeof value === "number" ? value : Number(value);
-    return Number.isFinite(parsed) ? parsed : value;
-  },
-  z.number().int("Whole numbers only").min(1, "Must be at least 1").optional(),
-);
-
-const itemSchema = z.object({
-  item_type: z.string(),
-  custom_description: optionalText,
-  quantity_type: z.string(),
-  exact_quantity: optionalCount,
-  bag_count: optionalCount,
-  estimated_quantity: optionalCount,
-  notes: optionalText,
-});
-
-/**
- * The items arrive as JSON in one hidden field — the compose-locally, commit-once
- * shape the dispatch planner and the contract wizard already use. Malformed JSON
- * is treated as "no items", which the caller then rejects with the same sentence
- * an empty list gets; there is no reading of a half-parsed laundry list.
- */
-const itemsField = z.preprocess((value) => {
-  if (typeof value !== "string" || value.trim() === "") return [];
-  try {
-    const parsed: unknown = JSON.parse(value);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}, z.array(itemSchema).max(40, "That is more laundry items than one job can hold."));
-
 const orderSchema = z.object({
   customer_id: z.string().uuid("Please select a customer."),
   received_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Please select a valid date."),
@@ -90,7 +57,9 @@ const orderSchema = z.object({
   // two the form offers, so a job holding a legacy value can still be edited.
   received_via: z.enum(RECEIVED_VIA),
   pickup_date: optionalDate,
-  pickup_time: optionalTime,
+  // No `pickup_time`. The form no longer asks for it and nothing reads it, so
+  // accepting one here would be a field the schema still required a caller to
+  // understand. The column stays, nullable, holding what history put in it.
   pickup_driver_id: optionalUuid,
   delivery_required: checkbox,
   expected_delivery_date: optionalDate,
@@ -143,23 +112,6 @@ function crossFieldProblem(input: OrderInput, items: OrderItemInput[]): string |
   return null;
 }
 
-/** Drop the blank rows the form always carries, keep the rest in order. */
-function itemsFrom(formData: FormData): OrderItemInput[] {
-  const parsed = itemsField.safeParse(formData.get("items"));
-  if (!parsed.success) return [];
-  return parsed.data
-    .map((item) => ({
-      item_type: item.item_type,
-      custom_description: item.custom_description ?? null,
-      quantity_type: item.quantity_type,
-      exact_quantity: item.exact_quantity ?? null,
-      bag_count: item.bag_count ?? null,
-      estimated_quantity: item.estimated_quantity ?? null,
-      notes: item.notes ?? null,
-    }))
-    .filter((item) => !isBlankItem(item));
-}
-
 /**
  * Only the fields the database column set actually holds, ready to write.
  *
@@ -176,7 +128,9 @@ function toRow(input: OrderInput, deliveryAddress: string | null, receivedAt: st
     // Pickup details only mean anything on a driver collection; carrying them
     // over from a changed answer would leave a drop-off claiming a driver.
     pickup_date: input.received_via === "driver_pickup" ? input.pickup_date ?? null : null,
-    pickup_time: input.received_via === "driver_pickup" ? input.pickup_time ?? null : null,
+    // `pickup_time` is deliberately absent from every write. It is out of the
+    // workflow, and a legacy value left on a historical row is invisible rather
+    // than wrong — which is a better trade than a destructive migration.
     pickup_driver_id: input.received_via === "driver_pickup" ? input.pickup_driver_id ?? null : null,
     delivery_required: delivery,
     expected_delivery_date: delivery ? input.expected_delivery_date ?? null : null,
@@ -245,45 +199,23 @@ async function resolveDeliveryAddress(
   return billing || null;
 }
 
-/* -------------------------------------------------------------- activity */
-
-type ActivityEntry = {
-  activity_type:
-    | "created" | "status_changed" | "updated" | "items_changed"
-    | "assigned" | "delivered" | "collected" | "cancelled";
-  previous?: Record<string, unknown> | null;
-  next?: Record<string, unknown> | null;
-  note?: string | null;
-};
-
 /**
- * One line of the job's timeline, written beside the change that caused it.
+ * Where a rejected post goes back to, carrying the customer already chosen.
  *
- * Failures are logged and swallowed, exactly as `recordAudit()` does: a job that
- * was delivered must not report itself as failed because the note about it could
- * not be written. The audit log remains the tamper-evident record; this is the
- * human-readable one on the page.
+ * A failure redirects — that is the flash-cookie convention — so the form is
+ * re-rendered by the server and anything held only in the browser is gone. The
+ * customer is the one answer that costs a search to give again, and the form
+ * already reads `?customer=` (it is how the quick-create returns), so the same
+ * door is used rather than a second mechanism. The id is re-validated here
+ * because it came off a form: only a well-formed uuid is ever put in the URL.
  */
-async function logActivity(
-  supabase: Awaited<ReturnType<typeof createClient>>,
-  session: Session,
-  orderId: string,
-  entry: ActivityEntry,
-): Promise<void> {
-  try {
-    const { error } = await supabase.from("laundry_order_activity").insert({
-      tenant_id: session.tenantId,
-      order_id: orderId,
-      actor_id: session.userId,
-      activity_type: entry.activity_type,
-      previous_value: entry.previous ?? null,
-      new_value: entry.next ?? null,
-      note: entry.note ?? null,
-    });
-    if (error) console.error("job activity insert failed", { orderId, error: error.message });
-  } catch (cause) {
-    console.error("job activity insert threw", cause);
-  }
+function backWithCustomer(path: string, formData: FormData): string {
+  const posted = formData.get("customer_id");
+  if (typeof posted !== "string" || !z.string().uuid().safeParse(posted).success) return path;
+  const [base, existing] = path.split("?");
+  const query = new URLSearchParams(existing);
+  query.set("customer", posted);
+  return `${base}?${query.toString()}`;
 }
 
 /** The job as it is now, with the two facts every guard here needs. */
@@ -310,19 +242,25 @@ async function loadOrder(
 export async function createOrder(formData: FormData): Promise<void> {
   const session = await assertCapability("orders.write");
   const backTo = returnTo(formData, "/orders/new");
+  // Every rejection below comes back with the customer still chosen; the one
+  // exception is the customer itself being unusable, which is handled there.
+  const backToForm = backWithCustomer(backTo, formData);
 
   const parsed = orderSchema.safeParse(toObject(formData));
-  if (!parsed.success) return fail(backTo, firstIssue(parsed.error));
+  if (!parsed.success) return fail(backToForm, firstIssue(parsed.error));
 
-  const items = itemsFrom(formData);
+  const parsedItems = parseOrderItems(formData.get("items"));
+  if (!parsedItems.ok) return fail(backToForm, parsedItems.problem);
+  const items = parsedItems.items;
+
   const problem = crossFieldProblem(parsed.data, items);
-  if (problem) return fail(backTo, problem);
+  if (problem) return fail(backToForm, problem);
 
   // Backdating a receipt changes what the day's takings and the overdue list
   // say, so it is a supervisor's action rather than a counter one.
   if (parsed.data.received_date < businessToday()
       && !can(session.role, "orders.manage")) {
-    return fail(backTo, "Only a manager can record a job as received on an earlier day.");
+    return fail(backToForm, "Only a manager can record a job as received on an earlier day.");
   }
 
   const supabase = await createClient();
@@ -333,8 +271,10 @@ export async function createOrder(formData: FormData): Promise<void> {
     .eq("id", parsed.data.customer_id)
     .is("deleted_at", null)
     .maybeSingle<{ id: string; business_name: string; depot_id: string | null }>();
-  if (customerError) return fail(backTo, describeDbError(customerError));
+  if (customerError) return fail(backToForm, describeDbError(customerError));
   if (!customer) {
+    // Deliberately *without* the customer: carrying an id the database will not
+    // stand behind would re-open the form still claiming that selection.
     return fail(backTo, "That customer could not be found — please select one from the list.");
   }
 
@@ -344,7 +284,7 @@ export async function createOrder(formData: FormData): Promise<void> {
   // same moment cannot be handed the same number.
   const { data: orderNumber, error: numberError } = await supabase
     .rpc("next_number", { t: session.tenantId, k: "laundry_order", p: "LJ" });
-  if (numberError) return fail(backTo, describeDbError(numberError));
+  if (numberError) return fail(backToForm, describeDbError(numberError));
 
   const { data: order, error } = await supabase
     .from("laundry_orders")
@@ -353,11 +293,14 @@ export async function createOrder(formData: FormData): Promise<void> {
       tenant_id: session.tenantId,
       depot_id: session.depotId ?? customer.depot_id,
       created_by: session.userId,
+      // Drawn above and, until now, thrown away: the column is `not null` with
+      // no default, so every single insert died on the constraint instead.
+      order_number: orderNumber as string,
       status: "new",
     })
     .select("id, order_number")
     .single();
-  if (error) return fail(backTo, describeDbError(error));
+  if (error) return fail(backToForm, describeDbError(error));
 
   // One transaction inside Postgres — see save_laundry_order_items in 0014.
   const { error: itemsError } = await supabase
@@ -372,10 +315,10 @@ export async function createOrder(formData: FormData): Promise<void> {
       return fail(`/orders/${order.id}`,
         `Job ${order.order_number} was created but its laundry list could not be saved: ${describeDbError(itemsError)}`);
     }
-    return fail(backTo, describeDbError(itemsError));
+    return fail(backToForm, describeDbError(itemsError));
   }
 
-  await logActivity(supabase, session, order.id, {
+  await logOrderActivity(supabase, session, order.id, {
     activity_type: "created",
     next: {
       status: "new",
@@ -399,12 +342,15 @@ export async function updateOrder(formData: FormData): Promise<void> {
   const session = await assertCapability("orders.write");
   const id = z.string().uuid().safeParse(formData.get("id"));
   if (!id.success) return fail(LIST, "That job could not be found.");
-  const backTo = `/orders/${id.data}/edit`;
+  const backTo = backWithCustomer(`/orders/${id.data}/edit`, formData);
 
   const parsed = orderSchema.safeParse(toObject(formData));
   if (!parsed.success) return fail(backTo, firstIssue(parsed.error));
 
-  const items = itemsFrom(formData);
+  const parsedItems = parseOrderItems(formData.get("items"));
+  if (!parsedItems.ok) return fail(backTo, parsedItems.problem);
+  const items = parsedItems.items;
+
   const problem = crossFieldProblem(parsed.data, items);
   if (problem) return fail(backTo, problem);
 
@@ -465,7 +411,7 @@ export async function updateOrder(formData: FormData): Promise<void> {
       `The job details were saved but the laundry list was not: ${describeDbError(itemsError)}`);
   }
 
-  await logActivity(supabase, session, id.data, {
+  await logOrderActivity(supabase, session, id.data, {
     activity_type: "updated",
     previous: before ?? null,
     next: {
@@ -498,11 +444,15 @@ const statusSchema = z.object({
 });
 
 /**
- * The three plain moves: in progress, ready, out for delivery.
+ * The plain status moves: in progress, ready for delivery, and the management
+ * override that sends a job out without the driver pressing Start Route.
  *
  * Completion and cancellation are not here — both capture more than a status and
  * live in their own actions below, so that "mark delivered" can never be reached
- * by posting `status=completed` at this one.
+ * by posting `status=completed` at this one. Assignment is not here either: it
+ * captures a driver and a date, and lives in `assignJobToDriver`. Posting
+ * `status=assigned` at this action is refused outright, because it would create
+ * exactly the row the brief forbids — an Assigned job with no assignment.
  */
 export async function advanceOrder(formData: FormData): Promise<void> {
   const session = await assertCapability("orders.status");
@@ -514,10 +464,29 @@ export async function advanceOrder(formData: FormData): Promise<void> {
   if (target === "completed" || target === "cancelled") {
     return fail(detail, "Use the delivery, collection or cancel action for that step.");
   }
+  if (target === "assigned") {
+    return fail(detail, "Use Assign Driver to give this job to a driver and a delivery date.");
+  }
+  // Sending a job out without the driver having loaded it is a management
+  // override, and the capability on the action says so. Checked here as well as
+  // hidden on the page, because the button is a courtesy and this is the guard.
+  if (target === "out_for_delivery" && !can(session.role, "orders.manage")) {
+    return fail(detail,
+      "Jobs go out when the driver starts their route. Ask a manager if this one needs "
+      + "sending out from the office.");
+  }
 
   const supabase = await createClient();
   const existing = await loadOrder(supabase, parsed.data.id);
   if (!existing) return fail(LIST, "That job could not be found.");
+
+  // `assigned → ready_for_delivery` is a legal transition, but it is Remove
+  // Assignment — it clears four columns besides the status, and it is dispatch's
+  // action. Routed there rather than allowed to strip an assignment silently
+  // through the status control.
+  if (target === "ready_for_delivery" && existing.status === "assigned") {
+    return fail(detail, "Use Remove Assignment to take this job off its driver.");
+  }
 
   const allowed = checkTransition(existing.status, target, existing.delivery_required);
   if (!allowed.ok) return fail(detail, allowed.reason);
@@ -529,7 +498,7 @@ export async function advanceOrder(formData: FormData): Promise<void> {
     .eq("tenant_id", session.tenantId);
   if (error) return fail(detail, describeDbError(error));
 
-  await logActivity(supabase, session, parsed.data.id, {
+  await logOrderActivity(supabase, session, parsed.data.id, {
     activity_type: "status_changed",
     previous: { status: existing.status },
     next: { status: target },
@@ -574,31 +543,19 @@ export async function completeOrder(formData: FormData): Promise<void> {
   const existing = await loadOrder(supabase, parsed.data.id);
   if (!existing) return fail(LIST, "That job could not be found.");
 
-  const allowed = checkTransition(existing.status, "completed", existing.delivery_required);
-  if (!allowed.ok) return fail(detail, allowed.reason);
-
-  const at = toInstant(parsed.data.completed_date, parsed.data.completed_time);
-  const delivered = existing.delivery_required;
-
-  const { error } = await supabase
-    .from("laundry_orders")
-    .update({
-      status: "completed",
-      completed_at: at,
-      ...(delivered
-        ? { delivered_at: at, delivered_by: parsed.data.handled_by }
-        : { collected_at: at, collected_by: parsed.data.handled_by }),
-    })
-    .eq("id", parsed.data.id)
-    .eq("tenant_id", session.tenantId);
-  if (error) return fail(detail, describeDbError(error));
-
-  await logActivity(supabase, session, parsed.data.id, {
-    activity_type: delivered ? "delivered" : "collected",
-    previous: { status: existing.status },
-    next: { status: "completed", at, by: parsed.data.handled_by },
+  // The write itself lives in `lib/orders/complete.ts`, shared with the driver's
+  // own "mark delivered" on My Runs — one implementation of finishing a job,
+  // two guards in front of it. `dispatchIfNeeded` is deliberately not passed
+  // here: at the counter, a delivery job still sitting at "ready" means somebody
+  // forgot to record that the van left, and that is worth being told about.
+  const result = await completeLaundryOrder(supabase, session, existing, {
+    at: toInstant(parsed.data.completed_date, parsed.data.completed_time),
+    handledBy: parsed.data.handled_by,
     note: parsed.data.note ?? null,
   });
+  if (!result.ok) return fail(detail, result.error);
+  const { delivered } = result;
+
   await recordAudit(session, {
     entity: "laundry_order", entityId: parsed.data.id, action: "status_change",
     summary: `${existing.order_number} ${delivered ? "delivered" : "collected"}`,
@@ -640,7 +597,7 @@ export async function cancelOrder(formData: FormData): Promise<void> {
     .eq("tenant_id", session.tenantId);
   if (error) return fail(detail, describeDbError(error));
 
-  await logActivity(supabase, session, parsed.data.id, {
+  await logOrderActivity(supabase, session, parsed.data.id, {
     activity_type: "cancelled",
     previous: { status: existing.status },
     next: { status: "cancelled" },
@@ -686,7 +643,7 @@ export async function assignOrder(formData: FormData): Promise<void> {
     .eq("tenant_id", session.tenantId);
   if (error) return fail(detail, describeDbError(error));
 
-  await logActivity(supabase, session, parsed.data.id, {
+  await logOrderActivity(supabase, session, parsed.data.id, {
     activity_type: "assigned",
     previous: { assigned_to: before?.assigned_to ?? null },
     next: { assigned_to: parsed.data.assigned_to ?? null },

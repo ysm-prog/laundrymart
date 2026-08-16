@@ -8,9 +8,8 @@ import {
   ButtonLink, Card, DataTable, EmptyState, Eyebrow, FlashMessages, PageHeader, SkeletonRows,
   SkeletonStats, Stage, Stat, StatusBadge, cx, humanise,
 } from "@/components/ui";
-import { SubmitButton } from "@/components/form";
 import { parseExceptionNotes } from "@/lib/exceptions";
-import { planToday } from "@/app/(app)/routes/daily/actions";
+import { addDays, businessToday, toInstant } from "@/lib/domain/timezone";
 import {
   PLANT_STAGES, SEVERITY_RULE, SEVERITY_TEXT, sortDecisions, type Decision,
 } from "./decisions";
@@ -70,13 +69,6 @@ export default async function DashboardPage({
         eyebrow={`${session.tenantName} · ${formatDate(date)}`}
         title="Dashboard"
         description="What needs a decision today."
-        actions={can(session.role, "routes.write") ? (
-          // One click from the weekly templates to a planned day (design B3).
-          // The action lands on the planner only when a choice is left to make.
-          <form action={planToday}>
-            <SubmitButton pendingLabel="Planning…">Plan my day</SubmitButton>
-          </form>
-        ) : null}
       />
 
       {setup && !setup.complete ? <GettingStarted steps={setup.steps} /> : null}
@@ -101,8 +93,8 @@ export default async function DashboardPage({
               <PlantStages />
             </Suspense>
           </div>
-          <Suspense fallback={<SkeletonRows rows={4} />}>
-            <RunsToday date={date} canPlan={can(session.role, "routes.write")} />
+          <Suspense fallback={<SkeletonRows rows={6} />}>
+            <JobBoard />
           </Suspense>
         </div>
       ) : null}
@@ -123,12 +115,12 @@ async function setupSteps(): Promise<{ steps: SetupStep[]; complete: boolean; fr
   const supabase = await createClient();
   const head = { count: "exact" as const, head: true };
 
-  const [depots, customers, agreements, templates, routes] = await Promise.all([
+  const [depots, customers, agreements, drivers, orders] = await Promise.all([
     supabase.from("depots").select("id", head).is("deleted_at", null),
     supabase.from("customers").select("id", head).is("deleted_at", null),
     supabase.from("service_agreements").select("id", head).is("deleted_at", null),
-    supabase.from("route_templates").select("id", head).is("deleted_at", null),
-    supabase.from("daily_routes").select("id", head),
+    supabase.from("drivers").select("id", head).is("deleted_at", null),
+    supabase.from("laundry_orders").select("id", head),
   ]);
 
   const steps: SetupStep[] = [
@@ -151,16 +143,19 @@ async function setupSteps(): Promise<{ steps: SetupStep[]; complete: boolean; fr
       done: (agreements.count ?? 0) > 0,
     },
     {
-      label: "Set up the weekly run",
-      detail: "The recurring week: which customers a driver visits, in what order.",
-      href: "/routes/templates", action: "Set up a weekly run",
-      done: (templates.count ?? 0) > 0,
+      // Replaces "set up the weekly run" and "plan today's runs". A driver is
+      // the only setup a delivery now needs: the run is created behind the
+      // scenes the moment a job is assigned to one.
+      label: "Add a driver",
+      detail: "Who delivers, and the login they sign in with.",
+      href: "/drivers", action: "Add a driver",
+      done: (drivers.count ?? 0) > 0,
     },
     {
-      label: "Plan today's runs",
-      detail: "Turn the weekly run into today's work and hand it to a driver.",
-      href: "/routes/daily", action: "Plan today",
-      done: (routes.count ?? 0) > 0,
+      label: "Take in your first job",
+      detail: "The laundry, when it is due back, and who is delivering it.",
+      href: "/orders/new", action: "Create a job",
+      done: (orders.count ?? 0) > 0,
     },
   ];
 
@@ -492,72 +487,71 @@ async function PlantStages() {
 
 /* -------------------------------------------------------------- runs today */
 
-type RunRow = {
-  id: string; code: string; name: string; status: string;
-  drivers: { full_name: string } | null;
-  jobs: Array<{ status: string }>;
-};
+/* ------------------------------------------------------------- job board */
 
-async function RunsToday({ date, canPlan }: { date: string; canPlan: boolean }) {
+/**
+ * Where the counter's work has got to, as counts.
+ *
+ * This panel used to be "Runs today" — a list of RUN-001, RUN-002 and a "Plan my
+ * day" button. Runs are no longer something anybody opens or manages, so the
+ * slot now answers the question the office actually has at a glance: how much
+ * work is at each stage, and how much of it has a driver.
+ *
+ * Every figure is a head-only count against the database rather than a tally of
+ * some page's rows, and every one links to the Jobs list already filtered to
+ * exactly what it counted — so the number and the rows behind it cannot disagree.
+ */
+async function JobBoard() {
   const supabase = await createClient();
-  const { data } = await supabase
-    .from("daily_routes")
-    .select("id, code, name, status, drivers(full_name), jobs(status)")
-    .eq("route_date", date).order("code")
-    .returns<RunRow[]>();
+  const head = { count: "exact" as const, head: true };
+  const today = businessToday();
 
-  const runs = data ?? [];
+  const [fresh, working, ready, assigned, out, completedToday] = await Promise.all([
+    supabase.from("laundry_orders").select("id", head).eq("status", "new"),
+    supabase.from("laundry_orders").select("id", head).eq("status", "in_progress"),
+    supabase.from("laundry_orders").select("id", head).eq("status", "ready_for_delivery"),
+    supabase.from("laundry_orders").select("id", head).eq("status", "assigned"),
+    supabase.from("laundry_orders").select("id", head).eq("status", "out_for_delivery"),
+    supabase.from("laundry_orders").select("id", head)
+      .eq("status", "completed")
+      .gte("completed_at", toInstant(today, "00:00"))
+      .lt("completed_at", toInstant(addDays(today, 1), "00:00")),
+  ]);
+
+  const rows = [
+    { label: "New", value: fresh.count, href: "/orders?status=new" },
+    { label: "In progress", value: working.count, href: "/orders?status=in_progress" },
+    {
+      label: "Ready for delivery", value: ready.count,
+      href: "/orders?status=ready_for_delivery",
+      // The one row that is a call to action rather than a statement: ready
+      // work with no driver is the thing that quietly does not go out.
+      hint: "Needs a driver",
+    },
+    { label: "Assigned", value: assigned.count, href: "/orders?status=assigned" },
+    { label: "Out for delivery", value: out.count, href: "/orders?status=out_for_delivery" },
+    { label: "Completed today", value: completedToday.count, href: "/orders?status=completed" },
+  ];
 
   return (
-    <Card title="Runs today" className="[&>div]:p-0">
-      {runs.length === 0 ? (
-        <div className="p-4">
-          <EmptyState
-            title="No runs planned"
-            description="One click builds today from your weekly runs."
-            action={canPlan ? (
-              <form action={planToday}>
-                <SubmitButton pendingLabel="Planning…">Plan my day</SubmitButton>
-              </form>
-            ) : undefined}
-          />
-        </div>
-      ) : (
-        <ul>
-          {runs.map((run) => {
-            const total = run.jobs?.length ?? 0;
-            const done = (run.jobs ?? []).filter((job) => job.status === "completed").length;
-            const percent = total === 0 ? 0 : Math.round((done / total) * 100);
-            const behind = percent < 100 && run.status === "in_progress";
-            return (
-              <li key={run.id} className="border-b last:border-b-0">
-                <Link href={`/routes/daily/${run.id}`}
-                      className="block px-4 py-2.5 transition hover:bg-surface-muted">
-                  <div className="flex items-baseline justify-between gap-2">
-                    <span className="truncate text-sm font-semibold">{run.code} · {run.name}</span>
-                    <span className={cx(
-                      "text-xs tabular-nums",
-                      percent === 100 ? "text-success" : behind ? "text-warning" : "text-muted-foreground",
-                    )}>
-                      {done} / {total}
-                    </span>
-                  </div>
-                  <div className="mt-1 flex flex-wrap items-center gap-2">
-                    <span className="truncate text-xs text-muted-foreground">
-                      {run.drivers?.full_name ?? "Unassigned"}
-                    </span>
-                    <StatusBadge status={run.status} />
-                  </div>
-                  <div aria-hidden className="mt-1.5 h-[5px] bg-surface-muted">
-                    <div className={cx("h-full", percent === 100 ? "bg-success" : "bg-primary")}
-                         style={{ width: `${percent}%` }} />
-                  </div>
-                </Link>
-              </li>
-            );
-          })}
-        </ul>
-      )}
+    <Card title="Jobs" description="Where the day's laundry has got to." className="[&>div]:p-0">
+      <ul>
+        {rows.map((row) => (
+          <li key={row.label} className="border-b last:border-b-0">
+            <Link href={row.href}
+                  className="flex min-h-11 items-center justify-between gap-3 px-4 py-2.5
+                             transition hover:bg-surface-muted">
+              <span className="min-w-0">
+                <span className="block truncate text-sm font-medium">{row.label}</span>
+                {row.hint && (row.value ?? 0) > 0 ? (
+                  <span className="block text-xs text-muted-foreground">{row.hint}</span>
+                ) : null}
+              </span>
+              <span className="text-lg font-semibold tabular-nums">{row.value ?? 0}</span>
+            </Link>
+          </li>
+        ))}
+      </ul>
     </Card>
   );
 }

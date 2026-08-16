@@ -10,7 +10,6 @@ import { OverlayDemo } from "./overlay-demo";
 import { CompleteJob } from "@/app/(app)/orders/complete-job";
 import { NotificationBell } from "@/components/notification-bell";
 import { NotificationList, type NotificationListItem } from "@/components/notification-list";
-import { InspectionChecklist } from "@/app/(app)/run/inspection-checklist";
 import { ExceptionCapture } from "@/components/offline-capture";
 import { AgreementWizard } from "@/app/(app)/agreements/agreement-wizard";
 import { CustomerEssentials, FormDisclosure } from "@/app/(app)/customers/customer-form";
@@ -20,6 +19,14 @@ import {
   ORDER_STATUSES, isOverdue, summariseItems,
 } from "@/lib/domain/laundry-orders";
 import { UNASSIGNED } from "@/app/(app)/routes/planner/plan";
+import { DateNav } from "@/app/(app)/my-runs/date-nav";
+import { DaySummary, JobCard, JobGroup } from "@/app/(app)/my-runs/run-view";
+import { PriceTable } from "@/app/(app)/invoices/prices/price-table";
+import {
+  defaultPriceList, priceListFor, type LaundryPriceRow,
+} from "@/lib/domain/laundry-billing";
+import { AssignForm } from "@/app/(app)/my-runs/assign-form";
+import type { DayJob } from "@/lib/runs/my-runs";
 import {
   PlannerBoard, type Option, type PlannerColumn, type PlannerJob,
 } from "@/app/(app)/routes/planner/planner-board";
@@ -49,7 +56,7 @@ export const metadata = { title: "Design preview" };
 const ITEMS: NavItem[] = navigationFor("super_admin");
 
 const COUNTS = {
-  routesToday: 3, exceptions: 4, batches: 12, unpaidInvoices: 9, overdueJobs: 2,
+  exceptions: 4, batches: 12, unpaidInvoices: 9, overdueJobs: 2,
 };
 
 /* ---------------------------------------------------- laundry jobs fixture */
@@ -197,6 +204,87 @@ const PREVIEW_REGISTER = [
   { number: "INV00006", customer: "Wentworth Aged Care", balance: "$8,412.00", total: "$8,412.00",
     status: "draft", when: "issued 01/08/2026", chasing: false, selected: false },
 ];
+
+/* --------------------------------------------------------- my runs fixture */
+
+/**
+ * A driver's morning, fixed. The date is the day the redesign fixtures use, so
+ * the screenshots are byte-stable across builds; the two stops are the two
+ * shapes that matter — one customer with several jobs under a single stop, and
+ * one already done.
+ */
+const PREVIEW_DAY_JOBS: DayJob[] = [
+  {
+    id: "j1", order_number: "LJ01041", status: "assigned", priority: "urgent",
+    delivery_required: true, due_date: "2026-08-16", expected_delivery_date: "2026-08-16",
+    assigned_delivery_date: "2026-08-16", assigned_driver_id: "d1",
+    load_confirmed_at: null, completed_at: null,
+    delivery_window: "morning", expected_delivery_time: null,
+    delivery_address: "123 Main Street, Adelaide SA 5000",
+    delivery_instructions: "Ring the bell at the roller door.",
+    special_instructions: null, customer_id: "c1",
+    customers: { id: "c1", business_name: "ABC Fitness", phone: "08 1234 5678" },
+    laundry_order_items: [
+      { item_type: "towels", custom_description: null, quantity_type: "exact",
+        exact_quantity: 250, bag_count: null, estimated_quantity: null, notes: null },
+    ],
+  },
+  {
+    id: "j2", order_number: "LJ01045", status: "out_for_delivery", priority: "normal",
+    delivery_required: true, due_date: "2026-08-16", expected_delivery_date: "2026-08-16",
+    assigned_delivery_date: "2026-08-16", assigned_driver_id: "d1",
+    load_confirmed_at: "2026-08-15T22:10:00Z", completed_at: null,
+    delivery_window: null, expected_delivery_time: null,
+    delivery_address: "55 North Terrace, Adelaide SA 5000",
+    delivery_instructions: null, special_instructions: null, customer_id: "c2",
+    customers: { id: "c2", business_name: "XYZ Medical", phone: "08 8888 1010" },
+    laundry_order_items: [
+      { item_type: "sheets", custom_description: null, quantity_type: "bulk_lot",
+        exact_quantity: null, bag_count: 5, estimated_quantity: 60, notes: null },
+    ],
+  },
+  {
+    id: "j3", order_number: "LJ01051", status: "completed", priority: "normal",
+    delivery_required: true, due_date: "2026-08-16", expected_delivery_date: "2026-08-16",
+    assigned_delivery_date: "2026-08-16", assigned_driver_id: "d1",
+    load_confirmed_at: "2026-08-15T22:10:00Z", completed_at: "2026-08-16T01:12:00Z",
+    delivery_window: null, expected_delivery_time: null,
+    delivery_address: "19 King William Street, Adelaide SA 5000",
+    delivery_instructions: null, special_instructions: null, customer_id: "c3",
+    customers: { id: "c3", business_name: "City Gym", phone: null },
+    laundry_order_items: [
+      { item_type: "bath_towels", custom_description: null, quantity_type: "exact",
+        exact_quantity: 80, bag_count: null, estimated_quantity: null, notes: null },
+    ],
+  },
+];
+
+/** The planner's driver fixture is `{value,label}`; My Runs wants real rows. */
+const PREVIEW_RUN_DRIVERS = [
+  { id: "d1", full_name: "John Smith", status: "active", phone: "0400 000 111" },
+  { id: "d2", full_name: "Mel Nguyen", status: "active", phone: null },
+];
+
+/**
+ * A price list, resolved the way the real screens resolve one: the customer's
+ * own rows for the fields, the tenant default for the hint under each label —
+ * so this gallery shows an override and an inherited price side by side, which
+ * is the layout worth looking at.
+ */
+const PREVIEW_PRICE_ROWS: LaundryPriceRow[] = [
+  { customer_id: null, item_type: "towels", unit_price: 2, bag_price: 15, taxable: true },
+  { customer_id: null, item_type: "sheets", unit_price: 4.5, bag_price: null, taxable: true },
+  { customer_id: null, item_type: "uniforms", unit_price: 6, bag_price: null, taxable: true },
+  { customer_id: "preview", item_type: "towels", unit_price: 1.75, bag_price: 12, taxable: true },
+];
+const toPriceValues = (source: ReturnType<typeof priceListFor>) =>
+  new Map([...source].map(([itemType, price]) => [itemType, {
+    unitPrice: price.unitPrice, bagPrice: price.bagPrice, taxable: price.taxable,
+  }]));
+const PREVIEW_CUSTOMER_PRICES = toPriceValues(
+  priceListFor("preview", PREVIEW_PRICE_ROWS.filter((row) => row.customer_id === "preview")),
+);
+const PREVIEW_DEFAULT_PRICES = toPriceValues(defaultPriceList(PREVIEW_PRICE_ROWS));
 
 export default function DesignPreviewPage() {
   if (process.env.VERCEL_ENV === "production") notFound();
@@ -431,6 +519,7 @@ export default function DesignPreviewPage() {
             </div>
             <div className="rounded-lg mt-4 border bg-surface p-3">
               <PlannerBoard
+                date="2026-08-14"
                 columns={PREVIEW_COLUMNS}
                 jobs={PREVIEW_JOBS}
                 drivers={PREVIEW_DRIVERS}
@@ -619,16 +708,6 @@ export default function DesignPreviewPage() {
                     />
                   </form>
                 </Card>
-                <Card title="Inspection checklist" description="Starts unchecked — ticking is an act, with a one-tap fast path.">
-                  <form action={previewApply}>
-                    <InspectionChecklist items={[
-                      { name: "p_tyres", label: "Tyres and wheels" },
-                      { name: "p_lights", label: "Lights and indicators" },
-                      { name: "p_brakes", label: "Brakes" },
-                      { name: "p_load", label: "Load area clean and secure" },
-                    ]} />
-                  </form>
-                </Card>
                 <Card title="Flash toast" description="Success dismisses itself in 5 s; an error stays until closed. A prerequisite failure links the screen that fixes it.">
                   <div className="space-y-2">
                     <div className="rounded-lg flex max-w-[440px] items-start gap-2.5 border border-l-[5px] border-success/40 border-l-success bg-surface px-3 py-2 text-sm text-success shadow-sm">
@@ -800,6 +879,82 @@ export default function DesignPreviewPage() {
               </div>
             </div>
           </div>
+
+          {/* ------------------------------------------------------ my runs --- */}
+          <section id="my-runs-preview" className="space-y-4 border-t pt-8">
+            <PageHeader
+              eyebrow="Sunday, 16 August 2026"
+              title="My Runs"
+              description="Good morning, John. Here is your work for the day."
+            />
+
+            <DateNav
+              date="2026-08-16"
+              driverParam="me"
+              drivers={PREVIEW_RUN_DRIVERS}
+              canChooseDriver
+            />
+
+            <DaySummary
+              driverName="John Smith"
+              date="2026-08-16"
+              toDeliver={1}
+              outForDelivery={1}
+              completed={1}
+            />
+
+            <JobGroup title="To deliver" count={1}>
+              {PREVIEW_DAY_JOBS.filter((job) => job.status === "assigned").map((job) => (
+                <JobCard key={job.id} job={job} actionable />
+              ))}
+            </JobGroup>
+
+            <JobGroup title="Out for delivery" count={1}>
+              {PREVIEW_DAY_JOBS.filter((job) => job.status === "out_for_delivery").map((job) => (
+                <JobCard key={job.id} job={job} actionable />
+              ))}
+            </JobGroup>
+
+            <JobGroup title="Completed" count={1}>
+              {PREVIEW_DAY_JOBS.filter((job) => job.status === "completed").map((job) => (
+                <JobCard key={job.id} job={job} actionable />
+              ))}
+            </JobGroup>
+
+            <Card
+              title="Ready for delivery, assigned to nobody"
+              description="Customer pickups are not listed — they are never assigned for delivery."
+            >
+              <AssignForm
+                orderId="preview"
+                defaultDriverId="d1"
+                defaultDate="2026-08-16"
+                expectedDeliveryDate="2026-08-16"
+                drivers={PREVIEW_RUN_DRIVERS}
+                returnTo="/design-preview"
+              />
+            </Card>
+          </section>
+
+          {/* ------------------------------------------------ laundry prices --- */}
+          {/* Nine rows of three inputs is the widest form in the app on a phone,
+              and it is a real screen behind the auth gate — which means this
+              gallery is the only place its layout can be looked at. */}
+          <section id="laundry-prices-preview" className="space-y-4 border-t pt-8">
+            <PageHeader
+              title="Laundry prices"
+              description="What each kind of laundry costs. Used to bill the jobs you take in at the counter."
+            />
+            <PriceTable
+              title="Prices for Harbourview Hotel"
+              description="Blank means the usual price, shown under each kind of laundry."
+              values={PREVIEW_CUSTOMER_PRICES}
+              defaults={PREVIEW_DEFAULT_PRICES}
+              customerId="preview"
+              writable
+              submitLabel="Save their prices"
+            />
+          </section>
         </main>
       </div>
     </div>

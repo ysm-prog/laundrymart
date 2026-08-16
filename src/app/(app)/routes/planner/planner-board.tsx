@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { Badge, Eyebrow, StatusBadge, cx, humanise } from "@/components/ui";
-import { UNASSIGNED, estimateLoad } from "./plan";
+import { UNASSIGNED, estimateLoad, type DispatchPlan } from "./plan";
 
 export type PlannerJob = {
   id: string;
@@ -34,14 +34,22 @@ export type PlannerColumn = {
 
 export type Option = { value: string; label: string; capacityKg?: number | null };
 
-type Plan = {
-  columns: Array<{ id: string; jobIds: string[]; driverId: string; vehicleId: string }>;
-};
-
-function toPlan(columns: PlannerColumn[]): Plan {
+/**
+ * The payload, and it is `DispatchPlan` on purpose — the type the action's own
+ * schema infers, so a board that stops posting what the server reads is a
+ * compile error rather than a toast nobody can act on.
+ *
+ * It was exactly that, until 2026-08-14: the board posted `{columns:[{id…}]}`
+ * with no date at all, `planSchema` wanted `{date, columns:[{routeId…}]}`, and
+ * every single "Apply plan" was refused. Nothing caught it because the schema
+ * lived in a `"use server"` module and the two shapes were only ever compared
+ * at runtime, in production.
+ */
+function toPlan(date: string, columns: PlannerColumn[]): DispatchPlan {
   return {
+    date,
     columns: columns.map((column) => ({
-      id: column.id,
+      routeId: column.id,
       jobIds: [...column.jobIds],
       driverId: column.driverId,
       vehicleId: column.vehicleId,
@@ -63,8 +71,11 @@ function toPlan(columns: PlannerColumn[]): Plan {
  * office is as likely to be driving this from a keyboard as a mouse.
  */
 export function PlannerBoard({
-  columns: initial, jobs, drivers, vehicles, action,
+  date, columns: initial, jobs, drivers, vehicles, action,
 }: {
+  /** The day being planned. Posted inside the payload — the action reads it
+      from there, not from the URL, so the plan carries its own date. */
+  date: string;
   columns: PlannerColumn[];
   jobs: Record<string, PlannerJob>;
   drivers: Option[];
@@ -74,8 +85,8 @@ export function PlannerBoard({
   const [columns, setColumns] = useState<PlannerColumn[]>(initial);
   const [dragging, setDragging] = useState<string | null>(null);
 
-  const baseline = useMemo(() => JSON.stringify(toPlan(initial)), [initial]);
-  const plan = toPlan(columns);
+  const baseline = useMemo(() => JSON.stringify(toPlan(date, initial)), [date, initial]);
+  const plan = toPlan(date, columns);
   const dirty = JSON.stringify(plan) !== baseline;
 
   const changes = useMemo(() => countChanges(initial, columns), [initial, columns]);

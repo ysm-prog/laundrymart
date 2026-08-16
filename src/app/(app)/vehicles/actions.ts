@@ -94,8 +94,8 @@ export async function updateVehicleStatus(formData: FormData): Promise<void> {
       kind: "vehicle_out_of_service",
       subjectId: parsed.data.id,
       title: `${vehicle?.registration ?? "A vehicle"} is off the road.`
-        + " Check whether any run today is still assigned to it.",
-      href: "/routes/daily",
+        + " Check whether any delivery today still depends on it.",
+      href: "/orders?run=assigned",
     });
   }
 

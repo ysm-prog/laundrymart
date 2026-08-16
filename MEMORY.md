@@ -1,277 +1,177 @@
 # MEMORY — working session handoff
 > Auto-loaded each session. Canonical state is CLAUDE.md; this is the live delta.
 
-**IN FLIGHT — Electro Services redesign** (branch `claude/electro-services-redesign-6o2q4f`,
-not yet merged to `Dev`/`Prod`). Full UI/UX pass: new token palette, Inter, restored radius and
-shadow scales, light icon rail with a collapsible desktop mode and a real phone drawer, header
-user menu + global search, Lucide icons, `Overlay`, `FormSection`, `PageContainer`, `bare`
-DataTable. Rebranded to **Electro Services** in every customer-facing string. **Nothing in the
-schema, actions, RLS, capabilities or queries changed** — no migration, 204 tests untouched.
-Verify passes; light and dark screenshotted at 390/820/1440 with no console errors and no
-horizontal overflow. See CLAUDE.md §10b and the 2026-08-13 changelog entry.
-- **Not seen with real data.** No Supabase credentials in that container, so authenticated
-  screens were checked via build/typecheck/lint/tests and `/design-preview` only. Worth opening
-  the deployed app once — Jobs list, Create job, Today, Invoices two-pane, `/run` on a phone.
-- Deliberately *not* renamed: package name, `laundrymart-offline` IndexedDB, `laundrymart-shell-v1`
-  SW cache key. Renaming the first orphans drivers' queued stops.
+## Latest: monthly invoices bill the counter's laundry (`0018_laundry_pricing`)
+The Jobs module carried no money since 0014, so a drop-off customer was never billed. Now the
+monthly run makes one draft invoice per customer carrying **every item of every job completed
+in the period, at that customer's price**, beside the contract charges it already produced.
+CLAUDE.md §4/§7 and the 2026-08-16 entry have the detail; what to carry forward:
 
-**Status:** Live, signed into, and on the upgraded stack (Next 16, Tailwind 4, Zod 4,
-vitest 4). `laundrymart-syd` (ref `xujhwljrmogenhvqpkrf`) has the demo tenant; the app is on
-Vercel at `ats.coreit.com.au`; sign-in verified end to end.
+**Numbered 0018, not 0017** — `Prod` took 0017 for `archive_records` while this was in
+flight, and that one is already applied live. `laundry_prices` is deliberately **not** in
+`archivable_tables()`: a price list is configuration, not a customer's paperwork.
 
-**Phases A, B and C are all on `Prod`** (`3f59cc6`). `0013_notifications` is applied to
-`laundrymart-syd`, verified there: RLS on, one policy, the `nulls not distinct` idempotency
-index in place, `anon` reading zero rows through a rolled-back probe, and no new security
-advisor (still the same five SECURITY DEFINER warnings §18 records as legitimate).
+**Prices live in `laundry_prices`, one row per kind of laundry per scope.** `customer_id is
+null` is the tenant default and a customer row overrides it — **there is no third fallback**.
+The unique index is `(tenant_id, customer_id, item_type) nulls not distinct`, because under the
+default NULL rule the *default* list is exactly the row that could be duplicated. Writes are
+role-gated like 0006 and `apply_tenant_policy` is deliberately **not** used: its permissive
+`for all` policy would OR with the role gate and let any member re-price the work.
 
-**Jobs / laundry order management is on `Prod`** (merge `ee351ad`, via `Dev` `875d2ae`;
-feature branch `claude/jobs-laundry-order-management-p4fu8k`, commit `39a1f0e`).
-**`0014_laundry_orders` is applied to `laundrymart-syd`** and verified there:
-- all three tables have RLS on with one policy each; `laundry_orders` carries 9 indexes and
-  2 triggers, `laundry_order_items` 2 triggers, `laundry_order_activity` none (no
-  `updated_at` column, so `apply_tenant_policy` correctly skips the trigger);
-- `search_path=public` pinned on all three functions and **`anon` can execute none of them**;
-- **a rolled-back end-to-end probe passed on the live project**: `next_number` issued
-  `LJ00001`, `save_laundry_order_items` wrote 2 items, all four transitions ran, `due_date`
-  generated as the delivery date, `completed_at` stamped by the trigger;
-- a second rolled-back probe confirmed the guards refuse on the live project — the pickup
-  going out for delivery, the backwards move, and emptying the laundry list;
-- `anon` reads 0 rows (it holds table-level SELECT, as it does on every table here — see the
-  Supabase default-privileges note below; RLS is the boundary);
-- **no new security advisor.** Still 7 warnings, none from 0014 — `save_laundry_order_items`
-  is SECURITY INVOKER so it does not trip the SECURITY DEFINER lint at all. The set is the 5
-  documented helpers plus `park_number_sequence` (from another branch's migration) and the
-  auth leaked-password toggle.
+**Unpriced is a reported outcome, never a zero.** `buildLaundryCharges` returns lines *and*
+unpriced items with the reason and job number; the run reports them in a sticky toast linking
+to `/invoices/prices`. The form parser (`prices/price-form.ts`, outside `"use server"`, tested)
+holds the matching rule: **blank clears the row, it does not store zero.** If you touch either,
+keep that distinction — a zero bills silently, a missing price is visible.
 
-**In flight: the job creation form update** (branch `claude/job-creation-form-update-w1zzn2`).
-Form-and-action change only, **no migration** — received time removed (server stamps
-`received_at`; an edit keeps the job's existing time of day), received via narrowed to the two
-real answers with legacy values preserved in edit mode, the delivery fork defaulting to
-Re-deliver for new jobs only, and "Machine instructions" as the label on `special_instructions`.
-`verify` green, 204 unit tests. Not yet applied anywhere but the branch. See §18.
+**A job is billed once, marked by `invoice_lines.laundry_order_id`.** The run skips any job
+already on a non-void invoice. Voiding an invoice makes its work billable again, on purpose.
 
-**The live DB is ahead of `Prod`'s migrations folder.** `list_migrations` shows
-`0012_return_count`, `purchases`, `supplier_payments` and `import_helpers` applied to
-`laundrymart-syd` with no matching file on `Prod`. They came from unmerged branches (the
-first is `claude/warehouse-inventory-flow-psooyq`; the last three were applied 2026-08-13).
-Nothing in 0014 touches them, but a fresh `db:test` run does **not** reproduce the live
-schema, and whoever merges those branches has a numbering reconcile to do.
+**Contracts are no longer a precondition of `generateInvoices`.** It used to refuse the whole
+period when no contract covered it, which would now hold back every counter-only customer. The
+customer set is contract customers ∪ customers with unbilled completed jobs.
 
-Carrying forward from the build:
-- **`/jobs` is Stops, `/orders` is Jobs.** `public.jobs` was already the routing module's stop.
-  The new module is `laundry_orders` in the schema, `/orders` as a route, and **Job** on screen.
-  Do not "tidy" one into the other; `/help` now defines both words and the rail carries both.
-- **The status list is closed.** Six values, mirrored in `src/lib/domain/laundry-orders.ts`,
-  the check constraint and `guard_laundry_order_transition`. Adding a seventh means editing
-  three places and a unit test that names all six deliberately.
-- **Overdue is never stored** — `due_date` (generated: delivery date, else collection date)
-  `< today` and status not terminal. The rail badge, the summary card and the row rule all
-  read the same predicate, and the partial index in 0014 covers it.
-- **`toInstant()` in `src/lib/domain/timezone.ts` is the only place a date picker + time
-  picker become a `timestamptz`.** Two-pass offset lookup through `Intl`; do not swap it for
-  `new Date("<date>T<time>")`, which is parsed in the host's zone (UTC on Vercel) and puts
-  every late-evening receipt on the wrong day.
-- **`orders.manage` is the supervisor gate**: cancel, backdate a receipt, edit a completed
-  job. `orders.status` is the floor's. `driver` deliberately holds none.
-- Staff pickers resolve through `src/lib/staff.ts` (memberships + service-role email lookup,
-  degrades to short ids) because `laundry_orders` has four FKs to `auth.users` and any embed
-  would be PGRST201.
-- Local pgTAP needs a superuser role matching `$USER`: `su postgres -c "psql -c 'create role
-  root superuser login'"` then `createdb root`, and `apt-get install postgresql-16-pgtap`.
+**Period edges are composed in `BUSINESS_TIMEZONE`** (`toInstant(start)` … `toInstant(end+1)`),
+because `completed_at` is a timestamptz and a 9pm finish on the 31st belongs to that month.
 
-**Two things must happen on the deployment before Phase C actually does anything:**
-1. **Set `CRON_SECRET`** in Vercel (`openssl rand -hex 32`). Until it is set,
-   `/api/notifications/sweep` refuses every request — closed by default on purpose — so the
-   two swept events (invoice past terms, run not started) never fire. `vercel.json` already
-   carries the cron entry; its schedule is **UTC**, five hits covering 07:00–15:00 Sydney.
-2. **Prove the Resend path — C0 was never completed.** It could not be: this container's
-   network policy answers 403 to `CONNECT api.resend.com`, so no live send was possible at
-   any point. Use the **"Send a test email"** button on `/admin/notifications` (admin.write,
-   sends only to the signed-in user's own address, audited), then email one real invoice for
-   the full path including the PDF. **Do not switch the customer emails on until both have
-   been done** — they are off by default and should stay off until the sender is proven.
+**Verification.** 325 unit tests, 131 pgTAP assertions, `verify` green, all migrations + pgTAP
++ seed applied to a fresh Postgres 16 in-container, price table asserted at eight widths in
+`/design-preview` light and dark. **No live project** — no invoice has been generated with real
+jobs on it. First thing on a live project: apply 0018, set the usual prices at
+Invoices › Laundry prices, run one month, read the draft.
 
-Owner's C3 decisions (2026-08-05), already the shipped defaults: overdue chase **7 days past
-terms, weekly, three at most, friendly in tone**. `enabled` is still false.
+## Also live: hide the real records, reversibly (`0017_archive_records`)
+**Applied to `laundrymart-syd`, and the real records ARE archived (2026-08-16).** 1,154 rows
+hidden — 508 customers, 646 invoices. A signed-in user now sees only the demo tenant's 4
+customers and 1 invoice. Nothing deleted; every row still on disk with its `archived_at` stamp.
+Undo with `select public.set_records_archived('20000000-0000-4000-8000-000000000001', false);`
+called as a super_admin of that tenant. CLAUDE.md §3, §11 and the 2026-08-16 changelog.
 
-The remaining Part-4 forks are Phase D's, not C's: simple-mode default for the existing
-tenant, and "Stops" vs "Jobs" as the merged name.
+**The restore *button* is not deployed.** Only `Prod`/`Dev` deploy and this is a feature branch,
+so `/admin/data` does not exist in the running app yet. Merging the branch is what makes the
+undo self-service; until then it is a SQL call.
 
-All 12 earlier migrations applied — `0012_optional_inspection` went on 2026-08-05 (verified:
-`search_path=public` still pinned, `anon` still cannot execute the guard, no inspection check
-left in the body). The app code for it is on `Prod` — it rode the Phase A promotion (`6147b06`),
-whose CI was green on all three jobs.
+**The live project has two tenants and only one of them is real.** `Adelaide Towel Service`
+(`20000000-0000-4000-8000-000000000001`) holds 508 customers and 646 invoices and **no jobs**;
+`Harbour Commercial Laundry` is the demo seed. The real tenant also holds 1,515 supplier bills,
+192 suppliers, 268 GL accounts and 636 import-activation rows from branches not merged here —
+**those have no screens in this build, so they are already invisible and 0017 does not touch
+them.** Both logins (`darshan@`, `jay@ctnorwood.com.au`) are super_admin of *both* tenants.
 
-**Simplification redesign:** Phase A is merged to `Prod` (6147b06, CI green). **Phase B
-shipped** on branch `claude/laundrymart-phase-b-88p0e4`: the 3-step contract wizard (one post
-to `createAgreement`, which now inserts priced lines and derives the delivery pattern from
-`delivery_follows`), the four-field customer quick-create (site address → first location;
-embedded in wizard step 1 via the HTML `form` attribute; `createCustomer` honours
-`return_to`), dashboard "Plan my day" (shared `instantiateRoutes`, lands on the planner only
-when a run is crewless or a stop is on no run), the in-run "Something's wrong" capture
-(outbox `exception` record kind + `exception` media scope; photo path rides
-`exception_notes` as a `[photo:…]` marker via `src/lib/exceptions.ts`), and flash-toast fix
-links (`fail`/`done` take optional `{href,label}`; template re-validates same-site).
-No migrations. Verified: typecheck, lint, 88 tests, build, /design-preview screenshotted
-light+dark. Wizard gotcha for later: step fields hide rather than unmount, and none carry
-`required` — a hidden required field fails native validation unfocusable.
-**Simplification audit shipped to `Prod`** (`112fab7`, via `Dev` `d1abc68` with all three CI
-jobs green). Branch `claude/app-simplification-ux-audit-g94ki1`:
-`docs/SIMPLIFICATION-AUDIT.md` is the 13-part deliverable and the record of what changed.
-Navigation rebuilt as data (ten areas + tab strip, `sectionFor` longest-match, capability
-resolved together with href); `/search` (seven capability-gated `ilike` groups) replacing a
-search box that submitted to the customers list; `/help` glossary; `DataTable` stacks to
-labelled cards below `sm` and its scroll box is focusable; dashboard's hand-rolled table
-folded in via `rowClassName`; `COMMON_ROLES`/`ROLE_SUMMARY` on People; `/admin` retired to a
-redirect; 36px tap targets; copy pass. No migrations. Verified: typecheck, lint, 103 tests,
-build, `/design-preview` screenshotted light + dark + 390px.
-**Live bug this pass found and fixed:** a driver had no rail row for `/dashboard`, the page
-the auth gate redirects everyone to — the row required `reports.read`. `capability` on a nav
-item is now optional (= every signed-in member), because no single capability is held by all
-eleven roles.
+**Watch this:** `requireSession()` picks the membership with `.limit(1)` and **no ordering**,
+so which of the two tenants a user lands in is effectively arbitrary. Pre-existing, unrelated
+to this branch, and worth fixing before anyone relies on the demo/real split.
 
-Merged `Prod` (Phase C) through on the way to shipping. The two met in the navigation:
-C's notification settings screen is a tab under Settings, and its `/notifications` list
-stays off the nav map because the bell is its entry point.
+**The hiding is in the RLS policy, not in the queries** — `archived_at is null` appended to
+every policy on nineteen tables. `with check` carries it too, which is *why* archive/restore is
+`set_records_archived(t, archive)`, SECURITY DEFINER with the membership+role check inside:
+once a row is archived nobody signed in can see it, so nobody signed in can clear the flag.
+Call it on the **RLS-bound** client (needs a real `auth.uid()`), never the admin one.
 
-**Phase C shipped** on `claude/laundrymart-phase-c-notifications-p90wk1`, merged through `Dev`
-to `Prod`. `0013_notifications` adds `tenants.settings jsonb` and the `notifications` table.
-Writers: server actions (`notify()`, RLS client) for inspection-failed, vehicle off the road,
-stock written off as damaged, and a rejected offline batch; `/api/notifications/sweep` (cron,
-bearer token, service-role client, tenant_id from the iterated row) for invoice-past-terms and
-run-not-started. Idempotency is `(tenant_id, kind, subject_id, occurred_on) nulls not
-distinct`, and `occurred_on` is the day the *event* belongs to — the invoice's due date, the
-run's date — not the day the sweep ran, so five hits a day still notify once.
-Things worth remembering:
-- **Notification rows are forms, not links.** Next prefetches `<Link>` on hover and in the
-  viewport, and the destination marks the row read on the way through — links would empty the
-  bell for anyone who merely scrolled past. Same reason `openNotification` reads the href back
-  from the row instead of the posted form.
-- **`nulls not distinct` needs PG15+** and PostgREST's `on_conflict=` names columns only, so
-  an expression/coalesce index would have been unusable from supabase-js. Hosted is PG17.6.
-- **Supabase's default privileges grant `anon` table-level SELECT on every new public table**,
-  including this one. The local pgTAP box does not, so the local assertion passes while the
-  hosted grant exists. RLS is the boundary and denies it — verified by probe. Consistent with
-  every other table; do not "fix" it in isolation.
-- Overdue-reminder idempotency rides the **audit log**, not the notifications table, because a
-  reminder recurs; the marker is written only on success, so a bounce retries.
+**The rewrite is generic on purpose.** `apply_archive_policy()` reads each policy's expression
+out of `pg_get_expr` and wraps it, because this repo's `invoices` policies and the live
+project's are different shapes (§11) and restating either would have dropped the other's
+tenancy predicate. If you add a table to `archivable_tables()`, that is the only place to add
+it — the DDL loop, the stamper and the counts all read it, and `archive.test.ts` pins the
+screen's labels to it from both directions.
 
-Open item: the live DB has `0012_return_count` applied from unmerged branch
-`claude/warehouse-inventory-flow-psooyq`; merging that branch needs a migration-number
-reconcile (0013 is taken — that one gets renumbered, not this one).
+**The service-role client is the one reader policies do not apply to.** `/api/notifications/
+sweep` filters `archived_at` by hand for that reason. Any new admin-client read of customers,
+jobs or invoices needs the same filter.
+## Previously: roadmap Phase D — an owner can add their own people (no migration)
+Invite by email, remove access, three role presets. CLAUDE.md §10c and the 2026-08-15
+changelog entry have the detail; the parts worth carrying forward:
 
-**Consolidated invoicing is fixed** (same branch): `generateInvoices` now writes one invoice
-per customer per period carrying every contract's charges. It used to loop per contract while
-de-duplicating on customer + period, so contract two was skipped as "already billed" — every
-period, silently. Consolidating is the only correct shape, because the weighed collections
-and the damaged/missing linen are recorded against the *customer*: one invoice per contract
-would have billed both twice. Each contract's minimum/levy/surcharges still apply to its own
-services only; lines keep `agreement_id` (null for replacement charges); header fields the
-contracts disagree on fall back via `consolidate()` to the customer's own payment terms, or
-to null for a purchase order. Pure part lives in `src/lib/domain/invoicing.ts` with 12 tests.
-No migration. **Not yet exercised against real data** — worth generating a period on the demo
-tenant for a customer with two contracts before anyone bills a real month.
+**The invite lands on `/auth/invite`, never `/auth/callback`.** Supabase returns an accepted
+invitation with the session in the URL **fragment** (never sent to the server), and
+`inviteUserByEmail` cannot use PKCE because the inviting browser is not the accepting one — no
+code verifier is waiting. Pointing it at `/auth/callback` compiles, builds and dead-ends every
+invitee on "link was invalid or expired". `/auth/invite` is therefore **the only
+client-rendered screen in the app** and `src/lib/supabase/client.ts` the **only browser Supabase
+client** — and that one reads `process.env.NEXT_PUBLIC_*` directly, deliberately unlike the
+three server clients, because `lib/env` validates the service-role key and must not be bundled
+for the browser.
 
-Working through the Plantline design handoff in four stages. **Stages 1–3 are done** — theme,
-shell, dashboard, and now the dispatch planner and the billing two-pane (branch
-`claude/dispatch-planner-billing-pane-xte9qg`, commit `ab43335`, pushed; no PR opened). The
-handoff bundle lives in the scratchpad, not the repo; re-upload it in a new session.
+**Removing access opened a lockout that granting never could.** Two administrators could each
+demote or remove the other. `updateMembership` and `removeMember` both refuse the last
+`admin.write` holder, counted against `rolesWith("admin.write")` — derived, never hand-listed.
+A failed count reads as "not stranded", so a transient error refuses nothing.
 
-**Stage 4 is blocked on four decisions, not on code.** Customer portal / public tracking,
-Xero and bag scan each have a fork the user asked to be consulted on rather than guessed:
-1. *Tracking auth* — unguessable per-job link (no login) vs emailed one-time code vs full
-   Supabase Auth portal accounts. Whatever wins, the tracking page shows no dollar figures:
-   §10b already establishes that drivers and floor staff see none, and a link holder is less
-   trusted than either.
-2. *Xero push* — DRAFT (a human approves in Xero before anything reaches a customer) vs
-   AUTHORISED-and-we-still-send vs AUTHORISED-and-Xero-sends (retires the Resend path).
-3. *Xero return path* — pull payments back on a schedule, push-only, or webhook. Push-only
-   leaves the aging strip, the chase queue and the dashboard's overdue KPI permanently stale
-   once Xero starts collecting.
-4. *Bag scan* — durable bag registered to a customer (needs a `bags` table + issue/retire) vs
-   one-time label per collection vs just scanning existing item barcodes to speed up counts.
-Only the first Xero option and the durable-bag option imply new migrations.
+**Role presets are presentation.** `ROLE_PRESETS` carries a `role`, never a capability list;
+the database, `has_role()` and every policy know only the eleven roles. Replaced `COMMON_ROLES`.
 
-The theme was written against Tailwind 3 and ported to 4 during the merge from `Dev`: there is
-no `tailwind.config.ts` any more, everything lives in the `@theme` block of `globals.css`.
+**D2 (simple mode) was deliberately not built** — its premise was a 22-row rail, which the
+2026-08-05 audit and the 2026-08-14 workflow change already removed. The `ui_mode` slot in
+`tenants.settings` stays reserved. D3 and D4 shipped 2026-08-05, so Phase D is otherwise done
+and the roadmap's remaining work is Phase E (customer portal, public tracking, Xero, bag scan).
 
-Run workflow: the inspection is no longer a database gate (0012) and `routes.status` is now a
-capability separate from `routes.write`, held by dispatchers/managers plus `driver` and
-`customer_service`. Office and driver unload share `src/lib/routes/unload.ts`.
+**Untested end to end.** No Supabase credentials here, so the mail → redirect → fragment →
+password round trip has never run. **First thing on a live project: add `<origin>/auth/invite`
+to the allowed redirect URLs, then invite one real address and follow the link.**
 
-CI's DB job runs Postgres on the runner, not in a `services:` container — pgTAP is a
-server-side extension, so its `.control` file has to sit in the postmaster's own filesystem
-and apt on the runner cannot reach into a container.
+**The workflow simplification is done, applied to `laundrymart-syd` and merged into `Prod`.**
+CLAUDE.md §18 has the full entry; the short version:
 
-**Next up**
-0. **Click through `/orders` on the deployed app** once Vercel has built `Prod`. The schema
-   and the workflow are proven on the live project by SQL probe; the screens themselves have
-   never been rendered against real data from anywhere.
-1. Stage 4, once the four decisions above are made.
-2. **Enable asymmetric JWT signing keys** on the project so `getClaims()` verifies locally
-   instead of calling the auth server on every navigation (§2 assumes this).
-3. **Set `CRON_SECRET` and prove the Resend path** — see the two blockers at the top. The
-   provider has still never been reached from anywhere; templates and PDF render are
-   unit-tested, the wire is not.
-4. Photo retention: nothing prunes `run-media`. Per-tenant path prefixes make a lifecycle
-   rule straightforward.
-5. Consolidated invoices: fixed (see above), but still never exercised against real data —
-   generate a period for a demo customer holding two contracts before anyone bills a real month.
+```
+Office:  Job → Driver → Delivery Date → Assigned
+Driver:  My Runs → date → Confirm Load → Start Route → Open Job → Mark Delivered
+```
 
-**Toolchain decisions from the dependency merge**
-- TypeScript is pinned to **6**, not the 7 Dependabot offered: typescript-eslint has no TS 7
-  support, so ESLint dies with "typescript-eslint does not support TS 7.0".
-- ESLint is pinned to **9**, not 10: `eslint-config-next@16` depends on typescript-eslint 8,
-  which targets ESLint 9 — under 10 the parser throws `scopeManager.addGlobals is not a
-  function`. Revisit both when the lint stack catches up.
-- Next 16 needs `experimental.useTypeScriptCli` because TS no longer exposes the JS
-  compiler API Next used to call.
-- Tailwind 4 is CSS-first: there is no `tailwind.config.ts`, the theme lives in `@theme`
-  in `globals.css`, and PostCSS uses `@tailwindcss/postcss`.
-- `npm install eslint@^9.40.0` hangs for minutes before failing — 9.40 does not exist and
-  npm backtracks the whole tree. Check the version exists before pinning.
+**`0016_job_assignment` is the only migration.** Seventh status `assigned`;
+`assigned_driver_id` + `assigned_delivery_date` (+ `assigned_at`, `assigned_by`,
+`load_confirmed_at`, `load_confirmed_by`) on `laundry_orders`; four check constraints; two
+indexes; both guard functions rewritten; the driver RLS clause widened. **Nothing dropped** —
+`vehicle_inspections`, `daily_routes` and `jobs` are all intact.
 
-**Gotchas worth remembering**
-- A `"use server"` file may only export async functions — constants live in a sibling module
-  (`items/categories.ts`, `run/checklist.ts`, `inventory/states.ts`, `warehouse/stages.ts`,
-  `routes/planner/plan.ts`).
-- **`revalidatePath` matches on route and ignores a query string.** Three invoice actions were
-  passing `/invoices/<id>?ok=…`-shaped paths to it and quietly revalidating nothing.
-- Tailwind only emits utilities it can see in the source, so `text-${tone}` compiles to
-  nothing. Tone classes get written out in full (see the aging strip in `invoices/page.tsx`).
-- `/design-preview` renders the real `PlannerBoard`; a no-op inline `"use server"` function
-  satisfies its `action` prop, and a zero-arg function is assignable to `(fd: FormData) => …`.
-- Screenshot loop that worked here: `npm run build && npm start`, Playwright from the
-  scratchpad against `/opt/pw-browsers/chromium-1194/chrome-linux/chrome`, element shots of
-  `main > div.border-t`. `.env.local` needs only the three Supabase vars — copying
-  `.env.example` wholesale fails validation on the *optional* blocks (empty `SENTRY_DSN`,
-  `RESEND_API_KEY`, `INVOICE_FROM_EMAIL`).
-- Supabase's type inference gives up on `.select()` strings built with `+`; use `.returns<T>()`.
-- `tsconfig` sets `jsx: "preserve"`; `vitest.config.ts` must set `esbuild.jsx = "automatic"`
-  or a `.tsx` under test renders nothing and react-pdf fails with "props of null".
-- `throws_ok(sql, code, msg, desc)` — with three args the third is the expected *message*.
-  Pass `null` for the message on constraint violations.
-- The media path is the security boundary. Build it server-side from `session.tenantId`
-  (`mediaPath()`), and re-check stored keys with `isTenantPath()` before writing them to a row.
-- **`storage.objects` is owned by `supabase_storage_admin`.** `alter table … enable row level
-  security` fails with "must be owner of table objects" on the hosted project (RLS is already
-  on). `create policy` on it *is* granted to `postgres`. 0007 guards the ALTER accordingly.
-- **Direct `delete from storage.objects` is blocked** by `storage.protect_delete()`. Escape
-  hatch for genuinely orphaned metadata: `set local storage.allow_delete_query = 'true'`.
-- **Revoking a grant from `anon` does not revoke the implicit PUBLIC grant.** Postgres gives
-  EXECUTE to PUBLIC at function creation. Assert on `has_function_privilege('anon', …)`, never
-  on the grant statements. And note 42501 means both "permission denied" *and* whatever your
-  own `raise … errcode = '42501'` throws — do not use it alone to prove a lockout.
-- This container's network policy blocks `*.supabase.co`, so REST/Storage cannot be exercised
-  over HTTP from here. Verify by simulating roles in SQL (`set local role anon` + `set local
-  "request.jwt.claim.sub"`) through the MCP `execute_sql` tool instead.
+**Two records of the assignment, on purpose, and the guard is what makes that safe.**
+`assigned_driver_id`/`assigned_delivery_date` are the user-facing truth (what My Runs queries);
+`stop_id → jobs.route_id → daily_routes` is the operational placement the depot load, the run
+sheet and the inventory unload sweep still need. `guard_laundry_order_assignment` refuses every
+disagreement, including **a job on a crewed run that names no driver** — on somebody's route
+sheet, on nobody's My Runs. If you touch either side, that trigger is the thing to re-read.
 
-## Environment readiness
-- node v22.22.2; deps installed
-- `.env.local` has the live URL + anon key; service-role key is set on Vercel, still blank here
-- local Postgres 16 + pgTAP available; `npm run db:test` needs a clean `public` schema
-  (`drop schema public cascade; create schema public;` first) and Postgres may need
-  `service postgresql start`
+**Watch this one:** `laundry_orders` now has **two FKs to `drivers`** (`pickup_driver_id`,
+`assigned_driver_id`). Every `drivers(...)` embed on that table must be disambiguated by
+constraint name or PostgREST rejects it with PGRST201 at request time — compile-clean and dead
+in production, the same class as the 2026-08-05 ambiguous-embed outage. `/orders/:id` and
+`/orders` are both explicit now; a new one will not be unless you make it.
 
-Reminders: RLS on every tenant table (tenant_id); admin client must filter tenant_id;
-getClaims not getUser; region syd1; never re-add `grant execute … to anon`.
+**Runs only ever move forward, and the app is what enforces it.**
+`guard_route_transition` refuses a start without a load and a close without an unload, but it
+does **not** refuse a backwards move, and it does not protect `started_at` when the caller
+passes a value. So `stampDepotLoad` filters to runs still at the depot with a null
+`load_confirmed_at`, and `stampRouteStarted` filters to runs with a null `started_at` and a
+confirmed load. Without those, the ordinary late-work flow (assign after the van has gone →
+driver confirms again → starts again) walked a moving run back to `load_confirmed` and rewrote
+the recorded departure time. If you add another day-level action, filter it the same way.
+
+**Load confirmation is per job, not just per run.** Start Route dispatches only load-confirmed
+jobs, so work assigned after the driver loaded the van stays `assigned` rather than being swept
+out. `confirmRunJobsLoaded` (depot screen) and `confirmDayLoad` (My Runs) both write it, so the
+two screens cannot disagree about what is on the van.
+
+**Runs are invisible, not deleted.** `/routes/daily`, `/routes/planner`, `/routes/templates`
+still work and still hold history, but no rail row and no screen links to them; `nav.test.ts`
+asserts no navigation href starts with `/routes/` for any role. Drivers and Vehicles are under
+a new **Fleet** area. If a future feature needs run planning back, it is all still there.
+
+**Inspection is out of the workflow, data intact.** `submitInspection`,
+`inspection-checklist.tsx` and `checklist.ts` deleted; the table, the column, the two route
+statuses and the `inspection_failed` notification kind all stay for history.
+
+**0016 is live** (ledger `20260814084223`). Its **statement order is load-bearing** because it
+carries a backfill: transition guard replaced *before* the backfill, constraints and the
+assignment guard *after*. The three pre-existing jobs were backfilled from the run chain and
+verified; five guard probes were refused in one rolled-back block; no new security advisor.
+
+**Verification state.** 286 unit tests, 118 pgTAP assertions, typecheck/lint/build green,
+migrations + pgTAP + seed all applied to a fresh Postgres 16 in-container. My Runs screenshotted
+light and dark at ten widths, no overflow, no sub-36px targets. **Not opened against a live
+Supabase project** — this container has no credentials. The pre-existing sub-36px targets and
+320px/1024px overflow in `/design-preview` come from the **dispatch planner** fixture, which
+this branch does not touch.
+
+**Still true from before:** `@typescript-eslint/no-unused-vars` is an error and it earned its
+place again here — it caught six dead imports the moment the inspection stage came out.
+Compose-locally-commit-once payload schemas stay outside `"use server"` files with tests
+against what the producer really emits.

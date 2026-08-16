@@ -6,6 +6,16 @@
  * and `warehouse/stages.ts`.
  */
 
+import { z } from "zod";
+
+/**
+ * The same rule as `requiredDate` in `lib/actions`, restated rather than
+ * imported: this module is pulled into the *client* bundle by `planner-board`,
+ * and `lib/actions` reaches for `next/headers` to set the flash cookie. Importing
+ * it here builds clean and typechecks clean, then fails the bundle.
+ */
+const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use the date picker");
+
 /** Column id for the tray of stops that have no run yet. */
 export const UNASSIGNED = "unassigned";
 
@@ -98,4 +108,60 @@ export function averageWeights(
     if (bucket.count > 0) averages.set(customerId, bucket.total / bucket.count);
   }
   return averages;
+}
+
+/* ------------------------------------------------------------ the payload */
+
+/**
+ * The whole board as one posted field.
+ *
+ * A planner is a sequence of trial moves — committing each drag separately would
+ * mean the run sheet is briefly wrong after every one of them, and a
+ * half-applied plan is worse than an unapplied one. So the board composes
+ * locally and commits once, through a hidden JSON input.
+ *
+ * The schema lives here rather than in `actions.ts` so it can be asserted
+ * against the shape `PlannerBoard` actually posts. That contract being
+ * untestable — a `"use server"` module can export nothing but server actions —
+ * is how the identical arrangement on the job form shipped broken and stayed
+ * broken behind a green `verify`.
+ *
+ * Note the crew fields: the board holds them as `""` when nobody is picked, so
+ * they are `z.literal("")`, never `null`. `planner-board.tsx` types them
+ * `string` and `page.tsx` writes `route.driver_id ?? ""` — if either ever starts
+ * emitting `null`, `parseDispatchPlan` rejects it by name instead of silently
+ * dropping the crew.
+ */
+export const planSchema = z.object({
+  date: isoDate,
+  columns: z.array(z.object({
+    // The unassigned tray is a column with no route behind it.
+    routeId: z.union([z.string().uuid(), z.literal(UNASSIGNED)]),
+    jobIds: z.array(z.string().uuid()).max(500),
+    driverId: z.union([z.string().uuid(), z.literal("")]).optional(),
+    vehicleId: z.union([z.string().uuid(), z.literal("")]).optional(),
+  })).max(60),
+});
+
+export type DispatchPlan = z.infer<typeof planSchema>;
+
+/** The posted plan, or the sentence explaining why it could not be read. */
+export type PlanResult =
+  | { ok: true; plan: DispatchPlan }
+  | { ok: false; problem: string };
+
+export function parseDispatchPlan(raw: FormDataEntryValue | null | undefined): PlanResult {
+  let payload: unknown;
+  try {
+    payload = JSON.parse(typeof raw === "string" ? raw : "");
+  } catch {
+    return { ok: false, problem: "The plan could not be read. Reload the page and try again." };
+  }
+  const parsed = planSchema.safeParse(payload);
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    const where = issue?.path.length ? `${issue.path.join(".")}: ` : "";
+    return { ok: false, problem: `${where}${issue?.message ?? "The plan could not be read."}` };
+  }
+  return { ok: true, plan: parsed.data };
 }

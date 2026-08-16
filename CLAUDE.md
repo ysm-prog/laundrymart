@@ -39,12 +39,46 @@ The master spec names a .NET 9 Web API; this build follows the supplied skeleton
   auto-dismisses, errors stick) then deletes it. The one
   URL-param survivor is the auth gate's `?error=forbidden`, set during render where a cookie
   cannot be. `/api/sync` stays the one API exception for the offline outbox.
+  **A rejection redirects, so the browser's copy of the form is gone**: an action that refuses
+  a post is responsible for handing back the answers that cost real work to give. The job form
+  does this for the customer, via the `?customer=` parameter its quick-create already uses.
+- **`optionalText`/`optionalUuid`/`optionalDate` accept `null` as well as `""`.** An empty HTML
+  input posts `""`, but a field composed in the browser and posted as JSON — the
+  compose-locally-commit-once hidden field used by the job form, the contract wizard and the
+  planner — spells the same absence `null`, because `JSON.stringify` drops `undefined` keys.
+  `z.string().optional()` refuses `null`, and one such field took down a whole array parse.
+- **Every compose-locally-commit-once payload schema lives outside its `"use server"` file**,
+  in `orders/order-items.ts`, `agreements/wizard-lines.ts` and `routes/planner/plan.ts`, each
+  with tests written against the shape its producer really emits. This is not tidiness: a
+  `"use server"` module can export nothing but server actions, so these contracts used to be
+  unreachable from a unit test — and **two of the three shipped broken and stayed broken behind
+  a green `verify`** (the job form's items, the planner's whole board). A new hidden JSON field
+  goes in a plain module with a test, never in the action. Mind what such a module imports:
+  `plan.ts` is in the client bundle, so it may not reach `lib/actions` (→ `next/headers`), and
+  that failure shows up only at `next build`.
+- **The assignment model is `Job → Driver → Delivery Date`, and it lives on the job.**
+  `laundry_orders.assigned_driver_id` + `assigned_delivery_date` (0016) are the user-facing
+  truth and what My Runs queries. `stop_id → jobs.route_id → daily_routes` (0015) survives as
+  the *operational placement* — the depot load, the run sheet and the inventory unload sweep are
+  all built on it — and is resolved by the server action, never chosen by a person. No run code
+  appears in any office or driver screen. Two copies of one fact is normally the bug 0015 was
+  written to avoid, which is why the guard trigger refuses every way they could contradict.
 - Pure domain logic lives in `src/lib/domain/` with no database access: the service calendar,
   pricing, recurring invoicing (`invoicing.ts` — one contract's charges, and the
-  `consolidate()` rule for header fields two contracts disagree on), ABN validation, date
-  helpers, the laundry-job workflow (`laundry-orders.ts`) and the business-timezone
-  conversion (`timezone.ts`). Unit-tested; shared by preview, route generation, invoicing and
-  the jobs module so they cannot diverge.
+  `consolidate()` rule for header fields two contracts disagree on), laundry-job billing
+  (`laundry-billing.ts` — a customer's effective price list, and one invoice line per item of
+  laundry), ABN validation, date
+  helpers, the laundry-job workflow (`laundry-orders.ts`), the run-assignment rules
+  (`run-assignment.ts`) and the timezone conversion (`timezone.ts`). Unit-tested; shared by
+  preview, route generation, invoicing, the jobs module and My Runs so they cannot diverge.
+- **Two timezones, on purpose.** `BUSINESS_TIMEZONE` is `Australia/Sydney` and is what
+  composes a stored instant (`received_at`), an invoice period and a notification's
+  `occurred_on` — every row written since 0001 carries that decision, so it does not move.
+  `OPERATIONS_TIMEZONE` is `Australia/Adelaide` and is the *operational day*: My Runs' default
+  date, its arrows, and the day boundary a `timestamptz` is filtered against when answering
+  "what happened on the 14th". Both live in `timezone.ts` and both read their offset out of
+  `Intl`, so neither hard-codes +9:30/+10:30/+10/+11. `getAdelaideDayRange()` is the one to
+  reach for when filtering a timestamp column by an operational day.
 - Invoice PDFs render server-side with `@react-pdf/renderer` (`src/lib/pdf/`), streamed from
   `/api/invoices/:id/pdf` and attached to the Resend email. `serverExternalPackages` keeps the
   renderer out of the client bundle.
@@ -69,17 +103,42 @@ Resource-scoped beyond tenancy:
   `drivers.id` via `current_driver_id()`.
 - `pickups` / `deliveries` / `*_lines` / `vehicle_inspections`: scoped through the parent's
   own RLS, so a driver never reaches another driver's paperwork.
+- `laundry_orders` (+ its items and activity, through the parent): tenant-wide for office
+  roles; for a **driver-only** member, narrowed by 0015/0016 to jobs **assigned to them** or
+  sitting on a stop of one of their own runs. My Runs is the first screen to give a driver a reason to read the table, and
+  a tenant-wide policy would have handed them every customer's laundry through PostgREST at
+  the same moment. No non-driver role's predicate changed.
 - `invoices` and friends: readable by any member, writable only by
-  super_admin / operations_manager / finance / dispatcher.
+  super_admin / operations_manager / finance / dispatcher. `laundry_prices` (0017) takes the
+  same shape and the same four roles — a price list is a finance record, and
+  `apply_tenant_policy` is deliberately *not* used on it because its permissive `for all`
+  policy would OR with the role gate and let any member re-price the work.
 - `storage.objects` in the `run-media` bucket: the object key starts with the tenant id, and
   the policies read it back through `media_tenant()` → `is_member()`. The path is the boundary,
   so it is always written from the session and never from the request.
+- **Archived records are invisible to everyone** (0017). Nineteen tables — a customer and the
+  paperwork hanging off one — carry `archived_at`, and every policy on them ends
+  `and archived_at is null`. Putting it in the policy rather than in the queries is what makes
+  it true of the fifty-first query as well as the first fifty, and of anything reaching
+  PostgREST directly. Two consequences that shape the code: `with check` carries the clause
+  too, so **no ordinary session can archive or restore a row** — the entry point is
+  `set_records_archived()`, SECURITY DEFINER, membership- and role-checked inside, called on
+  the caller's *RLS-bound* client so `auth.uid()` is real; and **the service-role client is the
+  one reader policies do not apply to**, which is why `/api/notifications/sweep` filters
+  `archived_at` by hand. The policy rewrite is generic — `apply_archive_policy()` reads each
+  policy's existing expression out of the catalogue and wraps it — because this repo and the
+  hosted project disagree about what the `invoices` policies say (§11), and re-stating either
+  shape would have dropped the other's tenancy predicate.
 - `notifications`: RLS scopes them to the tenant, as everywhere. The `audience` capability on
   each row narrows them further to the people who can act on it — but that is a UI filter
   applied in `src/lib/notifications/query.ts`, layered on top of RLS and never instead of it.
 
 Roles and capabilities are declared once in `src/lib/roles.ts` and drive the nav, page guards
-and action guards. `orders.*` follows the same split as routes: `write` creates and edits a
+and action guards. `ROLE_PRESETS` names three of the eleven in an owner's words — Owner
+(`super_admin`), Office (`operations_manager`), Driver — and is **presentation only**: a preset
+carries a `role`, never a capability list, so there is exactly one answer to "what can this
+person do". `rolesWith(capability)` is derived, and is what the People screen uses to refuse the
+change that would leave a tenant with nobody holding `admin.write`. `orders.*` follows the same split as routes: `write` creates and edits a
 laundry job, `status` walks it through the workflow (the plant floor advances work it does not
 plan, so `warehouse_operator` holds `status` without `write`), and `manage` is the supervisor's
 set — cancel a job, backdate a receipt, edit one already completed. `driver` holds none of
@@ -98,20 +157,49 @@ run — and to `customer_service`, so a stuck run is not waiting on a dispatcher
   writes the ledger row in one transaction.
 - `recalculate_invoice()` keeps invoice totals consistent with lines and payments.
 - **Recurring invoicing is one invoice per customer per period**, carrying every contract
-  they hold. Not a preference: the weighed collections and the damaged/missing linen are
-  recorded against the *customer*, so one invoice per contract would bill the same
-  kilograms and the same lost towels once per contract. Each contract's minimum, levy and
-  surcharges are still computed against its own services only; every line keeps its
-  `agreement_id` (null for replacement charges, which belong to no contract).
-- **A laundry job's six statuses are enforced by `guard_laundry_order_transition`**, not just
+  they hold **and every laundry job they had completed in it**. Not a preference: the weighed
+  collections and the damaged/missing linen are recorded against the *customer*, so one
+  invoice per contract would bill the same kilograms and the same lost towels once per
+  contract. Each contract's minimum, levy and surcharges are still computed against its own
+  services only; every line keeps its `agreement_id` (null for replacement and laundry
+  charges, which belong to no contract) and a laundry line keeps its `laundry_order_id`.
+  **A customer with no contract at all is invoiced when they handed laundry over the counter**,
+  which is why contracts are no longer a precondition of the run.
+- **Laundry is priced per customer, and a missing price is reported rather than billed at
+  zero.** `laundry_prices` (0017) holds one row per kind of laundry either for a customer or
+  for the tenant (`customer_id is null`); the customer's own row wins, the default is the only
+  fallback, and there is no third. A kind of laundry nobody has priced comes back from
+  `buildLaundryCharges` as *unpriced*, with the reason and the job number, and the monthly run
+  says so in a toast that sticks — a silently missing line looks exactly like laundry that was
+  never taken in. A bulk lot bills by the bag when a bag rate is set and the bags were counted,
+  otherwise by the counter's estimate; a lot with neither cannot be priced and says so.
+- **A laundry job is billed exactly once.** `invoice_lines.laundry_order_id` is the record of
+  it: the generator skips any job already carried on an invoice that is not void, so a job
+  finished near a period boundary cannot be billed by two runs. Voiding an invoice makes its
+  work billable again, which is what voiding is for. Archiving (0017) hides a job and the
+  invoice lines that bill it in the same call, so the two halves of this check can never
+  disagree — the generator reads both through the RLS-bound client.
+- **A laundry job's seven statuses are enforced by `guard_laundry_order_transition`**, not just
   by the screen: no skipping the middle, no going backwards, `completed`/`cancelled` terminal,
-  a customer pickup never reaches `out_for_delivery`, and a delivery job cannot be completed
-  off the shelf. The trigger stamps `completed_at`/`cancelled_at`, so no client can record a
+  a customer pickup never reaches `assigned` or `out_for_delivery`, a delivery job must be
+  assigned to a driver before it goes out, and it cannot be completed off the shelf. The one
+  backwards edge is `assigned → ready_for_delivery`, which is Remove Assignment: the trigger
+  clears the four assignment columns and the stop with it, so no half-assignment can survive. The trigger stamps `completed_at`/`cancelled_at`, so no client can record a
   finished job with no finishing time. Overdue is **not** among the statuses — it is
   `due_date < today and status not in (completed, cancelled)`, computed every time it is
   asked, where `due_date` is a generated column (delivery date, or collection date for a
   pickup job). A job's laundry list is replaced through `save_laundry_order_items()`, one
   transaction, because a delete-then-insert over PostgREST has a window with no items in it.
+- **A job is assigned to a Driver and a Delivery Date, and the two records of that cannot
+  disagree** (`guard_laundry_order_assignment`, 0016). Eligibility first: a customer pickup is
+  refused outright, so is a job still in the plant and a completed or cancelled one, the driver
+  must be an active driver of the same tenant, and the stop has to belong to the same tenant
+  *and* the same customer. Then coherence: the stop's run must name the same driver and the
+  same date, and — the case worth naming — **a job on a crewed run must name a driver**, since
+  otherwise it sits on somebody's route sheet and on nobody's My Runs. Three check constraints
+  hold the rest: `assigned` requires both columns, both columns require a non-ready status, and
+  a driver without a date is refused. The guard fires only when the stop or the assignment
+  changes, so completing an assigned job never re-runs eligibility.
 - A production batch cannot start with an empty manifest, cannot be completed except from
   `ready_for_dispatch`, and cannot be reopened once finished (`guard_batch_transition`). Its
   manifest freezes when it leaves receiving — only `rejected_quantity` and notes stay writable
@@ -123,15 +211,33 @@ Feature branch → `Dev` → `Prod`. CI (`Prod`/`Dev`) runs verify, gitleaks and
 branches deploy. Never force-push `Prod`.
 
 ## 6. Routes
-`/` landing · `/login` · `/offline` · `/api/sync` · `/api/media` · `/api/invoices/:id/pdf` ·
+`/` landing · `/login` · `/auth/callback` · `/auth/invite` · `/offline` · `/api/sync` ·
+`/api/media` · `/api/invoices/:id/pdf` ·
 `/api/notifications/sweep` (cron, bearer-token authed, no session)
-`(app)`: `/dashboard` · `/customers[/new|/:id|/:id/edit]` · `/agreements[/new|/:id]` ·
+`(app)`: `/dashboard` · `/my-runs[/jobs/:id]` ·
+`/customers[/new|/:id|/:id/edit|/:id/prices]` · `/agreements[/new|/:id]` ·
 `/orders[/new|/:id|/:id/edit]` ·
 `/items[/:id]` · `/drivers` · `/vehicles` · `/routes/templates[/:id]` ·
 `/routes/daily[/:id|/:id/sheet]` · `/routes/planner` · `/jobs[/:id]` ·
 `/operations/{pickups,deliveries,exceptions}` · `/run` · `/warehouse[/:id]` · `/inventory` ·
-`/invoices[/:id]` · `/reports` · `/search` · `/help` · `/notifications` ·
-`/admin` (redirects) `[/depots|/users|/holidays|/audit|/notifications]`
+`/invoices[/:id|/prices]` · `/reports` · `/search` · `/help` · `/notifications` ·
+`/admin` (redirects) `[/depots|/users|/holidays|/audit|/notifications|/data]`
+
+**There is no user-facing Runs module.** `/routes/daily`, `/routes/planner` and
+`/routes/templates` still exist, still work and still hold their history, but **no rail row
+points at them** and no office or driver screen links to one. Nobody creates, opens or manages
+a run: a job is given straight to a driver and a date, and the `daily_routes` row underneath is
+found-or-created by `assignJobToDriver`. `nav.test.ts` asserts, for every role, that no
+navigation href starts with `/routes/`. Drivers and Vehicles were tabs under the old Runs area
+and are not run management, so they moved to their own **Fleet** area rather than vanishing
+with it.
+
+**"My Runs" (`/my-runs`) is the driver's whole workspace**: the jobs assigned to them for a
+date they choose, grouped To deliver / Out for delivery / Completed, with Confirm Load and
+Start Route in front of them. Gated on `routes.read` so a manager can open it for a driver.
+`/run` survives as the second tab ("At the depot") because it owns the offline outbox, the
+service worker and the unload inventory sweep, and is the one screen that must work with no
+signal.
 
 **Navigation is data** (`src/lib/nav.ts`): eleven areas, each with optional `children`
 rendered as a tab strip (`SectionNav` in the layout, not per page). An area is visible
@@ -144,7 +250,11 @@ single capability is held by all eleven roles. **"Jobs" (`/orders`) and "Stops" 
 row**: a stop is a visit on a driver's run, a job is a customer's laundry from counter to
 hand-back. The route path is `/orders` because 0004 already took `/jobs` — the same
 label-is-not-the-route arrangement as Contracts (`/agreements`) and Linen (`/inventory`), and
-`/help` defines both words. `/notifications` (the bell's list) is
+`/help` defines both words. **Invoices is now an area with two tabs** — the register and
+`/invoices/prices`, the tenant's laundry price list — because what the monthly run charges is a
+billing decision, not a setting. A customer's own prices live on their record
+(`/customers/:id/prices`), reached from the customer page rather than from a tab, since it is
+one customer's exception to the list. `/notifications` (the bell's list) is
 deliberately off the map — the bell is its entry point, so it needs no rail row and
 renders no tab strip. Tested in `src/lib/__tests__/nav.test.ts`.
 
@@ -173,14 +283,36 @@ renders no tab strip. Tested in `src/lib/__tests__/nav.test.ts`.
 - `0014_laundry_orders` — the counter's job: `laundry_orders` (+ generated `due_date`),
   `laundry_order_items`, `laundry_order_activity`, the transition and cancelled-items guards,
   and `save_laundry_order_items()` for the atomic child-set replace. Adds nothing to 0001–0013.
+- `0015_run_assignment` — `laundry_orders.stop_id` (the one link between the counter's Job
+  and a driver's Stop), its two indexes, three new `laundry_order_activity` verbs, the
+  eligibility guard, and the driver clause on the three laundry policies. One column; no table.
+- `0016_job_assignment` — the seventh status `assigned`; `assigned_driver_id`,
+  `assigned_delivery_date`, `assigned_at`, `assigned_by`, `load_confirmed_at`,
+  `load_confirmed_by` on `laundry_orders`; four integrity constraints; two indexes; rewritten
+  transition and assignment guards; the driver RLS clause widened to include a direct
+  assignment. **Adds no table and drops nothing** — `vehicle_inspections`, `daily_routes`,
+  `jobs` and every historical row on them are untouched.
+- `0018_laundry_pricing` — `laundry_prices` (one row per kind of laundry per customer, or per
+  tenant when `customer_id is null`; unique `nulls not distinct`, so the default list cannot
+  hold two prices for one kind) and `invoice_lines.laundry_order_id`, the billed-once link.
+  Role-gated writes like 0006. **Adds no trigger, drops nothing and touches no existing row.**
+  It is deliberately *not* in `archivable_tables()` (0017): a price list is configuration, not
+  a customer's paperwork, and it carries no name or address to hide.
+- `0017_archive_records` — `archived_at` + a partial index on the nineteen customer/job/
+  invoice record tables, and `archived_at is null` appended to every policy already on them.
+  Adds no table, drops nothing, and changes no row until somebody asks. The three functions
+  are `archivable_tables()` (the list, stated once and read by both the DDL loop and the
+  stamper), `set_records_archived(t, archive)` and `archived_record_counts(t)`.
 - `0013_notifications` — `tenants.settings jsonb` (AD-3) and the `notifications` table
   (AD-4). Beware the numbering drift: the unmerged branch
   `claude/warehouse-inventory-flow-psooyq` carries its own `0012_return_count.sql`, which
   has to be renumbered when it lands.
 
 Proofs in `supabase/tests/`: `rls_isolation`, `rls_coverage`, `driver_scope`,
-`business_rules`, `media_scope`, `warehouse_rules`, `notifications_scope`, `laundry_orders`
-(83 assertions). Demo data in `supabase/seed.sql` — not applied by migrations.
+`business_rules`, `media_scope`, `warehouse_rules`, `notifications_scope`, `laundry_orders`,
+`run_assignment`, `archive_records`, `laundry_pricing` (156 assertions). Demo data in
+`supabase/seed.sql` — not
+applied by migrations.
 
 **Do not re-add `grant execute on all functions in schema public to anon`.** That
 boilerplate in 0002–0009 is what exposed every SECURITY DEFINER helper on
@@ -237,6 +369,13 @@ vitest 4. Two pins are held back on purpose: TypeScript **6** (typescript-eslint
 support TS 7) and ESLint **9** (`eslint-config-next@16` depends on typescript-eslint 8,
 which targets ESLint 9). Next 16 needs `experimental.useTypeScriptCli` and the auth gate
 lives in `src/proxy.ts`, not `src/middleware.ts`.
+
+`eslint.config.mjs` adds one rule on top of `eslint-config-next`:
+**`@typescript-eslint/no-unused-vars` as an error**, because a value fetched and then dropped
+is how `createOrder` drew a job number, never wrote it, and broke every job creation past a
+green typecheck — `.insert()` takes an untyped object, so `tsc` cannot see a missing column.
+The plugin instance is pulled back out of the Next config rather than declared as its own
+dependency, keeping the pins above the only source; it throws if that registration moves.
 
 ## 10b. Design system
 **Electro Services.** Replaced the Plantline language (flat, square, near-black chrome,
@@ -311,13 +450,73 @@ that scroller is their containing block. `sr-only` is `position:absolute`, so an
 inside a horizontally scrolling board stretched the document ~230px on a phone; the planner
 column carries `relative` for exactly that reason.
 
+## 10c. Invitations
+`/admin/users` invites by email. `inviteUserByEmail()` on the service-role client creates the
+login (Supabase sends the mail, so this needs no Resend configuration); the **membership** row
+goes in through the caller's own RLS-bound client, so which tenant somebody joins is still the
+database's decision. An address that already has a login is resolved with
+`generateLink({type:"magiclink"})`, which returns the user without sending anything.
+
+**The invite lands on `/auth/invite`, not `/auth/callback`.** Supabase bounces an accepted
+invitation back with the session in the URL **fragment**, which never reaches the server, and
+`inviteUserByEmail` cannot use the PKCE `?code=` flow because the browser that sent the
+invitation is not the one that opens it — there is no code verifier waiting. So `/auth/invite`
+is **the one client-rendered screen in the app**, and `src/lib/supabase/client.ts` is the one
+browser Supabase client (it reads `process.env.NEXT_PUBLIC_*` directly, because `lib/env`
+validates the service-role key and must not enter the client bundle). It handles all three
+shapes a link can arrive in — fragment, `?token_hash=`, `?code=` — and strips the tokens out of
+the address bar once the session is stored.
+
+**Deployment note:** the Supabase project must list `<origin>/auth/invite` under its allowed
+redirect URLs, or invitations fall back to the project's Site URL. The origin is read off the
+request, so a preview deployment invites into itself.
+
+Removing access deletes the membership and nothing else: the login survives (it may be their
+access to another tenant), and every row they wrote still points at them. Both removal and a
+role change refuse the last `admin.write` holder — with two administrators each could otherwise
+demote the other and lock the tenant out of its own People screen.
+
 ## 11. Hosted project
 `laundrymart-syd` · ref `xujhwljrmogenhvqpkrf` · ap-southeast-2 (Sydney) · org `ysm-prog`.
-Deployed on Vercel at `ats.coreit.com.au`. All migrations through `0014_laundry_orders`
-applied (0014 on 2026-08-13, verified by rolled-back probe: the full workflow, the three
-guards, `anon` reading nothing, and no new security advisor). Note the live project also
-carries `0012_return_count`, `purchases`, `supplier_payments` and `import_helpers` from
-branches not yet merged here, so `supabase/migrations/` is not a complete picture of it.
+Deployed on Vercel at `ats.coreit.com.au`. All migrations through `0017_archive_records`
+applied (0014 on 2026-08-13, 0015 and 0016 on 2026-08-14, 0017 on 2026-08-16), each verified by
+rolled-back probe rather than trusted.
+
+**There are two tenants and only one of them is real.** `Adelaide Towel Service`
+(`20000000-…-000000000001`) is the business: 508 customers and 646 invoices, no laundry jobs
+yet. `Harbour Commercial Laundry` (`10000000-…`) is the demo seed. Both logins
+(`darshan@`, `jay@ctnorwood.com.au`) are `super_admin` of **both**, and `requireSession()`
+picks a membership with `.limit(1)` and **no ordering** — so which of the two a person lands in
+is effectively arbitrary. Pre-existing, and worth fixing before anything depends on the split.
+
+**The real tenant's records are archived as of 2026-08-16** (§18): 1,154 rows hidden, nothing
+deleted, restored by `set_records_archived('20000000-…-000000000001', false)`.
+
+The live project also carries real supplier data from the unmerged purchases branch — 1,515
+supplier bills, 192 suppliers, 268 GL accounts, 636 import-activation rows. **No screen in this
+build reads any of it**, so it is already invisible in the deployed app and 0017 leaves it
+alone. If those screens ever land, that data needs its own decision. For **0016** that was: the three existing jobs backfilled from the run
+chain and read back (LJ00004/5 `ready_for_delivery → assigned` under Sam Okoye for 16 Aug,
+LJ00003 keeping its driver as the record of who delivered it); five guard probes all refused
+in one rolled-back block — Assigned with no assignment data, a driver with no date, ready
+straight to out-for-delivery, a job on a crewed run naming no driver, and reopening a completed
+job; and no new security advisor (still the same 7 warnings — 5 documented SECURITY DEFINER
+helpers, `park_number_sequence` from another branch, and the auth leaked-password toggle).
+
+**0016 carries a backfill, so its statement order is load-bearing**: the transition guard is
+replaced *before* the backfill (which performs `ready_for_delivery → assigned` and needs the
+new function to permit it), and the check constraints and the new assignment guard come
+*after* it, over data that is already consistent. Re-running it against an empty database is
+a no-op on that UPDATE; re-ordering it would break the next project it is applied to.
+
+**The number 0015 is used twice against this project.** The live ledger already carried
+`0015_import_activation` and `0015_import_activation_grants` (applied 2026-08-13 from an
+unmerged branch) before `0015_run_assignment` went on. Supabase keys migrations on their
+timestamp, not their name, so nothing collided — but when that branch lands here there will be
+two `0015_*` files in `supabase/migrations/` and one of them has to be renumbered. The live
+project also carries `0012_return_count`, `purchases`, `supplier_payments` and
+`import_helpers` from branches not yet merged here, so `supabase/migrations/` is still not a
+complete picture of it.
 Demo tenant seeded
 (`Harbour Commercial Laundry`); two `super_admin` logins, one also linked to the seeded driver.
 Sign-in verified end to end 2026-08-05.
@@ -340,7 +539,11 @@ Both are compositions over existing tables — neither added a migration.
   action both obey (a stop is frozen once `progress_status` leaves `not_started`; a closed or
   cancelled run neither gains nor loses stops) — the browser enforces them so a plan is never
   composed that the action will reject, and the action re-enforces them because the browser is
-  not the boundary. The load meter averages the customer's own recent weighed collections and
+  not the boundary. `plan.ts` also owns the **posted payload** (`planSchema` /
+  `parseDispatchPlan` / `DispatchPlan`), and `toPlan` in the board is typed to that inferred
+  type — because the two disagreed for the feature's whole shipped life: the board sent `id`
+  and no date, the schema wanted `routeId` and a date, and not one plan was ever applied.
+  The load meter averages the customer's own recent weighed collections and
   says how many stops it actually covers; there is no promised weight per stop in the schema,
   so it never implies one.
 - `/invoices` is the register + working pane. The left list is a chase queue, the right pane
@@ -351,6 +554,431 @@ Both are compositions over existing tables — neither added a migration.
   are edited and invoices voided.
 
 ## 18. Changelog
+### 2026-08-16 · The counter's laundry is billed: monthly invoices, at each customer's price
+The Jobs module has recorded what a customer handed over since 0014 and carried **no money at
+all** — `laundry_order_items` has a quantity and no price, and the monthly run billed contracts
+only. So a customer who simply drops laundry at the counter was never billed by the app, and a
+customer with a contract was billed for the pattern but not for the extra bag they brought in.
+One migration (`0018` — renumbered on the way in, because `Prod`'s archive work had taken
+0017), no new role, no new capability, nothing dropped.
+
+- **A price list, per customer, with the tenant's own list behind it.** `laundry_prices` holds
+  one row per kind of laundry either for a customer or for the tenant (`customer_id is null`).
+  One table rather than two: two would have doubled every read and left "which one wins" to be
+  re-decided at each call site. Its own table rather than a column on `items`, for the reason
+  0014 already gave for the item vocabulary — `items` is the linen *the laundry owns and rents
+  out*, and a counter hand must not have to create a stock record before they can take in a bag
+  of sheets. The unique index is `nulls not distinct`, because under the default rule the
+  default list — the row every unpriced customer falls back to — is precisely the one that
+  could have been duplicated, and which copy answered would have depended on the plan.
+- **A missing price is reported, never billed at nothing.** `buildLaundryCharges` returns the
+  lines it could price *and* the items it could not, each with the reason and the job number,
+  and the run says so in a toast that sticks with a link to the price list. This is the whole
+  safety property: a silently missing line looks exactly like laundry that was never taken in.
+  The form obeys the same rule — **blank clears the row, it does not store zero** — which is why
+  the parser lives in `prices/price-form.ts` with tests rather than inside the action.
+- **A bulk lot is billed on what was actually measured**: by the bag when a bag rate is set and
+  the bags were counted, otherwise on the counter's estimate at the piece rate. 0014 allows a
+  lot recorded as a note and nothing else; that one cannot be priced and says which job it is.
+- **Contracts are no longer a precondition of the monthly run.** It used to refuse the whole
+  period with "No active contracts cover that period", which would now hold back every
+  counter-only customer. The run is one invoice per customer as before, carrying contract
+  charges, replacement charges and laundry lines together.
+- **A job is billed exactly once**, marked by `invoice_lines.laundry_order_id`: the run skips
+  any job already on an invoice that is not void, so a job completed near a period boundary
+  cannot be billed by two runs, and voiding an invoice makes its work billable again.
+- **Two screens, both gated on `invoices.read`/`invoices.write`** — the same capability as the
+  invoices the prices produce, and the same four roles 0018 lets touch the table. Invoices
+  gained a "Laundry prices" tab; a customer's own list is a button on their record. The counter
+  can read prices and cannot change them, which is asserted against the database rather than
+  trusted to the screen.
+- **The save is read → update / insert / delete, not an upsert.** Inferring a `nulls not
+  distinct` index through PostgREST's `on_conflict=` is the sort of thing that works in testing
+  and surprises in production; diffing also means a save never has a window with no prices in it.
+- 325 unit tests (was 297; 19 for the billing rules, 9 for the form parser) and **131 pgTAP
+  assertions (was 118)**. `verify` green; every migration applied to a fresh Postgres 16 with
+  the whole pgTAP suite and the seed run against it. The price table was added to
+  `/design-preview` and asserted light and dark at 320/360/375/390/430/768/1024/1440 — no
+  console errors and nothing in it overflows (the 16px at 320 and 1024 is the pre-existing
+  dispatch-planner fixture, unchanged by this branch).
+
+**Not verified against a live project.** This container has no Supabase credentials, so no
+invoice has been generated with real jobs on it. **Before trusting it: apply 0018, set your
+usual prices at Invoices › Laundry prices, then run one month and read the draft.**
+### 2026-08-16 · Hide the real records, and put them back
+`Adelaide Towel Service` holds 508 real customers and 646 real invoices on the live project,
+and they needed to be out of sight for now without being lost. So: **an archive, not a
+delete.** One migration (`0017`), one screen, no new table, no new role and no new capability.
+
+- **The hiding is a policy, not a filter.** Nineteen tables gain `archived_at`, and every
+  policy already on them gains `and archived_at is null`. A filter added to the fifty-odd
+  queries that read customers, jobs and invoices is a filter somebody forgets on the
+  fifty-first, and it would do nothing at all about a session talking to PostgREST directly.
+  In the policy it is true everywhere, retroactively, including in code not written yet.
+- **The policy rewrite reads the catalogue rather than restating the policies.** This repo's
+  `invoices` still carries 0006's inline `is_member`/`has_role`; the live project's was
+  replaced with `can_read_billing`/`can_write_billing` by a branch that has not landed (§11).
+  Writing new policies would have silently dropped whichever shape was not in front of me and
+  handed somebody another tenant's invoices. `apply_archive_policy()` pulls each policy's
+  expression back out with `pg_get_expr` and wraps it, so every tenancy, role and
+  driver-scoping predicate keeps applying exactly as it did — verified against the live shape
+  and the repo shape both.
+- **`with check` carries the clause too, and that is what makes restore a database function.**
+  Once a row is archived nobody signed in can see it, so nobody signed in can clear the flag
+  either — an invisible row cannot be updated back into view. Hence
+  `set_records_archived(t, archive)`: SECURITY DEFINER, with the membership and role check
+  written the way 0010 wrote `next_number()`'s, and called on the caller's **RLS-bound**
+  client so `auth.uid()` is a real person. Calling it on the admin client would have left the
+  tenant id as whatever the caller passed.
+- **The one reader policies do not apply to is the service-role client**, so the overdue-invoice
+  sweep filters `archived_at` by hand. Without it a tenant that hid its records would still be
+  chased about them, and the notification would link to an invoice nobody can open.
+- **Configuration is not business records.** Sites, linen types, vehicles, drivers, people,
+  public holidays, route templates and inventory pools are all left alone: an operator who
+  hides last year's customers must come back to an app that still knows how they work. The
+  boundary is asserted from both directions in `archive.test.ts`.
+- **The screen has to prove the records still exist**, or an archive looks exactly like a
+  delete. `/admin/data` (Settings → Your records, `admin.write`) reads
+  `archived_record_counts()` — which can see the hidden rows precisely because they are hidden
+  — and says how many of each are waiting. `ConfirmSubmit` states the consequence, and its
+  eyebrow reads "This can be undone" rather than the default "Cannot be undone", because here
+  that is the fact that matters.
+- **Known boundary, stated rather than papered over:** `daily_routes` is not archived, only
+  the stops on it. Runs carry no customer and no screen links to one (§6), so nothing surfaces
+  — except that the late-run sweep could still raise a notification about an emptied run. The
+  live tenant has no runs at all, so this is theoretical today.
+- 304 unit tests (was 297) and **143 pgTAP assertions (was 118)**. `verify` green; every
+  migration applied to a fresh Postgres 16 with the whole pgTAP suite and the seed on top of
+  it — the existing nine proofs pass unchanged, which is the check that mattered, since the
+  rewrite touched policies they own.
+
+**Applied to `laundrymart-syd`, and the real records are archived as of 2026-08-16.** Rehearsed
+first the way §11 requires: the whole migration plus an archive, a read-back as
+`darshan@ctnorwood.com.au` and a restore, all inside one transaction that was then aborted —
+which is how the numbers below were known before anything was committed. Then applied for real
+and re-verified. **1,154 rows are hidden** (508 customers, 646 invoices); a signed-in user now
+sees 4 customers and 1 invoice, all of them the demo tenant's, and 0 rows of Adelaide Towel
+Service reachable through any query. Every hidden row is still on disk with its `archived_at`
+stamp — `CUST00001` reads back intact.
+
+**The restore button is not deployed yet.** Only `Prod` and `Dev` deploy (§5) and this is a
+feature branch, so until it is merged the archive can only be undone by calling
+`set_records_archived(tenant, false)` directly. The data is safe either way; the *self-service*
+half of the promise is not live until the branch is.
+
+Two new security advisors, both intentional and both the shape §11 already accepts:
+`set_records_archived` and `archived_record_counts` are SECURITY DEFINER and callable by
+`authenticated`. That is the entire design — an archived row is invisible, so only a
+definer-rights function can count or restore one — and each checks membership (and, for the
+write, an admin role) against `auth.uid()` before doing anything. The advisor total is now 12:
+these two, the eight pre-existing definer helpers (three of which,
+`can_read_billing`/`can_read_pricing`/`can_write_billing`, arrived with the unmerged billing
+branch), and the auth leaked-password toggle.
+
+### 2026-08-15 · An owner can add their own people (roadmap Phase D)
+The People screen could only re-role somebody who had *already* signed in, and said so:
+"Accounts are set up by your system administrator for now." For an owner running a three-person
+laundry that meant they could not add their own counter staff or their own driver at all — the
+one setup step the app made impossible. **No migration**; no schema, RLS, capability or
+workflow change.
+
+- **Invite by email (D5).** Email + role + site on `/admin/users`. `inviteUserByEmail()` creates
+  the login on the service-role client — **Supabase sends the mail, so this needs none of the
+  Resend configuration** §10 calls optional and the 2026-08-05 entry records as still unproven.
+  The membership row deliberately goes in through the caller's own RLS-bound client, so which
+  tenant a person joins stays the database's decision and not a server action's. An address that
+  already has a login (another tenant on the same deployment, or somebody being invited back) is
+  resolved with `generateLink({type:"magiclink"})`, which returns the user and sends nothing —
+  a second invitation mail would only invalidate a link they may still be holding. An address
+  already on the list is **refused, not upserted**: someone typing it means to add a person, not
+  to silently re-role the one who is there.
+- **`/auth/invite` is the one client-rendered screen in the app, and it has to be.** Supabase
+  bounces an accepted invitation back with the session in the URL **fragment** — never sent to
+  the server — and `inviteUserByEmail` cannot use the PKCE `?code=` flow the magic link uses,
+  because the browser that sent the invitation is not the browser that opens it, so no code
+  verifier is waiting. Pointing the invite at the existing `/auth/callback` would have compiled,
+  built and dead-ended every invitee on "Sign-in link was invalid or expired." The page handles
+  all three shapes a link can arrive in (fragment, `?token_hash=`, `?code=`), signs the person
+  in, offers a password, and strips the tokens out of the address bar. Skipping the password is
+  safe and says so: the invitation has already signed them in.
+- **`src/lib/supabase/client.ts` is the fourth Supabase client and the only browser one.** It
+  reads `process.env.NEXT_PUBLIC_*` directly rather than `lib/env` — deliberately against the
+  rule the 2026-08-05 entry set for the other three — because `lib/env` validates
+  `SUPABASE_SERVICE_ROLE_KEY`, which must not enter the client bundle and is rightly absent
+  there. A missing variable is still caught, by an explicit throw.
+- **Access can be taken away, and that opened a lockout `updateMembership` never had.** It
+  refused to change *your own* role, which was enough while nobody could remove anybody: with
+  two administrators, each can now demote or remove the other, and the second to act would strand
+  the tenant with no reachable People screen. Both actions now refuse the last `admin.write`
+  holder, counted through the caller's own RLS-bound client and against `rolesWith("admin.write")`
+  rather than a hand-written list. A failed count reads as "not stranded", so a transient error
+  refuses nothing. Removal deletes the membership only: the login survives, and every row they
+  wrote still points at them.
+- **Three role presets (D1), and they are presentation.** Owner (`super_admin`), Office
+  (`operations_manager`), Driver lead the picker; the other eight follow under "Specialist".
+  Each preset carries a *role*, never a capability list — a preset owning capabilities would be
+  a second answer to "what can this person do" and the two would drift. The label pairs both
+  words ("Owner (Super Admin)") because the members list and the activity log show the stored
+  role, and a picker saying only "Owner" would leave an administrator unable to match their
+  choice to the row it made. Replaces the four-role `COMMON_ROLES`.
+- **D2 (simple mode) is deliberately not built.** It was written against a rail of 22 rows; the
+  2026-08-05 audit collapsed that to eleven areas and 2026-08-14 removed the Runs area. Folding
+  the remaining eleven into eight now costs a tenant-wide `ui_mode` toggle and mislabels rows for
+  narrow roles — a dispatcher would get a "Settings" row containing only Drivers and Vehicles,
+  and merging Jobs with Stops contradicts §6. The `ui_mode` slot in `tenants.settings` stays
+  reserved. D3 (global search) and D4 (consolidated invoicing) shipped on 2026-08-05.
+- 297 unit tests (was 288; 9 for the presets and the derived capability lookup). `verify` green.
+  `/auth/invite` is outside the auth gate, so unlike the rest of this phase it could be rendered:
+  screenshotted light and dark in both its states and asserted at 320/360/375/390/430/768/1024/
+  1440 — no horizontal overflow, no console errors, and one sub-36px target found and fixed.
+
+**Not verified against a live project.** This container has no Supabase credentials, so the
+invitation round trip — the mail, the redirect, the fragment, the password — has not been run
+end to end. **Before trusting it: add `<origin>/auth/invite` to the Supabase project's allowed
+redirect URLs, then invite one real address and follow the link.** Everything else was checked
+by typecheck, lint, 297 unit tests, the production build and the rendered page.
+
+### 2026-08-14 · Confirm Load and Start Route could walk a moving run backwards
+Found by asking what the day-level actions do to a run that has already left — the case the
+empty-database tests never produced and the live data (Sam Okoye's 16 Aug run, `in_progress`)
+does. Two defects, one helper, no migration.
+
+- **`guard_route_transition` refuses a start without a load and a close without an unload, but
+  it does not refuse a *backwards* move.** Nothing in the database stopped Confirm Load from
+  setting a run that was out on the road back to `load_confirmed`. That matters because
+  confirming again is a deliberate part of the design: a job assigned after the van has gone
+  stays Assigned until the driver confirms it (§22). So the ordinary late-work flow walked the
+  run backwards and offered the depot screen a "Start route" button for a van halfway round
+  the suburbs. The load stamp is now filtered to runs still at the depot, and to a
+  `load_confirmed_at` that is still null.
+- **Start Route rewrote `started_at`.** The guard's `coalesce` only protects the column when the
+  *client* leaves it null, and this one passed a value — so a second press moved the recorded
+  departure to the second press. Now filtered to runs that have not started, and to runs whose
+  load is confirmed (a run opened by a late assignment has none, and the guard would refuse it
+  and take the whole statement, including the runs that should have started, with it).
+- `/run`'s own Confirm Load carried the same unconditional write, guarded only by the screen
+  not offering the button. The screen is not the boundary, so it is filtered too.
+- `RUN_NOT_STARTED_STATUSES` exists as literals because the filter is evaluated in the
+  database, where `runStage` cannot run. The unit test pins the two together from both
+  directions, so a tenth run status cannot be added to one and forgotten in the other.
+- 288 unit tests (was 286). Both defects were reproduced against a run loaded at 07:00 and
+  departed at 07:30, and the fix shown to leave both timestamps alone.
+
+### 2026-08-14 · Job → Driver → Delivery Date: the Runs mental model is gone
+The operational simplification. The office now gives a job to a driver and a date; the driver
+opens My Runs, confirms the load, starts the route and marks each job delivered. **Nobody
+creates, opens or manages a run, and no run number appears on any screen.** One migration
+(`0016`), no new table, no new role, no new capability, nothing dropped.
+
+- **`assigned` is the seventh job status**, and it is a real one: `ready_for_delivery →
+  assigned → out_for_delivery → completed`. A delivery job can no longer jump straight out —
+  it needs a driver and a date first, and `chk_laundry_orders_assigned_has_driver` means a row
+  cannot claim otherwise. `assigned → ready_for_delivery` is the one backwards edge and it is
+  Remove Assignment: the trigger clears the four assignment columns *and* the stop, so a
+  careless caller cannot leave half an assignment behind. A customer pickup never reaches
+  either delivery state.
+- **The assignment lives on the job** — `assigned_driver_id` + `assigned_delivery_date`, a
+  DATE and never a timestamp a timezone could shift. 0015's `stop_id` chain survives as the
+  operational placement, because the depot load, the run sheet and the inventory unload sweep
+  are built on it, and `assignJobToDriver` finds-or-creates the run and the stop silently. Two
+  copies of one fact is the bug 0015 was written to avoid, so the guard refuses every way they
+  could disagree: another driver's run, another day's run, and **a job on a crewed run naming
+  no driver** — which would be on somebody's route sheet and on nobody's My Runs.
+- **My Runs is a list of jobs, not a tree of runs and stops.** No run cards, no RUN-001, no
+  sequence numbers, no Show button and no Load Runs button — the date arrows are plain anchors
+  and the date and driver controls submit themselves on change. Grouped To deliver / Out for
+  delivery / Completed, with completed work staying on the day it was done so an earlier date
+  still shows what happened on it.
+- **Confirm Load replaced the vehicle inspection, and is emphatically not one**: no checklist,
+  no pass/fail, no defect capture, no vehicle status. It records that the day's assigned
+  laundry is on the van. Start Route then sends out **only load-confirmed jobs** — work
+  assigned after the load stays Assigned, because it is not on the van and sweeping it out
+  would record a departure that did not happen. That is why load confirmation is tracked per
+  job as well as per run.
+- **Inspection is out of the workflow; none of its data was touched.** `submitInspection`,
+  `inspection-checklist.tsx` and `checklist.ts` are deleted and `/run` lost its first stage.
+  `vehicle_inspections`, `daily_routes.inspection_id`, the two inspection route statuses and
+  the `inspection_failed` notification kind all stay, so historical runs still read correctly.
+- **Received Via defaults to Pickup by driver** on a new job; an existing job still answers
+  with its own stored value, so an edit cannot re-record how the laundry arrived. **Pickup Time
+  is gone** from the form, the Zod schema, every write and the detail page — the column stays
+  nullable with its history in it, because a destructive migration to delete a field nobody
+  reads is the wrong trade. Pickup Date stays, optional and unasterisked.
+- **"Re-deliver" is "Deliver to customer"** everywhere it faces a person. Internal identifiers
+  (`delivery_required`, `expected_delivery_date`) are untouched.
+- **`laundry_orders` now has two foreign keys to `drivers`**, so every `drivers(...)` embed on
+  it must be disambiguated by constraint name. `/orders/:id` had a bare one and would have died
+  at request time with PGRST201 — compile-clean, test-clean, dead in production, exactly the
+  failure the 2026-08-05 changelog records. Both call sites are now explicit.
+- **The office cannot bypass the driver.** "Mark out for delivery" moved from `orders.status`
+  to `orders.manage` and is labelled "Send out (override)"; `advanceOrder` refuses
+  `status=assigned` outright (it would create an Assigned job with no assignment) and routes
+  `assigned → ready_for_delivery` to Remove Assignment.
+- Nav: the **Runs area is gone**; Drivers and Vehicles moved to a new **Fleet** area. The
+  dashboard's "Runs today" panel is now a job-status board, "Plan my day" is gone, and the
+  getting-started checklist ends at "add a driver" and "take in your first job". The
+  `routesToday` badge and its per-request query went with the row. `/help` rewritten around the
+  new vocabulary.
+- 286 unit tests (was 266) and **118 pgTAP assertions (was 102)**. `verify` green; migrations
+  applied to a fresh Postgres 16 and the whole pgTAP suite plus the seed run against it. My
+  Runs screenshotted light and dark and asserted at 320/360/375/390/430/768/820/1024/1280/1440
+  — no horizontal overflow and no sub-36px target in it.
+
+**Not verified against a live project.** This container has no Supabase credentials, so the
+authenticated screens were checked by migration-against-real-Postgres, pgTAP, unit tests,
+build, typecheck, lint and the component gallery — not by being opened with real rows in them.
+
+### 2026-08-14 · The job number was drawn and thrown away; `no-unused-vars` now on
+Found by taking a real job in on the deployed app, which is the only way it could have been
+found. The two fixes below cleared the way to the insert, and the insert then failed with
+`null value in column "order_number" of relation "laundry_orders" violates not-null
+constraint`. No migration.
+
+- **`createOrder` called `next_number()` and never used the result.** `order_number` is
+  `not null` with no default and no trigger, so every job creation died on the constraint. The
+  fix is one line. Every other `next_number` call site — runs, stops, batches, invoices, credit
+  notes, contracts, customers — was swept and all seven write their number correctly; this was
+  the only one.
+- **Nothing could have caught it, so `@typescript-eslint/no-unused-vars` is now an error.**
+  `eslint-config-next` does not enable it, and `.insert()` on the untyped Supabase client takes
+  any object, so a missing required column is invisible to `tsc`. A value fetched and dropped on
+  the floor is the shape of a real bug, not a tidiness question — re-breaking the line proves
+  the rule now reports it. `_`-prefixed names stay allowed for deliberate skips.
+  The plugin is *reused* from `eslint-config-next` rather than depended on directly, so §10a's
+  pins stay the single source; the config throws rather than silently skipping if that
+  registration ever moves.
+- **17 dead imports cleared** to get there, across 8 files, plus a vestigial `searchParams` on
+  `/customers/new` left over from the flash-cookie migration. No behaviour change in any of them.
+- 266 unit tests, unchanged. **Verified against the live app** for the first time in this
+  sequence — the failure above is what the deployed build actually returned.
+
+### 2026-08-14 · The planner had never applied a plan: the board and the action disagreed
+Swept the other three compose-locally-commit-once payloads after the job-form outage below.
+One of them was broken the same way and just as completely. No migration.
+
+- **`/routes/planner` "Apply plan" was refused every single time.** The board posted
+  `{columns:[{id,…}]}` with **no date on it at all**; `planSchema` read
+  `{date, columns:[{routeId,…}]}`. So `date: Invalid input: expected string, received undefined`
+  came back on every attempt and no plan was ever committed. The server side was right
+  throughout — `applyDispatchPlan` has always read `column.routeId` — so the fix is entirely
+  in the producer: `PlannerBoard` takes the day as a prop and `toPlan` emits `routeId` and
+  `date`.
+- **`toPlan` now returns `DispatchPlan`**, the type inferred from the action's own schema, so
+  this particular disagreement is a compile error from here on. It caught the `/design-preview`
+  call site the moment it was introduced.
+- **The two survivors are sound, and are now pinned rather than assumed.** The contract
+  wizard's `lines` and the offline outbox's records both parse cleanly against the shapes their
+  producers really build — `/api/sync` had used `.nullish()` throughout from the start, which
+  is precisely what the job form's schema lacked.
+- **All three payload contracts moved out of `"use server"`**: `orders/order-items.ts`,
+  `agreements/wizard-lines.ts` and the planner's existing pure `plan.ts`. Such a module can
+  export nothing but server actions, so each contract had been unreachable from a unit test —
+  and two of the three were broken in production behind a green `verify`. Each now has tests
+  written against the payload its producer actually emits.
+- **`plan.ts` restates the ISO-date rule instead of importing `requiredDate`.** It is in the
+  *client* bundle via `planner-board`, and `lib/actions` reaches for `next/headers`. That import
+  typechecked, linted and tested clean and failed only at `next build` — worth remembering
+  before moving anything else into a module a client component imports.
+- 266 unit tests (was 254). Board re-rendered at 1440 in `/design-preview`: correct payload
+  keys, no console errors, no horizontal overflow, and the dirty/Apply-plan gate still
+  correct after a crew change.
+
+### 2026-08-14 · No job could be saved: "add at least one laundry item", on a job that had one
+The Jobs module was unusable from the day it shipped. Every create and every edit was refused
+with **"Please add at least one laundry item."** — including the one in the screenshot, with
+2332 towels on it — and the refusal also dropped the customer, so each attempt cost the counter
+the search as well. No migration; no schema, RLS, capability or workflow change.
+
+- **One `null` failed the whole laundry list.** The form posts its items as JSON, and spells
+  every unanswered field `null` (`JSON.stringify` drops `undefined` keys, so it cannot spell it
+  any other way). `optionalText` only ever mapped `""` → absent, and `z.string().optional()`
+  accepts `undefined` but **refuses `null`** — so an item with no *Item notes* failed to parse,
+  `z.array(itemSchema)` failed with it, and the caller was handed an empty list. `optionalText`,
+  `optionalUuid` and `optionalDate` now share one `absent()` preprocessor that reads both
+  spellings. The blast radius was every laundry row: only a job where *every* item had both a
+  custom description and a note typed in could ever have been saved.
+- **An unreadable list no longer poses as an empty one.** `parseOrderItems` returns the reason
+  it could not read the payload instead of `[]`, so a parse fault can never again surface as a
+  sentence about adding an item. That distinction is the whole reason this went unnoticed: the
+  message named a problem the operator could see was untrue, and named nothing they could act on.
+- **The parser moved out of `"use server"`** into `orders/order-items.ts`. A `"use server"`
+  module can export nothing but server actions, so the parser was unreachable from a unit test
+  — which is exactly why `verify` stayed green over a module nobody could use. It is now
+  covered by 8 tests written against the payload `JobForm` actually builds; 4 of them fail
+  against the old preprocessor.
+- **A rejected save keeps the customer.** `fail()` redirects, so the browser's copy of the form
+  is gone — the customer, found by search, was being thrown away on every validation message.
+  Both actions now return through `?customer=<id>`, the door the quick-create already uses, and
+  `JobForm` adopts a changed `defaultCustomerId` during render (no effect) so it works whether
+  or not React kept the component mounted across the redirect. The one deliberate exception is
+  the customer itself being unusable — carrying that id back would re-open the form still
+  claiming a selection the database will not stand behind.
+- **The picker can no longer show "nothing selected" while posting a customer.**
+  `loadJobFormData(ensureCustomerId?)` fetches that one row when the capped 500-name list did
+  not carry them — a customer past the 500th by name, or one since put on hold under an
+  existing job. If they are genuinely gone, the form says so instead of rendering an untouched
+  search box over a hidden field that still points at them. `truncated` is now measured against
+  what the search box covers, so the appended row cannot make a capped list look complete.
+- 254 unit tests (was 245). `verify` green. **Not verified against a live project** — this
+  container has no Supabase credentials, so the fix is proven by the payload-level tests, the
+  typecheck, the lint and the build rather than by taking a job in at a real counter.
+
+### 2026-08-14 · My Runs: a driver's day, and putting a job on it
+The counter's Jobs and the driver's Runs were two islands — a job could be marked "out for
+delivery" with nothing anywhere recording whose van it went out on. This joins them, adds the
+operational screen a driver actually works from, and gives dispatch somewhere to hand work
+out. **One migration, one new column, no new table, no new role and no new capability.**
+
+- **`laundry_orders.stop_id` is the whole data model** (`0015`). Job → Stop → Run → Driver,
+  and deliberately no `driver_id` on the job: a second copy of the answer is a second thing to
+  keep in step, and the failure mode is the one the brief names — the job says John, the run
+  says Mark, and nothing says which is true. Reassigning is one UPDATE of one column.
+- **Assignment is a relationship, not a status.** Nothing here adds to the six statuses of
+  0014, and assigning touches no laundry, no customer and no price. Eligibility —
+  delivery work, ready to leave, not already on a run, stop belongs to the same customer — is
+  stated in `src/lib/domain/run-assignment.ts` for the screen and enforced by
+  `guard_laundry_order_assignment` for everything else. A **customer pickup is refused
+  outright**, in the queue, in the form and in the database.
+- **Runs and stops are found before they are created.** Assigning six jobs for one customer to
+  one morning produces one run, one stop and six jobs under it. A driver with two open runs on
+  a date is *asked* rather than guessed at — a morning van and an afternoon van are different
+  promises to the customer. Multiple runs per driver per day were always supported by the
+  schema; `/run` merely hid the second one behind a `maybeSingle()`.
+- **`/my-runs`** — date arrows and a native date picker, a driver selector for `routes.write`
+  only, a summary with a progress bar, one card per run, stops in their existing `sequence`,
+  and the laundry grouped under each stop with phone and navigation links. The run controls
+  post to the very actions `/run` posts to (`confirmLoad` → `startRun` → `markReturning` →
+  `unloadRun` → `closeRun`), which gained a `return_to` and nothing else, so the load-before-
+  start rule and the unload sweep cannot drift between the two screens.
+- **`/my-runs/jobs/:id`** is the driver's read-only job view. It is a kindness on top of three
+  real boundaries, not a substitute for one: `/orders/:id/edit` is still `orders.write`,
+  `cancelOrder` is still `orders.manage`, and since 0015 RLS refuses the read outright unless
+  the job is on one of the driver's own stops.
+- **Delivery completion has one implementation.** `lib/orders/complete.ts` is called both by
+  the counter's `completeOrder` and by the driver's `markJobDelivered`; what differs is the
+  guard in front. The driver's branch is *resource*-based — `run.execute` plus "this job is on
+  a stop of a run whose driver is you", re-derived from the database on every call — so no new
+  capability was invented and posting somebody else's order id is refused, not merely hidden.
+  Starting a run moves its ready jobs to `out_for_delivery`, which is a statement of fact;
+  **closing a run never marks anything delivered.**
+- **Adelaide, beside Sydney rather than instead of it.** `OPERATIONS_TIMEZONE` and the
+  `getAdelaide*` helpers live in the existing `timezone.ts` on the existing offset lookup. The
+  global `BUSINESS_TIMEZONE` was left alone on purpose: flipping it would silently re-date
+  every invoice period and every stored `received_at`. 14 tests cover the day boundary in both
+  directions, both changeovers (23-hour and 25-hour days) and the fact that the machine's own
+  timezone cannot move the answer.
+- **Jobs screen integration only where it earns it**: a "Delivery run" card on `/orders/:id`,
+  a Run column and a "Ready for delivery — unassigned" filter on the list. The embed is
+  disambiguated by constraint name (`jobs!laundry_orders_stop_id_fkey`) — this repo has been
+  bitten once by an ambiguous embed that was compile-clean and dead in production.
+- 245 unit tests (was 204) and 102 pgTAP assertions (was 83). `/design-preview` gained the
+  module; screenshotted light and dark and asserted at 320/360/375/390/430/768/820/1024/1280/
+  1440 — no horizontal overflow and no sub-36px target anywhere in it.
+
+**Not verified against a live project.** This container has no Supabase credentials, so the
+authenticated screens were checked by migration-against-real-Postgres, pgTAP, unit tests,
+build, typecheck, lint and the component gallery — not by being opened with real rows in them.
+
 ### 2026-08-13 · Enterprise framework: adopted the gaps, not the directory
 Tooling only — nothing under `src/` or `supabase/` was touched, no migration, no test change.
 Installed a selected subset of `ysm-prog/enterprise-claude-framework` v1.5.0 into `.claude/`:

@@ -58,6 +58,7 @@ type PendingRoute = {
   code: string;
   name: string;
   route_date: string;
+  driver_id: string | null;
   route_templates: { planned_start_time: string | null } | null;
 };
 
@@ -87,6 +88,12 @@ async function sweepOverdueInvoices(
     .eq("tenant_id", tenant.id)
     .in("status", CHASEABLE_STATUSES)
     .is("deleted_at", null)
+    // The archive (0017) hides rows with a *policy*, and this route runs on the
+    // service-role client, which is the one client policies do not apply to. So
+    // the filter that every other reader gets for free has to be written here,
+    // or a tenant that hid its records would still be chased about them — and
+    // the notification would link to an invoice nobody can open.
+    .is("archived_at", null)
     .not("due_date", "is", null)
     .lt("due_date", businessDay)
     .gt("balance", 0)
@@ -215,7 +222,7 @@ async function sweepLateRuns(
   // constraint name — unlike its two FKs to `vehicles` (CLAUDE.md §10b).
   const { data, error } = await admin
     .from("daily_routes")
-    .select("id, code, name, route_date, route_templates(planned_start_time)")
+    .select("id, code, name, route_date, driver_id, route_templates(planned_start_time)")
     .eq("tenant_id", tenant.id)
     .eq("route_date", businessDay)
     .in("status", NOT_STARTED_STATUSES)
@@ -232,8 +239,15 @@ async function sweepLateRuns(
       kind: "run_not_started",
       subjectId: route.id,
       occurredOn: route.route_date,
-      title: `Run ${route.code} (${route.name}) has not left the depot and is past its start time.`,
-      href: `/routes/daily/${route.id}`,
+      // Said without the run code, and pointed at the driver's day rather than
+      // at the run record: the office no longer opens runs, and a notification
+      // is a poor place to reintroduce a vocabulary the app has dropped.
+      title: route.driver_id
+        ? "A driver has not left the depot and is past their start time."
+        : "Deliveries for today have not left the depot and are past the start time.",
+      href: route.driver_id
+        ? `/my-runs?date=${route.route_date}&driver=${route.driver_id}`
+        : `/orders?assigned=${route.route_date}&run=assigned`,
     });
     tally.notifications += 1;
   }

@@ -12,8 +12,8 @@ import { CustomerEssentials } from "@/app/(app)/customers/customer-form";
 import {
   DELIVERY_WINDOWS, DELIVERY_WINDOW_LABELS, ITEM_TYPES, ITEM_TYPE_LABELS,
   ORDER_PRIORITIES, PRIORITY_LABELS, QUANTITY_TYPES, QUANTITY_TYPE_LABELS,
-  RECEIVED_VIA_LABELS, describeItem, initialDeliveryRequired, receivedViaOptions,
-  type ReceivedVia,
+  RECEIVED_VIA_LABELS, describeItem, initialDeliveryRequired, initialReceivedVia,
+  receivedViaOptions, type ReceivedVia,
 } from "@/lib/domain/laundry-orders";
 import { businessToday, toZonedDate } from "@/lib/domain/timezone";
 import type { LaundryOrder, LaundryOrderItem } from "@/lib/db/types";
@@ -27,13 +27,13 @@ import type { LaundryOrder, LaundryOrderItem } from "@/lib/db/types";
  * conversation at the counter: who is this, what did they bring, when do they
  * want it, anything unusual.
  *
- * Everything that can be a default is one: today's date, a customer drop-off,
- * re-delivery, normal priority, one empty laundry row ready to fill. The time of
- * receipt is not asked for at all — it is the moment the job is being taken in,
- * so the server stamps it. The two branching questions — how it arrived, and
- * whether we deliver it back —
- * *render* their extra fields rather than hiding them, so nothing that is out of
- * play is still in the post.
+ * Everything that can be a default is one: today's date, a driver pickup,
+ * delivery back to the customer, normal priority, one empty laundry row ready to
+ * fill. Neither the time of receipt nor a pickup time is asked for at all — the
+ * first is the moment the job is being taken in, so the server stamps it, and
+ * the second was a field nobody ever read. The two branching questions — how it
+ * arrived, and whether we deliver it back — *render* their extra fields rather
+ * than hiding them, so nothing that is out of play is still in the post.
  *
  * The laundry rows post as JSON in one hidden field: the compose-locally,
  * commit-once shape the dispatch planner and the contract wizard already use,
@@ -109,13 +109,25 @@ export function JobForm({
 }) {
   const editing = order !== undefined;
 
-  // `defaultCustomerId` wins over the saved one: it is only ever set when the
-  // customer quick-create has just come back with a brand new customer, and
-  // that is the one the user meant.
+  // `defaultCustomerId` wins over the saved one: it is set when the customer
+  // quick-create has just come back with a brand new customer, and when a
+  // rejected save is coming back with the customer already chosen. Either way
+  // it is the one the user meant.
   const [customerId, setCustomerId] = useState(defaultCustomerId ?? order?.customer_id ?? "");
+
+  // Both of those arrive as a *navigation*, not a fresh page load, so React may
+  // keep this component mounted and `useState`'s initial value would never be
+  // read again. Adjusting during render on a changed prop is what keeps the
+  // selection in step — and it is the one pattern that does not need an effect,
+  // which the react-hooks rules here rightly refuse.
+  const [lastDefault, setLastDefault] = useState(defaultCustomerId);
+  if (defaultCustomerId !== lastDefault) {
+    setLastDefault(defaultCustomerId);
+    if (defaultCustomerId) setCustomerId(defaultCustomerId);
+  }
   const [query, setQuery] = useState("");
   const [quickCreate, setQuickCreate] = useState(false);
-  const [receivedVia, setReceivedVia] = useState<string>(order?.received_via ?? "customer_dropoff");
+  const [receivedVia, setReceivedVia] = useState<string>(() => initialReceivedVia(order));
   const [deliveryRequired, setDeliveryRequired] = useState(() => initialDeliveryRequired(order));
   const [deliveryWindow, setDeliveryWindow] = useState<string>(
     order?.delivery_window ?? "no_specific_time",
@@ -259,52 +271,70 @@ export function JobForm({
                 twelve customers, which made the first thing on the page the
                 largest and least useful thing on it. Results now float over the
                 form as a short list, the way a picker should behave.
-              */
-              <div className="relative">
-                <Field label="Customer" name="customer_search">
-                  <div className="relative">
-                    <Search className="pointer-events-none absolute left-3 top-1/2 size-4
-                                       -translate-y-1/2 text-muted-foreground" aria-hidden />
-                    <input
-                      id="customer_search" type="search" autoComplete="off"
-                      className={cx(CONTROL, "pl-9")}
-                      placeholder="Search customer by name, phone or email"
-                      role="combobox" aria-expanded={query.trim().length > 0}
-                      aria-controls="customer-results"
-                      value={query} onChange={(event) => setQuery(event.target.value)}
-                    />
-                  </div>
-                </Field>
 
-                {query.trim() ? (
-                  <ul id="customer-results"
-                      className="absolute inset-x-0 top-full z-20 mt-1 max-h-72 overflow-y-auto
-                                 rounded-xl border bg-surface py-1 shadow-lg">
-                    {matches.map((customer) => (
-                      <li key={customer.id}>
-                        <button type="button" onClick={() => setCustomerId(customer.id)}
-                                className="flex min-h-12 w-full flex-col items-start justify-center
-                                           px-4 py-2 text-left transition hover:bg-surface-muted">
-                          <span className="text-sm font-medium">{customer.business_name}</span>
-                          <span className="text-xs text-muted-foreground">
-                            {[customer.customer_number, customer.phone, customer.billing_email]
-                              .filter(Boolean).join(" · ")}
-                          </span>
-                        </button>
-                      </li>
-                    ))}
-                    {matches.length === 0 ? (
-                      <li className="px-4 py-3 text-sm text-muted-foreground">
-                        No customer found. Try another search, or add a new customer below.
-                      </li>
-                    ) : null}
-                  </ul>
-                ) : (
-                  <p className="mt-1.5 text-xs text-muted-foreground">
-                    Start typing to find them — business name, customer number, phone or email.
-                  </p>
-                )}
-              </div>
+                Reached with a `customerId` still set, this is a customer the
+                server could not resolve — a record since deleted. Said out loud
+                above the box, because the alternative is a picker that looks
+                untouched while the form still carries that id, and a save that
+                then fails on it for no visible reason. The warning sits outside
+                the `relative` wrapper: that wrapper is the floating results
+                list's containing block, and anything added inside it pushes the
+                list down the page.
+              */
+              <>
+                {customerId ? (
+                  <Notice tone="warning" title="That customer is no longer on file">
+                    The customer this job was pointed at cannot be opened any more.
+                    Please search for the right one and save again.
+                  </Notice>
+                ) : null}
+
+                <div className="relative">
+                  <Field label="Customer" name="customer_search">
+                    <div className="relative">
+                      <Search className="pointer-events-none absolute left-3 top-1/2 size-4
+                                         -translate-y-1/2 text-muted-foreground" aria-hidden />
+                      <input
+                        id="customer_search" type="search" autoComplete="off"
+                        className={cx(CONTROL, "pl-9")}
+                        placeholder="Search customer by name, phone or email"
+                        role="combobox" aria-expanded={query.trim().length > 0}
+                        aria-controls="customer-results"
+                        value={query} onChange={(event) => setQuery(event.target.value)}
+                      />
+                    </div>
+                  </Field>
+
+                  {query.trim() ? (
+                    <ul id="customer-results"
+                        className="absolute inset-x-0 top-full z-20 mt-1 max-h-72 overflow-y-auto
+                                   rounded-xl border bg-surface py-1 shadow-lg">
+                      {matches.map((customer) => (
+                        <li key={customer.id}>
+                          <button type="button" onClick={() => setCustomerId(customer.id)}
+                                  className="flex min-h-12 w-full flex-col items-start justify-center
+                                             px-4 py-2 text-left transition hover:bg-surface-muted">
+                            <span className="text-sm font-medium">{customer.business_name}</span>
+                            <span className="text-xs text-muted-foreground">
+                              {[customer.customer_number, customer.phone, customer.billing_email]
+                                .filter(Boolean).join(" · ")}
+                            </span>
+                          </button>
+                        </li>
+                      ))}
+                      {matches.length === 0 ? (
+                        <li className="px-4 py-3 text-sm text-muted-foreground">
+                          No customer found. Try another search, or add a new customer below.
+                        </li>
+                      ) : null}
+                    </ul>
+                  ) : (
+                    <p className="mt-1.5 text-xs text-muted-foreground">
+                      Start typing to find them — business name, customer number, phone or email.
+                    </p>
+                  )}
+                </div>
+              </>
             )}
 
             <button type="button" onClick={() => setQuickCreate((open) => !open)}
@@ -354,14 +384,17 @@ export function JobForm({
               </select>
             </Field>
 
+            {/* Only a driver pickup has pickup details, and the fields are
+                *rendered* conditionally rather than hidden — nothing out of play
+                is still in the post. Pickup date is optional and carries no
+                asterisk: the counter often does not know it yet, and a job that
+                cannot be saved for want of it is a job that does not get taken
+                in. There is no Pickup time field: it was asked for on every
+                collection, used by nothing, and is gone from the workflow. */}
             {receivedVia === "driver_pickup" ? (
               <>
-                <Field label="Pickup date" name="pickup_date">
+                <Field label="Pickup date" name="pickup_date" hint="Optional.">
                   <Input name="pickup_date" type="date" defaultValue={order?.pickup_date ?? undefined} />
-                </Field>
-                <Field label="Pickup time" name="pickup_time">
-                  <Input name="pickup_time" type="time"
-                         defaultValue={order?.pickup_time?.slice(0, 5) ?? undefined} />
                 </Field>
                 <Field label="Collected by" name="pickup_driver_id" className="sm:col-span-2"
                        hint="Your existing drivers.">
@@ -506,12 +539,14 @@ export function JobForm({
                      description="Are we taking it back to them, or are they coming for it?"
                      icon={<Truck className="size-[1.15rem]" />}>
           <div className="space-y-3">
-            {/* Re-deliver leads and is the default: it is the normal job, and
+            {/* Deliver leads and is the default: it is the normal job, and
                 selecting it every time was a step that was almost always the
-                same. Customer pickup is one tap away and unchanged. */}
+                same. Customer pickup is one tap away and unchanged. The word is
+                "Deliver", not "Re-deliver" — re-delivery is a courier's second
+                attempt, which is a different event this system does not model. */}
             <div className="flex flex-wrap gap-2">
               <ChoiceButton selected={deliveryRequired} onClick={() => setDeliveryRequired(true)}
-                            label="Re-deliver" detail="It goes back out to them on a run." />
+                            label="Deliver to customer" detail="We take it back out to them." />
               <ChoiceButton selected={!deliveryRequired} onClick={() => setDeliveryRequired(false)}
                             label="Customer pickup" detail="They collect it from the counter." />
             </div>

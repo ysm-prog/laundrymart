@@ -9,12 +9,15 @@ import {
   ORDER_PRIORITIES, ORDER_STATUSES, ORDER_STATUS_LABELS, PRIORITY_LABELS,
   isOverdue, summariseItems,
 } from "@/lib/domain/laundry-orders";
-import { addDays, businessToday, toInstant, weekBounds } from "@/lib/domain/timezone";
+import {
+  addDays, businessToday, formatAdelaideDate, toInstant, weekBounds,
+} from "@/lib/domain/timezone";
 import {
   Badge, ButtonLink, CONTROL, DataTable, EmptyState, Notice,
   PageHeader, SkeletonRows, SkeletonStats, Stat, StatusBadge, cx,
 } from "@/components/ui";
 import { Pagination, pageFrom, rangeFor } from "@/components/list-controls";
+import { listActiveDrivers } from "@/lib/runs/my-runs";
 
 export const metadata = { title: "Jobs" };
 export const dynamic = "force-dynamic";
@@ -26,8 +29,22 @@ type Search = {
   customer?: string;
   when?: string;
   date?: string;
+  /** Assignment state: "unassigned", "assigned", or "ready-unassigned". */
+  run?: string;
+  /** A specific assigned driver. */
+  driver?: string;
+  /** A specific assigned delivery date. */
+  assigned?: string;
   page?: string;
 };
+
+/** Every filter this list understands — one list, so nothing is forgotten. */
+function isFiltered(params: Search): boolean {
+  return Boolean(
+    params.q || params.status || params.priority || params.customer
+    || params.when || params.date || params.run || params.driver || params.assigned,
+  );
+}
 
 type Row = {
   id: string;
@@ -36,8 +53,18 @@ type Row = {
   priority: string;
   received_at: string;
   due_date: string | null;
+  expected_delivery_date: string | null;
   delivery_required: boolean;
   assigned_to: string | null;
+  /**
+   * Who is delivering this job and when — read straight off the job, because
+   * since 0016 that is where the assignment lives. No embed, no join through the
+   * routing module, and therefore nothing that can disagree with what My Runs
+   * shows the driver.
+   */
+  assigned_driver_id: string | null;
+  assigned_delivery_date: string | null;
+  drivers: { id: string; full_name: string } | null;
   customers: { id: string; business_name: string; trading_name: string | null } | null;
   laundry_order_items: Array<{
     item_type: string;
@@ -63,7 +90,7 @@ export default async function JobsPage({ searchParams }: { searchParams: Promise
           : null}
       />
 
-      <Suspense fallback={<div className="mb-4"><SkeletonStats count={6} /></div>}>
+      <Suspense fallback={<div className="mb-4"><SkeletonStats count={7} /></div>}>
         <SummaryStrip />
       </Suspense>
 
@@ -79,7 +106,7 @@ export default async function JobsPage({ searchParams }: { searchParams: Promise
 /* ------------------------------------------------------------------ cards */
 
 /**
- * Six head-only counts. Every one is a query against the database rather than a
+ * Seven head-only counts. Every one is a query against the database rather than a
  * tally of the page's rows — a summary computed from the current page would
  * quietly mean "on this page", which is the sort of number people make decisions
  * on and should not.
@@ -93,10 +120,11 @@ async function SummaryStrip() {
   const head = { count: "exact" as const, head: true };
   const notFinished = ["status", "in", "(completed,cancelled)"] as const;
 
-  const [fresh, working, ready, out, completedToday, overdue] = await Promise.all([
+  const [fresh, working, ready, assigned, out, completedToday, overdue] = await Promise.all([
     supabase.from("laundry_orders").select("id", head).eq("status", "new"),
     supabase.from("laundry_orders").select("id", head).eq("status", "in_progress"),
     supabase.from("laundry_orders").select("id", head).eq("status", "ready_for_delivery"),
+    supabase.from("laundry_orders").select("id", head).eq("status", "assigned"),
     supabase.from("laundry_orders").select("id", head).eq("status", "out_for_delivery"),
     supabase.from("laundry_orders").select("id", head)
       .eq("status", "completed")
@@ -112,16 +140,17 @@ async function SummaryStrip() {
     { label: "New", value: fresh.count, href: "/orders?status=new" },
     { label: "In progress", value: working.count, href: "/orders?status=in_progress" },
     { label: "Ready", value: ready.count, href: "/orders?status=ready_for_delivery" },
+    { label: "Assigned", value: assigned.count, href: "/orders?status=assigned" },
     { label: "Out for delivery", value: out.count, href: "/orders?status=out_for_delivery" },
     { label: "Completed today", value: completedToday.count, href: "/orders?status=completed" },
     { label: "Overdue", value: overdue.count, href: "/orders?when=overdue", danger: true },
   ];
 
-  // Six separate cards rather than one joined strip: the strip left an empty
-  // grey cell whenever the count did not fill the row, and square corners among
+  // Separate cards rather than one joined strip: the strip left an empty grey
+  // cell whenever the count did not fill the row, and square corners among
   // rounded panels everywhere else.
   return (
-    <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+    <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">
       {cards.map((card) => (
         <Stat
           key={card.label}
@@ -145,6 +174,13 @@ const WHEN_OPTIONS = [
   { value: "overdue", label: "Overdue" },
 ];
 
+const RUN_OPTIONS = [
+  { value: "", label: "Any assignment" },
+  { value: "ready-unassigned", label: "Ready for delivery — unassigned" },
+  { value: "unassigned", label: "No driver" },
+  { value: "assigned", label: "Has a driver" },
+];
+
 /**
  * One GET form carrying every filter, so the filtered list lives in the URL and
  * survives a bookmark, a share and a page of results.
@@ -156,13 +192,16 @@ const WHEN_OPTIONS = [
  */
 async function Filters({ params }: { params: Search }) {
   const supabase = await createClient();
-  const { data: customers } = await supabase
-    .from("customers")
-    .select("id, business_name")
-    .is("deleted_at", null)
-    .order("business_name")
-    .limit(200)
-    .returns<{ id: string; business_name: string }[]>();
+  const [{ data: customers }, drivers] = await Promise.all([
+    supabase
+      .from("customers")
+      .select("id, business_name")
+      .is("deleted_at", null)
+      .order("business_name")
+      .limit(200)
+      .returns<{ id: string; business_name: string }[]>(),
+    listActiveDrivers(supabase),
+  ]);
 
   return (
     <form method="get" action="/orders" className="mb-4 flex flex-wrap items-end gap-2">
@@ -216,9 +255,36 @@ async function Filters({ params }: { params: Search }) {
       </div>
 
       <div>
+        <label htmlFor="run" className="sr-only">Delivery run</label>
+        <select id="run" name="run" defaultValue={params.run ?? ""}
+                className={cx(CONTROL, "w-auto")}>
+          {RUN_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>{option.label}</option>
+          ))}
+        </select>
+      </div>
+
+      <div>
+        <label htmlFor="driver" className="sr-only">Assigned driver</label>
+        <select id="driver" name="driver" defaultValue={params.driver ?? ""}
+                className={cx(CONTROL, "w-auto max-w-[12rem]")}>
+          <option value="">Any driver</option>
+          {drivers.map((driver) => (
+            <option key={driver.id} value={driver.id}>{driver.full_name}</option>
+          ))}
+        </select>
+      </div>
+
+      <div>
         <label htmlFor="date" className="sr-only">Due on a specific date</label>
         <input id="date" name="date" type="date" defaultValue={params.date}
-               className={cx(CONTROL, "w-auto")} />
+               className={cx(CONTROL, "w-auto")} title="Due date" />
+      </div>
+
+      <div>
+        <label htmlFor="assigned" className="sr-only">Assigned delivery date</label>
+        <input id="assigned" name="assigned" type="date" defaultValue={params.assigned}
+               className={cx(CONTROL, "w-auto")} title="Assigned delivery date" />
       </div>
 
       <button type="submit"
@@ -226,7 +292,7 @@ async function Filters({ params }: { params: Search }) {
  text-sm font-medium transition hover:bg-surface-muted">
         Search
       </button>
-      {params.q || params.status || params.priority || params.customer || params.when || params.date ? (
+      {isFiltered(params) ? (
         <Link href="/orders"
               className="inline-flex min-h-9 items-center px-2 text-sm text-primary hover:underline">
           Clear
@@ -247,8 +313,15 @@ async function JobList({ params, canCreate }: { params: Search; canCreate: boole
   let query = supabase
     .from("laundry_orders")
     .select(
-      "id, order_number, status, priority, received_at, due_date, delivery_required, " +
-      "assigned_to, customers(id, business_name, trading_name), " +
+      "id, order_number, status, priority, received_at, due_date, expected_delivery_date, " +
+      "delivery_required, assigned_to, assigned_driver_id, assigned_delivery_date, " +
+      "customers(id, business_name, trading_name), " +
+      // Disambiguated by constraint name on purpose. Since 0016 `laundry_orders`
+      // has *two* foreign keys to `drivers` — the driver who collected it and
+      // the driver delivering it — and an ambiguous embed is rejected by
+      // PostgREST at request time: compile-clean, test-clean and dead in
+      // production (see the 2026-08-05 changelog).
+      "drivers!laundry_orders_assigned_driver_id_fkey(id, full_name), " +
       "laundry_order_items(item_type, custom_description, quantity_type, exact_quantity, " +
       "bag_count, estimated_quantity)",
       { count: "exact" },
@@ -273,6 +346,21 @@ async function JobList({ params, canCreate }: { params: Search; canCreate: boole
   }
   if (params.date && /^\d{4}-\d{2}-\d{2}$/.test(params.date)) {
     query = query.eq("due_date", params.date);
+  }
+
+  // Assignment state. "Ready for delivery, unassigned" is one option rather than
+  // two filters the user has to know to combine, because it is *the* question
+  // the office asks every morning: what is ready to go out and given to nobody?
+  if (params.run === "unassigned") query = query.is("assigned_driver_id", null);
+  else if (params.run === "assigned") query = query.not("assigned_driver_id", "is", null);
+  else if (params.run === "ready-unassigned") {
+    query = query.is("assigned_driver_id", null)
+      .eq("delivery_required", true)
+      .eq("status", "ready_for_delivery");
+  }
+  if (params.driver) query = query.eq("assigned_driver_id", params.driver);
+  if (params.assigned && /^\d{4}-\d{2}-\d{2}$/.test(params.assigned)) {
+    query = query.eq("assigned_delivery_date", params.assigned);
   }
 
   if (params.q) {
@@ -310,9 +398,7 @@ async function JobList({ params, canCreate }: { params: Search; canCreate: boole
 
   const staff = await listStaff();
   const names = staffNames(staff);
-  const filtered = Boolean(
-    params.q || params.status || params.priority || params.customer || params.when || params.date,
-  );
+  const filtered = isFiltered(params);
 
   return (
     <>
@@ -366,13 +452,35 @@ async function JobList({ params, canCreate }: { params: Search; canCreate: boole
           },
           { header: "Status", cell: (row) => <StatusBadge status={row.status} /> },
           {
-            header: "Assigned",
+            header: "Looked after by",
             cell: (row) => (row.assigned_to ? names.get(row.assigned_to) ?? "—" : "—"),
             hideBelow: "lg",
+          },
+          {
+            // Who is delivering it, and on what day. A pickup job says so
+            // instead of reading as work nobody has picked up — it is not
+            // delivery work and never will be.
+            header: "Driver",
+            cell: (row) => <AssignmentCell row={row} />,
+            hideBelow: "md",
           },
         ]}
       />
       <Pagination page={page} total={count ?? 0} params={params} basePath="/orders" />
     </>
+  );
+}
+
+function AssignmentCell({ row }: { row: Row }) {
+  if (!row.delivery_required) return <span className="text-muted-foreground">Pickup</span>;
+  if (!row.assigned_driver_id) return <Badge>Unassigned</Badge>;
+
+  return (
+    <span className="flex flex-col">
+      <span>{row.drivers?.full_name ?? "Assigned"}</span>
+      <span className="text-sm text-muted-foreground">
+        {formatAdelaideDate(row.assigned_delivery_date, "short")}
+      </span>
+    </span>
   );
 }

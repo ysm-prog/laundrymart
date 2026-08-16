@@ -107,7 +107,7 @@ async function JobList({ params }: { params: Search }) {
           <EmptyState
             title="No stops for this date"
             description="Plan the day's runs and each customer visit appears here as a stop."
-            action={<ButtonLink href="/routes/daily">Go to today&apos;s runs</ButtonLink>}
+            action={<ButtonLink href="/orders">Go to jobs</ButtonLink>}
           />
         }
         columns={[

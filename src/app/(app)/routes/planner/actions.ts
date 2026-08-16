@@ -1,47 +1,23 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { z } from "zod";
 import { assertCapability } from "@/lib/auth/context";
 import { createClient } from "@/lib/supabase/server";
 import { recordAudit } from "@/lib/audit";
-import { describeDbError, done, fail, firstIssue, requiredDate, toObject } from "@/lib/actions";
-import { UNASSIGNED, isMovable, isReceiving } from "./plan";
-
-/**
- * The whole board arrives as one payload. A planner is a sequence of trial moves
- * — committing each drag separately would mean the run sheet is briefly wrong
- * after every one of them, and a half-applied plan is worse than an unapplied
- * one.
- */
-const planSchema = z.object({
-  date: requiredDate,
-  columns: z.array(z.object({
-    // The unassigned tray is a column with no route behind it.
-    routeId: z.union([z.string().uuid(), z.literal(UNASSIGNED)]),
-    jobIds: z.array(z.string().uuid()).max(500),
-    driverId: z.union([z.string().uuid(), z.literal("")]).optional(),
-    vehicleId: z.union([z.string().uuid(), z.literal("")]).optional(),
-  })).max(60),
-});
+import { describeDbError, done, fail, toObject } from "@/lib/actions";
+import { UNASSIGNED, isMovable, isReceiving, parseDispatchPlan } from "./plan";
 
 type Placement = { routeId: string | null; sequence: number };
 
 export async function applyDispatchPlan(formData: FormData): Promise<void> {
   const session = await assertCapability("routes.write");
 
-  const raw = toObject(formData).plan;
-  let payload: unknown;
-  try {
-    payload = JSON.parse(typeof raw === "string" ? raw : "");
-  } catch {
-    return fail("/routes/planner", "The plan could not be read. Reload the page and try again.");
-  }
+  // The board arrives as one payload; the schema and this parse live in
+  // `plan.ts` so the contract can be unit-tested. See the note there.
+  const parsed = parseDispatchPlan(toObject(formData).plan);
+  if (!parsed.ok) return fail("/routes/planner", parsed.problem);
 
-  const parsed = planSchema.safeParse(payload);
-  if (!parsed.success) return fail("/routes/planner", firstIssue(parsed.error));
-
-  const { date, columns } = parsed.data;
+  const { date, columns } = parsed.plan;
   const backTo = `/routes/planner?date=${date}`;
   const supabase = await createClient();
 

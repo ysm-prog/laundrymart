@@ -1,15 +1,19 @@
-import { Suspense } from "react";
+import { cache, Suspense } from "react";
 import { requireCapability } from "@/lib/auth/context";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { can, COMMON_ROLES, ROLES, ROLE_LABELS, ROLE_SUMMARY, type Role } from "@/lib/roles";
+import {
+  can, isRole, presetForRole, PRESET_ROLES, ROLES, ROLE_LABELS, ROLE_PRESETS, ROLE_SUMMARY,
+  type Role,
+} from "@/lib/roles";
 import { date } from "@/lib/format";
 import type { Depot } from "@/lib/db/types";
 import {
   Badge, Card, DataTable, EmptyState, Notice, PageHeader, SkeletonRows,
 } from "@/components/ui";
-import { Select, SubmitButton } from "@/components/form";
-import { updateMembership } from "../actions";
+import { ConfirmSubmit } from "@/components/confirm-submit";
+import { Field, Input, Select, SubmitButton } from "@/components/form";
+import { inviteMember, removeMember, updateMembership } from "../actions";
 
 export const metadata = { title: "People" };
 export const dynamic = "force-dynamic";
@@ -18,6 +22,7 @@ type Row = { user_id: string; role: string; depot_id: string | null; created_at:
 
 export default async function UsersPage() {
   const session = await requireCapability("admin.read");
+  const canWrite = can(session.role, "admin.write");
 
   return (
     <div className="space-y-6">
@@ -26,25 +31,30 @@ export default async function UsersPage() {
         description="Who can sign in, and which parts of the app each person sees."
       />
 
-      <Notice tone="info" title="Adding someone new">
-        Accounts are set up by your system administrator for now. Once a person has
-        signed in for the first time, they appear here — give them a role, and link
-        drivers to their driver record (on the Drivers page) so their run shows up.
-      </Notice>
+      {canWrite ? (
+        <Suspense fallback={<SkeletonRows rows={2} />}>
+          <InviteCard />
+        </Suspense>
+      ) : (
+        <Notice tone="info" title="Adding someone new">
+          Administrators can invite people here by email. Ask one of them to add anyone
+          who needs a login.
+        </Notice>
+      )}
 
       <Suspense fallback={<SkeletonRows rows={5} />}>
-        <MembershipList canWrite={can(session.role, "admin.write")} currentUserId={session.userId} />
+        <MembershipList canWrite={canWrite} currentUserId={session.userId} />
       </Suspense>
 
       <Card
         title="What each role can do"
-        description="Most laundries only ever need the first four."
+        description="Most laundries only ever need the first three."
       >
         <dl className="divide-y">
           {ROLE_ORDER.map((role) => (
             <div key={role}
                  className="grid gap-0.5 py-2 sm:grid-cols-[200px_minmax(0,1fr)] sm:gap-4">
-              <dt className="text-[13px] font-medium">{ROLE_LABELS[role]}</dt>
+              <dt className="text-[13px] font-medium">{roleName(role)}</dt>
               <dd className="text-xs text-muted-foreground">{ROLE_SUMMARY[role]}</dd>
             </div>
           ))}
@@ -54,29 +64,94 @@ export default async function UsersPage() {
   );
 }
 
-/** Everyday roles first, the specialist seven after them, in one list. */
+/**
+ * The role as a person picking it should read it: the everyday word first for
+ * the three a small laundry uses, and the stored role in brackets so the choice
+ * can be matched to the members list and the activity log, which both show the
+ * role itself. The other eight keep their own label and nothing else.
+ */
+function roleName(role: Role): string {
+  const preset = presetForRole(role);
+  return preset ? `${preset.label} (${ROLE_LABELS[role]})` : ROLE_LABELS[role];
+}
+
+/** The three everyday answers first, the specialist eight after them. */
 const ROLE_ORDER: readonly Role[] = [
-  ...COMMON_ROLES,
-  ...ROLES.filter((role) => !(COMMON_ROLES as readonly string[]).includes(role)),
+  ...PRESET_ROLES,
+  ...ROLES.filter((role) => !PRESET_ROLES.includes(role)),
 ];
 
 /**
  * The same split inside the picker. An `<optgroup>` rather than an "advanced"
- * toggle: the four everyday answers are read first, and the other seven are one
+ * toggle: the three everyday answers are read first, and the other eight are one
  * scroll away instead of behind a control the user has to discover.
  */
 const ROLE_GROUPS = [
   {
-    label: "Common",
-    options: COMMON_ROLES.map((role) => ({ value: role, label: ROLE_LABELS[role] })),
+    label: "Most laundries",
+    options: ROLE_PRESETS.map((preset) => ({ value: preset.role, label: roleName(preset.role) })),
   },
   {
     label: "Specialist",
     options: ROLES
-      .filter((role) => !(COMMON_ROLES as readonly string[]).includes(role))
+      .filter((role) => !PRESET_ROLES.includes(role))
       .map((role) => ({ value: role, label: ROLE_LABELS[role] })),
   },
 ];
+
+/**
+ * Active sites, for the "one site only" choice on both forms. Memoised per
+ * request: the invite card and the members list each need the same list, and
+ * they stream independently, so without this the page issues the query twice.
+ */
+const activeDepots = cache(async (): Promise<Pick<Depot, "id" | "name">[]> => {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("depots").select("id, name").eq("status", "active").order("name")
+    .returns<Pick<Depot, "id" | "name">[]>();
+  return data ?? [];
+});
+
+/**
+ * Invite by email (roadmap D5).
+ *
+ * The screen used to say accounts were "set up by your system administrator" —
+ * true, and useless to an owner who needs to add their own counter staff and
+ * their own driver. Supabase sends the mail, so nothing here depends on the
+ * Resend configuration the invoice emails use.
+ */
+async function InviteCard() {
+  const depots = await activeDepots();
+
+  return (
+    <Card
+      title="Invite someone"
+      description="They get an email with a link to set a password. Their access starts as soon as they follow it."
+    >
+      <form action={inviteMember} className="space-y-4">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-[minmax(0,2fr)_minmax(0,1.5fr)_minmax(0,1.5fr)]">
+          <Field label="Email address" name="email" required
+                 hint="The address they will sign in with.">
+            <Input name="email" type="email" required autoComplete="off"
+                   inputMode="email" placeholder="name@example.com.au" />
+          </Field>
+          <Field label="What they do" name="role" required
+                 hint="You can change this at any time.">
+            <Select name="role" required defaultValue="driver" groups={ROLE_GROUPS} />
+          </Field>
+          <Field label="Site" name="depot_id"
+                 hint="Leave blank if they work across every site.">
+            <Select name="depot_id" placeholder="Every site"
+                    options={depots.map((depot) => ({ value: depot.id, label: depot.name }))} />
+          </Field>
+        </div>
+        <div className="flex justify-end">
+          <SubmitButton pendingLabel="Sending…">Send invitation</SubmitButton>
+        </div>
+      </form>
+    </Card>
+  );
+}
 
 /**
  * Emails for the tenant's members, from the service-role auth API. The lookup
@@ -111,14 +186,13 @@ async function MembershipList({
   canWrite, currentUserId,
 }: { canWrite: boolean; currentUserId: string }) {
   const supabase = await createClient();
-  const [{ data: memberships }, { data: depots }] = await Promise.all([
+  const [{ data: memberships }, depots] = await Promise.all([
     supabase.from("memberships").select("user_id, role, depot_id, created_at").order("created_at")
       .returns<Row[]>(),
-    supabase.from("depots").select("id, name").eq("status", "active").order("name")
-      .returns<Pick<Depot, "id" | "name">[]>(),
+    activeDepots(),
   ]);
 
-  const depotName = new Map((depots ?? []).map((depot) => [depot.id, depot.name]));
+  const depotName = new Map(depots.map((depot) => [depot.id, depot.name]));
   const emails = await memberEmails((memberships ?? []).map((row) => row.user_id));
 
   return (
@@ -146,7 +220,10 @@ async function MembershipList({
               </span>
             ),
           },
-          { header: "Role", cell: (row) => ROLE_LABELS[row.role as Role] ?? row.role },
+          {
+            header: "Role",
+            cell: (row) => (isRole(row.role) ? roleName(row.role) : row.role),
+          },
           {
             header: "Site",
             cell: (row) => (row.depot_id ? depotName.get(row.depot_id) ?? "—" : "Every site"),
@@ -157,13 +234,26 @@ async function MembershipList({
             header: "",
             align: "right",
             cell: (row) => (canWrite && row.user_id !== currentUserId ? (
-              <form action={updateMembership} className="flex items-center justify-end gap-2">
-                <input type="hidden" name="user_id" value={row.user_id} />
-                <Select name="role" defaultValue={row.role} groups={ROLE_GROUPS} />
-                <Select name="depot_id" placeholder="Every site" defaultValue={row.depot_id}
-                        options={(depots ?? []).map((depot) => ({ value: depot.id, label: depot.name }))} />
-                <SubmitButton variant="secondary" pendingLabel="Saving…">Save</SubmitButton>
-              </form>
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                <form action={updateMembership} className="flex items-center gap-2">
+                  <input type="hidden" name="user_id" value={row.user_id} />
+                  <Select name="role" defaultValue={row.role} groups={ROLE_GROUPS} />
+                  <Select name="depot_id" placeholder="Every site" defaultValue={row.depot_id}
+                          options={depots.map((depot) => ({ value: depot.id, label: depot.name }))} />
+                  <SubmitButton variant="secondary" pendingLabel="Saving…">Save</SubmitButton>
+                </form>
+                <form action={removeMember}>
+                  <input type="hidden" name="user_id" value={row.user_id} />
+                  <ConfirmSubmit
+                    label="Remove"
+                    eyebrow="Removes their access"
+                    consequence={`${emails.get(row.user_id) ?? "This person"} will no longer be able`
+                      + " to sign in to this laundry. Their login and everything they recorded stay"
+                      + " as they are, and you can invite them back later."}
+                    pendingLabel="Removing…"
+                  />
+                </form>
+              </div>
             ) : null),
           },
         ]}

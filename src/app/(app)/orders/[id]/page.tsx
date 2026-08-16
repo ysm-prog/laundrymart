@@ -18,6 +18,7 @@ import {
 import { Select, SubmitButton } from "@/components/form";
 import { ConfirmSubmit } from "@/components/confirm-submit";
 import { CompleteJob } from "../complete-job";
+import { DispatchCard } from "./dispatch-card";
 import { advanceOrder, assignOrder, cancelOrder, completeOrder } from "../actions";
 
 export const dynamic = "force-dynamic";
@@ -30,6 +31,7 @@ type Detail = LaundryOrder & {
     billing_state: string | null; billing_postcode: string | null;
   } | null;
   drivers: { full_name: string } | null;
+  assigned_driver: { id: string; full_name: string } | null;
 };
 
 export async function generateMetadata({
@@ -59,7 +61,11 @@ export default async function JobDetailPage({
     .select(
       "*, customers(id, customer_number, business_name, trading_name, phone, billing_email, " +
       "billing_address_line1, billing_suburb, billing_state, billing_postcode), " +
-      "drivers(full_name)",
+      // Disambiguated by constraint name: since 0016 `laundry_orders` has two
+      // foreign keys to `drivers` (who collected it, who is delivering it), and
+      // a bare `drivers(...)` embed is rejected by PostgREST at request time.
+      "drivers!laundry_orders_pickup_driver_id_fkey(full_name), " +
+      "assigned_driver:drivers!laundry_orders_assigned_driver_id_fkey(id, full_name)",
     )
     .eq("id", id)
     .maybeSingle<Detail>();
@@ -188,6 +194,11 @@ export default async function JobDetailPage({
       )}
 
       <div className="grid gap-4 lg:grid-cols-3">
+        {/* ------------------------------------------------------ delivery --- */}
+        {/* Which driver is taking it, and on what day. `routes.write` is the
+            existing plan-and-assign capability — no new one is introduced. */}
+        <DispatchCard order={order} canAssign={can(session.role, "routes.write")} />
+
         {/* ------------------------------------------------------ customer --- */}
         <Card
           title="Customer"
@@ -217,8 +228,10 @@ export default async function JobDetailPage({
             {order.received_via === "driver_pickup" ? (
               <>
                 <Row label="Collected on" value={order.pickup_date ? formatDate(order.pickup_date) : null} />
-                <Row label="Collected at" value={order.pickup_time ? formatTime(order.pickup_time) : null} />
-                <Row label="Driver" value={order.drivers?.full_name} />
+                {/* No pickup time. It is out of the workflow, and showing a
+                    legacy value here would be the one place a normal user still
+                    met a field the forms no longer have. */}
+                <Row label="Collected by" value={order.drivers?.full_name} />
               </>
             ) : null}
             {delivery ? (
@@ -231,6 +244,15 @@ export default async function JobDetailPage({
                        : null} />
                 <Row label="Delivery time"
                      value={order.expected_delivery_time ? formatTime(order.expected_delivery_time) : null} />
+                {/* The two dates the brief is careful to keep apart: what the
+                    customer was promised, and the day it is scheduled to a
+                    driver. Usually the same; shown separately so that when they
+                    differ, somebody notices. */}
+                <Row label="Assigned to"
+                     value={order.assigned_driver?.full_name ?? "Not assigned"} />
+                <Row label="Assigned delivery date"
+                     value={order.assigned_delivery_date
+                       ? formatDate(order.assigned_delivery_date) : null} />
                 <Row label="Actually delivered" value={dateTime(order.delivered_at)} />
               </>
             ) : (

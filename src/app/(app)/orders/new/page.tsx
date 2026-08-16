@@ -16,7 +16,9 @@ export const dynamic = "force-dynamic";
  *
  * `?customer=<id>` is how the customer quick-create comes back: `createCustomer`
  * already honours `return_to` and appends the new id, so the counter lands here
- * again with the new customer selected instead of starting the job over.
+ * again with the new customer selected instead of starting the job over. A
+ * rejected `createOrder` uses the same door, so a validation message does not
+ * also cost the counter the customer they had already found.
  */
 export default async function NewJobPage({
   searchParams,
@@ -25,7 +27,7 @@ export default async function NewJobPage({
 }) {
   const params = await searchParams;
   const session = await requireCapability("orders.write");
-  const { customers, drivers, staff, truncated } = await loadJobFormData();
+  const { customers, drivers, staff, truncated } = await loadJobFormData(params.customer);
 
   return (
     /* Capped at ~1040px: an entry form stretched across a 1900px monitor puts
