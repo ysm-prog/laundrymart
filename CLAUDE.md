@@ -133,6 +133,20 @@ Resource-scoped beyond tenancy:
   each row narrows them further to the people who can act on it — but that is a UI filter
   applied in `src/lib/notifications/query.ts`, layered on top of RLS and never instead of it.
 
+**`platform_admin` is the one role above tenancy** (0019). It is not a membership — it is a row
+in `platform_admins`, a table with **no `tenant_id`**, and the check constraint on
+`memberships.role` deliberately refuses the value. It reaches every laundry because
+`is_member()` and `has_role()` each gained `or public.is_platform_admin()`; widening those two
+helpers rather than rewriting policies is what makes it retroactive, reach code not yet
+written, and — critically — leave the `invoices` policies alone, which this repo and the hosted
+project still disagree about (§11). `is_driver_only()` gained `and not is_platform_admin()` so a
+platform admin who also holds a `driver` membership somewhere is never narrowed to that run.
+`platform.read`/`platform.write` are held by this role alone: every tenant role is built from
+`TENANT_ALL` (= `ALL` minus the platform block), so a capability added to that block cannot leak
+into `super_admin` by default. `MEMBERSHIP_ROLES` is the app's copy of the column's check
+constraint and is what the People picker and both membership actions validate against —
+`ROLES` is the twelve, `MEMBERSHIP_ROLES` the eleven a row can hold.
+
 Roles and capabilities are declared once in `src/lib/roles.ts` and drive the nav, page guards
 and action guards. `ROLE_PRESETS` names three of the eleven in an owner's words — Owner
 (`super_admin`), Office (`operations_manager`), Driver — and is **presentation only**: a preset
@@ -221,7 +235,8 @@ branches deploy. Never force-push `Prod`.
 `/routes/daily[/:id|/:id/sheet]` · `/routes/planner` · `/jobs[/:id]` ·
 `/operations/{pickups,deliveries,exceptions}` · `/run` · `/warehouse[/:id]` · `/inventory` ·
 `/invoices[/:id|/prices]` · `/reports` · `/search` · `/help` · `/notifications` ·
-`/admin` (redirects) `[/depots|/users|/holidays|/audit|/notifications|/data]`
+`/admin` (redirects) `[/depots|/users|/holidays|/audit|/notifications|/data]` ·
+`/platform[/admins|/settings|/release]` (platform admin only)
 
 **There is no user-facing Runs module.** `/routes/daily`, `/routes/planner` and
 `/routes/templates` still exist, still work and still hold their history, but **no rail row
@@ -308,9 +323,20 @@ renders no tab strip. Tested in `src/lib/__tests__/nav.test.ts`.
   `claude/warehouse-inventory-flow-psooyq` carries its own `0012_return_count.sql`, which
   has to be renumbered when it lands.
 
+- `0019_platform_admin` — `platform_admins` (**the one table with no `tenant_id`**),
+  `platform_settings` (one row, jsonb), `is_platform_admin()`, the `or is_platform_admin()`
+  clause on `is_member`/`has_role` and the `and not` on `is_driver_only`, a write policy on
+  `tenants` (0001 shipped a select policy and nothing else, which is why laundries were seeded
+  by hand), a last-administrator delete guard, and the read-only `platform_migrations()`.
+  **Rewrites no policy, drops nothing, and changes no row**: with no `platform_admins` rows
+  every added predicate is `or false`, which is what lets the eleven existing proofs pass
+  unchanged. `apply_tenant_policy` is deliberately not used — its whole job is a tenancy
+  predicate and there is none here. There is deliberately **no function that applies a
+  migration**; the Release screen reads the ledger and nothing more.
+
 Proofs in `supabase/tests/`: `rls_isolation`, `rls_coverage`, `driver_scope`,
 `business_rules`, `media_scope`, `warehouse_rules`, `notifications_scope`, `laundry_orders`,
-`run_assignment`, `archive_records`, `laundry_pricing` (156 assertions). Demo data in
+`run_assignment`, `archive_records`, `laundry_pricing`, `platform_admin` (179 assertions). Demo data in
 `supabase/seed.sql` — not
 applied by migrations.
 
@@ -478,9 +504,24 @@ demote the other and lock the tenant out of its own People screen.
 
 ## 11. Hosted project
 `laundrymart-syd` · ref `xujhwljrmogenhvqpkrf` · ap-southeast-2 (Sydney) · org `ysm-prog`.
-Deployed on Vercel at `ats.coreit.com.au`. All migrations through `0018_laundry_pricing`
-applied (0014 on 2026-08-13, 0015 and 0016 on 2026-08-14, 0017 and 0018 on 2026-08-16), each
-verified by rolled-back probe rather than trusted. For **0018** that was: RLS on, both policies
+Deployed on Vercel at `ats.coreit.com.au`. All migrations through `0019_platform_admin`
+applied (0014 on 2026-08-13, 0015 and 0016 on 2026-08-14, 0017, 0018 and 0019 on 2026-08-16),
+each verified by rolled-back probe rather than trusted.
+
+For **0019** that was: the live `is_member`/`has_role`/`is_driver_only` bodies confirmed
+identical to this repo's 0001 before being replaced (this is the check that matters most — a
+`create or replace` against a project carrying unmerged branches could silently revert one);
+zero `anon`-executable functions, so the migration's own assertion would pass; both new tables
+absent; then the whole migration plus probes in one aborted transaction, proving a rehearsal
+laundry invisible to an ordinary member and visible to a platform admin. After the apply:
+`anon` reads 0 rows from `platform_admins` with a row present, RLS on both new tables, the
+`tenants` policy set now `tenants_member, tenants_platform`, the last-admin delete trigger
+attached, and the 508 archived customers untouched. **Advisors went 12 → 14**: `is_platform_admin`
+and `platform_migrations` are the documented definer shape and both are internally scoped;
+`guard_last_platform_admin` briefly made a third before EXECUTE was revoked from
+`authenticated` — it is a trigger function, so Supabase's default privileges had published it
+at `/rest/v1/rpc/…` where it could only ever error. The repo migration carries that revoke now,
+so a fresh apply matches. For **0018** that was: RLS on, both policies
 present, the unique index confirmed `nulls not distinct`, the `updated_at` trigger attached,
 `laundry_prices` confirmed absent from `archivable_tables()`, and a price row inserted and read
 back as `anon` in one rolled-back block — 0 rows, so the standard Supabase `anon` SELECT grant
@@ -575,6 +616,85 @@ Both are compositions over existing tables — neither added a migration.
   are edited and invoices voided.
 
 ## 18. Changelog
+### 2026-08-16 · A role above the laundry: platform administrators
+Every role until now was a *membership* — a person, a laundry, and what they may do there.
+`super_admin` is the top of that ladder and is still bounded by one business, which is correct
+and is the whole reason `is_member()` is the isolation boundary. What was missing is the person
+who runs the **deployment**: creates a laundry in the first place, holds the settings that apply
+to all of them, and answers "what are we running?". One migration (`0019`), one new role, one
+new area, nothing dropped.
+
+- **The widening is two functions, not fifty policies.** `is_member()` and `has_role()` each
+  gained `or public.is_platform_admin()`. Every privileged surface in the schema already funnels
+  through those two, so the change reaches all of them at once, retroactively, and reaches
+  policies not written yet. Rewriting policies instead would have been actively dangerous for
+  the reason 0017 already recorded: this repo's `invoices` policies carry 0006's inline
+  `has_role`, the hosted project's were replaced with `can_read_billing`/`can_write_billing` by
+  a branch that has not landed, and re-stating either shape silently drops the other's role
+  gate. Touching the helper underneath both leaves each exactly as it is.
+- **`platform_admins` is the first table in the schema with no `tenant_id`**, and
+  `apply_tenant_policy` is deliberately not used on it — that helper's entire job is to attach a
+  tenancy predicate and there is no tenancy here. Its policy is `is_platform_admin()` in both
+  directions, so an operations manager cannot even see that the list exists. A membership row
+  per laundry was the alternative and only restates the problem: a laundry created tomorrow
+  would need one too.
+- **The last one cannot be removed, and that rule is in the database.** Delete the final row and
+  the policy hides the table from everybody left, so no screen could put it back — only the
+  service role could. `guard_last_platform_admin` refuses it; the action's own check is just the
+  readable sentence in front of it. The same shape as the People screen's last-administrator
+  guard, one level up and with no way back.
+- **`platform.read`/`platform.write` are held by this role alone**, and every tenant role is now
+  built from `TENANT_ALL` rather than `ALL` — so a capability added to the platform block cannot
+  leak into `super_admin` by default. `rolesWith("platform.write")` returning exactly
+  `["platform_admin"]` is asserted, as is the Platform rail row being invisible to all eleven
+  membership roles.
+- **`MEMBERSHIP_ROLES` split out of `ROLES`.** The column's check constraint does not accept
+  `platform_admin`, so the People picker and — the one that matters — the Zod enums in
+  `inviteMember` and `updateMembership` validate against the eleven. Offering the twelfth would
+  have been a choice the insert refuses. A unit test pins the eleven against the constraint.
+- **A platform admin had no session at all** until this landed: `requireSession()` read a
+  membership and redirected to `?error=no-membership` when there was none. It now resolves them
+  against `platform_admins` and an active-laundry cookie, with a switcher in the account menu.
+  Same cookie fixes a pre-existing bug §11 records — the membership query was `.limit(1)` with
+  **no ordering**, so a person belonging to two laundries landed in an arbitrary one that could
+  differ between requests. It is ordered now, and theirs to choose.
+- **Release is read-only, deliberately.** `platform_migrations()` reads the Supabase ledger
+  (which PostgREST does not publish, so a definer function is the only way in) and there is no
+  counterpart that applies anything. Migrations are applied by CI and the Supabase console:
+  reviewed, version-controlled, revertible. A browser button running DDL against a database
+  holding 508 real customers is a different risk, and "what schema are we on?" does not require
+  taking it. **This is narrower than the brief asked for** — see the note below.
+- 341 unit tests (was 325) and **179 pgTAP assertions (was 156)**. `verify` green; every
+  migration applied to a fresh Postgres 16 and the whole suite run against it. The eleven
+  existing proofs pass **unchanged**, which is the check that mattered — with no platform admin
+  rows every added predicate is `or false`, so the tenancy boundary is provably where it was.
+  The new proof asserts both directions: a platform admin crossing laundries, and an ordinary
+  member seeing exactly what they did before *while one exists*.
+
+**Applied to `laundrymart-syd` on 2026-08-16**, rehearsed first the way §11 requires. Three
+pre-flight probes ran before anything was committed: no function was `anon`-executable (the
+migration's own assertion would otherwise have aborted it), the live `is_member`/`has_role`/
+`is_driver_only` bodies matched this repo's 0001 **byte for byte** (so `create or replace` was
+not silently reverting an unmerged branch), and neither new table existed. Then the whole
+migration plus probes ran inside a transaction that was aborted — including the decisive one: a
+third laundry created in the rehearsal was **invisible** to an ordinary member (0 rows, 0
+customers, `is_member` false) and visible to a platform admin. After the real apply, `anon` was
+shown to read 0 rows from `platform_admins` *with a row present*, so the standard Supabase
+`anon` SELECT grant is refused by the policy rather than merely unused — the same proof 0018
+required.
+
+**Still to do: bootstrap the first administrator.** There are 0 rows in `platform_admins`, so
+the Platform area is currently unreachable by anyone, and the insert policy requires an
+administrator to already exist. The statement is at the foot of the migration and must be run
+from the SQL console. Nobody has been granted this access — deciding who gets it is not a
+decision to make on someone's behalf.
+
+**Two things the brief asked for that this does not do.** Applying migrations from the browser
+is not built, for the reason above. And a platform admin still works *inside one laundry at a
+time*, switching between them — there is no cross-tenant list view, because every screen in the
+app is written against one `tenant_id` and making them span laundries is a much larger change
+than the role itself.
+
 ### 2026-08-16 · The counter's laundry is billed: monthly invoices, at each customer's price
 The Jobs module has recorded what a customer handed over since 0014 and carried **no money at
 all** — `laundry_order_items` has a quantity and no price, and the monthly run billed contracts

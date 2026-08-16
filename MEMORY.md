@@ -1,7 +1,45 @@
 # MEMORY — working session handoff
 > Auto-loaded each session. Canonical state is CLAUDE.md; this is the live delta.
 
-## Latest: monthly invoices bill the counter's laundry (`0018_laundry_pricing`)
+## Latest: a role above the laundry — platform admins (`0019_platform_admin`)
+`platform_admin` is the twelfth role and the only one that is **not a membership**. CLAUDE.md
+§3/§7 and the 2026-08-16 entry have the detail; what to carry forward:
+
+**The widening is two functions, not fifty policies.** `is_member()` and `has_role()` each
+gained `or public.is_platform_admin()`; `is_driver_only()` gained `and not`. Every privileged
+surface funnels through those, so this reaches everything at once — including the `invoices`
+policies this repo and the live project still disagree about (§11), which is exactly why they
+were not rewritten. **If you add a policy, it inherits this for free. Do not restate it.**
+
+**`platform_admins` has no `tenant_id`** — the only table in the schema that does not — and
+`apply_tenant_policy` must never be used on it. Its policy is `is_platform_admin()` both ways,
+so nobody else can see the list exists. `platform_settings` is a single row keyed
+`id boolean primary key default true check (id)`.
+
+**`ROLES` (12) vs `MEMBERSHIP_ROLES` (11).** The check constraint on `memberships.role` refuses
+`platform_admin`. The People picker and the Zod enums in `inviteMember`/`updateMembership` must
+use `MEMBERSHIP_ROLES`, and the last-admin guard must use `membershipRolesWith`, not
+`rolesWith`. Tenant roles are built from `TENANT_ALL`, never `ALL`, so `platform.*` cannot leak
+into `super_admin`.
+
+**0019 IS APPLIED to `laundrymart-syd`** (2026-08-16) and merged to `Prod`. Rehearsed and
+verified per §11 — the decisive probe was a rehearsal laundry invisible to an ordinary member
+and visible to a platform admin, then rolled back.
+
+**Bootstrap is still outstanding and there is no way around it**: `platform_admins` has 0 rows,
+the insert policy requires one to already exist, so the Platform area is unreachable by anyone
+today. The statement is at the foot of 0019 and must be run from the SQL console. Nobody was
+granted this access — who gets it is the owner's call, not a default.
+
+**Release is read-only on purpose.** `platform_migrations()` reads the ledger; there is no
+function that applies one. The brief asked for schema updates from the app and this deliberately
+stops short — CI and the Supabase console own DDL. Don't "finish" it without asking.
+
+**Session resolution changed for everyone**, not just platform admins: `requireSession()` now
+reads an `active_tenant` cookie and orders the membership query. The old `.limit(1)` with no
+ordering (the §11 bug) is gone.
+
+## Previous: monthly invoices bill the counter's laundry (`0018_laundry_pricing`)
 The Jobs module carried no money since 0014, so a drop-off customer was never billed. Now the
 monthly run makes one draft invoice per customer carrying **every item of every job completed
 in the period, at that customer's price**, beside the contract charges it already produced.
