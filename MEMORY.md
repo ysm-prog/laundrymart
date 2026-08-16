@@ -2,8 +2,15 @@
 > Auto-loaded each session. Canonical state is CLAUDE.md; this is the live delta.
 
 ## Latest: hide the real records, reversibly (`0017_archive_records`)
-Built, proven locally, **not applied to the live project and nothing archived there** — that
-step is waiting on the user. CLAUDE.md §3 and the 2026-08-16 changelog have the detail.
+**Applied to `laundrymart-syd`, and the real records ARE archived (2026-08-16).** 1,154 rows
+hidden — 508 customers, 646 invoices. A signed-in user now sees only the demo tenant's 4
+customers and 1 invoice. Nothing deleted; every row still on disk with its `archived_at` stamp.
+Undo with `select public.set_records_archived('20000000-0000-4000-8000-000000000001', false);`
+called as a super_admin of that tenant. CLAUDE.md §3, §11 and the 2026-08-16 changelog.
+
+**The restore *button* is not deployed.** Only `Prod`/`Dev` deploy and this is a feature branch,
+so `/admin/data` does not exist in the running app yet. Merging the branch is what makes the
+undo self-service; until then it is a SQL call.
 
 **The live project has two tenants and only one of them is real.** `Adelaide Towel Service`
 (`20000000-0000-4000-8000-000000000001`) holds 508 customers and 646 invoices and **no jobs**;

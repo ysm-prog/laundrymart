@@ -437,9 +437,24 @@ demote the other and lock the tenant out of its own People screen.
 
 ## 11. Hosted project
 `laundrymart-syd` · ref `xujhwljrmogenhvqpkrf` · ap-southeast-2 (Sydney) · org `ysm-prog`.
-Deployed on Vercel at `ats.coreit.com.au`. All migrations through `0016_job_assignment`
-applied (0014 on 2026-08-13, 0015 and 0016 on 2026-08-14), each verified by rolled-back probe
-rather than trusted. For **0016** that was: the three existing jobs backfilled from the run
+Deployed on Vercel at `ats.coreit.com.au`. All migrations through `0017_archive_records`
+applied (0014 on 2026-08-13, 0015 and 0016 on 2026-08-14, 0017 on 2026-08-16), each verified by
+rolled-back probe rather than trusted.
+
+**There are two tenants and only one of them is real.** `Adelaide Towel Service`
+(`20000000-…-000000000001`) is the business: 508 customers and 646 invoices, no laundry jobs
+yet. `Harbour Commercial Laundry` (`10000000-…`) is the demo seed. Both logins
+(`darshan@`, `jay@ctnorwood.com.au`) are `super_admin` of **both**, and `requireSession()`
+picks a membership with `.limit(1)` and **no ordering** — so which of the two a person lands in
+is effectively arbitrary. Pre-existing, and worth fixing before anything depends on the split.
+
+**The real tenant's records are archived as of 2026-08-16** (§18): 1,154 rows hidden, nothing
+deleted, restored by `set_records_archived('20000000-…-000000000001', false)`.
+
+The live project also carries real supplier data from the unmerged purchases branch — 1,515
+supplier bills, 192 suppliers, 268 GL accounts, 636 import-activation rows. **No screen in this
+build reads any of it**, so it is already invisible in the deployed app and 0017 leaves it
+alone. If those screens ever land, that data needs its own decision. For **0016** that was: the three existing jobs backfilled from the run
 chain and read back (LJ00004/5 `ready_for_delivery → assigned` under Sam Okoye for 16 Aug,
 LJ00003 keeping its driver as the record of who delivered it); five guard probes all refused
 in one rolled-back block — Assigned with no assignment data, a driver with no date, ready
@@ -545,9 +560,28 @@ delete.** One migration (`0017`), one screen, no new table, no new role and no n
   it — the existing nine proofs pass unchanged, which is the check that mattered, since the
   rewrite touched policies they own.
 
-**The migration has not been applied to the live project and nothing has been archived there.**
-Hiding 1,154 real rows is the user's call to make, not a step to take while their back is
-turned. Everything above is proven against a fresh Postgres 16 carrying the same migrations.
+**Applied to `laundrymart-syd`, and the real records are archived as of 2026-08-16.** Rehearsed
+first the way §11 requires: the whole migration plus an archive, a read-back as
+`darshan@ctnorwood.com.au` and a restore, all inside one transaction that was then aborted —
+which is how the numbers below were known before anything was committed. Then applied for real
+and re-verified. **1,154 rows are hidden** (508 customers, 646 invoices); a signed-in user now
+sees 4 customers and 1 invoice, all of them the demo tenant's, and 0 rows of Adelaide Towel
+Service reachable through any query. Every hidden row is still on disk with its `archived_at`
+stamp — `CUST00001` reads back intact.
+
+**The restore button is not deployed yet.** Only `Prod` and `Dev` deploy (§5) and this is a
+feature branch, so until it is merged the archive can only be undone by calling
+`set_records_archived(tenant, false)` directly. The data is safe either way; the *self-service*
+half of the promise is not live until the branch is.
+
+Two new security advisors, both intentional and both the shape §11 already accepts:
+`set_records_archived` and `archived_record_counts` are SECURITY DEFINER and callable by
+`authenticated`. That is the entire design — an archived row is invisible, so only a
+definer-rights function can count or restore one — and each checks membership (and, for the
+write, an admin role) against `auth.uid()` before doing anything. The advisor total is now 12:
+these two, the eight pre-existing definer helpers (three of which,
+`can_read_billing`/`can_read_pricing`/`can_write_billing`, arrived with the unmerged billing
+branch), and the auth leaked-password toggle.
 
 ### 2026-08-15 · An owner can add their own people (roadmap Phase D)
 The People screen could only re-role somebody who had *already* signed in, and said so:
