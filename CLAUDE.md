@@ -478,9 +478,30 @@ demote the other and lock the tenant out of its own People screen.
 
 ## 11. Hosted project
 `laundrymart-syd` · ref `xujhwljrmogenhvqpkrf` · ap-southeast-2 (Sydney) · org `ysm-prog`.
-Deployed on Vercel at `ats.coreit.com.au`. All migrations through `0017_archive_records`
-applied (0014 on 2026-08-13, 0015 and 0016 on 2026-08-14, 0017 on 2026-08-16), each verified by
-rolled-back probe rather than trusted.
+Deployed on Vercel at `ats.coreit.com.au`. All migrations through `0018_laundry_pricing`
+applied (0014 on 2026-08-13, 0015 and 0016 on 2026-08-14, 0017 and 0018 on 2026-08-16), each
+verified by rolled-back probe rather than trusted. For **0018** that was: RLS on, both policies
+present, the unique index confirmed `nulls not distinct`, the `updated_at` trigger attached,
+`laundry_prices` confirmed absent from `archivable_tables()`, and a price row inserted and read
+back as `anon` in one rolled-back block — 0 rows, so the standard Supabase `anon` SELECT grant
+(which every table in this project carries) is refused by the policy, not merely unused. No new
+security advisor: still the same 12 warnings, being the documented SECURITY DEFINER helpers —
+including `can_read_billing`/`can_write_billing`/`can_read_pricing` from the branch below — and
+the auth leaked-password toggle.
+
+**`0018` had to be renumbered and made partly idempotent, and the reason is worth reading.**
+The live ledger already carried **`0017_customer_pricing_billing`** (applied 2026-08-15 from the
+unmerged branch `claude/customer-pricing-invoicing-sad9af`) — *an independent design for this
+same requirement*: a customer is pointed at a service agreement acting as a rate card
+(`customers.rate_card_agreement_id`) and each job's cost is frozen into `job_charge_snapshots`
+at financial approval. It converged on **exactly** the link this branch added —
+`invoice_lines.laundry_order_id`, same foreign key, same partial index, same name — so 0018
+adds that column `if not exists` or it fails on the hosted database with 42701 and takes the
+price table with it. **Both schemas are now live and only this one has code behind it**:
+`job_charge_snapshots` is empty, no customer has a rate card, and no invoice line carries a job
+yet. Two answers to "what is this customer charged?" is the duplication this file argues
+against everywhere else, so that branch needs deciding — adopted, or dropped and its two
+objects removed — before either is relied on.
 
 **There are two tenants and only one of them is real.** `Adelaide Towel Service`
 (`20000000-…-000000000001`) is the business: 508 customers and 646 invoices, no laundry jobs

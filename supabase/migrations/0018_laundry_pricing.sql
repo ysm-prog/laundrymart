@@ -112,12 +112,22 @@ grant all on public.laundry_prices to service_role;
 -- ------------------------------------------------- the billed-once link ----
 -- Which job a line came from. Read by the generator to skip work already
 -- invoiced, and by the invoice screen to link a line back to the job it bills.
+--
+-- **`if not exists`, and that is not defensive boilerplate.** The live project
+-- already carries this column, this foreign key and this index, applied on
+-- 2026-08-15 by `0017_customer_pricing_billing` from the unmerged branch
+-- `claude/customer-pricing-invoicing-sad9af` — an independent design for the
+-- same requirement that happened to converge on exactly this link, byte for
+-- byte. Without the guard this migration fails on the hosted database with
+-- 42701 and takes the price table with it. A fresh database is unaffected: the
+-- column does not exist there, so it is created here.
 alter table public.invoice_lines
-  add column laundry_order_id uuid references public.laundry_orders(id) on delete set null;
+  add column if not exists laundry_order_id uuid
+    references public.laundry_orders(id) on delete set null;
 
 -- Partial: only a minority of lines are laundry lines, and the lookup is always
 -- "has this job been billed?".
-create index idx_invoice_lines_laundry_order
+create index if not exists idx_invoice_lines_laundry_order
   on public.invoice_lines(laundry_order_id)
   where laundry_order_id is not null;
 

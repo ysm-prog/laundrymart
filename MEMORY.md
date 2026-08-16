@@ -34,6 +34,18 @@ customer set is contract customers ∪ customers with unbilled completed jobs.
 **Period edges are composed in `BUSINESS_TIMEZONE`** (`toInstant(start)` … `toInstant(end+1)`),
 because `completed_at` is a timestamptz and a 9pm finish on the 31st belongs to that month.
 
+**0018 is applied to `laundrymart-syd` (2026-08-16)** and verified by rolled-back probe: RLS on,
+both policies present, unique index `nulls not distinct`, trigger attached, and an `anon` read of
+an inserted price returning 0 rows. No new security advisor.
+
+**Watch this — there are two pricing designs in the live database.** The unmerged branch
+`claude/customer-pricing-invoicing-sad9af` applied `0017_customer_pricing_billing` on 2026-08-15:
+rate cards via `customers.rate_card_agreement_id` plus frozen `job_charge_snapshots`. It landed on
+**exactly** the same `invoice_lines.laundry_order_id` (same FK, same partial index), which is why
+0018 adds that column `if not exists` — without the guard it fails 42701 on the hosted database.
+Its tables are **empty** and its code is unmerged, so only this design has screens behind it. That
+branch needs a decision before anyone relies on either.
+
 **Verification.** 325 unit tests, 131 pgTAP assertions, `verify` green, all migrations + pgTAP
 + seed applied to a fresh Postgres 16 in-container, price table asserted at eight widths in
 `/design-preview` light and dark. **No live project** — no invoice has been generated with real
