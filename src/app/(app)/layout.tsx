@@ -1,5 +1,5 @@
 import { cookies } from "next/headers";
-import { requireSession, type Session } from "@/lib/auth/context";
+import { requireSession, switchableTenants, type Session } from "@/lib/auth/context";
 import { navigationFor } from "@/lib/nav";
 import { ROLE_LABELS } from "@/lib/roles";
 import { createClient } from "@/lib/supabase/server";
@@ -61,10 +61,13 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const items = navigationFor(session.role);
   // Both resolve to head-only counts; issued together so the bell is no slower
   // than the rail it sits beside.
-  const [counts, unread, cookieStore] = await Promise.all([
+  const [counts, unread, cookieStore, tenants] = await Promise.all([
     navCounts(),
     unreadNotificationCount(session),
     cookies(),
+    // Issued with the rest rather than awaited in the JSX below, which would
+    // have made the header wait on a query the badges had already finished.
+    switchableTenants(),
   ]);
 
   // Read here rather than in the browser so the rail paints at the right width
@@ -91,6 +94,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
               email={session.email ?? "Signed in"}
               role={ROLE_LABELS[session.role]}
               initials={initials(session)}
+              tenantName={session.tenantName}
+              tenants={tenants}
             />
           </div>
         </>

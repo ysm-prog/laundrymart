@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   CAPABILITIES, PRESET_ROLES, ROLES, ROLE_LABELS, ROLE_PRESETS, ROLE_SUMMARY,
-  can, isRole, presetForRole, rolesWith, type Role,
+  can, isRole, membershipRolesWith, MEMBERSHIP_ROLES, presetForRole, rolesWith, type Role,
 } from "@/lib/roles";
 
 describe("role presets", () => {
@@ -36,7 +36,12 @@ describe("role presets", () => {
   it("leaves the eleven roles and their capabilities untouched", () => {
     // The presets are presentation. If adding them had changed who can do what,
     // this is the assertion that would have caught it.
-    expect(ROLES).toHaveLength(11);
+    //
+    // MEMBERSHIP_ROLES rather than ROLES since 0019: the eleven this test is
+    // about are the ones a membership can hold, and `platform_admin` is a
+    // twelfth that deliberately cannot. Pinning ROLES here would have made the
+    // new role look like a regression in the preset model, which it is not.
+    expect(MEMBERSHIP_ROLES).toHaveLength(11);
     expect(can("super_admin", "admin.write")).toBe(true);
     expect(can("operations_manager", "admin.write")).toBe(false);
     expect(can("driver", "run.execute")).toBe(true);
@@ -75,5 +80,78 @@ describe("rolesWith", () => {
         expect(holders.has(role), `${role} → ${capability}`).toBe(can(role, capability));
       }
     }
+  });
+});
+
+describe("platform_admin (0019)", () => {
+  it("is a role, but never a membership role", () => {
+    // Two lists on purpose. `memberships.role` carries a check constraint that
+    // does not include `platform_admin`, so offering it in the People picker or
+    // accepting it in the invite action would be a choice the insert refuses.
+    expect(ROLES).toContain("platform_admin");
+    expect(MEMBERSHIP_ROLES as readonly string[]).not.toContain("platform_admin");
+    expect(ROLES.length).toBe(MEMBERSHIP_ROLES.length + 1);
+  });
+
+  it("matches the check constraint on memberships.role", () => {
+    // The database's list, copied from 0001. If a role is added to the app and
+    // not to the column, the failure is an insert error in production; this is
+    // the cheaper place to find out.
+    expect([...MEMBERSHIP_ROLES].sort()).toEqual([
+      "auditor", "branch_manager", "customer_service", "dispatcher", "driver",
+      "finance", "operations_manager", "regional_manager", "sales",
+      "super_admin", "warehouse_operator",
+    ]);
+  });
+
+  it("holds every capability there is", () => {
+    for (const capability of CAPABILITIES) {
+      expect(can("platform_admin", capability), capability).toBe(true);
+    }
+  });
+
+  it("is the only role holding the platform block — super_admin included", () => {
+    // The whole point of the role. `super_admin` is the top of one laundry and
+    // stops there; if a platform capability ever leaks into a role built from
+    // ALL, this is what says so.
+    const platform = CAPABILITIES.filter((c) => c.startsWith("platform."));
+    expect(platform.length).toBeGreaterThan(0);
+    for (const capability of platform) {
+      expect(rolesWith(capability), capability).toEqual(["platform_admin"]);
+    }
+  });
+
+  it("leaves every other role exactly as it was", () => {
+    // TENANT_ALL is derived by filtering, which is the kind of change that can
+    // silently drop something. Each tenant role must still hold every
+    // non-platform capability it held before.
+    expect(can("super_admin", "admin.write")).toBe(true);
+    expect(can("operations_manager", "admin.write")).toBe(false);
+    expect(can("operations_manager", "invoices.write")).toBe(true);
+    expect(can("auditor", "customers.read")).toBe(true);
+    expect(can("auditor", "customers.write")).toBe(false);
+    expect(can("driver", "run.execute")).toBe(true);
+    expect(can("branch_manager", "admin.read")).toBe(false);
+  });
+
+  it("keeps the last-administrator guard counting membership roles only", () => {
+    // `rolesWith` now includes platform_admin, which is not a value the
+    // memberships column accepts — so the People screen's lockout guard must
+    // use the membership-only variant or it would filter on a role no row can
+    // ever hold, and imply a platform admin stands in as a laundry's last one.
+    expect(rolesWith("admin.write")).toContain("platform_admin");
+    expect(membershipRolesWith("admin.write")).not.toContain("platform_admin");
+    expect(membershipRolesWith("admin.write")).toContain("super_admin");
+  });
+
+  it("gives the new role a label and a summary like every other", () => {
+    expect(ROLE_LABELS.platform_admin).toBeTruthy();
+    expect(ROLE_SUMMARY.platform_admin).toBeTruthy();
+  });
+
+  it("stays out of the three presets", () => {
+    // A preset is what a small laundry picks from. Nobody running one business
+    // should be offered the role that reaches all of them.
+    expect(PRESET_ROLES as readonly Role[]).not.toContain("platform_admin");
   });
 });

@@ -1,7 +1,15 @@
 // Role model from spec §3. Kept in one place so the nav, the page guards and
 // the server actions all agree on who can do what.
 
-export const ROLES = [
+/**
+ * The roles a **membership** may hold. This list is the app's copy of the check
+ * constraint on `memberships.role` (0001), and `roles.test.ts` pins the two
+ * together — a role added here and not there is refused by the database at
+ * insert time, which is a bad way to find out.
+ *
+ * `platform_admin` is deliberately absent: it is not a membership at all (0019).
+ */
+export const MEMBERSHIP_ROLES = [
   "super_admin",
   "operations_manager",
   "dispatcher",
@@ -15,9 +23,24 @@ export const ROLES = [
   "auditor",
 ] as const;
 
+export type MembershipRole = (typeof MEMBERSHIP_ROLES)[number];
+
+/**
+ * Every role the app knows, membership or not.
+ *
+ * `platform_admin` sits above `super_admin` and is a different kind of thing:
+ * a `super_admin` is the top of one laundry, a platform admin runs the
+ * deployment the laundries sit on. It is stored as a row in `platform_admins`
+ * with no tenant, resolved by `requireSession()`, and it is the only role here
+ * that can never appear on a membership — which is why the People picker reads
+ * `MEMBERSHIP_ROLES` and this list exists separately.
+ */
+export const ROLES = ["platform_admin", ...MEMBERSHIP_ROLES] as const;
+
 export type Role = (typeof ROLES)[number];
 
 export const ROLE_LABELS: Record<Role, string> = {
+  platform_admin: "Platform Admin",
   super_admin: "Super Admin",
   operations_manager: "Operations Manager",
   dispatcher: "Dispatcher",
@@ -69,18 +92,36 @@ export const CAPABILITIES = [
   "reports.read",
   "admin.read",
   "admin.write",
+  // Running the deployment rather than a laundry: creating and suspending
+  // laundries, the settings that apply across all of them, and reading what is
+  // released. `admin.*` is the top of one tenant — the owner's own settings and
+  // people — and stops there; these two are the level above it and are held by
+  // `platform_admin` alone. Kept out of every list derived from ALL below, so a
+  // capability added to this block cannot leak into `super_admin` by default.
+  "platform.read",
+  "platform.write",
 ] as const;
 
 export type Capability = (typeof CAPABILITIES)[number];
 
 const ALL: Capability[] = [...CAPABILITIES];
-const READ_ONLY: Capability[] = CAPABILITIES.filter((c) => c.endsWith(".read"));
+
+/**
+ * Everything a role bounded by one laundry may hold — that is, all of it except
+ * the platform block. Every tenant role below is built from this rather than
+ * from ALL, so the answer to "who can administer the deployment?" stays one
+ * name however many capabilities are added later.
+ */
+const TENANT_ALL: Capability[] = ALL.filter((c) => !c.startsWith("platform."));
+const READ_ONLY: Capability[] = TENANT_ALL.filter((c) => c.endsWith(".read"));
 
 export const ROLE_CAPABILITIES: Record<Role, readonly Capability[]> = {
-  // Full access.
-  super_admin: ALL,
+  // The deployment: every laundry, plus the platform block nobody else holds.
+  platform_admin: ALL,
+  // Full access to their own laundry, and nothing about the deployment.
+  super_admin: TENANT_ALL,
   // Everything except system settings.
-  operations_manager: ALL.filter((c) => c !== "admin.write"),
+  operations_manager: TENANT_ALL.filter((c) => c !== "admin.write"),
   // Customers, routes, jobs, drivers, vehicles, invoices.
   dispatcher: [
     "customers.read", "customers.write",
@@ -125,8 +166,8 @@ export const ROLE_CAPABILITIES: Record<Role, readonly Capability[]> = {
     "orders.read", "orders.write", "orders.status",
   ],
   sales: ["customers.read", "customers.write", "agreements.read", "agreements.write", "items.read", "reports.read"],
-  branch_manager: ALL.filter((c) => !c.startsWith("admin.")),
-  regional_manager: ALL.filter((c) => c !== "admin.write"),
+  branch_manager: TENANT_ALL.filter((c) => !c.startsWith("admin.")),
+  regional_manager: TENANT_ALL.filter((c) => c !== "admin.write"),
   // Read-only access to compliance and history.
   auditor: READ_ONLY,
 };
@@ -177,8 +218,24 @@ export function rolesWith(capability: Capability): Role[] {
   return ROLES.filter((role) => can(role, capability));
 }
 
+/**
+ * The same question, restricted to roles a membership can actually hold.
+ *
+ * This is what the last-administrator guard needs: it counts `memberships`
+ * rows, and `platform_admin` is never one of them (0019), so including it in
+ * that filter would be a value the check constraint refuses — harmless in an
+ * `IN` list, but it would quietly imply a platform admin could stand in as a
+ * laundry's last administrator, and they cannot. Their access is real but it
+ * comes from somewhere else, and a laundry with no administrator of its own is
+ * still stranded.
+ */
+export function membershipRolesWith(capability: Capability): MembershipRole[] {
+  return MEMBERSHIP_ROLES.filter((role) => can(role, capability));
+}
+
 /** What each role can do, said the way an owner would say it. */
 export const ROLE_SUMMARY: Record<Role, string> = {
+  platform_admin: "Every laundry on this system, and the system itself",
   super_admin: "Everything, including settings and who can sign in",
   operations_manager: "Everything day to day, but not the settings",
   dispatcher: "Customers, runs, stops, drivers, trucks and invoices",

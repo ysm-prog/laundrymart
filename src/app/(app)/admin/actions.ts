@@ -7,7 +7,7 @@ import { assertCapability } from "@/lib/auth/context";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { recordAudit } from "@/lib/audit";
-import { ROLES, rolesWith, type Role } from "@/lib/roles";
+import { MEMBERSHIP_ROLES, membershipRolesWith, type MembershipRole } from "@/lib/roles";
 import {
   describeDbError, done, fail, firstIssue, optionalText, optionalUuid, requiredDate, toObject,
 } from "@/lib/actions";
@@ -110,7 +110,7 @@ export async function removeHoliday(formData: FormData): Promise<void> {
 const PEOPLE = "/admin/users";
 
 /** The roles that can manage the tenant's logins. Derived, never hand-listed. */
-const ADMIN_ROLES = rolesWith("admin.write");
+const ADMIN_ROLES = membershipRolesWith("admin.write");
 
 /**
  * True when this change would leave nobody able to manage the tenant's people.
@@ -129,7 +129,7 @@ async function wouldStrandTenant(
   supabase: Awaited<ReturnType<typeof createClient>>,
   tenantId: string,
   userId: string,
-  nextRole: Role | null,
+  nextRole: MembershipRole | null,
 ): Promise<boolean> {
   // Keeping their admin role (or gaining one) can never strand anyone.
   if (nextRole && ADMIN_ROLES.includes(nextRole)) return false;
@@ -151,7 +151,7 @@ export async function updateMembership(formData: FormData): Promise<void> {
   const session = await assertCapability("admin.write");
   const parsed = z.object({
     user_id: z.string().uuid(),
-    role: z.enum(ROLES),
+    role: z.enum(MEMBERSHIP_ROLES),
     depot_id: optionalUuid,
   }).safeParse(toObject(formData));
   if (!parsed.success) return fail(PEOPLE, firstIssue(parsed.error));
@@ -183,7 +183,7 @@ const inviteSchema = z.object({
     (value) => (typeof value === "string" ? value.trim().toLowerCase() : value),
     z.string().email("Enter a valid email address"),
   ),
-  role: z.enum(ROLES),
+  role: z.enum(MEMBERSHIP_ROLES),
   depot_id: optionalUuid,
 });
 

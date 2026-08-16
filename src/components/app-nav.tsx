@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { useSyncExternalStore, type ComponentType } from "react";
 import {
   ChartColumn, CircleQuestionMark, ClipboardList, LayoutDashboard, MapPin, Moon,
-  Receipt, Route, Settings, Shirt, Sun, Truck, Users,
+  Receipt, Route, Server, Settings, Shirt, Sun, Truck, Users,
 } from "lucide-react";
 import { cx } from "./ui";
 import { isActive, sectionFor, type NavCountKey, type NavIcon, type NavItem } from "@/lib/nav";
@@ -30,6 +30,7 @@ const NAV_ICONS: Record<NavIcon, ComponentType<{ className?: string }>> = {
   linen: Shirt,
   reports: ChartColumn,
   settings: Settings,
+  platform: Server,
   help: CircleQuestionMark,
 };
 

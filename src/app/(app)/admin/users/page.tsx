@@ -3,7 +3,7 @@ import { requireCapability } from "@/lib/auth/context";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
-  can, isRole, presetForRole, PRESET_ROLES, ROLES, ROLE_LABELS, ROLE_PRESETS, ROLE_SUMMARY,
+  can, isRole, presetForRole, MEMBERSHIP_ROLES, PRESET_ROLES, ROLE_LABELS, ROLE_PRESETS, ROLE_SUMMARY,
   type Role,
 } from "@/lib/roles";
 import { date } from "@/lib/format";
@@ -78,7 +78,7 @@ function roleName(role: Role): string {
 /** The three everyday answers first, the specialist eight after them. */
 const ROLE_ORDER: readonly Role[] = [
   ...PRESET_ROLES,
-  ...ROLES.filter((role) => !PRESET_ROLES.includes(role)),
+  ...MEMBERSHIP_ROLES.filter((role) => !PRESET_ROLES.includes(role)),
 ];
 
 /**
@@ -93,7 +93,10 @@ const ROLE_GROUPS = [
   },
   {
     label: "Specialist",
-    options: ROLES
+    // MEMBERSHIP_ROLES, not ROLES: `platform_admin` is not a membership and the
+    // check constraint on the column refuses it (0019). Offering it here would
+    // be a picker entry that always fails to save.
+    options: MEMBERSHIP_ROLES
       .filter((role) => !PRESET_ROLES.includes(role))
       .map((role) => ({ value: role, label: ROLE_LABELS[role] })),
   },
