@@ -1,7 +1,39 @@
 # MEMORY — working session handoff
 > Auto-loaded each session. Canonical state is CLAUDE.md; this is the live delta.
 
-## Latest: roadmap Phase D — an owner can add their own people (no migration)
+## Latest: hide the real records, reversibly (`0017_archive_records`)
+Built, proven locally, **not applied to the live project and nothing archived there** — that
+step is waiting on the user. CLAUDE.md §3 and the 2026-08-16 changelog have the detail.
+
+**The live project has two tenants and only one of them is real.** `Adelaide Towel Service`
+(`20000000-0000-4000-8000-000000000001`) holds 508 customers and 646 invoices and **no jobs**;
+`Harbour Commercial Laundry` is the demo seed. The real tenant also holds 1,515 supplier bills,
+192 suppliers, 268 GL accounts and 636 import-activation rows from branches not merged here —
+**those have no screens in this build, so they are already invisible and 0017 does not touch
+them.** Both logins (`darshan@`, `jay@ctnorwood.com.au`) are super_admin of *both* tenants.
+
+**Watch this:** `requireSession()` picks the membership with `.limit(1)` and **no ordering**,
+so which of the two tenants a user lands in is effectively arbitrary. Pre-existing, unrelated
+to this branch, and worth fixing before anyone relies on the demo/real split.
+
+**The hiding is in the RLS policy, not in the queries** — `archived_at is null` appended to
+every policy on nineteen tables. `with check` carries it too, which is *why* archive/restore is
+`set_records_archived(t, archive)`, SECURITY DEFINER with the membership+role check inside:
+once a row is archived nobody signed in can see it, so nobody signed in can clear the flag.
+Call it on the **RLS-bound** client (needs a real `auth.uid()`), never the admin one.
+
+**The rewrite is generic on purpose.** `apply_archive_policy()` reads each policy's expression
+out of `pg_get_expr` and wraps it, because this repo's `invoices` policies and the live
+project's are different shapes (§11) and restating either would have dropped the other's
+tenancy predicate. If you add a table to `archivable_tables()`, that is the only place to add
+it — the DDL loop, the stamper and the counts all read it, and `archive.test.ts` pins the
+screen's labels to it from both directions.
+
+**The service-role client is the one reader policies do not apply to.** `/api/notifications/
+sweep` filters `archived_at` by hand for that reason. Any new admin-client read of customers,
+jobs or invoices needs the same filter.
+
+## Previously: roadmap Phase D — an owner can add their own people (no migration)
 Invite by email, remove access, three role presets. CLAUDE.md §10c and the 2026-08-15
 changelog entry have the detail; the parts worth carrying forward:
 

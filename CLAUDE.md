@@ -104,6 +104,19 @@ Resource-scoped beyond tenancy:
 - `storage.objects` in the `run-media` bucket: the object key starts with the tenant id, and
   the policies read it back through `media_tenant()` → `is_member()`. The path is the boundary,
   so it is always written from the session and never from the request.
+- **Archived records are invisible to everyone** (0017). Nineteen tables — a customer and the
+  paperwork hanging off one — carry `archived_at`, and every policy on them ends
+  `and archived_at is null`. Putting it in the policy rather than in the queries is what makes
+  it true of the fifty-first query as well as the first fifty, and of anything reaching
+  PostgREST directly. Two consequences that shape the code: `with check` carries the clause
+  too, so **no ordinary session can archive or restore a row** — the entry point is
+  `set_records_archived()`, SECURITY DEFINER, membership- and role-checked inside, called on
+  the caller's *RLS-bound* client so `auth.uid()` is real; and **the service-role client is the
+  one reader policies do not apply to**, which is why `/api/notifications/sweep` filters
+  `archived_at` by hand. The policy rewrite is generic — `apply_archive_policy()` reads each
+  policy's existing expression out of the catalogue and wraps it — because this repo and the
+  hosted project disagree about what the `invoices` policies say (§11), and re-stating either
+  shape would have dropped the other's tenancy predicate.
 - `notifications`: RLS scopes them to the tenant, as everywhere. The `audience` capability on
   each row narrows them further to the people who can act on it — but that is a UI filter
   applied in `src/lib/notifications/query.ts`, layered on top of RLS and never instead of it.
@@ -178,7 +191,7 @@ branches deploy. Never force-push `Prod`.
 `/routes/daily[/:id|/:id/sheet]` · `/routes/planner` · `/jobs[/:id]` ·
 `/operations/{pickups,deliveries,exceptions}` · `/run` · `/warehouse[/:id]` · `/inventory` ·
 `/invoices[/:id]` · `/reports` · `/search` · `/help` · `/notifications` ·
-`/admin` (redirects) `[/depots|/users|/holidays|/audit|/notifications]`
+`/admin` (redirects) `[/depots|/users|/holidays|/audit|/notifications|/data]`
 
 **There is no user-facing Runs module.** `/routes/daily`, `/routes/planner` and
 `/routes/templates` still exist, still work and still hold their history, but **no rail row
@@ -245,6 +258,11 @@ renders no tab strip. Tested in `src/lib/__tests__/nav.test.ts`.
   transition and assignment guards; the driver RLS clause widened to include a direct
   assignment. **Adds no table and drops nothing** — `vehicle_inspections`, `daily_routes`,
   `jobs` and every historical row on them are untouched.
+- `0017_archive_records` — `archived_at` + a partial index on the nineteen customer/job/
+  invoice record tables, and `archived_at is null` appended to every policy already on them.
+  Adds no table, drops nothing, and changes no row until somebody asks. The three functions
+  are `archivable_tables()` (the list, stated once and read by both the DDL loop and the
+  stamper), `set_records_archived(t, archive)` and `archived_record_counts(t)`.
 - `0013_notifications` — `tenants.settings jsonb` (AD-3) and the `notifications` table
   (AD-4). Beware the numbering drift: the unmerged branch
   `claude/warehouse-inventory-flow-psooyq` carries its own `0012_return_count.sql`, which
@@ -252,7 +270,8 @@ renders no tab strip. Tested in `src/lib/__tests__/nav.test.ts`.
 
 Proofs in `supabase/tests/`: `rls_isolation`, `rls_coverage`, `driver_scope`,
 `business_rules`, `media_scope`, `warehouse_rules`, `notifications_scope`, `laundry_orders`,
-`run_assignment` (118 assertions). Demo data in `supabase/seed.sql` — not applied by migrations.
+`run_assignment`, `archive_records` (143 assertions). Demo data in `supabase/seed.sql` — not
+applied by migrations.
 
 **Do not re-add `grant execute on all functions in schema public to anon`.** That
 boilerplate in 0002–0009 is what exposed every SECURITY DEFINER helper on
@@ -479,6 +498,57 @@ Both are compositions over existing tables — neither added a migration.
   are edited and invoices voided.
 
 ## 18. Changelog
+### 2026-08-16 · Hide the real records, and put them back
+`Adelaide Towel Service` holds 508 real customers and 646 real invoices on the live project,
+and they needed to be out of sight for now without being lost. So: **an archive, not a
+delete.** One migration (`0017`), one screen, no new table, no new role and no new capability.
+
+- **The hiding is a policy, not a filter.** Nineteen tables gain `archived_at`, and every
+  policy already on them gains `and archived_at is null`. A filter added to the fifty-odd
+  queries that read customers, jobs and invoices is a filter somebody forgets on the
+  fifty-first, and it would do nothing at all about a session talking to PostgREST directly.
+  In the policy it is true everywhere, retroactively, including in code not written yet.
+- **The policy rewrite reads the catalogue rather than restating the policies.** This repo's
+  `invoices` still carries 0006's inline `is_member`/`has_role`; the live project's was
+  replaced with `can_read_billing`/`can_write_billing` by a branch that has not landed (§11).
+  Writing new policies would have silently dropped whichever shape was not in front of me and
+  handed somebody another tenant's invoices. `apply_archive_policy()` pulls each policy's
+  expression back out with `pg_get_expr` and wraps it, so every tenancy, role and
+  driver-scoping predicate keeps applying exactly as it did — verified against the live shape
+  and the repo shape both.
+- **`with check` carries the clause too, and that is what makes restore a database function.**
+  Once a row is archived nobody signed in can see it, so nobody signed in can clear the flag
+  either — an invisible row cannot be updated back into view. Hence
+  `set_records_archived(t, archive)`: SECURITY DEFINER, with the membership and role check
+  written the way 0010 wrote `next_number()`'s, and called on the caller's **RLS-bound**
+  client so `auth.uid()` is a real person. Calling it on the admin client would have left the
+  tenant id as whatever the caller passed.
+- **The one reader policies do not apply to is the service-role client**, so the overdue-invoice
+  sweep filters `archived_at` by hand. Without it a tenant that hid its records would still be
+  chased about them, and the notification would link to an invoice nobody can open.
+- **Configuration is not business records.** Sites, linen types, vehicles, drivers, people,
+  public holidays, route templates and inventory pools are all left alone: an operator who
+  hides last year's customers must come back to an app that still knows how they work. The
+  boundary is asserted from both directions in `archive.test.ts`.
+- **The screen has to prove the records still exist**, or an archive looks exactly like a
+  delete. `/admin/data` (Settings → Your records, `admin.write`) reads
+  `archived_record_counts()` — which can see the hidden rows precisely because they are hidden
+  — and says how many of each are waiting. `ConfirmSubmit` states the consequence, and its
+  eyebrow reads "This can be undone" rather than the default "Cannot be undone", because here
+  that is the fact that matters.
+- **Known boundary, stated rather than papered over:** `daily_routes` is not archived, only
+  the stops on it. Runs carry no customer and no screen links to one (§6), so nothing surfaces
+  — except that the late-run sweep could still raise a notification about an emptied run. The
+  live tenant has no runs at all, so this is theoretical today.
+- 304 unit tests (was 297) and **143 pgTAP assertions (was 118)**. `verify` green; every
+  migration applied to a fresh Postgres 16 with the whole pgTAP suite and the seed on top of
+  it — the existing nine proofs pass unchanged, which is the check that mattered, since the
+  rewrite touched policies they own.
+
+**The migration has not been applied to the live project and nothing has been archived there.**
+Hiding 1,154 real rows is the user's call to make, not a step to take while their back is
+turned. Everything above is proven against a fresh Postgres 16 carrying the same migrations.
+
 ### 2026-08-15 · An owner can add their own people (roadmap Phase D)
 The People screen could only re-role somebody who had *already* signed in, and said so:
 "Accounts are set up by your system administrator for now." For an owner running a three-person

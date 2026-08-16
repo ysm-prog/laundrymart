@@ -88,6 +88,12 @@ async function sweepOverdueInvoices(
     .eq("tenant_id", tenant.id)
     .in("status", CHASEABLE_STATUSES)
     .is("deleted_at", null)
+    // The archive (0017) hides rows with a *policy*, and this route runs on the
+    // service-role client, which is the one client policies do not apply to. So
+    // the filter that every other reader gets for free has to be written here,
+    // or a tenant that hid its records would still be chased about them — and
+    // the notification would link to an invoice nobody can open.
+    .is("archived_at", null)
     .not("due_date", "is", null)
     .lt("due_date", businessDay)
     .gt("balance", 0)
