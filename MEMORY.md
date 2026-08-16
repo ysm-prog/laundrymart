@@ -36,7 +36,21 @@ to all of them silently.
 accounts; it lost only customer invoicing. The old "invoices minus dispatcher" pin is gone and
 the holders are pinned literally.
 
-**0025 is NOT applied to `laundrymart-syd`.** Until it is, the app refuses but the API allows.
+**0025 IS applied to `laundrymart-syd`** (2026-08-16), rehearsed and verified: a rehearsal
+warehouse operator's UPDATE touched 0 rows, both real logins still write (they are
+`platform_admin`, which `has_role()` admits), 27 policies over 9 tables, no row changed.
+
+**The driver carve-out is load-bearing** — `completeLaundryOrder` writes `laundry_orders` from
+My Runs and `/run`. Without it a driver's delivery completion is refused *silently* (UPDATE 0,
+no error) and the job sits at `out_for_delivery`. A local probe caught it before it shipped.
+
+## Decided: `claude/phase-6-build-0yybvq` is dropped, not pending
+Owner's decision 2026-08-16, all three parts refused on their own merits. **Do not merge it.**
+Simple mode (D2) was built for a 22-row rail and 0025 shrank most roles further; its own
+`inviteMember` uses `generateLink` and therefore *sends no email at all* (the shipped one uses
+`inviteUserByEmail`, which is what makes Supabase send it); the branded invite email needs
+Resend, which has never been proven against the provider. CLAUDE.md §19 has the full reasoning.
+Branch left on the remote, not deleted.
 
 ## Also live: deliveries were impossible — nothing ever loads the van
 Found on the deployed app. `only 0 of that item are in transit, so 12 cannot be moved out`.
