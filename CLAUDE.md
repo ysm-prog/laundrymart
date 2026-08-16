@@ -683,11 +683,22 @@ shown to read 0 rows from `platform_admins` *with a row present*, so the standar
 `anon` SELECT grant is refused by the policy rather than merely unused — the same proof 0018
 required.
 
-**Still to do: bootstrap the first administrator.** There are 0 rows in `platform_admins`, so
-the Platform area is currently unreachable by anyone, and the insert policy requires an
-administrator to already exist. The statement is at the foot of the migration and must be run
-from the SQL console. Nobody has been granted this access — deciding who gets it is not a
-decision to make on someone's behalf.
+**Bootstrapped 2026-08-16: `darshan@` and `jay@ctnorwood.com.au` are the two platform
+administrators.** Two rather than one deliberately — the delete guard refuses the last row, so a
+single administrator could never be replaced without the service role. Verified as each of them:
+`is_platform_admin` true, both laundries visible, `platform_admins` and `platform_settings`
+readable, `platform_migrations()` returning all 26 ledger entries. Also verified by rolled-back
+probe that a signed-in user who is neither a member nor a platform admin still sees 0 tenants,
+0 customers and 0 platform admins, that removing one administrator while two exist is allowed,
+and that removing the last is refused with `Cannot remove the last platform administrator`.
+
+**Consequence worth knowing: both logins now resolve as `platform_admin`, not `super_admin`.**
+`requireSession()` checks `platform_admins` before memberships, so their `super_admin`
+memberships in both tenants are no longer what drives their role — they hold every capability
+including the platform block, and land on `Adelaide Towel Service` by default (first by name)
+rather than on whichever tenant the old unordered `.limit(1)` happened to return. Their
+memberships are untouched and still there; removing their platform row returns them to
+`super_admin` exactly as before.
 
 **Two things the brief asked for that this does not do.** Applying migrations from the browser
 is not built, for the reason above. And a platform admin still works *inside one laundry at a

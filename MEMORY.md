@@ -26,10 +26,14 @@ into `super_admin`.
 verified per §11 — the decisive probe was a rehearsal laundry invisible to an ordinary member
 and visible to a platform admin, then rolled back.
 
-**Bootstrap is still outstanding and there is no way around it**: `platform_admins` has 0 rows,
-the insert policy requires one to already exist, so the Platform area is unreachable by anyone
-today. The statement is at the foot of 0019 and must be run from the SQL console. Nobody was
-granted this access — who gets it is the owner's call, not a default.
+**Bootstrapped: `darshan@` and `jay@ctnorwood.com.au` are the two platform admins** (2026-08-16).
+Two on purpose — the delete guard refuses the last row. Verified as each: both laundries visible,
+the ledger readable, and a non-admin still sees nothing.
+
+**Both logins now resolve as `platform_admin`, not `super_admin`.** `requireSession()` checks
+`platform_admins` first, so their memberships no longer drive their role. They default to
+`Adelaide Towel Service` (first by name) and switch from the account menu. Memberships untouched;
+delete the platform row to put either back to `super_admin`.
 
 **Release is read-only on purpose.** `platform_migrations()` reads the ledger; there is no
 function that applies one. The brief asked for schema updates from the app and this deliberately
