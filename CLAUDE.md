@@ -569,10 +569,15 @@ sees 4 customers and 1 invoice, all of them the demo tenant's, and 0 rows of Ade
 Service reachable through any query. Every hidden row is still on disk with its `archived_at`
 stamp — `CUST00001` reads back intact.
 
-**The restore button is not deployed yet.** Only `Prod` and `Dev` deploy (§5) and this is a
-feature branch, so until it is merged the archive can only be undone by calling
-`set_records_archived(tenant, false)` directly. The data is safe either way; the *self-service*
-half of the promise is not live until the branch is.
+**Merged into `Prod` the same day** (`f52116a`, CI green on all three jobs), so the undo is
+self-service: Settings → Your records → *Restore my records*. Before that merge the archive
+could only be reversed with a direct `set_records_archived(tenant, false)`, which is still the
+fallback if the screen is ever unreachable.
+
+Merged into `Prod` rather than `Dev` despite §5's stated order, because `Dev` had fallen 15
+commits behind `Prod` and `ats.coreit.com.au` builds from `Prod` — the same route the previous
+three features took. `Dev` is still stale and wants a catch-up merge before it is trusted as a
+staging branch again.
 
 Two new security advisors, both intentional and both the shape §11 already accepts:
 `set_records_archived` and `archived_record_counts` are SECURITY DEFINER and callable by
