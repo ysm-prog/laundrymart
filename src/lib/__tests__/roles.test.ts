@@ -157,18 +157,24 @@ describe("platform_admin (0019)", () => {
 });
 
 describe("the payable side (purchases.*)", () => {
-  it("is held by whoever writes money records, except the dispatcher", () => {
-    // Most of these roles arrive by deriving from TENANT_ALL rather than by
-    // being named, so without this the set is an accident that happens to be
-    // right. The dispatcher is the one deliberate subtraction: they hold
-    // `invoices.write` so they can bill the work they plan, which is no reason
-    // to show them what the business pays its suppliers.
-    expect(rolesWith("purchases.write")).toEqual(
-      rolesWith("invoices.write").filter((role) => role !== "dispatcher"),
-    );
-    expect(rolesWith("purchases.read")).toEqual(
-      rolesWith("invoices.read").filter((role) => role !== "dispatcher"),
-    );
+  it("no longer follows invoices.*, and is pinned literally instead", () => {
+    // It used to be "whoever writes money records, except the dispatcher",
+    // which held while both sides of the ledger answered to the same people.
+    // Narrowing job→invoice to the Owner and the Office manager broke that:
+    // deriving would have taken supplier bills off finance as a side effect of
+    // a decision about *customer* billing. So the holders are pinned here.
+    expect(rolesWith("purchases.write")).toEqual([
+      "platform_admin", "super_admin", "operations_manager",
+      "finance", "branch_manager", "regional_manager",
+    ]);
+    expect(rolesWith("purchases.read")).toEqual([
+      "platform_admin", "super_admin", "operations_manager",
+      "finance", "branch_manager", "regional_manager", "auditor",
+    ]);
+    // The point of pinning: the payable side must NOT have narrowed with the
+    // receivable one.
+    expect(can("finance", "purchases.write")).toBe(true);
+    expect(can("finance", "invoices.write")).toBe(false);
   });
 
   it("never reaches the counter, the floor or the van", () => {
@@ -183,5 +189,57 @@ describe("the payable side (purchases.*)", () => {
   it("lets the auditor look and not touch, like everything else", () => {
     expect(can("auditor", "purchases.read")).toBe(true);
     expect(can("auditor", "purchases.write")).toBe(false);
+  });
+});
+
+describe("job → invoice is the Owner's and the Office manager's alone", () => {
+  const CHAIN = [
+    "orders.read", "orders.write", "orders.status", "orders.manage",
+    "invoices.read", "invoices.write",
+  ] as const;
+
+  it("is held by exactly super_admin and operations_manager", () => {
+    // The owner's decision, 2026-08-16: taking a job in, moving it through the
+    // plant and billing it is one flow and it answers to two people.
+    // `platform_admin` holds it the way it holds everything.
+    for (const capability of CHAIN) {
+      expect(rolesWith(capability), capability).toEqual([
+        "platform_admin", "super_admin", "operations_manager",
+      ]);
+    }
+  });
+
+  it("is closed to every other role, read included", () => {
+    const allowed = new Set(["platform_admin", "super_admin", "operations_manager"]);
+    for (const role of ROLES.filter((r) => !allowed.has(r))) {
+      for (const capability of CHAIN) {
+        expect(can(role, capability), `${role} → ${capability}`).toBe(false);
+      }
+    }
+  });
+
+  it("names the roles that lost it, so the change is not silent", () => {
+    // Each of these held part of the chain before and no longer does. Listed
+    // by name because a future edit that hands one of them back should have to
+    // change this test and say why.
+    expect(can("warehouse_operator", "orders.status")).toBe(false); // the plant floor
+    expect(can("customer_service", "orders.write")).toBe(false);    // the counter
+    expect(can("dispatcher", "invoices.write")).toBe(false);
+    expect(can("finance", "invoices.write")).toBe(false);
+    expect(can("auditor", "invoices.read")).toBe(false);
+    expect(can("branch_manager", "orders.write")).toBe(false);
+    expect(can("regional_manager", "orders.write")).toBe(false);
+  });
+
+  it("leaves each of those roles their own work", () => {
+    // The restriction is about the main flow, not a demotion. Nothing else the
+    // roles do was touched.
+    expect(can("warehouse_operator", "warehouse.write")).toBe(true);
+    expect(can("warehouse_operator", "inventory.write")).toBe(true);
+    expect(can("customer_service", "customers.write")).toBe(true);
+    expect(can("dispatcher", "routes.write")).toBe(true);
+    expect(can("finance", "purchases.write")).toBe(true);
+    expect(can("finance", "reports.read")).toBe(true);
+    expect(can("driver", "run.execute")).toBe(true);
   });
 });

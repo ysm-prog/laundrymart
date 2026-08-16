@@ -95,12 +95,14 @@ export const CAPABILITIES = [
   // can see whether a customer is on stop, which is no reason to show them what
   // the business pays its suppliers.
   //
-  // **The line is "whoever writes money records, except the dispatcher."** Most
-  // holders arrive here by deriving from TENANT_ALL rather than by being named,
-  // which is how a capability added to this file quietly reaches six roles — so
-  // the rule is stated here and pinned in `roles.test.ts` against
-  // `invoices.*`, and a change to either set now fails a test instead of
-  // silently handing somebody the chart of accounts.
+  // **This block does NOT follow `invoices.*` any more.** It used to be exactly
+  // "whoever writes money records, except the dispatcher", which was true while
+  // both sides of the ledger answered to the same people. Since the job→invoice
+  // flow was narrowed to the Owner and the Office manager, deriving from
+  // `invoices.*` would have taken supplier bills and the chart of accounts off
+  // the finance role as a side effect of a decision about customer billing.
+  // So the holders are named explicitly on each role and pinned literally in
+  // `roles.test.ts`.
   "purchases.read",
   "purchases.write",
   "reports.read",
@@ -121,6 +123,29 @@ export type Capability = (typeof CAPABILITIES)[number];
 const ALL: Capability[] = [...CAPABILITIES];
 
 /**
+ * Taking a job in, moving it through the plant, and billing it.
+ *
+ * **Held by the Owner and the Office manager, and by nobody else** (the owner's
+ * decision, 2026-08-16). This is the business's main flow and the whole of it —
+ * `orders.*` and `invoices.*` — answers to the same two people, so the block is
+ * named once here and subtracted from every other role rather than being
+ * omitted role by role, where the next capability added would quietly reopen it.
+ *
+ * Note what is deliberately *not* in this block: `purchases.*` keeps its own
+ * holders (see below). Narrowing who bills the customer is not a statement
+ * about who pays the suppliers, and letting the payable side ride along on this
+ * change would have taken the chart of accounts off the finance role for a
+ * reason nobody asked for.
+ */
+const JOB_TO_INVOICE: Capability[] = ALL.filter(
+  (c) => c.startsWith("orders.") || c.startsWith("invoices."),
+);
+
+/** Everything a role may hold that is neither platform work nor the main flow. */
+const outsideMainFlow = (caps: Capability[]): Capability[] =>
+  caps.filter((c) => !JOB_TO_INVOICE.includes(c));
+
+/**
  * Everything a role bounded by one laundry may hold — that is, all of it except
  * the platform block. Every tenant role below is built from this rather than
  * from ALL, so the answer to "who can administer the deployment?" stays one
@@ -136,7 +161,8 @@ export const ROLE_CAPABILITIES: Record<Role, readonly Capability[]> = {
   super_admin: TENANT_ALL,
   // Everything except system settings.
   operations_manager: TENANT_ALL.filter((c) => c !== "admin.write"),
-  // Customers, routes, jobs, drivers, vehicles, invoices.
+  // Customers, routes, stops, drivers and vehicles. No jobs and no invoices:
+  // the main flow is the Owner's and the Office manager's alone.
   dispatcher: [
     "customers.read", "customers.write",
     "agreements.read",
@@ -144,49 +170,48 @@ export const ROLE_CAPABILITIES: Record<Role, readonly Capability[]> = {
     "fleet.read", "fleet.write",
     "routes.read", "routes.write", "routes.status",
     "operations.read", "operations.write",
-    "orders.read", "orders.write", "orders.status",
     "inventory.read",
     "warehouse.read",
-    "invoices.read", "invoices.write",
     "reports.read",
   ],
   // Own run only — RLS confines every routes row to their own `drivers.id`, so
   // `routes.status` here means "my run", not "any run".
   driver: ["run.execute", "routes.read", "routes.status", "operations.read", "operations.write"],
-  // Invoices, payments, bills, reports. The only role that needs the payable
-  // side named explicitly — every other holder of it derives from ALL or
-  // READ_ONLY and picks it up on its own.
+  // The payable side and reports. Customer invoicing is **not** here: billing
+  // the work is part of the main flow, which the Owner and the Office manager
+  // keep. What finance still owns is what the business pays out — supplier
+  // bills, purchase orders and the chart of accounts — which is why
+  // `purchases.*` is named explicitly rather than derived.
   finance: [
     "customers.read",
     "agreements.read",
     "items.read",
-    // Read-only on jobs: "what did we actually take in for them?" is a billing
-    // question, but finance never works the counter or the floor.
-    "orders.read",
-    "invoices.read", "invoices.write",
     "purchases.read", "purchases.write",
     "reports.read",
   ],
+  // The plant floor: stock, batches and the linen vocabulary. It used to hold
+  // `orders.status` so the floor could walk a job from new to ready — that is
+  // now the Owner's and the Office manager's, by the owner's decision. The
+  // floor still runs every warehouse stage; what it no longer does is move the
+  // customer's job along behind them.
   warehouse_operator: [
     "inventory.read", "inventory.write",
     "warehouse.read", "warehouse.write",
     "items.read", "operations.read",
-    // The floor is what actually moves a job from new to ready, so it holds
-    // `orders.status` without `orders.write` — it advances work, it does not
-    // take orders or change what was agreed.
-    "orders.read", "orders.status",
   ],
+  // Customers and the day's stops. Taking laundry in over the counter was this
+  // role's whole point and is now the Owner's and the Office manager's — so a
+  // laundry that wants counter staff to book jobs gives them the Office role
+  // rather than this one.
   customer_service: [
     "customers.read", "customers.write", "agreements.read", "operations.read",
     "routes.read", "routes.status",
-    // The counter: takes the laundry in and hands it back.
-    "orders.read", "orders.write", "orders.status",
   ],
   sales: ["customers.read", "customers.write", "agreements.read", "agreements.write", "items.read", "reports.read"],
-  branch_manager: TENANT_ALL.filter((c) => !c.startsWith("admin.")),
-  regional_manager: TENANT_ALL.filter((c) => c !== "admin.write"),
+  branch_manager: outsideMainFlow(TENANT_ALL.filter((c) => !c.startsWith("admin."))),
+  regional_manager: outsideMainFlow(TENANT_ALL.filter((c) => c !== "admin.write")),
   // Read-only access to compliance and history.
-  auditor: READ_ONLY,
+  auditor: outsideMainFlow(READ_ONLY),
 };
 
 /**
@@ -255,15 +280,15 @@ export const ROLE_SUMMARY: Record<Role, string> = {
   platform_admin: "Every laundry on this system, and the system itself",
   super_admin: "Everything, including settings and who can sign in",
   operations_manager: "Everything day to day, but not the settings",
-  dispatcher: "Customers, runs, stops, drivers, trucks and invoices",
+  dispatcher: "Customers, stops, drivers and trucks — not jobs or invoices",
   driver: "Their own run, on their phone, and nothing else",
-  finance: "Invoices, payments, supplier bills and reports",
-  warehouse_operator: "The plant floor and stock",
-  customer_service: "Customers and the day's stops",
+  finance: "Supplier bills, what you owe, and reports",
+  warehouse_operator: "The plant floor and stock — not the customer's job",
+  customer_service: "Customers and the day's stops — not taking jobs in",
   sales: "Customers and their contracts",
-  branch_manager: "Everything at one site",
-  regional_manager: "Everything day to day across sites",
-  auditor: "Can look at everything, can change nothing",
+  branch_manager: "Everything at one site except jobs and invoices",
+  regional_manager: "Everything across sites except jobs and invoices",
+  auditor: "Can look at everything except jobs and invoices, changes nothing",
 };
 
 export function can(role: Role, capability: Capability): boolean {

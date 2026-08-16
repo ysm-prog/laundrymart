@@ -74,15 +74,26 @@ describe("navigationFor", () => {
     }
   });
 
-  it("keeps the payable screens away from the people who plan the day", () => {
-    // A dispatcher holds `invoices.read` so they can see whether a customer is
-    // on stop. That is not a reason to show them what the business pays its
-    // suppliers, which is why `purchases.read` exists as its own capability.
-    const money = navigationFor("dispatcher").find((item) => item.label === "Money");
-    expect(money?.children?.map((child) => child.label)).toEqual(["Invoices", "Laundry prices"]);
+  it("splits the two sides of the ledger between the roles that own them", () => {
+    // The Money area holds both. Since job→invoice became the Owner's and the
+    // Office manager's, the two halves land on different people and the area
+    // resolves to whichever screen the role can actually open.
+    //
+    // A dispatcher now holds neither half, so the row is gone entirely rather
+    // than pointing at a screen the auth gate would bounce them from.
+    expect(navigationFor("dispatcher").map((item) => item.label)).not.toContain("Money");
 
+    // Finance keeps the payable side and loses the receivable one, so the area
+    // survives with the three payable tabs and starts at Bills.
     const finance = navigationFor("finance").find((item) => item.label === "Money");
+    expect(finance?.href).toBe("/bills");
     expect(finance?.children?.map((child) => child.label)).toEqual([
+      "Bills", "Suppliers", "Accounts",
+    ]);
+
+    // The Office manager keeps both sides.
+    const office = navigationFor("operations_manager").find((item) => item.label === "Money");
+    expect(office?.children?.map((child) => child.label)).toEqual([
       "Invoices", "Laundry prices", "Bills", "Suppliers", "Accounts",
     ]);
   });
@@ -167,11 +178,20 @@ describe("navigationFor", () => {
     ]);
   });
 
-  it("shows the counter its jobs and keeps them from the driver", () => {
-    expect(navigationFor("customer_service").map((item) => item.label)).toContain("Jobs");
-    expect(navigationFor("warehouse_operator").map((item) => item.label)).toContain("Jobs");
-    // A driver's world is their own run; counter jobs are not on it.
-    expect(navigationFor("driver").map((item) => item.label)).not.toContain("Jobs");
+  it("shows Jobs to the Owner and the Office manager and to nobody else", () => {
+    // The owner's decision, 2026-08-16: the job→invoice flow is theirs alone.
+    // The rail follows the capability, so the row simply is not there for the
+    // counter, the floor, a dispatcher or a driver — none of whom can open a
+    // job any more.
+    for (const role of ["super_admin", "operations_manager", "platform_admin"] as const) {
+      expect(navigationFor(role).map((item) => item.label), role).toContain("Jobs");
+    }
+    for (const role of [
+      "customer_service", "warehouse_operator", "dispatcher", "driver",
+      "finance", "auditor", "branch_manager", "regional_manager", "sales",
+    ] as const) {
+      expect(navigationFor(role).map((item) => item.label), role).not.toContain("Jobs");
+    }
   });
 });
 
