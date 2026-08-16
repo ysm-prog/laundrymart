@@ -165,6 +165,32 @@ them: counter jobs are not stops on a run. `routes.write` (plan and assign) is s
 a run that is already out): the latter also goes to `driver` — RLS confines them to their own
 run — and to `customer_service`, so a stuck run is not waiting on a dispatcher.
 
+### 3a. Test role profiles
+`npm run seed:roles` provisions **one login per role** so a capability change can be checked by
+signing in rather than by reading `roles.ts`. `scripts/role-profiles.mjs` is the list (plain
+JS — the runner is bare Node with no build step, and `role-profiles.test.ts` imports that same
+file, so there is no second copy); `scripts/seed-role-profiles.mjs` is the runner. Addresses are
+`<role-with-hyphens>@roles.example.com` — reserved by RFC 2606, so a stray invitation or overdue
+chase aimed at a test profile can never leave the building — and the shared password is printed
+on every run. Needs `SUPABASE_SERVICE_ROLE_KEY`: creating a login is an Auth admin call and the
+membership insert writes a `tenant_id` no session is bound to, so every statement in it filters
+`tenant_id` by hand.
+
+Four decisions worth keeping:
+- **Idempotent, and that is also the recovery path.** An address that exists is reused and its
+  password reset, so a rerun is how you get back a test login nobody wrote down.
+- **`platform_admin` is opt-in (`--platform-admin`), not part of "all the roles".** It is not a
+  membership (0019) and it reaches *every* laundry on the project — on this deployment that
+  includes the real tenant beside the demo one, so it is not a demo-tenant test login at all.
+- **The driver profile gets a `drivers` row.** A `driver` membership with no such row leaves
+  `current_driver_id()` null, every driver-scoped policy then matches nothing, and the result is
+  a login that works with empty screens — which reads as a bug in My Runs.
+- **`--remove` deletes a login only when this script's grants were the whole of it**, and
+  unlinks the driver row rather than deleting it, because runs and stops point at it.
+
+`role-profiles.test.ts` pins the list against `ROLES`, so a twelfth role added to `roles.ts`
+fails a test rather than shipping with no way to be signed in as.
+
 ## 4. Business rules enforced in the database
 - Run cannot start without `load_confirmed_at`; cannot close before `unloaded_at`
   (`guard_route_transition`). The vehicle inspection is recorded and surfaced but is **not**
@@ -693,6 +719,35 @@ Both are compositions over existing tables — neither added a migration.
   are edited and invoices voided.
 
 ## 18. Changelog
+### 2026-08-16 · A login per role, so a capability change can be signed in as
+`0025` narrowed the job→invoice flow to two roles, and the only way to check what the other nine
+now see was to read `roles.ts`. There were two logins on the whole deployment, both
+`super_admin` (in fact both `platform_admin` since 0019). **No migration, no schema, no RLS
+policy, no capability and no application code changed** — this is tooling.
+
+- **`npm run seed:roles`** creates one login per role in the demo laundry, resets the password of
+  any that already exist, and prints the lot. See §3a. Chosen over adding users to
+  `supabase/seed.sql` because that file writes `auth.users` rows directly and gives no password
+  — the accounts would exist and nobody could sign in as one.
+- **The list lives in `scripts/role-profiles.mjs` and the vitest suite imports that same file**,
+  rather than the script carrying its own array. `role-profiles.test.ts` pins it against `ROLES`,
+  so a role added to `roles.ts` with no test profile fails a test. Verified by deleting the
+  `sales` profile: two assertions fail.
+- **Plain JavaScript with a `.d.mts` beside it**, because the runner is bare Node — no build
+  step, no `tsx` dependency — while `tsc --noEmit` and vitest still read it typed.
+- **`platform_admin` is behind `--platform-admin`.** "All the roles" would otherwise put a test
+  login above the tenancy boundary and into `Adelaide Towel Service`, which is the opposite of
+  the point of testing on the demo tenant.
+- 393 unit tests (was 386; 7 for the profile list). `verify` green. The default
+  `--tenant "Harbour Commercial Laundry"` was checked against the live project: the name is
+  unique, so the resolver cannot be ambiguous, and the laundry has an active depot for the
+  driver record to sit in.
+
+**Not run against any project.** This container has no Supabase credentials, so the argument
+guards, the profile list and the refusals were exercised, and the Auth admin round trip was not.
+**Before trusting it: run `npm run seed:roles -- --dry-run` first**, then without the flag, then
+sign in as `driver@roles.example.com` and confirm My Runs is theirs and Money is refused.
+
 ### 2026-08-16 · Job to invoice belongs to the Owner and the Office manager
 The owner's decision: taking a job in, moving it through the plant and billing it is one flow,
 and it answers to two people. `orders.*` and `invoices.*` are now held by `super_admin` and
