@@ -378,37 +378,76 @@ The plugin instance is pulled back out of the Next config rather than declared a
 dependency, keeping the pins above the only source; it throws if that registration moves.
 
 ## 10b. Design system
-**Electro Services.** Replaced the Plantline language (flat, square, near-black chrome,
-monospace labels) in the 2026-08-13 redesign — it read as a developer console to the counter
+**YSM Hub — "paper and ink with accent."** Adopted from `ysm-prog/ysm-hub` (`src/index.css`) in
+the 2026-08-16 re-skin so the two products read as one company's software. It supersedes the
+2026-08-13 Electro Services language, which in turn replaced Plantline (flat, square,
+near-black chrome, monospace labels) because that read as a developer console to the counter
 staff, drivers and managers who use it. Tokens live in the `@layer base` block of
-`globals.css`; nothing hard-codes a colour, radius or shadow at a call site.
+`globals.css`; nothing hard-codes a colour, radius or shadow at a call site — which is what let
+the whole re-skin happen in the token layer, with `src/` otherwise untouched.
 
-- **One brand colour, used for intent.** `--primary` (blue `#2145c4`; lifted to `#7ba4f5` on
-  dark) marks the primary action and the place you are — buttons, active nav, focus ring.
-  `--action` is a separate token pointed at the same value, because the whole app spells the
-  solid button `bg-action`; the seam stays if the two ever need to diverge.
-- **Status keeps its own family** (`--success`, `--warning`, `--danger`, `--info`) and is
-  **always paired with a written label** — a badge never carries meaning by colour alone.
-  Text on a solid status fill uses `--on-status`, never a literal white: the dark theme lifts
-  every status colour to clear AA on a dark surface, which leaves them far too light for white.
-- **Soft, not flat.** The `--radius-*` scale is real again (4–24px, `rounded-lg` = 10px is the
-  default control corner) and `--shadow-*` is a light layered set. A base rule gives
-  `button`/`select`/`textarea`/`input` the system radius, so the ~120 controls hand-rolled when
-  the language was square cannot come out square; a `rounded-*` utility still wins.
-- **Comfortable, not dense.** 15px body, 44px (`min-h-11`) inputs and touch-first buttons, 40px
-  standard buttons, nothing tappable below 36px. Page titles 26–28px, section 16px, body 14–15px.
+**Every hex in YSM Hub's stylesheet was converted to HSL and pinned to one decimal place**, so
+each token round-trips to YSM's exact byte (`--background` really is `#f4f1ea`, not a near
+miss). Integer percentages drift by 1–2 per channel; if you add a token, carry the decimal.
 
-Inter + JetBrains Mono via `next/font` (self-hosted; the driver app must render without signal).
-**Mono is bound but deliberately rare** — genuine machine text only, never a date, total or job
-number. `Eyebrow` in `ui.tsx` is the supporting-label voice: 12px sentence case, *not* the old
-9px mono uppercase.
+- **One brand colour, used for intent.** `--primary` (YSM teal `#01696f`) marks the primary
+  action and the place you are — buttons, active nav, focus ring. `--action` is a separate
+  token pointed at the same value, because the whole app spells the solid button `bg-action`;
+  the seam stays if the two ever need to diverge.
+- **Status keeps its own family** (`--success`, `--warning`, `--danger`, `--info` — YSM's
+  earthier semantic four) and is **always paired with a written label** — a badge never carries
+  meaning by colour alone. Text on a solid status fill uses `--on-status`, never a literal
+  white.
+- **The dark theme is ours, not YSM's, and that is deliberate.** YSM Hub's own stylesheet
+  contrast-checked its dark `--ink-3`/`--ink-4` and never its dark accent: `#00898f` measures
+  4.4:1 on the dark page and 4.0:1 on a dark card, under the 4.5:1 floor its light theme holds.
+  Its semantic four are left at their light values, which are unreadable on `#141412`. So every
+  dark colour **keeps YSM's hue exactly and moves only lightness** until it clears AA on the
+  page, on a card, and as a fill under `--on-status`. Same teal, legible. `--muted-foreground`
+  is lifted one step past YSM's `#84817a` for the same reason — that value clears AA on the
+  page (4.7:1) but not on a *card* (4.3:1), and most muted text in this app sits on a card.
+- **Paper, not panels-on-grey.** Warm paper page carrying an 18px dot lattice at 3% ink (felt,
+  not seen — it stops a large empty page reading as a void), warm off-white cards, hairlines in
+  stone rather than cool grey. Shadow is used sparingly and is retinted to YSM's ink so it no
+  longer goes faintly violet on warm paper.
+- **YSM's geometry**, which is crisper than what came before: `--radius-*` now spans 2–22px,
+  with **`rounded-lg` = 6px the control corner** (YSM `--r`) and **`rounded-xl` = 12px the card
+  corner** (YSM `--r-lg`). Those two names were already load-bearing at ~130 call sites, so the
+  remap changed the geometry of the whole app without touching one of them. A base rule gives
+  `button`/`select`/`textarea`/`input` the system radius, so the ~120 hand-rolled controls
+  cannot come out square; a `rounded-*` utility still wins.
+- **Comfortable, not dense — the one place we do *not* follow YSM's numbers.** 15px body, 44px
+  (`min-h-11`) inputs and touch-first buttons, 40px standard buttons, nothing tappable below
+  36px. YSM Hub is 14px body and 36px controls because it is a desktop repair-shop console;
+  this is a counter tablet and a driver's phone. YSM reasons the same way — it re-declares its
+  whole type scale under `@media (pointer: coarse)` to get a legible touch floor — so holding
+  the comfortable sizing follows its intent rather than departing from it.
+
+Instrument Sans + Instrument Serif + JetBrains Mono via `next/font` (self-hosted). This is the
+one thing YSM Hub does that could not be copied as-is: it pulls all three from
+`fonts.googleapis.com` with a `<link>`, which is fine for a shop counter on wifi and wrong for
+a van — the driver app must render without signal. Same three faces, fetched at build time.
+
+**`em` is Instrument Serif italic**, bound globally in `globals.css` — YSM's signature accent
+word inside a heading. Safe to bind because the app contained no `<em>` at all; use it in a
+page title, not in body copy. **Mono stays bound but deliberately rare**: YSM spends it freely
+on eyebrows, table headers and badges, and **this app does not follow it there**, because that
+uppercase-mono-label treatment is exactly what the 2026-08-13 redesign swept out of 28 files.
+Same fonts, same palette, different label voice — deliberate, not drift. The one exception is
+`BrandMark`, where YSM spends mono too (`.side-shop .av`): a single letter in a teal tile is a
+mark, not prose. `Eyebrow` in `ui.tsx` remains the supporting-label voice: 12px sentence case.
 
 The strong border colour is named `--color-strong`, **not** `--color-border-strong`: the latter
 would spell the utility `border-border-strong` and silently do nothing.
 
-The sidebar is a light surface driven by its own `--sidebar-*` tokens (it used to be near-black
+The sidebar is a paper surface driven by its own `--sidebar-*` tokens (it used to be near-black
 with literal hex). Tokenised separately so the rail can be themed without touching the page
-surfaces beside it.
+surfaces beside it. **The active row is the one place the language goes loud**: an *ink pill
+with paper-coloured text* (YSM's own `.side-nav a.is-active`), inverting to a paper pill with
+ink text on dark. 15.7:1 either way, and it leaves the teal free to mean "this is the action"
+rather than "this is where you are". Note `/design-preview` never shows it — the gallery's
+pathname matches no nav area, so no rail row is ever active there; verify it by token, not by
+screenshot.
 
 **Shared components** (`ui.tsx` unless noted). Layout: `PageContainer` (caps width — `form`
 ≈1040px for entry screens, `default` ≈1280px, `wide` opts out), `PageHeader` (title, one-line
@@ -575,6 +614,59 @@ Both are compositions over existing tables — neither added a migration.
   are edited and invoices voided.
 
 ## 18. Changelog
+### 2026-08-16 · The YSM Hub design language: paper, ink, teal
+A visual re-skin so this app and `ysm-prog/ysm-hub` read as one company's software. **No schema,
+server action, RLS policy, capability, query, route or business rule changed** — no migration,
+and the 332 unit tests pass untouched. Five files: `globals.css`, `layout.tsx`, one line of
+`app-nav.tsx`, the PWA icon and the manifest. See §10b for the system.
+
+- **The whole re-skin fits in the token layer, and that is the point.** `src/` was audited first
+  and carries **zero** literal Tailwind palette classes and zero hard-coded hex outside the
+  email templates (standalone HTML for inboxes) and the signature canvas. So swapping
+  `@layer base` re-skinned every screen — including the authenticated ones that cannot be opened
+  here — with no call site touched. The 2026-08-13 rule that nothing hard-codes a colour at a
+  call site is what made this a one-file change instead of a 28-file sweep.
+- **The palette is YSM's exact bytes, not its mood.** Every hex in their stylesheet was
+  converted to HSL and pinned to one decimal, because integer percentages drift 1–2 per channel
+  — the first pass rendered the page `#f4f2eb` against YSM's `#f4f1ea`. Verified in the browser:
+  `body` computes `rgb(244, 241, 234)`.
+- **Geometry moved without touching a call site.** YSM works from four corners (3/6/8/12px).
+  `rounded-lg` (104 uses — `Button`, `CONTROL`, the base control rule) → 6px, `rounded-xl`
+  (29 uses — `Card`, `DataTable`, `Stat`, `EmptyState`) → 12px. The two load-bearing names were
+  aimed at YSM's real numbers rather than the scale being rewritten around them.
+- **The dark theme is deliberately not YSM's.** Their stylesheet contrast-checked its dark
+  `--ink-3`/`--ink-4` and never its dark accent — `#00898f` is 4.4:1 on the dark page and 4.0:1
+  on a dark card, under the 4.5:1 floor their light theme holds itself to — and their semantic
+  four stay at light values that are unreadable on `#141412`. Every dark colour keeps YSM's hue
+  exactly and moves only lightness until it clears AA three ways: on the page, on a card, and as
+  a fill under `--on-status`. Measured as rendered, both themes: page 15.7/15.8:1, primary
+  button 6.5/8.3:1, muted-on-card 5.7/4.8:1, all four status fills 5.5–8.7:1.
+- **Same fonts, self-hosted.** Instrument Sans, Instrument Serif and JetBrains Mono through
+  `next/font` rather than YSM's `<link>` to `fonts.googleapis.com`. That link is the one thing
+  in their system that could not be copied: it is fine at a shop counter and wrong in a van, and
+  `/run` has to render with no signal. `em` is bound to Instrument Serif italic — YSM's accent
+  word in a heading — which was safe to bind globally because the app contained no `<em>` at all.
+- **Mono is where this app knowingly diverges.** YSM spends it on eyebrows, table headers and
+  badges; adopting that would reverse the 2026-08-13 sweep of 74 `font-mono` and every uppercase
+  tracked label across 28 files, done because counter staff and drivers read the result as a
+  developer console. Same fonts and same palette, different label voice. The one place mono came
+  *back* is `BrandMark`, which is where YSM spends it too — a letter in a tile is a mark.
+- **Comfort metrics held**: 15px body and 44px controls, against YSM's 14px/36px. YSM re-declares
+  its whole type scale under `@media (pointer: coarse)`, so keeping the touch sizing on a
+  counter tablet and a driver's phone follows its reasoning rather than contradicting it.
+- 332 unit tests (unchanged — this branch adds no logic to test), `verify` green.
+  `/design-preview` asserted light and dark at 320/360/375/390/430/768/1024/1440: no console
+  errors anywhere. **The pre-existing dispatch-planner overflow was measured against a
+  stash-and-rebuild baseline rather than assumed**: 16px at 320 and 1024 before, 7px after, same
+  135/33 overflowing elements and the same 16px smallest tap target — so the re-skin introduced
+  none and slightly reduced it.
+
+**Not verified against a live project.** This container has no Supabase credentials, so the
+authenticated screens were checked through the component gallery, the token probes and the
+build — not by being opened with real rows in them. The re-skin is entirely presentational, so
+the risk is cosmetic, but **the rail's active ink pill is not visible in `/design-preview`**
+(its pathname matches no nav area) and was verified by token rather than by eye.
+
 ### 2026-08-16 · The counter's laundry is billed: monthly invoices, at each customer's price
 The Jobs module has recorded what a customer handed over since 0014 and carried **no money at
 all** — `laundry_order_items` has a quantity and no price, and the monthly run billed contracts

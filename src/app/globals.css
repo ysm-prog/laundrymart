@@ -7,107 +7,137 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 /*
- * Electro Services — design tokens.
+ * Electro Services — design tokens, in the YSM Hub language.
  *
- * This replaces the earlier "Plantline" language (flat, square, near-black
- * chrome, monospace labels), which read as a developer console to the counter
- * staff, drivers and managers who actually use the app. Three rules carry the
- * current system:
+ * Adopted from `ysm-prog/ysm-hub` (`src/index.css`) so the two products read as
+ * one company's software. YSM Hub calls it "paper and ink with accent": a warm
+ * paper page carrying a barely-there dot grid, near-black ink, and a single
+ * teal that marks intent. Three rules carry it:
  *
- *  - **One brand colour, used for intent.** `--primary` is the Electro Services
- *    blue and it marks the primary action and the place you are — buttons,
- *    active navigation, focus. Status keeps its own family (`--success`,
- *    `--warning`, `--danger`, `--info`) and is always paired with a written
- *    label, never carried by colour alone.
- *  - **Soft, not flat.** A real radius scale, hairline borders in a warm grey,
- *    and a light layered shadow set. Surfaces are white on an off-white page so
- *    panels read as panels without needing a box drawn round every cell.
- *  - **Comfortable, not dense.** Controls are 44px so a thumb on a tablet at the
- *    counter hits them, body text is 14–16px, and labels are sentence-case sans.
+ *  - **One brand colour, used for intent.** `--primary` is the YSM teal and it
+ *    marks the primary action and the place you are — buttons, active
+ *    navigation, focus. Status keeps its own family (`--success`, `--warning`,
+ *    `--danger`, `--info`) and is always paired with a written label, never
+ *    carried by colour alone.
+ *  - **Paper, not panels-on-grey.** Surfaces are a warm off-white (`--surface`,
+ *    YSM's `--app-panel`) sitting on a slightly deeper paper, separated by
+ *    hairlines in a warm stone rather than a cool grey. Shadow is used sparingly
+ *    — the language is mostly flat, and a rule usually does the work.
+ *  - **Comfortable, not dense.** Controls stay 44px and body stays 15px. This is
+ *    the one place we do *not* follow YSM Hub's numbers (14px body, 36px
+ *    controls): that is a desktop repair-shop console, and this is a counter
+ *    tablet and a driver's phone. YSM Hub reasons the same way — it re-declares
+ *    its whole type scale under `@media (pointer: coarse)` to get a legible
+ *    floor on touch — so holding the comfortable sizing follows its intent
+ *    rather than departing from it.
  *
  * Values stay as raw HSL channels so the palette can be themed from one place;
  * the @theme block below turns them into Tailwind colours, and v4's color-mix()
- * handles the `/50` opacity modifiers.
+ * handles the `/50` opacity modifiers. Every hex in YSM Hub's stylesheet was
+ * converted to HSL rather than re-eyeballed, so the two palettes are the same
+ * colours and not merely a similar mood.
  */
 @layer base {
   :root {
     color-scheme: light;
-    --background: 220 24% 97%;       /* #f5f6f9 — off-white page              */
-    --surface: 0 0% 100%;            /* #ffffff — cards and panels            */
-    --surface-muted: 220 20% 96%;    /* #f3f4f8 — table headers, input fills  */
-    --surface-sunken: 220 22% 94%;   /* #eef0f5 — wells, inset areas          */
-    --foreground: 222 25% 15%;       /* #1d2231 — charcoal, never pure black  */
-    --muted-foreground: 220 11% 46%; /* #6b7280 — supporting text             */
-    --border: 220 18% 91%;           /* #e4e7ed — the everyday hairline       */
-    --strong: 220 15% 84%;           /* #d1d6e0 — inputs and framed panels    */
+    --background: 42 31.3% 93.7%;        /* #f4f1ea — YSM --paper                 */
+    --surface: 45 50% 96.9%;           /* #fbf9f3 — YSM --app-panel             */
+    --surface-muted: 40 27.3% 91.4%;     /* #efebe3 — YSM --paper-2               */
+    --surface-sunken: 41 24% 87%;    /* #e6e1d6 — YSM --paper-3               */
+    --foreground: 172.5 18.2% 8.6%;        /* #121a19 — YSM --ink                   */
+    --muted-foreground: 120 2.6% 38.2%;  /* #5f645f — YSM --ink-3, 5.4:1 on paper */
+    --border: 42 24% 86%;            /* #e4dfd3 — YSM --rule-soft             */
+    --strong: 41.1 20% 81.4%;            /* #d9d3c6 — YSM --rule                  */
 
-    /* The brand. Used for the primary action, the active nav row and focus —
-       intent and place, not status. AA on white at 5.6:1. */
-    --primary: 224 71% 45%;          /* #2145c4                               */
+    /* The brand. YSM's teal, used for the primary action, the active nav row
+       and focus — intent and place, not status. 5.7:1 on paper, 6.1:1 on a
+       card, and 6.5:1 carrying white text. */
+    --primary: 183.3 98.2% 22%;          /* #01696f — YSM --accent                */
     --primary-foreground: 0 0% 100%;
     /* Kept as a separate token because the whole app spells the solid button
        `bg-action`. Pointing it at the brand turns every primary button over at
        once, and leaves the seam here if the two ever need to diverge again. */
-    --action: 224 71% 45%;
+    --action: 183.3 98.2% 22%;
     --action-foreground: 0 0% 100%;
-    /* A quiet secondary accent, for supporting highlights only. */
-    --accent: 190 82% 34%;           /* #0a8ba0                               */
+    /* A quiet secondary accent, for supporting highlights only. YSM's deep end
+       of the same teal ramp, so the two never read as two brands. */
+    --accent: 184.5 89.3% 14.7%;           /* #044247 — YSM --accent-deep           */
 
-    /* Status. Each is paired with a label everywhere it is used. */
-    --success: 148 62% 30%;          /* #1d7a4c — resolved, paid, completed   */
-    --warning: 30 84% 40%;           /* #bc6c11 — needs attention             */
-    --danger: 356 68% 46%;           /* #c62839 — late, failed, cancelled     */
-    --info: 202 84% 36%;             /* #0e6ea8 — informational, ready        */
+    /* Status. Each is paired with a label everywhere it is used. These are
+       YSM's semantic four, which are noticeably earthier than the previous
+       set — they belong on paper rather than on white. */
+    --success: 122.5 35.3% 26.7%;          /* #2c5c2e — resolved, paid, completed   */
+    --warning: 16.1 69.7% 38.8%;           /* #a8431e — needs attention             */
+    --danger: 0 61.6% 43.9%;             /* #b52b2b — late, failed, cancelled     */
+    --info: 215.9 63.3% 33.1%;             /* #1f4a8a — informational, ready        */
     /* Text sitting *on* a solid status fill. It cannot be a fixed white: the
        dark theme lifts every status colour to clear AA against a dark surface,
        which leaves them far too light to carry white text. */
     --on-status: 0 0% 100%;
-    --ring: 224 71% 45%;
+    --ring: 183.3 98.2% 22%;
 
-    /* The sidebar is now a light surface rather than a near-black console.
-       Tokenised separately so the rail can be themed without touching the
-       page surfaces it sits beside. */
-    --sidebar: 0 0% 100%;
-    --sidebar-foreground: 222 20% 28%;
-    --sidebar-muted: 220 10% 52%;
-    --sidebar-border: 220 18% 91%;
-    --sidebar-active: 224 71% 45%;
-    --sidebar-active-bg: 224 71% 96%;
-    --sidebar-hover: 220 22% 96%;
+    /* The rail is paper too — YSM runs it on `--app-panel` with a rule down its
+       right edge. The active row is the one place the language goes loud: an
+       INK pill with paper-coloured text, which is YSM's own `.side-nav
+       a.is-active`. It reads as "you are here" from across a counter, and it
+       leaves the teal to mean "this is the action". */
+    --sidebar: 45 50% 96.9%;
+    --sidebar-foreground: 169.1 8.7% 24.9%;   /* #3a4543 — YSM --ink-2              */
+    --sidebar-muted: 120 2.6% 38.2%;        /* #5f645f — YSM --ink-3              */
+    --sidebar-border: 42 24% 86%;
+    --sidebar-active: 42 31.3% 93.7%;       /* paper text …                       */
+    --sidebar-active-bg: 172.5 18.2% 8.6%;    /* … on an ink pill                   */
+    --sidebar-hover: 40 27.3% 91.4%;
   }
 
   .dark {
     color-scheme: dark;
-    --background: 222 24% 10%;
-    --surface: 222 21% 13%;
-    --surface-muted: 222 18% 17%;
-    --surface-sunken: 222 22% 11%;
-    --foreground: 214 20% 93%;
-    --muted-foreground: 218 12% 68%;
-    --border: 220 14% 22%;
-    --strong: 220 12% 30%;
+    --background: 60 5.3% 7.5%;          /* #141412 — YSM dark --paper            */
+    --surface: 45 7% 11%;            /* #1e1d1a — YSM dark --app-panel        */
+    --surface-muted: 60 6% 10%;      /* #1b1b18 — YSM dark --paper-2          */
+    --surface-sunken: 60 4.5% 13.1%;     /* #232320 — YSM dark --paper-3          */
+    --foreground: 37.5 21.1% 92.5%;        /* #f0ede8 — YSM dark --ink              */
+    /* YSM's dark --ink-3 is #84817a, which it verified at 4.7:1 against the
+       page — but it measures 4.34:1 against a *card*, and most muted text in
+       this app sits on a card. Lifted one step to #8b8880: 5.2:1 on the page,
+       4.8:1 on a card, so it clears AA on both. */
+    --muted-foreground: 43.6 4.5% 52.4%;   /* #8b8880                               */
+    --border: 48 6.3% 15.5%;             /* #2a2925 — YSM dark --rule-soft        */
+    --strong: 50 7% 17%;             /* #2e2d28 — YSM dark --rule             */
 
-    /* Lifted so the brand still clears AA against a dark surface. */
-    --primary: 219 84% 68%;          /* #7ba4f5                               */
-    --primary-foreground: 222 40% 12%;
-    --action: 219 84% 68%;
-    --action-foreground: 222 40% 12%;
-    --accent: 188 70% 55%;
+    /* Lifted so the brand still clears AA against a dark surface, and so a
+       solid fill can carry dark text. YSM's own dark accent (#00898f) is the
+       one value its stylesheet never contrast-checked — it measures 4.4:1 on
+       the dark page and 4.0:1 on a dark card, both under the 4.5:1 floor its
+       light theme holds itself to. The hue is kept exactly (183°); only the
+       lightness moves, so it is still unmistakably the same teal. */
+    --primary: 183 52% 52%;          /* #45bec4 — 8.3:1 page, 7.6:1 card      */
+    --primary-foreground: 60 5.3% 7.5%;
+    --action: 183 52% 52%;
+    --action-foreground: 60 5.3% 7.5%;
+    --accent: 182.5 100% 32.7%;          /* #00a0a7 — YSM dark --accent-deep      */
 
-    --success: 148 52% 58%;
-    --warning: 34 88% 64%;
-    --danger: 356 82% 70%;
-    --info: 202 80% 65%;
-    --on-status: 222 40% 12%;
-    --ring: 219 84% 68%;
+    /* Same treatment for the semantic four: YSM's dark theme leaves these at
+       their light values, which are far too dark to read on #141412. Hue held,
+       lightness lifted until each clears AA on page, on card, and as a fill
+       under dark text. */
+    --success: 122 34% 55%;          /* #65b368 — 7.2:1 page                  */
+    --warning: 16 72% 60%;           /* #e27750 — 6.1:1 page                  */
+    --danger: 0 68% 64%;             /* #e26565 — 5.5:1 page                  */
+    --info: 216 66% 64%;             /* #6797e0 — 6.2:1 page                  */
+    --on-status: 60 5.3% 7.5%;
+    --ring: 183 52% 52%;
 
-    --sidebar: 222 22% 12%;
-    --sidebar-foreground: 214 16% 80%;
-    --sidebar-muted: 218 10% 58%;
-    --sidebar-border: 220 14% 20%;
-    --sidebar-active: 219 84% 68%;
-    --sidebar-active-bg: 219 60% 20%;
-    --sidebar-hover: 222 18% 17%;
+    /* The ink pill inverts in dark: the rail is near-black already, so "you are
+       here" becomes a paper-coloured row with ink text — the same idea, the
+       same contrast, read the other way up. */
+    --sidebar: 45 7% 11%;
+    --sidebar-foreground: 36.7 8.7% 59.2%;    /* #a0998e — YSM dark --ink-2         */
+    --sidebar-muted: 43.6 4.5% 52.4%;
+    --sidebar-border: 48 6.3% 15.5%;
+    --sidebar-active: 60 5.3% 7.5%;         /* ink text …                         */
+    --sidebar-active-bg: 37.5 21.1% 92.5%;    /* … on a paper pill                  */
+    --sidebar-hover: 60 4.5% 13.1%;
   }
 
   /* v4 defaults the border colour to currentColor; pin it to our token. */
@@ -122,11 +152,38 @@
     /* 15px base: the operator reads this all day on a counter tablet. */
     font-size: 0.9375rem;
     line-height: 1.5;
+    /* YSM Hub's paper grain — an 18px dot lattice at 3% ink. It is doing one
+       job: stopping a large empty page from reading as a blank white void, so
+       a card looks like it is resting on something. At this opacity it is felt
+       rather than seen, and it never sits behind text (cards paint their own
+       `--surface` over it). */
+    background-image: radial-gradient(hsl(var(--foreground) / 0.03) 1px, transparent 1px);
+    background-size: 18px 18px;
   }
 
   /* Headings carry a slight optical tightening; body text does not. */
   h1, h2, h3, h4 {
     letter-spacing: -0.011em;
+  }
+
+  /*
+   * YSM Hub's signature: an accent word inside a heading set in Instrument
+   * Serif italic, against the sans everywhere else. Bound to `em` because that
+   * is where YSM binds it and because the semantics already match — this is
+   * stress emphasis, not decoration.
+   *
+   * Safe to bind globally: there is no `<em>` anywhere in the app today, so
+   * this changes nothing already rendered and adds a voice to reach for. Use it
+   * on a page title, not in body copy — a serif italic run inside a paragraph
+   * of 15px sans is harder to read, not easier.
+   */
+  em {
+    font-family: var(--font-serif);
+    font-style: italic;
+    font-weight: 400;
+    /* Instrument Serif runs small next to Instrument Sans at the same size. */
+    font-size: 1.06em;
+    letter-spacing: 0;
   }
 
   /*
@@ -189,11 +246,16 @@
   --color-sidebar-active-bg: hsl(var(--sidebar-active-bg));
   --color-sidebar-hover: hsl(var(--sidebar-hover));
 
-  /* Inter for everything a person reads. Mono is bound but deliberately
-     unused in the shared components — it is for genuine machine text only
-     (an audit payload, a raw identifier), never for ordinary business
-     content like a date, a total or a job number. */
-  --font-sans: var(--font-inter), system-ui, -apple-system, "Segoe UI", sans-serif;
+  /* Instrument Sans for everything a person reads — YSM Hub's body face.
+     Instrument Serif is the accent italic (see the `em` rule above). Mono
+     stays bound but deliberately rare: YSM Hub spends it freely on eyebrows,
+     table headers and badges, and this app does not follow it there. That
+     uppercase-mono-label treatment is exactly what the 2026-08-13 redesign
+     swept out of 28 files after counter staff and drivers read the result as a
+     developer console. Same fonts, same palette, different label voice — and
+     the difference is deliberate, not drift. */
+  --font-sans: var(--font-instrument-sans), system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-serif: var(--font-instrument-serif), Georgia, "Times New Roman", serif;
   --font-mono: var(--font-jetbrains-mono), ui-monospace, monospace;
 
   /* These two used to be 9px and 10px, and were sprinkled over labels
@@ -202,27 +264,36 @@
   --text-3xs: 0.6875rem;  /* 11px — the smallest thing we will render */
   --text-2xs: 0.75rem;    /*  12px — supporting labels, counts        */
 
-  /* Soft, modern corners. The scale was previously zeroed to force square
-     chrome; restoring it makes the `rounded-*` classes already scattered
-     through the app do the right thing. */
-  --radius-xs: 0.25rem;   /*  4px */
-  --radius-sm: 0.375rem;  /*  6px */
-  --radius-md: 0.5rem;    /*  8px */
-  --radius-lg: 0.625rem;  /* 10px */
-  --radius-xl: 0.75rem;   /* 12px */
-  --radius-2xl: 1rem;     /* 16px */
-  --radius-3xl: 1.25rem;  /* 20px */
-  --radius-4xl: 1.5rem;   /* 24px */
+  /*
+   * YSM Hub's geometry, which is crisper than what this app carried: it works
+   * from four corners — 3px, 6px for a control, 8px, and 12px for a card.
+   *
+   * The eight Tailwind steps are remapped onto those four rather than reduced,
+   * because the two names that matter are already load-bearing at ~130 call
+   * sites and must land on YSM's real numbers:
+   *   `rounded-lg` (104 uses — Button, CONTROL, and the base rule below) → 6px
+   *   `rounded-xl` ( 29 uses — Card, DataTable, Stat, EmptyState)       → 12px
+   * So no call site had to be touched to change the geometry of the app.
+   */
+  --radius-xs: 0.125rem;  /*  2px */
+  --radius-sm: 0.1875rem; /*  3px — YSM --r-sm                             */
+  --radius-md: 0.25rem;   /*  4px */
+  --radius-lg: 0.375rem;  /*  6px — YSM --r, the control corner            */
+  --radius-xl: 0.75rem;   /* 12px — YSM --r-lg, the card corner            */
+  --radius-2xl: 0.875rem; /* 14px */
+  --radius-3xl: 1.125rem; /* 18px */
+  --radius-4xl: 1.375rem; /* 22px */
 
-  /* Light and layered. Shadow carries elevation, not decoration — a card at
-     rest is `sm`, something floating over the page is `lg` or `xl`. */
-  --shadow-2xs: 0 1px 2px rgb(16 24 40 / 0.04);
-  --shadow-xs: 0 1px 2px rgb(16 24 40 / 0.05);
-  --shadow-sm: 0 1px 3px rgb(16 24 40 / 0.07), 0 1px 2px rgb(16 24 40 / 0.04);
-  --shadow-md: 0 4px 8px -2px rgb(16 24 40 / 0.08), 0 2px 4px -2px rgb(16 24 40 / 0.04);
-  --shadow-lg: 0 12px 16px -4px rgb(16 24 40 / 0.08), 0 4px 6px -2px rgb(16 24 40 / 0.03);
-  --shadow-xl: 0 20px 24px -4px rgb(16 24 40 / 0.10), 0 8px 8px -4px rgb(16 24 40 / 0.04);
-  --shadow-2xl: 0 24px 48px -12px rgb(16 24 40 / 0.18);
+  /* Light and layered, and used sparingly — the language is mostly flat and a
+     hairline usually does the work. Retinted from a cool blue-grey to YSM's
+     ink (18 26 25), so a shadow on warm paper no longer goes faintly violet. */
+  --shadow-2xs: 0 1px 2px rgb(18 26 25 / 0.03);
+  --shadow-xs: 0 1px 2px rgb(18 26 25 / 0.04);
+  --shadow-sm: 0 1px 2px rgb(18 26 25 / 0.04), 0 1px 1px rgb(18 26 25 / 0.03);
+  --shadow-md: 0 4px 12px rgb(18 26 25 / 0.06), 0 2px 6px rgb(18 26 25 / 0.03);
+  --shadow-lg: 0 12px 32px rgb(18 26 25 / 0.10), 0 4px 12px rgb(18 26 25 / 0.05);
+  --shadow-xl: 0 20px 40px -8px rgb(18 26 25 / 0.12), 0 8px 16px -6px rgb(18 26 25 / 0.06);
+  --shadow-2xl: 0 24px 56px -12px rgb(18 26 25 / 0.20);
 }
 
 /*
