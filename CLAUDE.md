@@ -169,7 +169,9 @@ run — and to `customer_service`, so a stuck run is not waiting on a dispatcher
 - **A laundry job is billed exactly once.** `invoice_lines.laundry_order_id` is the record of
   it: the generator skips any job already carried on an invoice that is not void, so a job
   finished near a period boundary cannot be billed by two runs. Voiding an invoice makes its
-  work billable again, which is what voiding is for.
+  work billable again, which is what voiding is for. Archiving (0017) hides a job and the
+  invoice lines that bill it in the same call, so the two halves of this check can never
+  disagree — the generator reads both through the RLS-bound client.
 - **A laundry job's seven statuses are enforced by `guard_laundry_order_transition`**, not just
   by the screen: no skipping the middle, no going backwards, `completed`/`cancelled` terminal,
   a customer pickup never reaches `assigned` or `out_for_delivery`, a delivery job must be
