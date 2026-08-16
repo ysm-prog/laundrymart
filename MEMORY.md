@@ -17,9 +17,10 @@ an always-empty pool. Verified live: not one `in_transit` row on the whole deplo
 should then only cover the unloaded case. It is not built because the load step captures no
 quantities — counts are taken at the door.
 
-**Still open (from the merge review):** `purchases.write` reached `operations_manager`,
-`branch_manager` and `regional_manager` by deriving from `TENANT_ALL`, not by decision, and no
-test pins it. Worth an explicit call.
+**`purchases.*` is now stated and pinned.** Investigating the "derived by accident" worry showed
+the set is exactly `invoices.*` minus `dispatcher` — a coherent line, just never written down.
+`roles.test.ts` now asserts that relationship both ways, so adding a capability to `roles.ts`
+can no longer widen the payable side silently.
 
 ## Also live: the app wears the YSM Hub design language (no migration)
 Presentation only. **No schema, action, RLS policy, capability, query, route or business rule

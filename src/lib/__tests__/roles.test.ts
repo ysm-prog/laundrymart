@@ -155,3 +155,33 @@ describe("platform_admin (0019)", () => {
     expect(PRESET_ROLES as readonly Role[]).not.toContain("platform_admin");
   });
 });
+
+describe("the payable side (purchases.*)", () => {
+  it("is held by whoever writes money records, except the dispatcher", () => {
+    // Most of these roles arrive by deriving from TENANT_ALL rather than by
+    // being named, so without this the set is an accident that happens to be
+    // right. The dispatcher is the one deliberate subtraction: they hold
+    // `invoices.write` so they can bill the work they plan, which is no reason
+    // to show them what the business pays its suppliers.
+    expect(rolesWith("purchases.write")).toEqual(
+      rolesWith("invoices.write").filter((role) => role !== "dispatcher"),
+    );
+    expect(rolesWith("purchases.read")).toEqual(
+      rolesWith("invoices.read").filter((role) => role !== "dispatcher"),
+    );
+  });
+
+  it("never reaches the counter, the floor or the van", () => {
+    // The roles a small laundry actually staffs. None of them should be able to
+    // read what the business owes, let alone change it.
+    for (const role of ["customer_service", "warehouse_operator", "driver", "sales"] as const) {
+      expect(can(role, "purchases.read"), role).toBe(false);
+      expect(can(role, "purchases.write"), role).toBe(false);
+    }
+  });
+
+  it("lets the auditor look and not touch, like everything else", () => {
+    expect(can("auditor", "purchases.read")).toBe(true);
+    expect(can("auditor", "purchases.write")).toBe(false);
+  });
+});

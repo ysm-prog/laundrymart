@@ -152,7 +152,12 @@ and action guards. `ROLE_PRESETS` names three of the eleven in an owner's words 
 (`super_admin`), Office (`operations_manager`), Driver — and is **presentation only**: a preset
 carries a `role`, never a capability list, so there is exactly one answer to "what can this
 person do". `rolesWith(capability)` is derived, and is what the People screen uses to refuse the
-change that would leave a tenant with nobody holding `admin.write`. `orders.*` follows the same split as routes: `write` creates and edits a
+change that would leave a tenant with nobody holding `admin.write`. **`purchases.*` is "whoever writes money records, except the dispatcher"** — the same holders as
+`invoices.*` minus that one role, who bills the work they plan and has no business seeing what
+the laundry pays its suppliers. Worth stating because most holders arrive by deriving from
+`TENANT_ALL` rather than by being named, which is how a capability added to `roles.ts` quietly
+reaches six roles; `roles.test.ts` pins the two sets against each other so a change to either
+fails a test rather than handing somebody the chart of accounts. `orders.*` follows the same split as routes: `write` creates and edits a
 laundry job, `status` walks it through the workflow (the plant floor advances work it does not
 plan, so `warehouse_operator` holds `status` without `write`), and `manage` is the supervisor's
 set — cancel a job, backdate a receipt, edit one already completed. `driver` holds none of

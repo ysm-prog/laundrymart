@@ -94,6 +94,13 @@ export const CAPABILITIES = [
   // two answer to different people — a dispatcher holds `invoices.read` so they
   // can see whether a customer is on stop, which is no reason to show them what
   // the business pays its suppliers.
+  //
+  // **The line is "whoever writes money records, except the dispatcher."** Most
+  // holders arrive here by deriving from TENANT_ALL rather than by being named,
+  // which is how a capability added to this file quietly reaches six roles — so
+  // the rule is stated here and pinned in `roles.test.ts` against
+  // `invoices.*`, and a change to either set now fails a test instead of
+  // silently handing somebody the chart of accounts.
   "purchases.read",
   "purchases.write",
   "reports.read",
