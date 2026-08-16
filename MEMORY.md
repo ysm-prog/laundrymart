@@ -17,6 +17,10 @@ manager = 1 row.
 `npm run seed:roles -- --dry-run` from a machine with the key — it should say "reset password"
 eleven times and create nothing.
 
+**Nor has a sign-in been exercised.** The password grant was attempted; this container's network
+policy answers 403 to `CONNECT …supabase.co` (same wall the Resend path hit). First thing to do
+on the deployed app: sign in as `driver@roles.example.com` / `RoleTest!2026`.
+
 **`platform_admin` needs `--platform-admin`.** It is not a membership and crosses into
 `Adelaide Towel Service`, which defeats testing on the demo tenant.
 

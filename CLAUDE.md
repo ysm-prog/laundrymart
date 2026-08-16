@@ -789,7 +789,11 @@ UPDATE on `laundry_orders` touched **0 rows** where the office manager's touched
 unproven.** This container has no service-role key, so `auth.users` + `auth.identities` were
 written directly in the shape GoTrue writes them (bcrypt through `extensions.crypt`, confirmed
 `email_confirmed_at`, one email identity each), and the hash was verified against the password
-in the rehearsal. What that leaves untested is `createUser`/`updateUserById` and the rerun path.
+in the rehearsal. What that leaves untested is `createUser`/`updateUserById`, the rerun path, and
+**the sign-in itself** — a password grant against `/auth/v1/token` was attempted and the
+container's network policy answered 403 to `CONNECT …supabase.co`, the same wall the Resend path
+hit on 2026-08-05. Everything GoTrue reads is in place and the hash verifies; that it *accepts*
+them is the one claim resting on the shape being right rather than on having been seen.
 **Run `npm run seed:roles -- --dry-run` once from a machine that has the key**: it should report
 "reset password" for all eleven and create nothing, which is the same statement as the script
 agreeing with what is already there.
