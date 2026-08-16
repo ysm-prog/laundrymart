@@ -13,6 +13,7 @@ import {
   REJECT_DESTINATIONS, STAGE_INVENTORY_STATE, STAGE_MOVEMENT_REASON,
   isFlowStage, nextStage,
 } from "./stages";
+import { driverCountsForRoute } from "./returns";
 
 const BACK = "/warehouse";
 
@@ -24,6 +25,164 @@ type BatchLine = {
   quantity: number;
   rejected_quantity: number;
 };
+
+/**
+ * Book a returned van into the plant, counting it as you go.
+ *
+ * This is the operator's whole job at this point in the day: the van is on the
+ * dock, the trolleys are in front of them, and the driver's numbers are already
+ * on file. So the form arrives pre-filled and they only touch what disagrees.
+ *
+ * The disagreement is the point. Where the count is short the difference is
+ * posted as a real `loss` movement rather than left in at_depot for nobody to
+ * find — the recount is how shrinkage gets discovered, and a control that
+ * silently discards its own finding is not a control.
+ */
+export async function countReturn(formData: FormData): Promise<void> {
+  const session = await assertCapability("warehouse.write");
+  const parsed = z.object({
+    route_id: z.string().uuid(),
+    machine: optionalText,
+    notes: optionalText,
+  }).safeParse(toObject(formData));
+  if (!parsed.success) return fail(BACK, firstIssue(parsed.error));
+
+  const backTo = `/warehouse/count/${parsed.data.route_id}`;
+  const supabase = await createClient();
+
+  const { data: route } = await supabase
+    .from("daily_routes")
+    .select("id, code, depot_id, unloaded_at")
+    .eq("id", parsed.data.route_id)
+    .maybeSingle<{ id: string; code: string; depot_id: string | null; unloaded_at: string | null }>();
+  if (!route) return fail(BACK, "That run could not be found.");
+  if (!route.unloaded_at) {
+    return fail(BACK, "That van has not been unloaded yet — the driver finishes the run first.");
+  }
+
+  const { data: already } = await supabase
+    .from("production_batches")
+    .select("id, batch_number").eq("route_id", route.id).is("deleted_at", null)
+    .maybeSingle<{ id: string; batch_number: string }>();
+  if (already) {
+    return fail(BACK, `Run ${route.code} was already counted into batch ${already.batch_number}.`);
+  }
+
+  // The driver's figures are the baseline; the form only sends what was counted
+  // against them, so an item nobody touched still balances to zero difference.
+  const expected = await driverCountsForRoute(route.id);
+  const counted: Array<typeof expected[number] & { countedQuantity: number }> = [];
+  let missingCountFor: string | null = null;
+  for (const item of expected) {
+    const raw = formData.get(`count_${item.itemId}`);
+    const value = Number(raw);
+    if (raw == null || raw === "" || !Number.isFinite(value) || value < 0) {
+      missingCountFor = item.name;
+      break;
+    }
+    counted.push({ ...item, countedQuantity: Math.trunc(value) });
+  }
+  if (missingCountFor) {
+    return fail(backTo, `Enter a count for ${missingCountFor} — use 0 if none of it came back.`);
+  }
+
+  if (counted.every((item) => item.countedQuantity === 0)) {
+    return fail(backTo, "Nothing was counted. If the van really came back empty, leave this run uncounted and tell your supervisor.");
+  }
+
+  const { data: batchNumber, error: numberError } = await supabase
+    .rpc("next_number", { t: session.tenantId, k: "batch", p: "BATCH" });
+  if (numberError) return fail(backTo, describeDbError(numberError));
+
+  const { data: batch, error } = await supabase
+    .from("production_batches")
+    .insert({
+      tenant_id: session.tenantId,
+      created_by: session.userId,
+      operator_id: session.userId,
+      route_id: route.id,
+      // Must match the depot the unload credited, or every stage after this one
+      // draws from a pool that has nothing in it.
+      depot_id: route.depot_id,
+      batch_number: batchNumber as string,
+      machine: parsed.data.machine ?? null,
+      notes: parsed.data.notes ?? null,
+    })
+    .select("id, batch_number")
+    .single();
+  if (error) return fail(backTo, describeDbError(error));
+
+  const lines = counted.filter((item) => item.countedQuantity > 0);
+  if (lines.length > 0) {
+    const { error: lineError } = await supabase.from("production_batch_lines").insert(
+      lines.map((item) => ({
+        tenant_id: session.tenantId,
+        created_by: session.userId,
+        batch_id: batch.id,
+        item_id: item.itemId,
+        quantity: item.countedQuantity,
+        driver_quantity: item.driverQuantity,
+      })),
+    );
+    if (lineError) return fail(backTo, describeDbError(lineError));
+  }
+
+  let short = 0;
+  let over = 0;
+
+  for (const item of counted) {
+    const difference = item.countedQuantity - item.driverQuantity;
+    if (difference === 0) continue;
+
+    // Short: the driver booked it out of the customer but it never reached the
+    // shelf. Over: more arrived than was booked, so it enters the system here.
+    const movement = difference < 0
+      ? {
+        quantity: -difference, from: "at_depot", to: "lost", reason: "loss",
+        note: `short at count, run ${route.code}`,
+      }
+      : {
+        quantity: difference, from: null, to: "at_depot", reason: "manual",
+        note: `extra found at count, run ${route.code}`,
+      };
+
+    const { error: moveError } = await supabase.rpc("move_inventory", {
+      p_tenant: session.tenantId,
+      p_item: item.itemId,
+      p_owner_type: "laundry_owned",
+      p_quantity: movement.quantity,
+      p_from_state: movement.from,
+      p_to_state: movement.to,
+      p_reason: movement.reason,
+      p_from_customer: null,
+      p_from_depot: movement.from ? route.depot_id : null,
+      p_from_vehicle: null,
+      p_to_customer: null,
+      p_to_depot: route.depot_id,
+      p_to_vehicle: null,
+      p_job: null,
+      p_pickup: null,
+      p_delivery: null,
+      p_notes: movement.note,
+    });
+    if (moveError) return fail(backTo, describeDbError(moveError));
+
+    if (difference < 0) short += -difference; else over += difference;
+  }
+
+  await recordAudit(session, {
+    entity: "production_batch", entityId: batch.id, action: "create",
+    summary: `${batch.batch_number} counted off run ${route.code}`,
+    metadata: { routeId: route.id, short, over },
+  });
+
+  revalidatePath(BACK);
+  const variance = short > 0 || over > 0
+    ? ` ${[short > 0 && `${short} short`, over > 0 && `${over} extra`]
+      .filter(Boolean).join(" and ")} — recorded.`
+    : "";
+  return done(`/warehouse/${batch.id}`, `Run ${route.code} counted into batch ${batch.batch_number}.${variance}`);
+}
 
 export async function createBatch(formData: FormData): Promise<void> {
   const session = await assertCapability("warehouse.write");
@@ -66,8 +225,6 @@ export async function addBatchLine(formData: FormData): Promise<void> {
   const parsed = z.object({
     batch_id: z.string().uuid(),
     item_id: z.string().uuid("Choose an item"),
-    owner_type: z.enum(["laundry_owned", "customer_owned"]),
-    customer_id: optionalUuid,
     quantity: count.pipe(z.number().positive("Quantity must be at least 1")),
     notes: optionalText,
   }).safeParse(toObject(formData));
@@ -75,20 +232,17 @@ export async function addBatchLine(formData: FormData): Promise<void> {
 
   const backTo = `/warehouse/${parsed.data.batch_id}`;
 
-  // Mirrors the database constraint so the operator gets a sentence rather than
-  // a constraint name.
-  if (parsed.data.owner_type === "customer_owned" && !parsed.data.customer_id) {
-    return fail(backTo, "Customer-owned linen needs a customer, so it can be returned to them.");
-  }
-
+  // Always our own linen. Pickups book stock as `laundry_owned` and nothing
+  // else, so offering customer-owned here only ever produced a batch drawing on
+  // a pool that does not exist — a question with one wrong answer. The column
+  // and its constraint stay for the day customer-owned linen is collected too.
   const supabase = await createClient();
   const { error } = await supabase.from("production_batch_lines").insert({
     tenant_id: session.tenantId,
     created_by: session.userId,
     batch_id: parsed.data.batch_id,
     item_id: parsed.data.item_id,
-    owner_type: parsed.data.owner_type,
-    customer_id: parsed.data.customer_id ?? null,
+    owner_type: "laundry_owned",
     quantity: parsed.data.quantity,
     notes: parsed.data.notes ?? null,
   });

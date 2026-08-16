@@ -30,6 +30,7 @@ import type { DayJob } from "@/lib/runs/my-runs";
 import {
   PlannerBoard, type Option, type PlannerColumn, type PlannerJob,
 } from "@/app/(app)/routes/planner/planner-board";
+import { CountRow } from "@/app/(app)/warehouse/count-row";
 
 /**
  * Design review harness — a component gallery, not part of the product.
@@ -425,6 +426,17 @@ export default function DesignPreviewPage() {
                       </div>
                     );
                   })}
+                </div>
+              </Card>
+
+              <Card
+                title="Depot count"
+                description="Pre-filled from the driver's numbers — only the disagreements get touched."
+              >
+                <div className="-mx-4 -mb-4 border-t border-border">
+                  <CountRow itemId="p1" name="Bath Towel" sku="TOW-01" driverQuantity={40} />
+                  <CountRow itemId="p2" name="Flat Sheet Queen" sku="SHT-02" driverQuantity={25} />
+                  <CountRow itemId="p3" name="Chef Jacket" sku="UNI-07" driverQuantity={12} />
                 </div>
               </Card>
 
