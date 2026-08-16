@@ -657,6 +657,17 @@ is effectively arbitrary. Pre-existing, and worth fixing before anything depends
 **The real tenant's records are archived as of 2026-08-16** (§18): 1,154 rows hidden, nothing
 deleted, restored by `set_records_archived('20000000-…-000000000001', false)`.
 
+**Thirteen logins as of 2026-08-16, and eleven of them are test profiles.** The two real ones are
+above; the rest are `<role>@roles.example.com` (§3a), one per membership role, members of
+`Harbour Commercial Laundry` **only** — proved rather than assumed: `is_member()` is false for
+`Adelaide Towel Service` for every one of them, and none is a platform admin, so the real
+laundry's 508 customers are outside all eleven. Shared password, printed by `npm run seed:roles`
+and easy to reset with a rerun; `npm run seed:roles -- --remove --yes` takes them off again.
+Written by SQL rather than by the Auth admin API because no session here holds the service-role
+key — `auth.users` + `auth.identities` in GoTrue's own shape, one email identity each. Treat
+this as a **demo-tenant** convenience: an address on a real laundry would want the script and a
+real invitation.
+
 The live project also carries real supplier data from the unmerged purchases branch — 1,515
 supplier bills, 192 suppliers, 268 GL accounts, 636 import-activation rows. **No screen in this
 build reads any of it**, so it is already invisible in the deployed app and 0017 leaves it
@@ -767,10 +778,21 @@ policy, no capability and no application code changed** — this is tooling.
   unique, so the resolver cannot be ambiguous, and the laundry has an active depot for the
   driver record to sit in.
 
-**Not run against any project.** This container has no Supabase credentials, so the argument
-guards, the profile list and the refusals were exercised, and the Auth admin round trip was not.
-**Before trusting it: run `npm run seed:roles -- --dry-run` first**, then without the flag, then
-sign in as `driver@roles.example.com` and confirm My Runs is theirs and Money is refused.
+**The eleven profiles are live on `laundrymart-syd`** (2026-08-16), in `Harbour Commercial
+Laundry` and nowhere else. Rehearsed and applied the way §11 requires, and verified after:
+`is_member(Harbour)` true and `is_member(Adelaide)` **false** for every one of them,
+`current_driver_id()` resolving for the driver, the auditor seeing exactly one laundry and zero
+platform admins, and 0025 proved through the API in the same probe — the warehouse operator's
+UPDATE on `laundry_orders` touched **0 rows** where the office manager's touched 1.
+
+**Provisioned by SQL, not by the script — so the script's own Auth round trip is still
+unproven.** This container has no service-role key, so `auth.users` + `auth.identities` were
+written directly in the shape GoTrue writes them (bcrypt through `extensions.crypt`, confirmed
+`email_confirmed_at`, one email identity each), and the hash was verified against the password
+in the rehearsal. What that leaves untested is `createUser`/`updateUserById` and the rerun path.
+**Run `npm run seed:roles -- --dry-run` once from a machine that has the key**: it should report
+"reset password" for all eleven and create nothing, which is the same statement as the script
+agreeing with what is already there.
 
 ### 2026-08-16 · Job to invoice belongs to the Owner and the Office manager
 The owner's decision: taking a job in, moving it through the plant and billing it is one flow,

@@ -6,8 +6,16 @@
 login per role in the demo laundry, `<role>@roles.example.com`, shared password printed each
 run. CLAUDE.md §3a has the reasoning.
 
-**Not run against any project yet** — no credentials here. Dry-run it first, then sign in as
-`driver@roles.example.com` and check My Runs is theirs and Money is refused.
+**The eleven profiles ARE live on `laundrymart-syd`**, in the demo laundry only. Verified:
+`is_member(Adelaide)` false for all eleven, `current_driver_id()` resolves for the driver, and
+0025 proved through the API — warehouse operator UPDATE on `laundry_orders` = 0 rows, office
+manager = 1 row.
+
+**Provisioned by SQL, not by the script** — no service-role key in that container, so
+`auth.users` + `auth.identities` were written in GoTrue's shape and the bcrypt hash verified.
+**The script's own Auth round trip is therefore still unproven**: run
+`npm run seed:roles -- --dry-run` from a machine with the key — it should say "reset password"
+eleven times and create nothing.
 
 **`platform_admin` needs `--platform-admin`.** It is not a membership and crosses into
 `Adelaide Towel Service`, which defeats testing on the demo tenant.
