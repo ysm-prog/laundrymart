@@ -353,7 +353,7 @@ renders no tab strip. Tested in `src/lib/__tests__/nav.test.ts`.
   migration**; the Release screen reads the ledger and nothing more.
 
 - `0025_main_flow_owner_office` — **restrictive** write policies on the nine job→invoice
-  tables, narrowing INSERT/UPDATE/DELETE to `super_admin` and `operations_manager`.
+  tables (applied live 2026-08-16), narrowing INSERT/UPDATE/DELETE to `super_admin` and `operations_manager`.
   Restrictive rather than a rewrite precisely because of the §11 divergence: this repo's
   `invoices` policies carry 0006's inline `has_role` and the hosted project's use
   `can_write_billing`, and a restrictive policy ANDs with whichever is there without reading
@@ -730,8 +730,14 @@ capability, nothing dropped.
   floor, the counter and finance are each refused through the API while the two roles that own
   the flow are not. Every migration applied to a fresh Postgres 16.
 
-**Not applied to the live project.** 0025 needs applying before the restriction is real on
-`ats.coreit.com.au`; until then the app refuses but the API does not.
+**Applied to `laundrymart-syd` on 2026-08-16**, rehearsed first the way §11 requires. Pre-flight:
+no restrictive policy existed anywhere in the schema, all nine tables were present and all nine
+carried `tenant_id`. The rehearsal ran the whole migration plus probes in an aborted
+transaction, with the decisive one being a rehearsal `warehouse_operator` in the real tenant
+whose UPDATE touched **0 rows**. After the apply: 27 restrictive policies across 9 tables, the
+5 jobs and 647 invoices untouched, the 508 archived customers untouched, and a rolled-back
+probe showing both real logins still writing (they are `platform_admin`, which `has_role()`
+admits) while a warehouse operator is refused outright.
 
 ### 2026-08-16 · Every delivery failed: nothing ever loads the van
 Found on the deployed app, by a driver standing at a customer with a signature pad. Recording
