@@ -59,6 +59,31 @@ declare
   ];
   v_predicate constant text :=
     '(select public.has_role(tenant_id, array[''super_admin'',''operations_manager'']))';
+  -- `laundry_orders` needs one carve-out, and leaving it out breaks the app.
+  --
+  -- A driver finishing a delivery *writes* to this table: `completeLaundryOrder`
+  -- sets the status, and Confirm Load and Start Route stamp the jobs riding on
+  -- the run. Those are the driver executing their own run, not somebody working
+  -- the office's flow — and without this the update is silently refused (zero
+  -- rows, no error) and the job sits at `out_for_delivery` for ever, which is
+  -- exactly what a local probe showed before this clause existed.
+  --
+  -- The added condition is the *same* driver clause the permissive policy on
+  -- this table already carries (0015/0016), so it grants nothing that policy did
+  -- not already grant — it only declines to take it away.
+  -- Every column is qualified: the EXISTS joins `jobs` and `daily_routes`,
+  -- which both carry `tenant_id`, so a bare reference is ambiguous.
+  v_orders_predicate constant text := '('
+    || '(select public.has_role(laundry_orders.tenant_id,'
+    || '                        array[''super_admin'',''operations_manager'']))'
+    || ' or laundry_orders.assigned_driver_id ='
+    || '      (select public.current_driver_id(laundry_orders.tenant_id))'
+    || ' or exists (select 1 from public.jobs j'
+    || '              join public.daily_routes r on r.id = j.route_id'
+    || '             where j.id = laundry_orders.stop_id'
+    || '               and r.driver_id ='
+    || '                   (select public.current_driver_id(laundry_orders.tenant_id))))';
+  v_for_table text;
 begin
   foreach v_table in array v_tables loop
     -- Skip anything this database does not have. The four purchases tables and
@@ -79,24 +104,28 @@ begin
       raise exception '0025: % has no tenant_id', v_table using errcode = 'P0001';
     end if;
 
+    -- One table takes the wider predicate; the rest take the plain one.
+    v_for_table := case when v_table = 'laundry_orders'
+                        then v_orders_predicate else v_predicate end;
+
     execute format(
       'drop policy if exists %I on public.%I', v_table || '_main_flow_insert', v_table);
     execute format(
       'create policy %I on public.%I as restrictive for insert to authenticated
-         with check (%s)', v_table || '_main_flow_insert', v_table, v_predicate);
+         with check (%s)', v_table || '_main_flow_insert', v_table, v_for_table);
 
     execute format(
       'drop policy if exists %I on public.%I', v_table || '_main_flow_update', v_table);
     execute format(
       'create policy %I on public.%I as restrictive for update to authenticated
          using (%s) with check (%s)',
-      v_table || '_main_flow_update', v_table, v_predicate, v_predicate);
+      v_table || '_main_flow_update', v_table, v_for_table, v_for_table);
 
     execute format(
       'drop policy if exists %I on public.%I', v_table || '_main_flow_delete', v_table);
     execute format(
       'create policy %I on public.%I as restrictive for delete to authenticated
-         using (%s)', v_table || '_main_flow_delete', v_table, v_predicate);
+         using (%s)', v_table || '_main_flow_delete', v_table, v_for_table);
   end loop;
 end $$;
 
