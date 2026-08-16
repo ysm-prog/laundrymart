@@ -132,7 +132,8 @@ async function search(term: string, role: Role): Promise<Group[]> {
 
   const groups: Group[] = [];
 
-  const [customers, agreements, invoices, jobs, items, drivers, vehicles] = await Promise.all([
+  const [customers, agreements, invoices, jobs, items, drivers, vehicles,
+         suppliers, bills] = await Promise.all([
     can(role, "customers.read")
       ? supabase.from("customers")
           .select("id, customer_number, business_name, trading_name, billing_suburb, status")
@@ -199,6 +200,32 @@ async function search(term: string, role: Role): Promise<Group[]> {
             model: string | null; maintenance_status: string;
           }>>()
       : empty(),
+    // The payable side is gated on `purchases.read`, not `invoices.read`: a
+    // dispatcher who can look up a customer's invoice has no business finding
+    // supplier bills through the same box.
+    can(role, "purchases.read")
+      ? supabase.from("suppliers")
+          .select("id, supplier_number, name, phone, status")
+          .or(`name.ilike.${like},supplier_number.ilike.${like}`)
+          .is("deleted_at", null).order("name").limit(LIMIT)
+          .returns<Array<{
+            id: string; supplier_number: string; name: string;
+            phone: string | null; status: string;
+          }>>()
+      : empty(),
+    can(role, "purchases.read")
+      // Their invoice number too: a supplier chasing payment quotes their own
+      // number, which is the one the caller will be reading down the phone.
+      ? supabase.from("supplier_bills")
+          .select("id, bill_number, supplier_invoice_no, issue_date, balance_due, status, suppliers(name)")
+          .or(`bill_number.ilike.${like},supplier_invoice_no.ilike.${like}`)
+          .is("deleted_at", null).order("issue_date", { ascending: false }).limit(LIMIT)
+          .returns<Array<{
+            id: string; bill_number: string; supplier_invoice_no: string | null;
+            issue_date: string; balance_due: number; status: string;
+            suppliers: { name: string } | null;
+          }>>()
+      : empty(),
   ]);
 
   push(groups, "Customers", "Businesses you collect from", (customers.data ?? []).map((row) => ({
@@ -250,6 +277,25 @@ async function search(term: string, role: Role): Promise<Group[]> {
     detail: [row.make, row.model].filter(Boolean).join(" ") || "No make recorded",
     trailing: <StatusBadge status={row.maintenance_status} />,
   })));
+
+  push(groups, "Suppliers", "Businesses you buy from", (suppliers.data ?? []).map((row) => ({
+    href: `/suppliers?q=${encodeURIComponent(row.name)}`,
+    title: row.name,
+    detail: [row.supplier_number, row.phone].filter(Boolean).join(" · "),
+    trailing: <StatusBadge status={row.status} />,
+  })));
+
+  push(groups, "Bills", "What your suppliers have invoiced you",
+    (bills.data ?? []).map((row) => ({
+      href: `/bills?q=${encodeURIComponent(row.bill_number)}`,
+      title: `${row.bill_number} · ${row.suppliers?.name ?? "Unknown supplier"}`,
+      detail: [
+        `Issued ${formatDate(row.issue_date)}`,
+        Number(row.balance_due) === 0 ? "settled" : `${money(row.balance_due)} owing`,
+        row.supplier_invoice_no ? `their ref ${row.supplier_invoice_no}` : null,
+      ].filter(Boolean).join(" · "),
+      trailing: <StatusBadge status={row.status} />,
+    })));
 
   return groups;
 }

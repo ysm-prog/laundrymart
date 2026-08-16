@@ -48,7 +48,7 @@ describe("navigationFor", () => {
 
   it("hides an area entirely when no screen inside it is reachable", () => {
     const driver = navigationFor("driver");
-    expect(driver.map((item) => item.label)).not.toContain("Invoices");
+    expect(driver.map((item) => item.label)).not.toContain("Money");
     expect(driver.map((item) => item.label)).not.toContain("Settings");
   });
 
@@ -72,6 +72,19 @@ describe("navigationFor", () => {
     for (const role of MEMBERSHIP_ROLES) {
       expect(navigationFor(role).length, role).toBeLessThanOrEqual(11);
     }
+  });
+
+  it("keeps the payable screens away from the people who plan the day", () => {
+    // A dispatcher holds `invoices.read` so they can see whether a customer is
+    // on stop. That is not a reason to show them what the business pays its
+    // suppliers, which is why `purchases.read` exists as its own capability.
+    const money = navigationFor("dispatcher").find((item) => item.label === "Money");
+    expect(money?.children?.map((child) => child.label)).toEqual(["Invoices", "Laundry prices"]);
+
+    const finance = navigationFor("finance").find((item) => item.label === "Money");
+    expect(finance?.children?.map((child) => child.label)).toEqual([
+      "Invoices", "Laundry prices", "Bills", "Suppliers", "Accounts",
+    ]);
   });
 
   it("shows Platform to the platform admin and to nobody else", () => {
@@ -150,7 +163,7 @@ describe("navigationFor", () => {
   it("orders the rail the way the day runs", () => {
     expect(navigationFor("super_admin").map((item) => item.label)).toEqual([
       "Today", "My Runs", "Fleet", "Stops", "Jobs", "Customers",
-      "Invoices", "Linen", "Reports", "Settings", "Help",
+      "Money", "Linen", "Reports", "Settings", "Help",
     ]);
   });
 
@@ -169,7 +182,7 @@ describe("sectionFor", () => {
   it("puts a detail route in its own area", () => {
     expect(label("/customers/abc-123")).toBe("Customers");
     expect(label("/customers/abc-123/edit")).toBe("Customers");
-    expect(label("/invoices/inv-1")).toBe("Invoices");
+    expect(label("/invoices/inv-1")).toBe("Money");
   });
 
   it("resolves a child that is not under the area's own path", () => {
@@ -177,6 +190,9 @@ describe("sectionFor", () => {
     expect(label("/operations/exceptions")).toBe("Stops");
     expect(label("/warehouse/batch-1")).toBe("Linen");
     expect(label("/vehicles")).toBe("Fleet");
+    expect(label("/bills")).toBe("Money");
+    expect(label("/suppliers")).toBe("Money");
+    expect(label("/accounts")).toBe("Money");
   });
 
   it("prefers the longest matching destination", () => {

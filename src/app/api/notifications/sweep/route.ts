@@ -50,7 +50,11 @@ type OverdueInvoice = {
   due_date: string;
   balance: number | string;
   currency: string | null;
-  customers: { business_name: string; billing_email: string | null } | null;
+  customers: {
+    business_name: string;
+    billing_email: string | null;
+    reminders_enabled: boolean | null;
+  } | null;
 };
 
 type PendingRoute = {
@@ -84,7 +88,10 @@ async function sweepOverdueInvoices(
   // `invoices` has one FK to `customers`, so this embed is unambiguous.
   const { data, error } = await admin
     .from("invoices")
-    .select("id, invoice_number, due_date, balance, currency, customers(business_name, billing_email)")
+    .select(
+      "id, invoice_number, due_date, balance, currency, " +
+      "customers(business_name, billing_email, reminders_enabled)",
+    )
     .eq("tenant_id", tenant.id)
     .in("status", CHASEABLE_STATUSES)
     .is("deleted_at", null)
@@ -169,6 +176,12 @@ async function chaseOverdueInvoices(
 
   for (const { invoice, daysOverdue, sequence } of candidates) {
     if (alreadySent.has(`${invoice.id}:${sequence}`)) continue;
+
+    // The tenant switch decides whether the chase runs at all; this decides who
+    // is in it. Customers carried in from a previous system arrive with the
+    // choice their old books recorded, and a customer who was never chased
+    // there must not start being chased here.
+    if (invoice.customers?.reminders_enabled === false) continue;
 
     const recipient = invoice.customers?.billing_email;
     if (!recipient) continue;

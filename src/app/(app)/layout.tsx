@@ -29,7 +29,7 @@ async function navCounts(): Promise<NavCounts> {
 
     // No runs-today count: the rail no longer has a Runs row to hang it on, and
     // querying for a badge nothing renders is a request every page load pays for.
-    const [exceptions, batches, unpaid, overdueJobs] = await Promise.all([
+    const [exceptions, batches, unpaid, overdueJobs, bills] = await Promise.all([
       supabase.from("jobs").select("id", head).eq("status", "exception"),
       supabase.from("production_batches").select("id", head)
         .in("stage", ["received", "washing", "drying", "folding", "packing", "ready_for_dispatch"])
@@ -42,6 +42,11 @@ async function navCounts(): Promise<NavCounts> {
       supabase.from("laundry_orders").select("id", head)
         .lt("due_date", today())
         .not("status", "in", "(completed,cancelled)"),
+      // Outstanding by balance, not by status: a bill carried in from the
+      // previous books keeps whatever status it had there, and it is the
+      // balance that says whether anyone still has to pay it.
+      supabase.from("supplier_bills").select("id", head)
+        .neq("balance_due", 0).is("deleted_at", null),
     ]);
 
     return {
@@ -49,6 +54,7 @@ async function navCounts(): Promise<NavCounts> {
       batches: batches.count ?? undefined,
       unpaidInvoices: unpaid.count ?? undefined,
       overdueJobs: overdueJobs.count ?? undefined,
+      unpaidBills: bills.count ?? undefined,
     };
   } catch {
     return {};

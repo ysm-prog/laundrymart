@@ -25,7 +25,8 @@ import { can, type Capability, type Role } from "@/lib/roles";
 
 /** Counts the rail can surface. Resolved once per request in the layout. */
 export type NavCountKey =
-  | "exceptions" | "batches" | "unpaidInvoices" | "overdueJobs";
+  | "exceptions" | "batches" | "unpaidInvoices" | "overdueJobs"
+  | "unpaidBills";
 
 /**
  * The rail's icon, named rather than imported.
@@ -178,12 +179,15 @@ export const NAVIGATION: NavItem[] = [
     ],
   },
   {
-    label: "Invoices",
+    // Renamed from "Invoices" when the payable side landed: the row now covers
+    // money in *and* money out, and an area named after one of its four tabs
+    // would read as the odd one out.
+    label: "Money",
     href: "/invoices",
     icon: "invoices",
     capability: "invoices.read",
     count: "unpaidInvoices",
-    blurb: "Bill the work, chase what is unpaid, record what comes in.",
+    blurb: "What customers owe you, what you owe your suppliers.",
     children: [
       {
         label: "Invoices", href: "/invoices", capability: "invoices.read",
@@ -196,6 +200,19 @@ export const NAVIGATION: NavItem[] = [
         // is gated on the same capability as the invoices it produces.
         label: "Laundry prices", href: "/invoices/prices", capability: "invoices.read",
         blurb: "What each kind of laundry costs, before a customer's own price.",
+      },
+      {
+        label: "Bills", href: "/bills", capability: "purchases.read",
+        count: "unpaidBills",
+        blurb: "What your suppliers have invoiced you, and what is still owed.",
+      },
+      {
+        label: "Suppliers", href: "/suppliers", capability: "purchases.read",
+        blurb: "Businesses you buy from, and what you owe each of them.",
+      },
+      {
+        label: "Accounts", href: "/accounts", capability: "purchases.read",
+        blurb: "The chart of accounts every invoice and bill is coded against.",
       },
     ],
   },
@@ -249,6 +266,12 @@ export const NAVIGATION: NavItem[] = [
         // read-only role would get a screen it cannot submit.
         label: "Notifications", href: "/admin/notifications", capability: "admin.write",
         blurb: "What the app tells you about, and what it emails your customers.",
+      },
+      {
+        // Write, not read: the page is an upload form and nothing else, so a
+        // read-only role would get a screen it cannot submit.
+        label: "Bring in your books", href: "/admin/import", capability: "admin.write",
+        blurb: "Upload the reports from your old accounting system and load them in.",
       },
       {
         label: "Public holidays", href: "/admin/holidays", capability: "admin.read",
