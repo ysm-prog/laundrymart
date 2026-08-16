@@ -59,9 +59,12 @@ customers and 1 invoice. Nothing deleted; every row still on disk with its `arch
 Undo with `select public.set_records_archived('20000000-0000-4000-8000-000000000001', false);`
 called as a super_admin of that tenant. CLAUDE.md §3, §11 and the 2026-08-16 changelog.
 
-**The restore *button* is not deployed.** Only `Prod`/`Dev` deploy and this is a feature branch,
-so `/admin/data` does not exist in the running app yet. Merging the branch is what makes the
-undo self-service; until then it is a SQL call.
+**Merged into `Prod`** (`f52116a`, PR #18, CI green), so `/admin/data` — Settings → Your
+records — is deployed and the undo is a button. The SQL call above is the fallback.
+
+**`Dev` is stale**: 15 commits behind `Prod` at the time of this merge, which is why this went
+straight to `Prod` like the three features before it. Worth a catch-up merge before anyone
+treats `Dev` as a staging branch again.
 
 **The live project has two tenants and only one of them is real.** `Adelaide Towel Service`
 (`20000000-0000-4000-8000-000000000001`) holds 508 customers and 646 invoices and **no jobs**;
