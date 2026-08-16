@@ -167,6 +167,15 @@ run — and to `customer_service`, so a stuck run is not waiting on a dispatcher
   and a run without one had no legal transition out of `inspection_pending`.
 - Items on an active agreement cannot be soft-deleted (`guard_item_soft_delete`).
 - Customer / agreement / job / invoice / credit-note numbers come from `next_number()`.
+- **A delivery takes its linen from the van if the van has it, and from the run's depot
+  otherwise** (`lib/routes/delivery-stock.ts`). Deliveries used to draw from `in_transit`
+  unconditionally, and **nothing ever puts clean linen there**: `unload.ts` sweeps
+  `in_transit → at_depot` when a van returns, but `confirmLoad` records no movement at all, so
+  the only writer of `in_transit` is a *pickup* — the dirty linen going the other way. Every
+  delivery therefore failed with `only 0 of that item are in transit`. A short van falls back
+  whole rather than splitting, so one delivery line stays one ledger row. A real load manifest
+  (which would record the depot hop when it happens) is deliberately not built: the load step
+  captures no quantities, because the counts are taken at the door.
 - `move_inventory()` is the single entry point for stock changes: it upserts both pools and
   writes the ledger row in one transaction.
 - `recalculate_invoice()` keeps invoice totals consistent with lines and payments.
@@ -265,7 +274,11 @@ single capability is held by all eleven roles. **"Jobs" (`/orders`) and "Stops" 
 row**: a stop is a visit on a driver's run, a job is a customer's laundry from counter to
 hand-back. The route path is `/orders` because 0004 already took `/jobs` — the same
 label-is-not-the-route arrangement as Contracts (`/agreements`) and Linen (`/inventory`), and
-`/help` defines both words. **Invoices is now an area with two tabs** — the register and
+`/help` defines both words. **Invoices is now "Money", with both sides of the ledger**: the register and `/invoices/prices`
+as before, plus `/bills`, `/suppliers` and `/accounts` from the MYOB import, gated on the
+separate `purchases.read` — a dispatcher holds `invoices.read` so they can see whether a
+customer is on stop, which is no reason to show them what the business pays its suppliers.
+It was previously **an area with two tabs** — the register and
 `/invoices/prices`, the tenant's laundry price list — because what the monthly run charges is a
 billing decision, not a setting. A customer's own prices live on their record
 (`/customers/:id/prices`), reached from the customer page rather than from a tab, since it is
@@ -333,6 +346,17 @@ renders no tab strip. Tested in `src/lib/__tests__/nav.test.ts`.
   unchanged. `apply_tenant_policy` is deliberately not used — its whole job is a tenancy
   predicate and there is none here. There is deliberately **no function that applies a
   migration**; the Release screen reads the ledger and nothing more.
+
+- `0020_return_count` — the depot count as a control rather than a re-typing exercise.
+  Renumbered from 0012 on the way in (0012_optional_inspection holds that number here), and
+  already applied to the hosted project under the old name.
+- `0021_purchases` / `0022_supplier_payments` / `0023_import_helpers` / `0024_import_activation`
+  — the payable side carried across from MYOB: suppliers, their bills, purchase orders, the
+  chart of accounts, and the switch that holds imported master records inactive. Renumbered
+  from 0014/0015/0016/0015, all four of which collided with numbers this repo already used.
+  All are live on the hosted project under their original names (§11), so the renumbering
+  changes the repo's ordering only. None re-adds `grant execute … to anon`, which is what makes
+  them safe to sit after 0019's revoke. None is in `archivable_tables()`.
 
 Proofs in `supabase/tests/`: `rls_isolation`, `rls_coverage`, `driver_scope`,
 `business_rules`, `media_scope`, `warehouse_rules`, `notifications_scope`, `laundry_orders`,
@@ -655,6 +679,40 @@ Both are compositions over existing tables — neither added a migration.
   are edited and invoices voided.
 
 ## 18. Changelog
+### 2026-08-16 · Every delivery failed: nothing ever loads the van
+Found on the deployed app, by a driver standing at a customer with a signature pad. Recording
+the drop returned **`only 0 of that item are in transit, so 12 cannot be moved out`** — the
+guard in `move_inventory()` doing its job over a hole in the model. No migration.
+
+- **The load half of the load/unload pair was never built.** `lib/routes/unload.ts` sweeps
+  `in_transit → at_depot` when a van comes back; `confirmLoad` stamps `load_confirmed_at`,
+  marks the jobs riding on the run, and **moves no stock**. So the only writer of `in_transit`
+  is a *pickup* — the dirty linen going the other way — and a delivery of clean linen drew from
+  a pool that was structurally always empty. Confirmed against the live project: every pool on
+  the deployment was `at_depot` or `at_customer`, **not one row was `in_transit`**.
+- **A delivery now takes the linen from the van when the van has it, and from the run's depot
+  otherwise.** Both are true statements about where it was a moment ago, and the second is the
+  one that matches what the app actually knows: the load step captures no quantities, because
+  the counts are taken at the door. Preferring the van keeps the old behaviour intact for
+  anything that did get there, so this only ever adds a path that used to fail.
+- **A short van falls back whole rather than splitting.** Five aboard and twelve going out
+  takes all twelve from the depot, so one delivery line stays one ledger row and the movement
+  history stays reconcilable; the five are swept back by the unload.
+- **Both delivery paths go through one helper**, for the reason `unload.ts` is shared: the
+  online action and the offline outbox each carried their own copy of the same move, so fixing
+  one would have left the other broken — and the offline one is what a driver in a car park
+  actually posts through. Wiring `/api/sync` to it exposed that its job query never selected
+  `depot_id`, which the typechecker caught.
+- **The refusal now names the item and says where the stock is.** "only 0 of that item are in
+  transit" describes a state the operator never saw and cannot act on; the message now reads
+  "There are only 5 on the van and 3 at the depot for Table Cloth — White…".
+- 379 unit tests (was 369; 10 for the source rule and its message). Reproduced against the live
+  project in a rolled-back transaction: the old call failed with the screenshot's exact
+  sentence, the new source succeeded.
+
+**Not built, deliberately: a real load manifest.** Recording the depot hop when it happens
+needs a screen that captures what goes on the van, which is a feature and not a bug fix.
+
 ### 2026-08-16 · The YSM Hub design language: paper, ink, teal
 A visual re-skin so this app and `ysm-prog/ysm-hub` read as one company's software. **No schema,
 server action, RLS policy, capability, query, route or business rule changed** — no migration,

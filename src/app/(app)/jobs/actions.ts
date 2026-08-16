@@ -9,6 +9,7 @@ import {
   describeDbError, done, fail, firstIssue, mediaPaths, optionalText, toObject,
 } from "@/lib/actions";
 import { isTenantPath } from "@/lib/media";
+import { deliverLineFromStock } from "@/lib/routes/deliver-stock";
 import { sendDeliveryConfirmation } from "@/lib/notifications/delivery-confirmation";
 
 /**
@@ -259,27 +260,18 @@ export async function recordDelivery(formData: FormData): Promise<void> {
   );
   if (lineError) return fail(backTo, describeDbError(lineError));
 
+  // Sourced through the shared helper rather than hard-coded to `in_transit`:
+  // nothing ever loads clean linen onto a van, so that source was empty on every
+  // real delivery. See `lib/routes/delivery-stock.ts`.
   for (const line of lines) {
-    const { error: moveError } = await supabase.rpc("move_inventory", {
-      p_tenant: session.tenantId,
-      p_item: line.itemId,
-      p_owner_type: "laundry_owned",
-      p_quantity: line.quantity,
-      p_from_state: "in_transit",
-      p_to_state: "at_customer",
-      p_reason: "delivery",
-      p_from_customer: null,
-      p_from_depot: null,
-      p_from_vehicle: job.vehicle_id,
-      p_to_customer: job.customer_id,
-      p_to_depot: null,
-      p_to_vehicle: null,
-      p_job: job.id,
-      p_pickup: null,
-      p_delivery: delivery.id,
-      p_notes: null,
+    const problem = await deliverLineFromStock(supabase, {
+      tenantId: session.tenantId,
+      itemId: line.itemId,
+      quantity: line.quantity,
+      job,
+      deliveryId: delivery.id,
     });
-    if (moveError) return fail(backTo, describeDbError(moveError));
+    if (problem) return fail(backTo, problem);
   }
 
   await supabase.from("jobs")

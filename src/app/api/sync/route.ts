@@ -9,6 +9,7 @@ import { MAX_PHOTOS, isTenantPath } from "@/lib/media";
 import { EXCEPTION_REASON_VALUES } from "@/app/(app)/jobs/exception-reasons";
 import { notify } from "@/lib/notifications/notify";
 import { sendDeliveryConfirmation } from "@/lib/notifications/delivery-confirmation";
+import { deliverLineFromStock } from "@/lib/routes/deliver-stock";
 
 /**
  * Offline sync endpoint for the driver app.
@@ -134,7 +135,7 @@ export async function POST(request: NextRequest) {
     // RLS scopes this read: a driver can only reach their own jobs.
     const { data: job } = await supabase
       .from("jobs")
-      .select("id, customer_id, route_id, driver_id, vehicle_id")
+      .select("id, customer_id, route_id, driver_id, vehicle_id, depot_id")
       .eq("id", record.jobId)
       .maybeSingle();
 
@@ -212,13 +213,27 @@ export async function POST(request: NextRequest) {
     }
 
     for (const entry of record.lines) {
-      const moves = record.kind === "pickup"
-        ? [
-            { quantity: entry.quantity, from: "at_customer", to: "in_transit", reason: "pickup" },
-            { quantity: entry.damagedQuantity ?? 0, from: "at_customer", to: "damaged", reason: "damage" },
-            { quantity: entry.missingQuantity ?? 0, from: "at_customer", to: "lost", reason: "loss" },
-          ]
-        : [{ quantity: entry.quantity, from: "in_transit", to: "at_customer", reason: "delivery" }];
+      // A delivery no longer books stock here. It goes through the shared
+      // helper, which picks the van or the depot — nothing loads clean linen
+      // onto a van, so the old hard-coded `in_transit` source was empty on
+      // every real delivery and the whole batch failed on it.
+      if (record.kind === "delivery") {
+        await deliverLineFromStock(supabase, {
+          tenantId: session.tenantId,
+          itemId: entry.itemId,
+          quantity: entry.quantity,
+          job,
+          deliveryId: parent.id,
+          notes: "offline sync",
+        });
+        continue;
+      }
+
+      const moves = [
+        { quantity: entry.quantity, from: "at_customer", to: "in_transit", reason: "pickup" },
+        { quantity: entry.damagedQuantity ?? 0, from: "at_customer", to: "damaged", reason: "damage" },
+        { quantity: entry.missingQuantity ?? 0, from: "at_customer", to: "lost", reason: "loss" },
+      ];
 
       for (const move of moves) {
         if (move.quantity <= 0) continue;
@@ -238,8 +253,8 @@ export async function POST(request: NextRequest) {
           p_to_depot: null,
           p_to_vehicle: move.to === "in_transit" ? job.vehicle_id : null,
           p_job: job.id,
-          p_pickup: record.kind === "pickup" ? parent.id : null,
-          p_delivery: record.kind === "delivery" ? parent.id : null,
+          p_pickup: parent.id,
+          p_delivery: null,
           p_notes: "offline sync",
         });
       }

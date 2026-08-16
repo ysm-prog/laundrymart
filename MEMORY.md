@@ -1,7 +1,27 @@
 # MEMORY — working session handoff
 > Auto-loaded each session. Canonical state is CLAUDE.md; this is the live delta.
 
-## Latest: the app wears the YSM Hub design language (no migration)
+## Latest: deliveries were impossible — nothing ever loads the van
+Found on the deployed app. `only 0 of that item are in transit, so 12 cannot be moved out`.
+
+**`confirmLoad` moves no stock.** `unload.ts` does `in_transit → at_depot`; nothing does the
+reverse. So `in_transit` is written only by *pickups*, and every clean-linen delivery drew from
+an always-empty pool. Verified live: not one `in_transit` row on the whole deployment.
+
+**Fix: a delivery sources from the van if it has it, else the run's depot**
+(`lib/routes/delivery-stock.ts` decides, `deliver-stock.ts` performs). A short van falls back
+**whole**, never split — one delivery line, one ledger row. Both the online action and
+`/api/sync` go through the one helper; they used to carry separate copies of the move.
+
+**If you build a load manifest**, that is where the depot→van hop belongs, and this fallback
+should then only cover the unloaded case. It is not built because the load step captures no
+quantities — counts are taken at the door.
+
+**Still open (from the merge review):** `purchases.write` reached `operations_manager`,
+`branch_manager` and `regional_manager` by deriving from `TENANT_ALL`, not by decision, and no
+test pins it. Worth an explicit call.
+
+## Also live: the app wears the YSM Hub design language (no migration)
 Presentation only. **No schema, action, RLS policy, capability, query, route or business rule
 moved**, and the 332 unit tests pass untouched. CLAUDE.md §10b and the 2026-08-16 entry have the
 detail; what to carry forward:
