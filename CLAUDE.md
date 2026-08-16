@@ -668,6 +668,30 @@ Two things the hosted project does differently from local Postgres, both handled
 - PostgREST publishes `public` as RPC. Anything executable by `anon` is an unauthenticated
   endpoint — see the warning under §7.
 
+## 19. Branches evaluated and dropped
+Recorded so nobody re-opens them by finding the branch and assuming it is pending work.
+
+**`claude/phase-6-build-0yybvq` — dropped in full, 2026-08-16** (owner's decision). 1,001 lines
+across 16 files, conflicting in 7. It was an earlier take on Phase D, and each of its three
+parts was rejected on its own merits rather than as a batch:
+
+- **Simple mode (D2).** Designed against a 22-row rail. The rail is eleven areas (twelve for a
+  platform admin), and 0025 cut most roles down further — a warehouse operator now sees a
+  handful of rows and a driver fewer, so the problem simple mode solves has largely solved
+  itself. Its `advanced` flags also predate the Money and Platform rows and would have defaulted
+  both to visible in simple mode, which nobody had considered.
+- **Its own `inviteMember`.** Built on `generateLink` in both paths, which returns a sign-in
+  link and **sends nothing**. The shipped action uses `inviteUserByEmail`, which is precisely
+  what makes Supabase send the invitation (§10c). Taking it would have been a regression that
+  looked like a refactor, and it was the cause of most of the seven conflicts.
+- **The branded invitation email** (`src/lib/email/invite-email.ts`). Standalone and usable, but
+  only if invitations are sent through Resend instead of Supabase — and the Resend path has
+  never been exercised against the provider from this environment (§18, Phase C's C0). Not worth
+  trading a working invitation flow for an unproven one to change how the mail looks.
+
+The branch is left on the remote rather than deleted; nothing in it is lost if the reasoning
+above ever stops holding.
+
 ## 17. Dispatch planner and the billing two-pane
 Both are compositions over existing tables — neither added a migration.
 
@@ -1093,7 +1117,8 @@ workflow change.
   the remaining eleven into eight now costs a tenant-wide `ui_mode` toggle and mislabels rows for
   narrow roles — a dispatcher would get a "Settings" row containing only Drivers and Vehicles,
   and merging Jobs with Stops contradicts §6. The `ui_mode` slot in `tenants.settings` stays
-  reserved. D3 (global search) and D4 (consolidated invoicing) shipped on 2026-08-05.
+  reserved. **Re-decided and closed on 2026-08-16** — see §19. D3 (global search) and D4
+  (consolidated invoicing) shipped on 2026-08-05.
 - 297 unit tests (was 288; 9 for the presets and the derived capability lookup). `verify` green.
   `/auth/invite` is outside the auth gate, so unlike the rest of this phase it could be rendered:
   screenshotted light and dark in both its states and asserted at 320/360/375/390/430/768/1024/
