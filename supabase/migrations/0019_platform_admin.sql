@@ -231,7 +231,15 @@ grant all on public.platform_settings to service_role;
 
 revoke execute on function public.is_platform_admin() from public;
 revoke execute on function public.platform_migrations() from public;
-revoke execute on function public.guard_last_platform_admin() from public;
+-- The delete guard is a trigger function and nothing may call it directly, so
+-- it is revoked from `authenticated` as well as PUBLIC — otherwise Supabase's
+-- default privileges publish it at /rest/v1/rpc/guard_last_platform_admin.
+-- Calling it there would fail ("trigger functions can only be called as
+-- triggers"), but an endpoint that exists and always errors is still surface,
+-- and it showed up as a security advisor the moment 0019 landed. Revoking after
+-- CREATE TRIGGER is safe: EXECUTE is checked when the trigger is created, not
+-- each time it fires.
+revoke execute on function public.guard_last_platform_admin() from public, anon, authenticated;
 revoke execute on function public.is_member(uuid) from public;
 revoke execute on function public.has_role(uuid, text[]) from public;
 revoke execute on function public.is_driver_only(uuid) from public;

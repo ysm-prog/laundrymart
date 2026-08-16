@@ -22,9 +22,14 @@ use `MEMBERSHIP_ROLES`, and the last-admin guard must use `membershipRolesWith`,
 `rolesWith`. Tenant roles are built from `TENANT_ALL`, never `ALL`, so `platform.*` cannot leak
 into `super_admin`.
 
-**Bootstrap is a console step and there is no way around it**: the insert policy requires a
-platform admin to already exist. The statement is at the foot of 0019. **0019 is not applied
-anywhere** — no Supabase credentials in this container.
+**0019 IS APPLIED to `laundrymart-syd`** (2026-08-16) and merged to `Prod`. Rehearsed and
+verified per §11 — the decisive probe was a rehearsal laundry invisible to an ordinary member
+and visible to a platform admin, then rolled back.
+
+**Bootstrap is still outstanding and there is no way around it**: `platform_admins` has 0 rows,
+the insert policy requires one to already exist, so the Platform area is unreachable by anyone
+today. The statement is at the foot of 0019 and must be run from the SQL console. Nobody was
+granted this access — who gets it is the owner's call, not a default.
 
 **Release is read-only on purpose.** `platform_migrations()` reads the ledger; there is no
 function that applies one. The brief asked for schema updates from the app and this deliberately

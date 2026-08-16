@@ -504,9 +504,24 @@ demote the other and lock the tenant out of its own People screen.
 
 ## 11. Hosted project
 `laundrymart-syd` · ref `xujhwljrmogenhvqpkrf` · ap-southeast-2 (Sydney) · org `ysm-prog`.
-Deployed on Vercel at `ats.coreit.com.au`. All migrations through `0018_laundry_pricing`
-applied (0014 on 2026-08-13, 0015 and 0016 on 2026-08-14, 0017 and 0018 on 2026-08-16), each
-verified by rolled-back probe rather than trusted. For **0018** that was: RLS on, both policies
+Deployed on Vercel at `ats.coreit.com.au`. All migrations through `0019_platform_admin`
+applied (0014 on 2026-08-13, 0015 and 0016 on 2026-08-14, 0017, 0018 and 0019 on 2026-08-16),
+each verified by rolled-back probe rather than trusted.
+
+For **0019** that was: the live `is_member`/`has_role`/`is_driver_only` bodies confirmed
+identical to this repo's 0001 before being replaced (this is the check that matters most — a
+`create or replace` against a project carrying unmerged branches could silently revert one);
+zero `anon`-executable functions, so the migration's own assertion would pass; both new tables
+absent; then the whole migration plus probes in one aborted transaction, proving a rehearsal
+laundry invisible to an ordinary member and visible to a platform admin. After the apply:
+`anon` reads 0 rows from `platform_admins` with a row present, RLS on both new tables, the
+`tenants` policy set now `tenants_member, tenants_platform`, the last-admin delete trigger
+attached, and the 508 archived customers untouched. **Advisors went 12 → 14**: `is_platform_admin`
+and `platform_migrations` are the documented definer shape and both are internally scoped;
+`guard_last_platform_admin` briefly made a third before EXECUTE was revoked from
+`authenticated` — it is a trigger function, so Supabase's default privileges had published it
+at `/rest/v1/rpc/…` where it could only ever error. The repo migration carries that revoke now,
+so a fresh apply matches. For **0018** that was: RLS on, both policies
 present, the unique index confirmed `nulls not distinct`, the `updated_at` trigger attached,
 `laundry_prices` confirmed absent from `archivable_tables()`, and a price row inserted and read
 back as `anon` in one rolled-back block — 0 rows, so the standard Supabase `anon` SELECT grant
@@ -656,10 +671,23 @@ new area, nothing dropped.
   The new proof asserts both directions: a platform admin crossing laundries, and an ordinary
   member seeing exactly what they did before *while one exists*.
 
-**Not verified against a live project, and not applied.** This container has no Supabase
-credentials. Before trusting it: apply 0019, then bootstrap the first administrator from the
-SQL console (the policy requires one to already exist, so there is no screen that can create
-it) — the statement is at the foot of the migration.
+**Applied to `laundrymart-syd` on 2026-08-16**, rehearsed first the way §11 requires. Three
+pre-flight probes ran before anything was committed: no function was `anon`-executable (the
+migration's own assertion would otherwise have aborted it), the live `is_member`/`has_role`/
+`is_driver_only` bodies matched this repo's 0001 **byte for byte** (so `create or replace` was
+not silently reverting an unmerged branch), and neither new table existed. Then the whole
+migration plus probes ran inside a transaction that was aborted — including the decisive one: a
+third laundry created in the rehearsal was **invisible** to an ordinary member (0 rows, 0
+customers, `is_member` false) and visible to a platform admin. After the real apply, `anon` was
+shown to read 0 rows from `platform_admins` *with a row present*, so the standard Supabase
+`anon` SELECT grant is refused by the policy rather than merely unused — the same proof 0018
+required.
+
+**Still to do: bootstrap the first administrator.** There are 0 rows in `platform_admins`, so
+the Platform area is currently unreachable by anyone, and the insert policy requires an
+administrator to already exist. The statement is at the foot of the migration and must be run
+from the SQL console. Nobody has been granted this access — deciding who gets it is not a
+decision to make on someone's behalf.
 
 **Two things the brief asked for that this does not do.** Applying migrations from the browser
 is not built, for the reason above. And a platform admin still works *inside one laundry at a
