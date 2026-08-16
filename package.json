@@ -14,6 +14,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "db:test": "bash scripts/run-db-tests.sh",
+    "seed:roles": "node --env-file-if-exists=.env.local scripts/seed-role-profiles.mjs",
     "verify": "bash scripts/verify.sh",
     "prepare": "lefthook install || true"
   },

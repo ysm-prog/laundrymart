@@ -165,6 +165,32 @@ them: counter jobs are not stops on a run. `routes.write` (plan and assign) is s
 a run that is already out): the latter also goes to `driver` — RLS confines them to their own
 run — and to `customer_service`, so a stuck run is not waiting on a dispatcher.
 
+### 3a. Test role profiles
+`npm run seed:roles` provisions **one login per role** so a capability change can be checked by
+signing in rather than by reading `roles.ts`. `scripts/role-profiles.mjs` is the list (plain
+JS — the runner is bare Node with no build step, and `role-profiles.test.ts` imports that same
+file, so there is no second copy); `scripts/seed-role-profiles.mjs` is the runner. Addresses are
+`<role-with-hyphens>@roles.example.com` — reserved by RFC 2606, so a stray invitation or overdue
+chase aimed at a test profile can never leave the building — and the shared password is printed
+on every run. Needs `SUPABASE_SERVICE_ROLE_KEY`: creating a login is an Auth admin call and the
+membership insert writes a `tenant_id` no session is bound to, so every statement in it filters
+`tenant_id` by hand.
+
+Four decisions worth keeping:
+- **Idempotent, and that is also the recovery path.** An address that exists is reused and its
+  password reset, so a rerun is how you get back a test login nobody wrote down.
+- **`platform_admin` is opt-in (`--platform-admin`), not part of "all the roles".** It is not a
+  membership (0019) and it reaches *every* laundry on the project — on this deployment that
+  includes the real tenant beside the demo one, so it is not a demo-tenant test login at all.
+- **The driver profile gets a `drivers` row.** A `driver` membership with no such row leaves
+  `current_driver_id()` null, every driver-scoped policy then matches nothing, and the result is
+  a login that works with empty screens — which reads as a bug in My Runs.
+- **`--remove` deletes a login only when this script's grants were the whole of it**, and
+  unlinks the driver row rather than deleting it, because runs and stops point at it.
+
+`role-profiles.test.ts` pins the list against `ROLES`, so a twelfth role added to `roles.ts`
+fails a test rather than shipping with no way to be signed in as.
+
 ## 4. Business rules enforced in the database
 - Run cannot start without `load_confirmed_at`; cannot close before `unloaded_at`
   (`guard_route_transition`). The vehicle inspection is recorded and surfaced but is **not**
@@ -631,6 +657,17 @@ is effectively arbitrary. Pre-existing, and worth fixing before anything depends
 **The real tenant's records are archived as of 2026-08-16** (§18): 1,154 rows hidden, nothing
 deleted, restored by `set_records_archived('20000000-…-000000000001', false)`.
 
+**Thirteen logins as of 2026-08-16, and eleven of them are test profiles.** The two real ones are
+above; the rest are `<role>@roles.example.com` (§3a), one per membership role, members of
+`Harbour Commercial Laundry` **only** — proved rather than assumed: `is_member()` is false for
+`Adelaide Towel Service` for every one of them, and none is a platform admin, so the real
+laundry's 508 customers are outside all eleven. Shared password, printed by `npm run seed:roles`
+and easy to reset with a rerun; `npm run seed:roles -- --remove --yes` takes them off again.
+Written by SQL rather than by the Auth admin API because no session here holds the service-role
+key — `auth.users` + `auth.identities` in GoTrue's own shape, one email identity each. Treat
+this as a **demo-tenant** convenience: an address on a real laundry would want the script and a
+real invitation.
+
 The live project also carries real supplier data from the unmerged purchases branch — 1,515
 supplier bills, 192 suppliers, 268 GL accounts, 636 import-activation rows. **No screen in this
 build reads any of it**, so it is already invisible in the deployed app and 0017 leaves it
@@ -717,6 +754,50 @@ Both are compositions over existing tables — neither added a migration.
   are edited and invoices voided.
 
 ## 18. Changelog
+### 2026-08-16 · A login per role, so a capability change can be signed in as
+`0025` narrowed the job→invoice flow to two roles, and the only way to check what the other nine
+now see was to read `roles.ts`. There were two logins on the whole deployment, both
+`super_admin` (in fact both `platform_admin` since 0019). **No migration, no schema, no RLS
+policy, no capability and no application code changed** — this is tooling.
+
+- **`npm run seed:roles`** creates one login per role in the demo laundry, resets the password of
+  any that already exist, and prints the lot. See §3a. Chosen over adding users to
+  `supabase/seed.sql` because that file writes `auth.users` rows directly and gives no password
+  — the accounts would exist and nobody could sign in as one.
+- **The list lives in `scripts/role-profiles.mjs` and the vitest suite imports that same file**,
+  rather than the script carrying its own array. `role-profiles.test.ts` pins it against `ROLES`,
+  so a role added to `roles.ts` with no test profile fails a test. Verified by deleting the
+  `sales` profile: two assertions fail.
+- **Plain JavaScript with a `.d.mts` beside it**, because the runner is bare Node — no build
+  step, no `tsx` dependency — while `tsc --noEmit` and vitest still read it typed.
+- **`platform_admin` is behind `--platform-admin`.** "All the roles" would otherwise put a test
+  login above the tenancy boundary and into `Adelaide Towel Service`, which is the opposite of
+  the point of testing on the demo tenant.
+- 393 unit tests (was 386; 7 for the profile list). `verify` green. The default
+  `--tenant "Harbour Commercial Laundry"` was checked against the live project: the name is
+  unique, so the resolver cannot be ambiguous, and the laundry has an active depot for the
+  driver record to sit in.
+
+**The eleven profiles are live on `laundrymart-syd`** (2026-08-16), in `Harbour Commercial
+Laundry` and nowhere else. Rehearsed and applied the way §11 requires, and verified after:
+`is_member(Harbour)` true and `is_member(Adelaide)` **false** for every one of them,
+`current_driver_id()` resolving for the driver, the auditor seeing exactly one laundry and zero
+platform admins, and 0025 proved through the API in the same probe — the warehouse operator's
+UPDATE on `laundry_orders` touched **0 rows** where the office manager's touched 1.
+
+**Provisioned by SQL, not by the script — so the script's own Auth round trip is still
+unproven.** This container has no service-role key, so `auth.users` + `auth.identities` were
+written directly in the shape GoTrue writes them (bcrypt through `extensions.crypt`, confirmed
+`email_confirmed_at`, one email identity each), and the hash was verified against the password
+in the rehearsal. What that leaves untested is `createUser`/`updateUserById`, the rerun path, and
+**the sign-in itself** — a password grant against `/auth/v1/token` was attempted and the
+container's network policy answered 403 to `CONNECT …supabase.co`, the same wall the Resend path
+hit on 2026-08-05. Everything GoTrue reads is in place and the hash verifies; that it *accepts*
+them is the one claim resting on the shape being right rather than on having been seen.
+**Run `npm run seed:roles -- --dry-run` once from a machine that has the key**: it should report
+"reset password" for all eleven and create nothing, which is the same statement as the script
+agreeing with what is already there.
+
 ### 2026-08-16 · Job to invoice belongs to the Owner and the Office manager
 The owner's decision: taking a job in, moving it through the plant and billing it is one flow,
 and it answers to two people. `orders.*` and `invoices.*` are now held by `super_admin` and
