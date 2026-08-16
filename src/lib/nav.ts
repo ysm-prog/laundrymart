@@ -244,6 +244,13 @@ export const NAVIGATION: NavItem[] = [
         label: "Activity log", href: "/admin/audit", capability: "admin.read",
         blurb: "Every change anyone has made, kept permanently.",
       },
+      {
+        // Write, not read, for the same reason as Notifications: the screen is
+        // two buttons and a count, and a read-only role would get a page it
+        // cannot act on.
+        label: "Your records", href: "/admin/data", capability: "admin.write",
+        blurb: "Hide your customers, jobs and invoices while you show the app around.",
+      },
     ],
   },
   {
