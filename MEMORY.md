@@ -1,7 +1,27 @@
 # MEMORY — working session handoff
 > Auto-loaded each session. Canonical state is CLAUDE.md; this is the live delta.
 
-## Latest: deliveries were impossible — nothing ever loads the van
+## Latest: job→invoice is the Owner's and the Office manager's (`0025`)
+`orders.*` + `invoices.*` → `super_admin` and `operations_manager` only (owner's decision).
+
+**Two layers, on purpose.** `roles.ts` decides who is *shown* the flow; `0025` adds
+**restrictive** write policies so the database decides who may *change* it. Restrictive, not a
+rewrite, because of the §11 `invoices` divergence — it ANDs with whatever policy is there.
+
+**SELECT is deliberately NOT restricted.** A driver must read the job they are delivering.
+Locking reads would blank My Runs. Ask before changing that.
+
+**`JOB_TO_INVOICE` is subtracted from every other role** rather than omitted per role — six
+roles derive from `TENANT_ALL`, so a new `orders.*` capability would otherwise reopen the flow
+to all of them silently.
+
+**`purchases.*` deliberately did NOT follow.** Finance keeps supplier bills and the chart of
+accounts; it lost only customer invoicing. The old "invoices minus dispatcher" pin is gone and
+the holders are pinned literally.
+
+**0025 is NOT applied to `laundrymart-syd`.** Until it is, the app refuses but the API allows.
+
+## Also live: deliveries were impossible — nothing ever loads the van
 Found on the deployed app. `only 0 of that item are in transit, so 12 cannot be moved out`.
 
 **`confirmLoad` moves no stock.** `unload.ts` does `in_transit → at_depot`; nothing does the
@@ -16,11 +36,6 @@ an always-empty pool. Verified live: not one `in_transit` row on the whole deplo
 **If you build a load manifest**, that is where the depot→van hop belongs, and this fallback
 should then only cover the unloaded case. It is not built because the load step captures no
 quantities — counts are taken at the door.
-
-**`purchases.*` is now stated and pinned.** Investigating the "derived by accident" worry showed
-the set is exactly `invoices.*` minus `dispatcher` — a coherent line, just never written down.
-`roles.test.ts` now asserts that relationship both ways, so adding a capability to `roles.ts`
-can no longer widen the payable side silently.
 
 ## Also live: the app wears the YSM Hub design language (no migration)
 Presentation only. **No schema, action, RLS policy, capability, query, route or business rule

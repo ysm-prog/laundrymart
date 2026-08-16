@@ -352,6 +352,14 @@ renders no tab strip. Tested in `src/lib/__tests__/nav.test.ts`.
   predicate and there is none here. There is deliberately **no function that applies a
   migration**; the Release screen reads the ledger and nothing more.
 
+- `0025_main_flow_owner_office` — **restrictive** write policies on the nine job→invoice
+  tables, narrowing INSERT/UPDATE/DELETE to `super_admin` and `operations_manager`.
+  Restrictive rather than a rewrite precisely because of the §11 divergence: this repo's
+  `invoices` policies carry 0006's inline `has_role` and the hosted project's use
+  `can_write_billing`, and a restrictive policy ANDs with whichever is there without reading
+  or replacing it. **SELECT is deliberately untouched** — a driver has to read the job they
+  are delivering, and the app already gates who is shown the screens. Adds no table, no
+  column, no function, and changes no row.
 - `0020_return_count` — the depot count as a control rather than a re-typing exercise.
   Renumbered from 0012 on the way in (0012_optional_inspection holds that number here), and
   already applied to the hosted project under the old name.
@@ -365,7 +373,8 @@ renders no tab strip. Tested in `src/lib/__tests__/nav.test.ts`.
 
 Proofs in `supabase/tests/`: `rls_isolation`, `rls_coverage`, `driver_scope`,
 `business_rules`, `media_scope`, `warehouse_rules`, `notifications_scope`, `laundry_orders`,
-`run_assignment`, `archive_records`, `laundry_pricing`, `platform_admin` (179 assertions). Demo data in
+`run_assignment`, `archive_records`, `laundry_pricing`, `platform_admin`, `main_flow_scope`
+(242 assertions). Demo data in
 `supabase/seed.sql` — not
 applied by migrations.
 
@@ -684,6 +693,46 @@ Both are compositions over existing tables — neither added a migration.
   are edited and invoices voided.
 
 ## 18. Changelog
+### 2026-08-16 · Job to invoice belongs to the Owner and the Office manager
+The owner's decision: taking a job in, moving it through the plant and billing it is one flow,
+and it answers to two people. `orders.*` and `invoices.*` are now held by `super_admin` and
+`operations_manager` alone. One migration (`0025`), no new table, no new role, no new
+capability, nothing dropped.
+
+- **Named as a block, not omitted role by role.** `JOB_TO_INVOICE` is subtracted from every
+  other role, because six of the eleven derive their capabilities from `TENANT_ALL` — so the
+  next capability added to `orders.*` would otherwise reopen the flow to all of them silently.
+  The same lesson 0019 recorded when it split `TENANT_ALL` out of `ALL`.
+- **What each role lost**, stated because none of it is obvious from the diff:
+  `warehouse_operator` loses `orders.status` (the floor still runs every warehouse stage and
+  all of stock; it no longer walks the customer's job along behind it); `customer_service`
+  loses `orders.write`, which was that role's whole point — a laundry wanting counter staff to
+  book jobs gives them the Office role now; `dispatcher` loses both blocks and keeps customers,
+  routes, stops and fleet; `finance` loses `invoices.*` and keeps `purchases.*`; `auditor`,
+  `branch_manager` and `regional_manager` lose the chain entirely.
+- **`purchases.*` no longer derives from `invoices.*`.** That pin was added the same day and
+  was right while both sides of the ledger answered to the same people. Deriving it now would
+  have taken supplier bills and the chart of accounts off finance as a side effect of a
+  decision about *customer* billing, so the holders are named per role and pinned literally.
+- **The database enforces it too, and that is the half that matters.** `roles.ts` drives the
+  screens; every one of these tables is published on `/rest/v1/…`, so the floor's own login
+  could have PATCHed a job's status straight past the screen that refuses. 0025 adds
+  restrictive write policies — which AND with the existing permissive ones rather than
+  replacing them, sidestepping the §11 divergence entirely.
+- **SELECT is deliberately not restricted.** A driver must read the job they are delivering;
+  that is what My Runs is. So the app decides who is *shown* the flow and the database decides
+  who may *change* it. Locking reads down as well would cost the driver their run screen, and
+  should be asked for explicitly.
+- **ROLE_SUMMARY rewritten for the six affected roles** — a picker still describing a
+  dispatcher as "Customers, runs, stops, drivers, trucks and invoices" when they can no longer
+  open an invoice is worse than no description at all.
+- 386 unit tests (was 379) and **242 pgTAP assertions (was 226)**, including a proof that the
+  floor, the counter and finance are each refused through the API while the two roles that own
+  the flow are not. Every migration applied to a fresh Postgres 16.
+
+**Not applied to the live project.** 0025 needs applying before the restriction is real on
+`ats.coreit.com.au`; until then the app refuses but the API does not.
+
 ### 2026-08-16 · Every delivery failed: nothing ever loads the van
 Found on the deployed app, by a driver standing at a customer with a signature pad. Recording
 the drop returned **`only 0 of that item are in transit, so 12 cannot be moved out`** — the
