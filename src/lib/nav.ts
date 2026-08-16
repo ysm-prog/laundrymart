@@ -37,7 +37,7 @@ export type NavCountKey =
  */
 export type NavIcon =
   | "today" | "myRun" | "runs" | "stops" | "jobs" | "customers"
-  | "invoices" | "linen" | "reports" | "settings" | "help";
+  | "invoices" | "linen" | "reports" | "settings" | "help" | "platform";
 
 export type NavItem = {
   label: string;
@@ -274,6 +274,35 @@ export const NAVIGATION: NavItem[] = [
     href: "/help",
     icon: "help",
     blurb: "What the words mean, and how a normal day runs.",
+  },
+  {
+    // Last on purpose, and invisible to all eleven membership roles: `platform.read`
+    // is held by `platform_admin` alone (0019). This is the deployment, not a
+    // laundry — an owner opening their own Settings should never see a row that
+    // implies there are other businesses on the other side of it.
+    label: "Platform",
+    href: "/platform",
+    icon: "platform",
+    capability: "platform.read",
+    blurb: "The laundries on this system, and the system itself.",
+    children: [
+      {
+        label: "Laundries", href: "/platform", capability: "platform.read",
+        blurb: "Every business on this deployment. Add one, rename one, suspend one.",
+      },
+      {
+        label: "Administrators", href: "/platform/admins", capability: "platform.write",
+        blurb: "Who else can reach every laundry on this system.",
+      },
+      {
+        label: "Settings", href: "/platform/settings", capability: "platform.write",
+        blurb: "Defaults a new laundry starts with.",
+      },
+      {
+        label: "Release", href: "/platform/release", capability: "platform.read",
+        blurb: "What schema this deployment is on, and what shipped.",
+      },
+    ],
   },
 ];
 

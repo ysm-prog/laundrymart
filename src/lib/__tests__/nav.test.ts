@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { NAVIGATION, isActive, navigationFor, sectionFor } from "@/lib/nav";
-import { ROLES, can, type Role } from "@/lib/roles";
+import { MEMBERSHIP_ROLES, ROLES, can, type Role } from "@/lib/roles";
 
 describe("navigationFor", () => {
   it("gives every role a way to reach the screen they are redirected to", () => {
@@ -66,9 +66,30 @@ describe("navigationFor", () => {
   // that the rail lists areas of work rather than tables, and that a role only
   // ever sees the ones it can open.
   it("stays inside the eleven rows the redesign promises", () => {
-    for (const role of ROLES) {
+    // Every role that works inside a laundry. `platform_admin` is checked
+    // separately below: it gets a twelfth row that none of these can see, and
+    // folding it in here would have quietly raised the ceiling for all of them.
+    for (const role of MEMBERSHIP_ROLES) {
       expect(navigationFor(role).length, role).toBeLessThanOrEqual(11);
     }
+  });
+
+  it("shows Platform to the platform admin and to nobody else", () => {
+    // The row is gated on `platform.read`, which `roles.test.ts` proves is held
+    // by `platform_admin` alone. This is the other half: an owner opening their
+    // own app must never see a row implying there are other businesses behind
+    // it, and the platform admin must actually be able to reach one.
+    for (const role of MEMBERSHIP_ROLES) {
+      expect(navigationFor(role).map((item) => item.label), role).not.toContain("Platform");
+    }
+
+    const rows = navigationFor("platform_admin");
+    expect(rows).toHaveLength(12);
+    const platform = rows.find((item) => item.label === "Platform");
+    expect(platform?.href).toBe("/platform");
+    expect(platform?.children?.map((child) => child.href)).toEqual([
+      "/platform", "/platform/admins", "/platform/settings", "/platform/release",
+    ]);
   });
 
   it("gives the driver My Runs, and both screens inside it", () => {
