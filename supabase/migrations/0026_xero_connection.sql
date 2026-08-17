@@ -19,8 +19,8 @@
 -- ## The tokens are credentials, so nobody signed in can read them
 --
 -- This is the first table in the schema that `authenticated` may not touch at
--- all. RLS is enabled and **no policy is created for `authenticated`**, and the
--- table grants are revoked from it: a refresh token is a bearer credential for
+-- all. RLS is enabled, its only policy denies everything outright, and the
+-- table grants are revoked too: a refresh token is a bearer credential for
 -- somebody's accounting system, and there is no screen that needs its value.
 -- Only the service-role client — used by the OAuth callback and the push, both
 -- server-side — can read or write a row.
@@ -65,8 +65,17 @@ comment on table public.xero_connections is
 
 alter table public.xero_connections enable row level security;
 
--- Deliberately no policy for `authenticated`. RLS with no policy denies
--- everything, which is the intent: these are bearer credentials.
+-- The denial is written down rather than left to the absence of a policy.
+--
+-- RLS with no policy at all already denies everything, and that is what this
+-- table wants — but `rls_coverage` asserts that every table carrying a
+-- `tenant_id` has a policy, and it is right to: "no policy" and "somebody
+-- forgot the policy" look identical in the catalogue. Saying `false` out loud
+-- states the intent, survives a future grant being restored by accident, and
+-- keeps the coverage proof meaningful for every other table.
+create policy xero_connections_no_access on public.xero_connections
+  for all to authenticated
+  using (false) with check (false);
 create trigger set_xero_connections_updated_at
   before update on public.xero_connections
   for each row execute procedure public.set_updated_at();
