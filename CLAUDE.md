@@ -397,6 +397,11 @@ renders no tab strip. Tested in `src/lib/__tests__/nav.test.ts`.
   changes the repo's ordering only. None re-adds `grant execute … to anon`, which is what makes
   them safe to sit after 0019's revoke. None is in `archivable_tables()`.
 
+- `0027_xero_payments` — `payments.xero_payment_id`/`xero_pushed_at`/`xero_push_error`,
+  `xero_connections.payment_account_code`/`payment_account_name`, and
+  `xero_connection_status()` re-created to carry the account. Four columns, no table, no policy
+  change, no row touched. The re-create restates the pinned `search_path` and the revoke, the
+  same trap 0012 recorded.
 - `0026_xero_connection` — `xero_connections` (one row per laundry, keyed on `tenant_id`),
   `xero_connection_status()`, `invoices.xero_invoice_id`/`xero_pushed_at`/`xero_push_error`, and
   `customers.xero_contact_id`/`xero_contact_name` added `if not exists` because the hosted
@@ -786,6 +791,19 @@ invoice goes, because this app has no counter-cash concept.
 - A draft and a void are never pushed (`canPushToXero`), and a laundry that has not connected
   is *skipped*, not failed — it should not have every invoice wearing a red error it cannot act
   on.
+- **Payments go too** (`0027`). A payment posts against the Xero invoice it settles, into a
+  bank account **the laundry chooses** — Xero will not take one without an account, and guessing
+  puts real money against the wrong ledger with nothing to notice it, so the settings screen
+  offers the laundry's own accounts read back from Xero rather than a text box.
+  `payment_account_code` is null until picked and payments are *skipped* while it is.
+- **A payment carries an `Idempotency-Key`, and that is stricter than the invoice path on
+  purpose.** The payment's own id goes in the header, so a retry after a timeout — where the
+  first attempt may in fact have landed — cannot post the money twice. A duplicated invoice is
+  visible and embarrassing; a duplicated payment quietly makes a customer look paid up.
+- `paymentGate()` is pure and tested, and its four "not yet" cases are **skips, not failures**:
+  already posted, the invoice never reached Xero, no bank account chosen, and a zero or negative
+  amount (a refund is a credit note in Xero, not a payment). Marking those as errors is how an
+  integration teaches people to ignore its warnings.
 - `XERO_CLIENT_ID`/`XERO_CLIENT_SECRET` are optional like the mail provider, and a **partial**
   pair counts as unconfigured. The redirect URI is derived from the request origin, so a
   preview deployment connects to itself — and must be registered on the Xero app.

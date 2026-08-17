@@ -28,6 +28,7 @@ import { invoiceFileName, renderInvoicePdf } from "@/lib/pdf/render";
 import { buildInvoiceEmail } from "@/lib/email/invoice-email";
 import { sendEmail } from "@/lib/email/send";
 import { pushInvoiceToXero } from "@/lib/xero/push";
+import { pushPaymentToXero } from "@/lib/xero/push-payment";
 
 /**
  * Generate recurring invoices for a billing period — **one invoice per
@@ -618,9 +619,12 @@ export async function recordPayment(formData: FormData): Promise<void> {
   const backTo = returnTo(formData, `/invoices/${parsed.data.invoice_id}`);
   const supabase = await createClient();
 
-  const { error } = await supabase.from("payments").insert({
+  // `select("id")` because the Xero push needs the row: the payment's own id is
+  // sent as Xero's Idempotency-Key, which is what stops a retry posting the
+  // money twice.
+  const { data: payment, error } = await supabase.from("payments").insert({
     ...parsed.data, tenant_id: session.tenantId, created_by: session.userId,
-  });
+  }).select("id").single<{ id: string }>();
   if (error) return fail(backTo, describeDbError(error));
 
   await supabase.rpc("recalculate_invoice", { p_invoice: parsed.data.invoice_id });
@@ -642,11 +646,50 @@ export async function recordPayment(formData: FormData): Promise<void> {
     entity: "payment", entityId: parsed.data.invoice_id, action: "create",
     summary: `${parsed.data.amount} via ${parsed.data.method}`,
   });
+  // Xero after the money is recorded, and never in front of it: somebody has
+  // handed over payment, and recording that is what must succeed.
+  const push = payment
+    ? await pushPaymentToXero(supabase, payment.id, session.tenantId)
+    : null;
+
   // Revalidate the routes, not `backTo` — that may carry a query string, which
   // `revalidatePath` does not match against.
   revalidatePath(`/invoices/${parsed.data.invoice_id}`);
   revalidatePath("/invoices");
-  return done(backTo, "Payment recorded.");
+
+  if (push?.ok) return done(backTo, "Payment recorded and sent to Xero.");
+  // A laundry with no Xero, no bank account chosen, or an invoice that never
+  // reached Xero is not failing at anything — say nothing extra.
+  if (!push || push.skipped) return done(backTo, "Payment recorded.");
+  return done(backTo, `Payment recorded, but Xero did not accept it. ${push.reason}`,
+              { href: `/invoices/${parsed.data.invoice_id}`, label: "Open the invoice" });
+}
+
+/**
+ * Try Xero again for a payment whose push failed.
+ *
+ * Separate from recording it, for the same reason the invoice has its own
+ * retry: the money is already recorded here, and this is the button beside the
+ * error rather than a reason to re-enter the payment.
+ */
+export async function retryXeroPayment(formData: FormData): Promise<void> {
+  const session = await assertCapability("invoices.write");
+  const parsed = z.object({
+    payment_id: z.string().uuid(),
+    invoice_id: z.string().uuid(),
+  }).safeParse(toObject(formData));
+  if (!parsed.success) return fail("/invoices", firstIssue(parsed.error));
+
+  const backTo = returnTo(formData, `/invoices/${parsed.data.invoice_id}`);
+  const supabase = await createClient();
+  const push = await pushPaymentToXero(supabase, parsed.data.payment_id, session.tenantId);
+
+  revalidatePath(`/invoices/${parsed.data.invoice_id}`);
+  revalidatePath("/invoices");
+
+  if (push.ok) return done(backTo, "Payment sent to Xero.");
+  return fail(backTo, push.reason,
+              push.skipped ? { href: "/invoices/xero", label: "Xero settings" } : undefined);
 }
 
 export async function voidInvoice(formData: FormData): Promise<void> {

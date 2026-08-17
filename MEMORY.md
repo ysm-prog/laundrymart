@@ -1,6 +1,35 @@
 # MEMORY — working session handoff
 > Auto-loaded each session. Canonical state is CLAUDE.md; this is the live delta.
 
+## Latest: Xero — invoices (`0026`) and payments (`0027`)
+Billing design as decided: rates stay where they are (contract lines + `laundry_prices`), the
+Owner raises one invoice a month, and both the invoice and its payments reach Xero.
+
+**One Xero org per laundry** — `xero_connections` keyed on `tenant_id`. **The tokens are
+credentials**: RLS denies everything outright, grants revoked, and screens read
+`xero_connection_status()` (definer, never returns a token).
+
+**Neither push ever blocks the money.** Issue/record succeeds first; a refusal is written to
+`xero_push_error` with a Retry. A laundry that has not connected, or has not chosen a bank
+account, is **skipped, not failed** — red errors nobody can act on are how an integration gets
+ignored.
+
+**A payment carries an Idempotency-Key (its own id).** Stricter than the invoice path on
+purpose: a duplicated invoice is visible, a duplicated payment quietly makes a customer look
+paid up.
+
+**Payments need a bank account and only the laundry knows which.** The settings screen lists
+their real Xero bank accounts; `payment_account_code` null = skip.
+
+**NOTHING here has touched Xero.** No credentials in this container and the session's Xero
+tools are read-only. **0026 and 0027 are not applied to `laundrymart-syd`.** First live run:
+apply both, set XERO_CLIENT_ID/SECRET, register `<origin>/api/xero/callback`, connect, pick the
+account, then issue one invoice and take one payment.
+
+**Trap worth remembering:** a pgTAP run reporting `0 assertions, 0 failures` is Postgres being
+down, not a pass. Check the count.
+
+
 ## Latest: a test login per role (`npm run seed:roles`) — tooling, no migration
 `scripts/role-profiles.mjs` (the list) + `scripts/seed-role-profiles.mjs` (the runner). One
 login per role in the demo laundry, `<role>@roles.example.com`, shared password printed each

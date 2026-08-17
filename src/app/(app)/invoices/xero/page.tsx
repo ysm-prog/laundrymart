@@ -2,9 +2,11 @@ import { requireCapability } from "@/lib/auth/context";
 import { createClient } from "@/lib/supabase/server";
 import { dateTime } from "@/lib/format";
 import { xeroConfig } from "@/lib/xero/config";
+import { listXeroBankAccounts } from "@/lib/xero/accounts";
 import { Badge, ButtonLink, Card, Notice, PageHeader, Stat } from "@/components/ui";
 import { ConfirmSubmit } from "@/components/confirm-submit";
-import { disconnectXero } from "./actions";
+import { Field, Select, SubmitButton } from "@/components/form";
+import { disconnectXero, setXeroPaymentAccount } from "./actions";
 
 export const metadata = { title: "Xero" };
 export const dynamic = "force-dynamic";
@@ -13,6 +15,8 @@ type Status = {
   xero_tenant_name: string | null;
   connected_at: string;
   expires_at: string;
+  payment_account_code: string | null;
+  payment_account_name: string | null;
   connected: boolean;
 };
 
@@ -56,10 +60,12 @@ export default async function XeroPage() {
               <Stat label="Access renews" value={dateTime(status.expires_at)} />
             </div>
             <p className="text-xs text-muted-foreground">
-              An issued invoice is sent automatically. If Xero refuses one, the invoice stays
-              issued and the register offers to try again — the money record is this app&apos;s,
-              and Xero is a copy of it.
+              An issued invoice is sent automatically, and a payment is posted against it. If
+              Xero refuses either, the record here stays exactly as it is and the register offers
+              to try again — the money record is this app&apos;s, and Xero is a copy of it.
             </p>
+            <PaymentAccount status={status} tenantId={session.tenantId} />
+
             <form action={disconnectXero}>
               <ConfirmSubmit
                 label="Disconnect"
@@ -85,5 +91,43 @@ export default async function XeroPage() {
         )}
       </Card>
     </div>
+  );
+}
+
+/**
+ * Which Xero bank account payments land in.
+ *
+ * A picker of the laundry's real accounts rather than a text box: an account
+ * code is an arbitrary number in somebody else's system, and typing it from
+ * memory posts real money against the wrong account with nothing to notice it.
+ */
+async function PaymentAccount({ status, tenantId }: { status: Status; tenantId: string }) {
+  const accounts = await listXeroBankAccounts(tenantId);
+
+  if (accounts.length === 0) {
+    return (
+      <Notice tone="warning" title="Payments are not being sent">
+        No bank accounts could be read from Xero, so there is nothing to choose. Payments are
+        recorded here as normal and simply not posted — reconnect if this persists.
+      </Notice>
+    );
+  }
+
+  const current = status.payment_account_code
+    ? `${status.payment_account_code}|${status.payment_account_name ?? ""}`
+    : "";
+
+  return (
+    <form action={setXeroPaymentAccount} className="flex flex-wrap items-end gap-3">
+      <Field label="Post payments to" name="account"
+             hint="The Xero bank account a customer's payment is recorded against.">
+        <Select name="account" defaultValue={current} placeholder="Do not send payments"
+                options={accounts.map((account) => ({
+                  value: `${account.code}|${account.name}`,
+                  label: `${account.name} (${account.code})`,
+                }))} />
+      </Field>
+      <SubmitButton variant="secondary" pendingLabel="Saving…">Save</SubmitButton>
+    </form>
   );
 }
