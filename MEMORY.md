@@ -46,6 +46,28 @@ SELECT *and INSERT* on **all 49 public tables**. Inert today — RLS is on every
 policy is `to authenticated` — but any future table without RLS would be publicly readable. Wants
 its own migration.
 
+## Also live: the trial driver, and linking a login is a picker now
+**`Adelaide Towel Service` had no `drivers` rows at all** — the only two on the deployment
+belonged to the demo tenant — so no job could be assigned and My Runs was empty for everybody.
+One trial driver now exists there: **Mario Forte, D001, Adelaide depot, active,
+`fa1a7cb7-dcf0-484b-a5fe-65755c55f1ce`**, `user_id` still null.
+
+**Next step is the owner's, and it is two clicks:** Settings → People → invite Mario's address as
+Driver, then Fleet → Drivers → pick him in the Login column and press Link. No invitation was
+sent from here — this container has no service-role key and its network policy blocks
+`supabase.co` — and the roster's real email addresses are not in this session's context.
+
+**The Drivers screen no longer asks for a UUID.** It used to say "paste from Administration →
+Users", from a screen that has shown emails and not ids since the People rewrite — so the link
+was effectively unmakeable, and an unlinked driver signs in to empty screens because
+`current_driver_id()` matches `drivers.user_id`. Both the Login column and the Add-driver form
+now offer a picker of the tenant's unlinked members. **Not filtered to the `driver` role**, on
+purpose: an owner who drives a van is ordinary, and roles say what somebody may do while this
+link says which driver they are.
+
+`memberEmails` moved to `src/lib/members.ts` and is shared with People. It still asks the admin
+client for ids the caller already got through RLS, never lists users globally.
+
 ## Also live: Xero — invoices (`0026`) and payments (`0027`)
 Billing design as decided: rates stay where they are (contract lines + `laundry_prices`), the
 Owner raises one invoice a month, and both the invoice and its payments reach Xero.

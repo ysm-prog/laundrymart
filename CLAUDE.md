@@ -930,6 +930,28 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-08-17 · A driver could be created but not linked, so My Runs was empty
+Found while setting up one trial driver in the real laundry, which had **no `drivers` rows at
+all**. No migration, no schema, no capability.
+
+- **`current_driver_id()` matches `drivers.user_id`, so an unlinked driver signs in to empty
+  screens** — a login that works and shows nothing, which reads as a broken app rather than as a
+  missing link.
+- **The link was effectively unmakeable.** The Drivers screen asked for a raw UUID, hinted "paste
+  from Administration → Users" — and the People screen has shown *emails and not ids* since it was
+  rewritten to resolve them. Both the Login column and the Add-driver form now offer a picker of
+  the tenant's unlinked members.
+- **The picker is deliberately not filtered to the `driver` role.** A laundry whose owner drives a
+  van, or a manager covering a run, is ordinary; refusing to link them would have the app insisting
+  they cannot drive while they are out driving. Roles say what somebody may *do*; this link says
+  *which driver they are*.
+- `memberEmails` moved out of the People page into `src/lib/members.ts`. It keeps the rule §2 sets
+  for the admin client: the caller passes ids it already got through RLS, and this asks for each
+  one — it never lists users globally and filters afterwards.
+- 496 unit tests, `verify` green. **One trial driver is live on `laundrymart-syd`** — Mario Forte,
+  D001, Adelaide depot — with no login linked yet, because no invitation can be sent from this
+  container.
+
 ### 2026-08-17 · One pricing model: the rate card adopted, the second one retired
 Two rival answers to "what is this customer charged?" had both been live on the database since
 15 August — `laundry_prices` (0018, with all the code) and the unmerged

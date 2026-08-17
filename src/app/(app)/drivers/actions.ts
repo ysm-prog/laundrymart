@@ -75,7 +75,7 @@ export async function linkDriverLogin(formData: FormData): Promise<void> {
   const session = await assertCapability("admin.write");
   const parsed = z.object({
     id: z.string().uuid(),
-    user_id: z.string().uuid("Enter the user's ID from Administration → Users"),
+    user_id: z.string().uuid("Choose the login to link"),
   }).safeParse(toObject(formData));
   if (!parsed.success) return fail("/drivers", firstIssue(parsed.error));
 

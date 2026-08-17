@@ -1,7 +1,7 @@
 import { cache, Suspense } from "react";
 import { requireCapability } from "@/lib/auth/context";
 import { createClient } from "@/lib/supabase/server";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { memberEmails } from "@/lib/members";
 import {
   can, isRole, presetForRole, MEMBERSHIP_ROLES, PRESET_ROLES, ROLE_LABELS, ROLE_PRESETS, ROLE_SUMMARY,
   type Role,
@@ -156,34 +156,6 @@ async function InviteCard() {
   );
 }
 
-/**
- * Emails for the tenant's members, from the service-role auth API. The lookup
- * starts from this tenant's membership rows and asks for each id — the admin
- * client bypasses RLS, so it must never list globally and filter afterwards.
- * Any failure (no service key in a local build, auth API down) degrades to
- * the short id rather than an error: a less readable list beats no list.
- */
-async function memberEmails(userIds: string[]): Promise<Map<string, string>> {
-  const emails = new Map<string, string>();
-  if (userIds.length === 0) return emails;
-  try {
-    const admin = createAdminClient();
-    const results = await Promise.all(userIds.map(async (id) => {
-      try {
-        const { data } = await admin.auth.admin.getUserById(id);
-        return [id, data.user?.email ?? null] as const;
-      } catch {
-        return [id, null] as const; // One unresolvable id must not blank the rest.
-      }
-    }));
-    for (const [id, email] of results) {
-      if (email) emails.set(id, email);
-    }
-  } catch {
-    // Fall through with whatever resolved; the cell renders short ids instead.
-  }
-  return emails;
-}
 
 async function MembershipList({
   canWrite, currentUserId,
