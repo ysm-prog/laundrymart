@@ -29,8 +29,7 @@ account, then issue one invoice and take one payment.
 **Trap worth remembering:** a pgTAP run reporting `0 assertions, 0 failures` is Postgres being
 down, not a pass. Check the count.
 
-
-## Latest: a test login per role (`npm run seed:roles`) — tooling, no migration
+## Also live: a test login per role (`npm run seed:roles`) — tooling, no migration
 `scripts/role-profiles.mjs` (the list) + `scripts/seed-role-profiles.mjs` (the runner). One
 login per role in the demo laundry, `<role>@roles.example.com`, shared password printed each
 run. CLAUDE.md §3a has the reasoning.
