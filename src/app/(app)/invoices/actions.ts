@@ -22,6 +22,7 @@ import {
 import { loadInvoiceForPdf } from "@/lib/pdf/invoice-data";
 import { pushInvoiceToXero } from "@/lib/xero/push";
 import { pushPaymentToXero } from "@/lib/xero/push-payment";
+import { pushVoidToXero } from "@/lib/xero/push-void";
 import { generateInvoicesForJobs } from "@/lib/invoices/from-jobs";
 import {
   markInvoiceJobsPaid, releaseVoidedInvoiceJobs, sendInvoice,
@@ -570,6 +571,27 @@ export async function retryXeroPush(formData: FormData): Promise<void> {
 
   const backTo = returnTo(formData, `/invoices/${id.data}`);
   const supabase = await createClient();
+
+  // **Which retry this is depends on the invoice's own status.** A voided
+  // invoice whose Xero push failed needs the *void* retried; sending it through
+  // `pushInvoiceToXero` would be refused by `canPushToXero` and report "a void
+  // invoice is not sent to Xero" — technically true, useless as an answer, and
+  // it would leave the real failure (Xero still shows it as authorised) with no
+  // way to retry at all.
+  const { data: row } = await supabase
+    .from("invoices").select("status")
+    .eq("id", id.data).eq("tenant_id", session.tenantId)
+    .maybeSingle<{ status: string }>();
+
+  if (row?.status === "void") {
+    const voided = await pushVoidToXero(supabase, id.data, session.tenantId);
+    revalidatePath(`/invoices/${id.data}`);
+    revalidatePath("/invoices");
+    if (voided.ok) return done(backTo, "Voided in Xero.");
+    return fail(backTo, voided.reason,
+                voided.skipped ? { href: "/invoices/xero", label: "Xero settings" } : undefined);
+  }
+
   const push = await pushInvoiceToXero(supabase, id.data, session.tenantId);
 
   revalidatePath(`/invoices/${id.data}`);
@@ -700,14 +722,35 @@ export async function voidInvoice(formData: FormData): Promise<void> {
   // caller (migration 0017).
   await releaseVoidedInvoiceJobs(supabase, session, parsed.data.id);
 
+  // Void it in Xero too, *after* voiding it here and never blocking on it. An
+  // invoice voided here used to stay AUTHORISED in Xero, so a void was a
+  // two-place job and the books disagreed until somebody noticed — which is
+  // worse than never pushing, because the first successful push teaches
+  // everyone that the two systems agree.
+  //
+  // The refusal that will actually happen is a paid invoice: Xero will not void
+  // one with payments applied, and it is right not to — that protects a
+  // reconciled bank line. `voidGate` catches it before the request so the
+  // message can name the remedy rather than relay validation text.
+  const voided = await pushVoidToXero(supabase, parsed.data.id, session.tenantId);
+
   await recordAudit(session, {
     entity: "invoice", entityId: parsed.data.id, action: "status_change",
     summary: `voided: ${parsed.data.void_reason}`,
+    metadata: { xero: voided.ok ? "voided" : (voided.skipped ? "skipped" : "refused") },
   });
   revalidatePath(backTo);
   revalidatePath("/invoices/awaiting");
-  return done(backTo,
-    "Invoice voided. Any jobs on it are back in the ready-to-invoice queue.");
+
+  const released = "Invoice voided. Any jobs on it are back in the ready-to-invoice queue.";
+
+  // A refusal the operator has to act on is said as a failure — the void here
+  // still happened, and the sentence has to make clear that Xero did not follow.
+  // A skip (never pushed, already void there, not connected) is silent.
+  if (!voided.ok && !voided.skipped) {
+    return fail(backTo, `${released} But Xero did not: ${voided.reason}`);
+  }
+  return done(backTo, released);
 }
 
 /** Credit notes always reference the original invoice (acceptance criteria §10). */

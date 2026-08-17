@@ -2,6 +2,7 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { XERO_API } from "./config";
+import { summariseXeroError } from "./errors";
 import { getXeroTokens } from "./tokens";
 import { buildPaymentPayload, paymentGate, type PayloadPayment } from "./payment-payload";
 
@@ -100,7 +101,7 @@ export async function pushPaymentToXero(
     const detail = await response.text().catch(() => "");
     return await record(supabase, paymentId, tenantId, {
       ok: false,
-      reason: `Xero refused the payment (${response.status}). ${summarise(detail)}`.trim(),
+      reason: `Xero refused the payment (${response.status}). ${summariseXeroError(detail)}`.trim(),
     });
   }
 
@@ -115,22 +116,6 @@ export async function pushPaymentToXero(
   return await record(supabase, paymentId, tenantId, { ok: true, xeroPaymentId: posted });
 }
 
-/** The actionable part of a Xero error body. */
-function summarise(detail: string): string {
-  if (!detail) return "";
-  try {
-    const json = JSON.parse(detail) as {
-      Message?: string;
-      Elements?: { ValidationErrors?: { Message?: string }[] }[];
-    };
-    const validation = json.Elements?.[0]?.ValidationErrors?.map((e) => e.Message).filter(Boolean);
-    if (validation?.length) return validation.join(" ");
-    if (json.Message) return json.Message;
-  } catch {
-    // Not JSON; fall through.
-  }
-  return detail.slice(0, 300);
-}
 
 async function record(
   supabase: SupabaseClient,

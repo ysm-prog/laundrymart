@@ -1,6 +1,7 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { XERO_API } from "./config";
+import { summariseXeroError } from "./errors";
 import { getXeroTokens } from "./tokens";
 import {
   buildInvoicePayload, canPushToXero,
@@ -119,7 +120,7 @@ export async function pushInvoiceToXero(
     const detail = await response.text().catch(() => "");
     return await record(supabase, invoice.id, tenantId, {
       ok: false,
-      reason: `Xero refused the invoice (${response.status}). ${summarise(detail)}`.trim(),
+      reason: `Xero refused the invoice (${response.status}). ${summariseXeroError(detail)}`.trim(),
     });
   }
 
@@ -144,22 +145,6 @@ export async function pushInvoiceToXero(
     { ok: true, xeroInvoiceId: created.InvoiceID, contactId });
 }
 
-/** Xero's error bodies are long; keep the part a person can act on. */
-function summarise(detail: string): string {
-  if (!detail) return "";
-  try {
-    const json = JSON.parse(detail) as {
-      Message?: string;
-      Elements?: { ValidationErrors?: { Message?: string }[] }[];
-    };
-    const validation = json.Elements?.[0]?.ValidationErrors?.map((e) => e.Message).filter(Boolean);
-    if (validation?.length) return validation.join(" ");
-    if (json.Message) return json.Message;
-  } catch {
-    // Not JSON — fall through to the raw text, trimmed.
-  }
-  return detail.slice(0, 300);
-}
 
 /** Write the outcome onto the invoice so the register can show it. */
 async function record(

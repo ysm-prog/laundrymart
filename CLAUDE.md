@@ -900,6 +900,31 @@ invoice goes, because this app has no counter-cash concept.
   already posted, the invoice never reached Xero, no bank account chosen, and a zero or negative
   amount (a refund is a credit note in Xero, not a payment). Marking those as errors is how an
   integration teaches people to ignore its warnings.
+- **A void reaches Xero too** (2026-08-17). Voiding here voids there, on the same
+  never-blocks-the-money contract: the local void and the job release happen first, and a
+  refusal is written to `xero_push_error` with a Retry. `voidGate()` is pure and tested, and it
+  distinguishes three *skips* — never pushed, already `VOIDED` there, laundry not connected —
+  from the one real **refusal**: **Xero will not void an invoice with payments applied to it**,
+  and it is right not to, because that protects a reconciled bank line. The message names the
+  remedy (a credit note in Xero) rather than relaying validation text, and it is a failure
+  precisely because somebody must act on it — their books still show the money.
+- **Retry is status-aware.** On a voided invoice the Retry button retries the *void*, not the
+  push: `canPushToXero` refuses a void, so the plain retry would have answered "a void invoice
+  is not sent to Xero" — true, useless, and leaving the actual failure with no way to retry.
+- **`recordXeroReference` was removed, not kept alongside.** It let a person type an invoice's
+  `xero_invoice_id` in by hand, which was correct on the branch it came from — that code had no
+  Xero client and could only hold a reference for reconciliation. The same column is now the
+  push's **idempotency key**, so a typed value turns the next push into an update against an
+  arbitrary invoice in the laundry's books, and steers the void and payment gates as well.
+  There is deliberately no replacement control: if a push went wrong, the answer is to look in
+  Xero, not to retype a GUID.
+- **`invoices.xero_synced_at` (0017) and `xero_pushed_at` (0026) are two columns for one fact**,
+  and only the second is written now. Left in place rather than dropped — it costs nothing and a
+  destructive migration to remove an unread column is the wrong trade (the same call 0016 made
+  about Pickup Time).
+- `summariseXeroError` in `lib/xero/errors.ts` is shared by all three pushes. It was a private
+  copy in two of them and the void path would have made three, at which point they drift and the
+  least-used one stops parsing the shape Xero actually sends.
 - `XERO_CLIENT_ID`/`XERO_CLIENT_SECRET` are optional like the mail provider, and a **partial**
   pair counts as unconfigured. The redirect URI is derived from the request origin, so a
   preview deployment connects to itself — and must be registered on the Xero app.
@@ -1010,9 +1035,8 @@ owner's decision, so the app behaves exactly as it did before and the Settings s
 **Before trusting it: set the two variables, register the callback on the Xero app, connect, pick
 the bank account, then issue one invoice and take one payment and read them in Xero.**
 
-**Not built, stated rather than glossed: the void path.** An invoice voided here stays authorised
-in Xero, so a void is currently a two-place job. It wants its own decision — voiding somebody's
-accounting record from this app is a bigger action than creating one.
+**The void path was not built here** — it landed later the same day, once the owner asked for it.
+See the 2026-08-17 pricing entry and §20.
 
 ### 2026-08-15 · Customer pricing, immutable job prices, and a billing lifecycle
 The money half of a job. One migration (`0017`), two new tables, no table dropped and no

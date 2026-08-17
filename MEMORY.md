@@ -82,7 +82,16 @@ XERO_CLIENT_ID/SECRET, register `https://ats.coreit.com.au/api/xero/callback` on
 connect, pick the bank account, then issue **one** invoice and take **one** payment and read
 them in Xero.
 
-**Not built: the void path.** An invoice voided here stays authorised in Xero. Needs a decision.
+**The void path IS built** (owner's decision 2026-08-17). Voiding here voids in Xero, never
+blocking the local void. `voidGate` has three skips (never pushed, already VOIDED, not connected)
+and one real refusal: **Xero will not void an invoice with payments applied** — the message says
+"credit note", because that is the remedy. Retry is status-aware: on a void invoice it retries the
+void, not the push.
+
+**`recordXeroReference` was DELETED, on purpose.** It let a person type `xero_invoice_id` by hand,
+which was fine when there was no Xero client. That column is now the push's idempotency key, so a
+typed value would turn the next push into an update against an arbitrary invoice in their books.
+Do not reinstate it.
 
 **Trap worth remembering:** a pgTAP run reporting `0 assertions, 0 failures` is Postgres being
 down, not a pass. Check the count.

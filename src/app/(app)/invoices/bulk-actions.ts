@@ -5,7 +5,7 @@ import { z } from "zod";
 import { assertCapability } from "@/lib/auth/context";
 import { createClient } from "@/lib/supabase/server";
 import { recordAudit } from "@/lib/audit";
-import { describeDbError, done, fail, firstIssue, returnTo, toObject } from "@/lib/actions";
+import { done, fail, returnTo } from "@/lib/actions";
 import { businessToday } from "@/lib/domain/timezone";
 import { money } from "@/lib/format";
 import { approveJob } from "@/lib/orders/job-billing";
@@ -200,48 +200,18 @@ export async function sendSelectedInvoices(formData: FormData): Promise<void> {
 }
 
 /* --------------------------------------------- record a Xero reference ----- */
-
-/**
- * Record what an invoice is called in Xero.
- *
- * **Typed in by a person, because there is no Xero integration in this
- * codebase.** The previous project checkpoint left Xero authentication and the
- * invoice-state mapping unresolved, and inventing an API contract here would
- * produce code that compiles, reads convincingly and has never spoken to Xero.
- * What this does instead is hold the reference so the two systems can be
- * reconciled, and say plainly on screen that it is doing only that.
- */
-export async function recordXeroReference(formData: FormData): Promise<void> {
-  const session = await assertCapability("billing.write");
-  const parsed = z.object({
-    id: z.string().uuid(),
-    xero_invoice_id: z.string().trim().max(120).optional(),
-    xero_invoice_number: z.string().trim().max(60).optional(),
-    xero_status: z.string().trim().max(40).optional(),
-  }).safeParse(toObject(formData));
-  if (!parsed.success) return fail(REGISTER, firstIssue(parsed.error));
-
-  const back = returnTo(formData, `/invoices/${parsed.data.id}`);
-  const supabase = await createClient();
-
-  const { error } = await supabase
-    .from("invoices")
-    .update({
-      xero_invoice_id: parsed.data.xero_invoice_id || null,
-      xero_invoice_number: parsed.data.xero_invoice_number || null,
-      xero_status: parsed.data.xero_status || null,
-      xero_synced_at: new Date().toISOString(),
-    })
-    .eq("id", parsed.data.id)
-    .eq("tenant_id", session.tenantId);
-  if (error) return fail(back, describeDbError(error));
-
-  await recordAudit(session, {
-    entity: "invoice", entityId: parsed.data.id, action: "update",
-    summary: `Xero reference recorded: ${parsed.data.xero_invoice_number ?? "—"}`,
-  });
-
-  revalidatePath(`/invoices/${parsed.data.id}`);
-  revalidatePath(REGISTER);
-  return done(back, "Xero reference recorded.");
-}
+//
+// **Removed, 2026-08-17.** `recordXeroReference` let a person type an invoice's
+// `xero_invoice_id` in by hand, which was the right answer while this codebase
+// had no Xero client — the branch it came from could only hold the reference so
+// the two systems could be reconciled, and said so on screen.
+//
+// It is now actively dangerous, because that column stopped being a note and
+// became **the push's idempotency key** (§20): a hand-typed value makes the next
+// push an *update* to whatever id was entered rather than a create, and the same
+// value steers `voidGate` and `paymentGate`. A typo would silently edit some
+// other invoice in the laundry's books.
+//
+// The connection screen and the automatic push replace it. There is deliberately
+// no "correct the Xero id" control to replace it with: if a push went wrong, the
+// answer is to look in Xero, not to retype a GUID.
