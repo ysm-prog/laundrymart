@@ -2,7 +2,7 @@
 -- This is the test that makes "every new table gets RLS" enforceable rather
 -- than advisory — adding a tenant_id table without a policy fails CI.
 begin;
-select plan(4);
+select plan(6);
 
 select is(
   (select count(*)::int from pg_tables t
@@ -45,6 +45,33 @@ select is(
       and not exists (select 1 from pg_depend d
                        where d.objid = p.oid and d.deptype = 'e')),
   0, 'no function we ship in public is callable by anon');
+
+-- `anon` holds no privilege on any table in `public` (0029).
+--
+-- Asserted alongside the function check because they are the same hole seen
+-- from two sides, and because the *table* half was open for months while the
+-- function half was closed — 0011 revoked functions in 2026-08-05 and nothing
+-- looked at tables until 0029.
+--
+-- Worth stating why RLS is not enough on its own here: RLS filters rows, so it
+-- says nothing about TRUNCATE, REFERENCES or TRIGGER, all of which `anon` held.
+-- A role with TRUNCATE empties the table whatever the policies say.
+select is(
+  (select count(*)::int from information_schema.role_table_grants
+    where table_schema = 'public' and grantee = 'anon'),
+  0, 'anon holds no table privilege in public');
+
+-- The half that stops it coming back: a table created *after* the migrations
+-- must not arrive with a grant on it from the schema's default privileges. This
+-- is the actual regression that 0029 exists to prevent — every previous table
+-- got its grant this way, without any migration asking for it.
+create table public.zz_default_privilege_probe (id uuid primary key);
+select is(
+  (select count(*)::int from information_schema.role_table_grants
+    where table_schema = 'public' and table_name = 'zz_default_privilege_probe'
+      and grantee = 'anon'),
+  0, 'a newly created table grants anon nothing');
+drop table public.zz_default_privilege_probe;
 
 select * from finish();
 rollback;

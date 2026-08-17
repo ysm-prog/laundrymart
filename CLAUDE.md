@@ -391,6 +391,16 @@ renders no tab strip. Tested in `src/lib/__tests__/nav.test.ts`.
   Adds no table, drops nothing, and changes no row until somebody asks. The three functions
   are `archivable_tables()` (the list, stated once and read by both the DDL loop and the
   stamper), `set_records_archived(t, archive)` and `archived_record_counts(t)`.
+- `0029_revoke_anon_table_grants` — **`anon` may not touch a table in `public`, and no future
+  table hands it one back.** Revokes all table/sequence/function privileges from `anon`, then
+  rewrites the **default privileges** that were re-granting them on every new table. Adds no
+  table, changes no row, and touches neither `authenticated` nor `service_role`. Asserts its own
+  outcome three ways (no table grant, no executable function, RLS on everywhere), so it fails
+  rather than half-applying. `usage on schema public` is deliberately left granted — with nothing
+  in the schema reachable, keeping it makes a future mistake read as "permission denied for
+  table" rather than a confusing schema error. The `storage`, `graphql` and `graphql_public`
+  default ACLs are deliberately untouched: they are Supabase's own, and `storage.objects` is
+  where 0007's media policies live.
 - `0028_archive_billing_policies` — puts `archived_at is null` back on the twelve **permissive**
   policies that `0017_customer_pricing_billing` replaced. Needed only because the two 0017s apply
   in filename order on a fresh database and in timestamp order live, and those orders disagree;
@@ -456,6 +466,16 @@ applied by migrations.
 boilerplate in 0002–0009 is what exposed every SECURITY DEFINER helper on
 `/rest/v1/rpc/…` without a login; 0011 revokes it and `rls_coverage` asserts it stays
 revoked.
+
+**The same applies to tables, and that half stayed open for months longer** (0029). Supabase's
+stock **default privileges** grant `anon` and `authenticated` on every table created in `public`,
+so each new table arrived reachable without a login — nothing in this repo asked for it and
+nothing noticed. RLS kept it inert for reads, but **RLS does not apply to TRUNCATE**, and `anon`
+held that too. 0029 revokes the grants *and* the default privileges behind them.
+
+`scripts/health/pg-bootstrap.sql` now **mirrors those default privileges** so a local run
+reproduces the hosted posture. Before that it did not, which is exactly why CI looked clean for
+months while the live database was not: without the mirror, 0029's proof passes vacuously.
 
 `scripts/health/pg-bootstrap.sql` shims what Supabase provides outside our migrations: the
 `auth` schema, and the `storage` bucket/object tables plus `foldername()` that 0007 attaches
@@ -701,15 +721,25 @@ rolled-back transaction and read *as* that session — **0 of 647 invoices, 0 of
 payments, 0 credit notes, 0 job charges, while contract headers (2) and customers (512) stayed
 readable. `anon` reads 0 from every one of them.
 
-**OPEN — pre-existing drift found while verifying 0017, not caused by it and still not fixed:**
-on the live project `anon` holds table-level SELECT *and INSERT* on **all 49 public tables**,
-which the repo's own migrations never grant — it arrived with one of the import branches. It is
-currently inert: RLS is enabled on all 49 and every policy is `to authenticated`, so a probe as
-`anon` read 0 rows from `invoices`, `customers` and `laundry_orders` and its INSERT into
-`job_charge_snapshots` was refused. It is still defence-in-depth this project does not have —
-**any future table shipped without RLS, or any policy written `using (true)`, would be publicly
-readable**. Wants a migration of its own; deliberately not bundled into 0017 then, and not into
-0028 now.
+**CLOSED 2026-08-17 by `0029` — the `anon` grant drift found while verifying 0017.** The
+original note said "SELECT and INSERT"; a proper look found `anon` holding **DELETE, INSERT,
+REFERENCES, SELECT, TRIGGER, TRUNCATE and UPDATE** on **52 of 53** tables. It also called the
+state "inert", which was too generous: RLS filters rows and therefore says nothing about
+TRUNCATE, so the thing actually preventing an unauthenticated wipe was PostgREST not exposing
+that verb plus 0011's function revoke — not the policies. Rehearsed and applied: **364 anon
+table grants → 0**, `authenticated` unchanged at 364 and `service_role` at 371, a real signed-in
+owner still reading (4 customers, 1 invoice — the rest are archived), `anon` refused at 42501,
+a brand-new table arriving with **zero** anon grants, 0 anon-executable functions, RLS still on
+all 53, and 647 invoices / 508 archived customers / 5 jobs untouched.
+
+**One residual, stated rather than glossed:** three default ACLs in `public` still name `anon`
+and belong to **`supabase_admin`**, which `postgres` is not a member of — so they cannot be
+altered from here and the migration skips them by design. They are latent, not live:
+**zero tables in `public` are owned by `supabase_admin`**, so nothing is currently created under
+them. If Supabase ever creates a table in `public` itself, that table would arrive granted to
+`anon`. Worth re-checking after any Supabase platform upgrade with:
+`select count(*) from information_schema.role_table_grants where table_schema='public' and grantee='anon';`
+— it should stay 0.
 
 For **0019** that was: the live `is_member`/`has_role`/`is_driver_only` bodies confirmed
 identical to this repo's 0001 before being replaced (this is the check that matters most — a
@@ -930,6 +960,46 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-08-17 · `anon` could have truncated every table; the grants and their source are gone
+The last open security item from §11, closed. One migration (`0029`), no table, no column, no
+policy, no row changed — and nothing granted to `authenticated` or `service_role` touched.
+
+- **It was worse than the note said, in two ways.** The finding recorded "SELECT and INSERT"; it
+  was actually **all seven privileges** — DELETE, INSERT, REFERENCES, SELECT, TRIGGER, TRUNCATE,
+  UPDATE — on **52 of 53** tables. And "inert, because RLS is on everywhere" was the wrong
+  reassurance: **RLS filters rows, so it has nothing to say about TRUNCATE**, which empties the
+  table whatever the policies are. What actually stood between the public anon key and a wiped
+  database was PostgREST not exposing that verb, plus 0011 having revoked every function. That is
+  one accident from being untrue, and it is not a property to rely on.
+- **None of it came from this repo.** `0001` grants `anon` schema USAGE and nothing else. Every
+  table privilege arrived from **Supabase's stock default privileges**, which grant `anon` and
+  `authenticated` on each new table in `public`. So revoking today's grants is only half the fix:
+  without rewriting the default privileges the next migration that adds a table reopens it — which
+  is exactly what happened between 0011 closing the function half and now.
+- **The local harness was reproducing a friendlier database than the real one**, which is the
+  reason this hid for months. `pg-bootstrap.sql` had no such default ACLs, so `anon` held **0**
+  table grants locally and any assertion about it passed vacuously. The shim now mirrors
+  Supabase's default privileges: a local run went from 0 to **364** anon grants before 0029, and
+  to 0 after. Both new pgTAP assertions were confirmed to **fail** without the migration.
+- **Two proofs, not one.** `rls_coverage` now asserts that `anon` holds no table privilege *and*
+  that a table created after the migrations arrives with none — the second is the regression that
+  actually matters, since every previous table got its grant that way without any migration
+  asking.
+- **What is deliberately left alone:** `authenticated` and `service_role` keep everything;
+  `usage on schema public` stays granted to `anon` (with nothing reachable, keeping it makes a
+  future mistake read as "permission denied for table" rather than a confusing schema error); and
+  the `storage`, `graphql` and `graphql_public` default ACLs are Supabase's own — `storage.objects`
+  carries 0007's media policies and breaking it would take the driver's photo capture with it.
+- **292 pgTAP assertions** (was 290), 496 unit tests, `verify` green.
+
+**Applied to `laundrymart-syd` on 2026-08-17**, rehearsed first: 364 anon grants → 0,
+`authenticated` unchanged at 364, `service_role` at 371, a real signed-in owner still reading,
+`anon` refused at 42501, a brand-new table arriving with zero anon grants, and 647 invoices /
+508 archived customers / 5 jobs untouched. **One residual is recorded in §11 rather than hidden:**
+three default ACLs owned by `supabase_admin` still name `anon` and cannot be altered by
+`postgres`. They are latent — no table in `public` is owned by that role — but they want
+re-checking after any Supabase platform upgrade.
+
 ### 2026-08-17 · A driver could be created but not linked, so My Runs was empty
 Found while setting up one trial driver in the real laundry, which had **no `drivers` rows at
 all**. No migration, no schema, no capability.

@@ -50,3 +50,19 @@ grant usage on schema storage to anon, authenticated, service_role;
 grant select, insert, update, delete on storage.objects to authenticated;
 grant all on storage.objects, storage.buckets to service_role;
 grant execute on function storage.foldername(text) to anon, authenticated, service_role;
+
+-- ---------------------------------------------------------------------------
+-- Supabase's stock default privileges, mirrored so a local run reproduces the
+-- hosted posture rather than a friendlier one.
+--
+-- A hosted project grants `anon` and `authenticated` on **every** table created
+-- in `public`, through default ACLs this repo never wrote. That is where the
+-- hole 0029 closes came from — and because the shim did not reproduce it, a
+-- local run and CI both looked clean for months while the live database had
+-- `anon` holding all seven privileges on 52 tables.
+--
+-- With this here, 0029 has something real to revoke and its proof in
+-- `rls_coverage.test.sql` is worth reading. Without it the assertions pass
+-- vacuously, which is worse than not having them.
+alter default privileges in schema public grant all on tables to anon, authenticated;
+alter default privileges in schema public grant all on sequences to anon, authenticated;

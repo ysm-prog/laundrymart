@@ -32,8 +32,9 @@ so the pricing rewrite discarded `archived_at is null` from **twelve permissive 
 archived invoice became readable. Caught by `archive_records.test.sql` (`not ok 10`). 0028 restores
 it, **permissive policies only** — 0025's restrictive ones AND on top and must not be touched.
 
-**`0028` is NOT yet applied to `laundrymart-syd`.** It is a no-op there (the ordering was lucky)
-but the ledger should still carry it. Nothing else here changes the live schema.
+**`0028` IS applied to `laundrymart-syd`** (2026-08-17). Verified a no-op first — all twelve
+permissive policies already carried the clause, because the live ordering was lucky. Nothing else
+in that entry changes the live schema.
 
 **No invoice has been generated from an approved job.** First live check: take a job in, complete,
 price and approve at Money › Awaiting invoice, run the month, read the draft.
@@ -41,10 +42,24 @@ price and approve at Money › Awaiting invoice, run the month, read the draft.
 **A stray NUL byte was removed from `laundry-billing.ts`** — pre-existing, made the file read as
 *binary* to grep and ripgrep, which is how it hid.
 
-**Still open (pre-existing, found verifying 0017):** on the live project `anon` holds table-level
-SELECT *and INSERT* on **all 49 public tables**. Inert today — RLS is on everywhere and every
-policy is `to authenticated` — but any future table without RLS would be publicly readable. Wants
-its own migration.
+**CLOSED by `0029` (2026-08-17): the `anon` grants are gone.** It was worse than recorded — all
+seven privileges including **TRUNCATE**, on 52 of 53 tables — and **RLS does not apply to
+TRUNCATE**, so "inert because RLS is on" was the wrong reassurance. Live: 364 anon grants → 0,
+`authenticated` (364) and `service_role` (371) untouched, anon refused at 42501, a new table now
+arrives with zero anon grants.
+
+**The half that matters is the default privileges**, not the revoke: Supabase grants anon on every
+new table in `public`, so without rewriting those ACLs the next migration reopens it.
+
+**`pg-bootstrap.sql` now mirrors Supabase's default privileges** — it did not before, which is why
+CI looked clean for months while live was not. Locally: 0 anon grants before the mirror, 364 after,
+0 once 0029 runs. Both new pgTAP assertions were checked to FAIL without 0029.
+
+**Residual, do not forget:** three default ACLs owned by `supabase_admin` still name anon and
+`postgres` cannot alter them. Latent (no table in `public` is owned by that role). Re-check after
+any Supabase platform upgrade:
+`select count(*) from information_schema.role_table_grants where table_schema='public' and grantee='anon';`
+should stay 0.
 
 ## Also live: the trial driver, and linking a login is a picker now
 **`Adelaide Towel Service` had no `drivers` rows at all** — the only two on the deployment
