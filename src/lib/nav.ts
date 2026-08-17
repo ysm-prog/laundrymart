@@ -202,6 +202,13 @@ export const NAVIGATION: NavItem[] = [
         blurb: "What each kind of laundry costs, before a customer's own price.",
       },
       {
+        // Sits with the register rather than under Settings: which invoices
+        // reach the books is a billing decision, and it is gated on the same
+        // capability as the invoices it sends.
+        label: "Xero", href: "/invoices/xero", capability: "invoices.write",
+        blurb: "Connect this laundry's Xero, and see whether invoices are reaching it.",
+      },
+      {
         label: "Bills", href: "/bills", capability: "purchases.read",
         count: "unpaidBills",
         blurb: "What your suppliers have invoiced you, and what is still owed.",

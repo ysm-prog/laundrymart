@@ -27,6 +27,7 @@ import { loadInvoiceForPdf } from "@/lib/pdf/invoice-data";
 import { invoiceFileName, renderInvoicePdf } from "@/lib/pdf/render";
 import { buildInvoiceEmail } from "@/lib/email/invoice-email";
 import { sendEmail } from "@/lib/email/send";
+import { pushInvoiceToXero } from "@/lib/xero/push";
 
 /**
  * Generate recurring invoices for a billing period — **one invoice per
@@ -561,9 +562,45 @@ export async function issueInvoice(formData: FormData): Promise<void> {
   if (error) return fail(backTo, describeDbError(error));
 
   await recordAudit(session, { entity: "invoice", entityId: id.data, action: "status_change", summary: "issued" });
+
+  // Xero comes after the invoice is issued, and never blocks it. The money
+  // record is ours; Xero is a copy. A provider outage must leave the invoice
+  // issued with a visible failure and a retry, not refuse to issue an invoice
+  // the customer is about to be sent.
+  const push = await pushInvoiceToXero(supabase, id.data, session.tenantId);
+
   revalidatePath(`/invoices/${id.data}`);
   revalidatePath("/invoices");
-  return done(backTo, "Invoice issued.");
+
+  if (push.ok) return done(backTo, "Invoice issued and sent to Xero.");
+  // A laundry that has not connected Xero is not failing at anything.
+  if (push.skipped) return done(backTo, "Invoice issued.");
+  return done(backTo, `Invoice issued, but Xero did not accept it. ${push.reason}`,
+              { href: `/invoices/${id.data}`, label: "Open the invoice" });
+}
+
+/**
+ * Try Xero again for an invoice whose push failed.
+ *
+ * Separate from issuing because the two fail for different reasons and the
+ * operator needs the second one on its own: the invoice is already issued, and
+ * this is the button beside the error the register shows.
+ */
+export async function retryXeroPush(formData: FormData): Promise<void> {
+  const session = await assertCapability("invoices.write");
+  const id = z.string().uuid().safeParse(formData.get("id"));
+  if (!id.success) return fail("/invoices", "That invoice could not be found.");
+
+  const backTo = returnTo(formData, `/invoices/${id.data}`);
+  const supabase = await createClient();
+  const push = await pushInvoiceToXero(supabase, id.data, session.tenantId);
+
+  revalidatePath(`/invoices/${id.data}`);
+  revalidatePath("/invoices");
+
+  if (push.ok) return done(backTo, "Sent to Xero.");
+  return fail(backTo, push.reason,
+              push.skipped ? { href: "/invoices/xero", label: "Xero settings" } : undefined);
 }
 
 export async function recordPayment(formData: FormData): Promise<void> {

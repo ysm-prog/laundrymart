@@ -371,6 +371,15 @@ renders no tab strip. Tested in `src/lib/__tests__/nav.test.ts`.
   changes the repo's ordering only. None re-adds `grant execute … to anon`, which is what makes
   them safe to sit after 0019's revoke. None is in `archivable_tables()`.
 
+- `0026_xero_connection` — `xero_connections` (one row per laundry, keyed on `tenant_id`),
+  `xero_connection_status()`, `invoices.xero_invoice_id`/`xero_pushed_at`/`xero_push_error`, and
+  `customers.xero_contact_id`/`xero_contact_name` added `if not exists` because the hosted
+  project already has them from the unmerged pricing branch (§11, §19). **The first table
+  `authenticated` may not touch at all**: RLS on, no policy for it, and the table grants
+  revoked — a refresh token is a bearer credential for somebody's accounting system, and no
+  screen needs its value. The Settings screen reads the definer function instead, which returns
+  the organisation name and the timestamps and never a token.
+
 Proofs in `supabase/tests/`: `rls_isolation`, `rls_coverage`, `driver_scope`,
 `business_rules`, `media_scope`, `warehouse_rules`, `notifications_scope`, `laundry_orders`,
 `run_assignment`, `archive_records`, `laundry_pricing`, `platform_admin`, `main_flow_scope`
@@ -715,6 +724,34 @@ Both are compositions over existing tables — neither added a migration.
   `lib/actions.ts` only honours a plain same-site path, since an absolute one would make every
   action an open redirect. `/invoices/:id` stays as the printable record and the place lines
   are edited and invoices voided.
+
+## 20. Xero
+Each laundry connects **its own** Xero organisation — `xero_connections` is keyed on
+`tenant_id`, because a deployment-wide connection works exactly until a second real business
+arrives and then posts one laundry's receivables into another's books.
+
+Modelled on `ysm-prog/ysm-hub` (`lib/_xero.js`, `lib/_xero-invoice.js`): tokens refreshed on
+read a minute before expiry, an `ACCREC` invoice carrying Contact + LineItems + DueDate, and
+the invoice number in both `InvoiceNumber` and `Reference`. Two things this app does that YSM
+does not need: the connection is per tenant, and there is no POS/B2B sync policy — every issued
+invoice goes, because this app has no counter-cash concept.
+
+- `lib/xero/invoice-payload.ts` is **pure and tested** — the mapping is the part with rules in
+  it (GST per line from `invoice_lines.taxable`, the PO as `Reference`, a zero-priced line kept
+  rather than dropped, `numeric`-as-string coerced). The fetch lives in `push.ts` beside it.
+- **A push never blocks issuing.** `issueInvoice` issues, then pushes; a refusal leaves the
+  invoice issued with `xero_push_error` set and a Retry button. The money record is this
+  database's and Xero is a copy of it, so an outage must not roll back an invoice the customer
+  has been told about.
+- **`xero_invoice_id` is the idempotency key**: a retry carries it, which turns the create into
+  an update. `customers.xero_contact_id` is filled from the first successful push so the second
+  invoice attaches to the same contact instead of making a twin.
+- A draft and a void are never pushed (`canPushToXero`), and a laundry that has not connected
+  is *skipped*, not failed — it should not have every invoice wearing a red error it cannot act
+  on.
+- `XERO_CLIENT_ID`/`XERO_CLIENT_SECRET` are optional like the mail provider, and a **partial**
+  pair counts as unconfigured. The redirect URI is derived from the request origin, so a
+  preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
 ### 2026-08-16 · Job to invoice belongs to the Owner and the Office manager

@@ -17,6 +17,13 @@ const schema = z.object({
   INVOICE_FROM_EMAIL: z.string().email().optional(),
   INVOICE_FROM_NAME: z.string().min(1).optional(),
   INVOICE_REPLY_TO: z.string().email().optional(),
+  // Xero. Optional on the same principle as the mail provider: a deployment
+  // with no Xero app configured boots and works, and the connect screen says so
+  // rather than the whole thing refusing to start over an integration most
+  // pages never touch. All three are needed together — see `lib/xero/config.ts`,
+  // which treats a partial set as "not configured" rather than half-working.
+  XERO_CLIENT_ID: z.string().min(10).optional(),
+  XERO_CLIENT_SECRET: z.string().min(10).optional(),
   // Shared secret for the notification sweep, which runs without a session.
   // Optional for the same reason the mail provider is: a deployment with no
   // cron configured should boot and work, minus the swept notifications. The

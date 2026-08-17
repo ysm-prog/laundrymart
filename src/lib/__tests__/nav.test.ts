@@ -94,8 +94,13 @@ describe("navigationFor", () => {
     // The Office manager keeps both sides.
     const office = navigationFor("operations_manager").find((item) => item.label === "Money");
     expect(office?.children?.map((child) => child.label)).toEqual([
-      "Invoices", "Laundry prices", "Bills", "Suppliers", "Accounts",
+      "Invoices", "Laundry prices", "Xero", "Bills", "Suppliers", "Accounts",
     ]);
+
+    // Xero rides with the receivable side, so finance does not see it: they no
+    // longer bill the customer, and the connection decides where those invoices
+    // land.
+    expect(finance?.children?.map((child) => child.label)).not.toContain("Xero");
   });
 
   it("shows Platform to the platform admin and to nobody else", () => {
