@@ -1,7 +1,36 @@
 # MEMORY — working session handoff
 > Auto-loaded each session. Canonical state is CLAUDE.md; this is the live delta.
 
-## Latest: job→invoice is the Owner's and the Office manager's (`0025`)
+## Latest: a test login per role (`npm run seed:roles`) — tooling, no migration
+`scripts/role-profiles.mjs` (the list) + `scripts/seed-role-profiles.mjs` (the runner). One
+login per role in the demo laundry, `<role>@roles.example.com`, shared password printed each
+run. CLAUDE.md §3a has the reasoning.
+
+**The eleven profiles ARE live on `laundrymart-syd`**, in the demo laundry only. Verified:
+`is_member(Adelaide)` false for all eleven, `current_driver_id()` resolves for the driver, and
+0025 proved through the API — warehouse operator UPDATE on `laundry_orders` = 0 rows, office
+manager = 1 row.
+
+**Provisioned by SQL, not by the script** — no service-role key in that container, so
+`auth.users` + `auth.identities` were written in GoTrue's shape and the bcrypt hash verified.
+**The script's own Auth round trip is therefore still unproven**: run
+`npm run seed:roles -- --dry-run` from a machine with the key — it should say "reset password"
+eleven times and create nothing.
+
+**Nor has a sign-in been exercised.** The password grant was attempted; this container's network
+policy answers 403 to `CONNECT …supabase.co` (same wall the Resend path hit). First thing to do
+on the deployed app: sign in as `driver@roles.example.com` / `RoleTest!2026`.
+
+**`platform_admin` needs `--platform-admin`.** It is not a membership and crosses into
+`Adelaide Towel Service`, which defeats testing on the demo tenant.
+
+**The driver profile creates a `drivers` row.** Without one `current_driver_id()` is null and
+the driver's screens are empty — a login that works and shows nothing.
+
+**`role-profiles.test.ts` imports the script's own module**, so the list has no second copy and
+a role added to `roles.ts` without a profile fails a test.
+
+## Previously: job→invoice is the Owner's and the Office manager's (`0025`)
 `orders.*` + `invoices.*` → `super_admin` and `operations_manager` only (owner's decision).
 
 **Two layers, on purpose.** `roles.ts` decides who is *shown* the flow; `0025` adds
