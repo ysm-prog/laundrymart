@@ -21,10 +21,23 @@ paid up.
 **Payments need a bank account and only the laundry knows which.** The settings screen lists
 their real Xero bank accounts; `payment_account_code` null = skip.
 
-**NOTHING here has touched Xero.** No credentials in this container and the session's Xero
-tools are read-only. **0026 and 0027 are not applied to `laundrymart-syd`.** First live run:
-apply both, set XERO_CLIENT_ID/SECRET, register `<origin>/api/xero/callback`, connect, pick the
-account, then issue one invoice and take one payment.
+**Both migrations ARE live on `laundrymart-syd` (2026-08-17).** Rehearsed in an aborted
+transaction, then applied and re-verified: RLS on with the one deny policy, **a real token row
+inserted and both `anon` and `authenticated` refused at 42501 with it present** (grants revoked,
+so the refusal beats RLS to it), `xero_connection_status()` carrying the account, 647 invoices /
+0 payments / 508 archived customers untouched, 0 anon-executable functions. Advisors 14 → 15,
+the addition being `xero_connection_status` (documented definer shape).
+
+Pre-flight surprise worth knowing: **`invoices.xero_invoice_id` was already there**, from the
+unmerged `customer-pricing-invoicing-sad9af` branch — `if not exists` made it a no-op.
+
+**NOTHING has yet talked to Xero.** No credentials on the deployment (owner: "I will add
+variable later"), so the app behaves exactly as before. **Next live step:** set
+XERO_CLIENT_ID/SECRET, register `https://ats.coreit.com.au/api/xero/callback` on the Xero app,
+connect, pick the bank account, then issue **one** invoice and take **one** payment and read
+them in Xero.
+
+**Not built: the void path.** An invoice voided here stays authorised in Xero. Needs a decision.
 
 **Trap worth remembering:** a pgTAP run reporting `0 assertions, 0 failures` is Postgres being
 down, not a pass. Check the count.

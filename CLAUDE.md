@@ -621,9 +621,35 @@ demote the other and lock the tenant out of its own People screen.
 
 ## 11. Hosted project
 `laundrymart-syd` · ref `xujhwljrmogenhvqpkrf` · ap-southeast-2 (Sydney) · org `ysm-prog`.
-Deployed on Vercel at `ats.coreit.com.au`. All migrations through `0019_platform_admin`
-applied (0014 on 2026-08-13, 0015 and 0016 on 2026-08-14, 0017, 0018 and 0019 on 2026-08-16),
-each verified by rolled-back probe rather than trusted.
+Deployed on Vercel at `ats.coreit.com.au`. All migrations through `0027_xero_payments`
+applied (0014 on 2026-08-13, 0015 and 0016 on 2026-08-14, 0017, 0018, 0019 and 0025 on
+2026-08-16, 0026 and 0027 on 2026-08-17), each verified by rolled-back probe rather than
+trusted. 0020–0024 are the renumbered branch migrations, already live under their original
+names (§7).
+
+For **0026/0027** that was: the whole of both migrations plus probes in one aborted
+transaction, then applied for real and re-verified. `xero_connections` present with RLS on and
+its single deny-everything policy; **a rehearsal row inserted and both `anon` and
+`authenticated` refused at 42501 with that row present** — the grants are revoked, so the
+refusal happens before RLS is even consulted, which is stronger than the "0 rows" 0018 and 0019
+settled for; `xero_connection_status()` carrying the payment account (6 out columns); the two
+partial indexes created; 647 invoices, 0 payments and the 508 archived customers untouched; and
+still **zero** `anon`-executable functions, which is the migrations' own assertion. Advisors
+went 14 → 15, the one addition being `xero_connection_status` — the documented definer shape,
+role-checked inside and returning the organisation name, the timestamps and the account but
+never a token.
+
+**Pre-flight found `invoices.xero_invoice_id` already on the live database** — from the unmerged
+`claude/customer-pricing-invoicing-sad9af` branch, which §11 below records as converging on
+exactly this column. `0026` adds it `if not exists`, so the apply was a no-op for that column
+and the 647 existing invoices kept their values (all null). `payments` had none of the three,
+and there are **no payment rows at all**, so the payment path starts from nothing at risk.
+
+**Nothing has yet talked to Xero.** `XERO_CLIENT_ID`/`XERO_CLIENT_SECRET` are unset on the
+deployment by the owner's decision ("I will add variable later"), so the Settings screen says so
+and every invoice issues exactly as it did before. First live run: set the two variables,
+register `https://ats.coreit.com.au/api/xero/callback` on the Xero app, connect, pick the bank
+account, then issue **one** invoice and take **one** payment and read them in Xero.
 
 For **0019** that was: the live `is_member`/`has_role`/`is_driver_only` bodies confirmed
 identical to this repo's 0001 before being replaced (this is the check that matters most — a
@@ -809,6 +835,59 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-08-17 · Billing reaches Xero: invoices, then the payments that settle them
+The owner's billing design, built rather than redesigned: **the pre-agreed rate per service per
+client already lives where it should** — `service_agreement_lines` for a contract and
+`laundry_prices` for counter laundry — and `generateInvoices` already raises one invoice per
+customer per month for the work completed in it. What was missing was the last hop: the invoice
+never left this database. Two migrations (`0026`, `0027`), no new role, no new capability,
+nothing dropped. See §20 for the system.
+
+- **One Xero organisation per laundry.** `xero_connections` is keyed on `tenant_id`. A
+  deployment-wide connection works exactly until a second real business arrives and then posts
+  one laundry's receivables into another's books — and this deployment already runs two.
+- **The first table in the schema `authenticated` may not touch at all.** A refresh token is a
+  bearer credential for somebody's accounting system and no screen needs its value, so RLS is on
+  with a policy that denies both directions outright *and* the table grants are revoked. The
+  Settings screen reads `xero_connection_status()` instead — definer, role-checked inside,
+  returning the organisation name, the timestamps and the bank account and never a token.
+- **Neither push ever blocks the money.** `issueInvoice` issues and *then* pushes; a refusal
+  leaves the invoice issued with `xero_push_error` set and a Retry beside it. The money record is
+  this database's and Xero is a copy of it, so an outage must not roll back an invoice a customer
+  has already been told about. Same contract for payments.
+- **A payment carries an `Idempotency-Key` and the invoice does not, deliberately.** The
+  payment's own id goes in the header, so a retry after a timeout — where the first attempt may
+  in fact have landed — cannot post the money twice. The invoice path is idempotent a different
+  way: `xero_invoice_id` turns a retry into an update. A duplicated invoice is visible and
+  embarrassing; a duplicated payment quietly makes a customer look paid up.
+- **Four "not yet" cases are skips, not failures** (`paymentGate`, pure and tested): already
+  posted, the invoice never reached Xero, no bank account chosen, and a zero or negative amount
+  (a refund is a credit note in Xero, not a payment). A laundry that has not connected is skipped
+  too. Marking those red is how an integration teaches people to ignore its warnings.
+- **Payments need a bank account and only the laundry knows which.** Xero refuses a payment
+  without one, and guessing puts real money against the wrong ledger with nothing to notice it —
+  so the settings screen offers their own accounts read back from Xero rather than a text box.
+  `payment_account_code` is null until picked and payments are skipped while it is.
+- **The mapping is pure and tested; the fetch is not.** `invoice-payload.ts` and
+  `payment-payload.ts` hold the parts with rules in them — GST per line from
+  `invoice_lines.taxable`, the PO as `Reference`, a zero-priced line kept rather than dropped,
+  `numeric`-as-string coerced — because that is what can be wrong in a way a green build hides.
+- 393 unit tests, `verify` green.
+
+**Applied to `laundrymart-syd` on 2026-08-17** (§11), rehearsed first. Pre-flight turned up
+`invoices.xero_invoice_id` **already live** from the unmerged pricing branch, which §11 records
+as having converged on exactly this column — `add column if not exists` made that a no-op rather
+than a 42701. Both roles were then proved out at the grant level with a real token row present.
+
+**Nothing here has talked to Xero yet.** `XERO_CLIENT_ID`/`XERO_CLIENT_SECRET` are unset by the
+owner's decision, so the app behaves exactly as it did before and the Settings screen says why.
+**Before trusting it: set the two variables, register the callback on the Xero app, connect, pick
+the bank account, then issue one invoice and take one payment and read them in Xero.**
+
+**Not built, stated rather than glossed: the void path.** An invoice voided here stays authorised
+in Xero, so a void is currently a two-place job. It wants its own decision — voiding somebody's
+accounting record from this app is a bigger action than creating one.
+
 ### 2026-08-16 · A login per role, so a capability change can be signed in as
 `0025` narrowed the job→invoice flow to two roles, and the only way to check what the other nine
 now see was to read `roles.ts`. There were two logins on the whole deployment, both
