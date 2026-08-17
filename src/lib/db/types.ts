@@ -464,6 +464,20 @@ export type LaundryOrder = {
   /** When the driver confirmed this job was on the van, and who confirmed it. */
   load_confirmed_at: string | null;
   load_confirmed_by: Uuid | null;
+
+  /**
+   * The job's *financial* state, beside the operational one (migration 0017).
+   *
+   * `pending → awaiting_review → approved → invoice_generated → invoice_sent
+   * → paid`, plus `not_billable`. Completing a job sets `awaiting_review` in the
+   * transition guard and **never generates an invoice** — everything past that
+   * point is a finance decision. See `src/lib/domain/billing.ts`.
+   */
+  billing_status: string;
+  billing_approved_at: string | null;
+  billing_approved_by: Uuid | null;
+  /** Why this job is out of the billing queue. Required unless it was cancelled. */
+  billing_exclusion_reason: string | null;
 };
 
 export type LaundryOrderItem = {

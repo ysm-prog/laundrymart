@@ -1,6 +1,7 @@
 import { Suspense } from "react";
 import Link from "next/link";
 import { requireCapability } from "@/lib/auth/context";
+import { can } from "@/lib/roles";
 import { createClient } from "@/lib/supabase/server";
 import { date, money, number, relativeDays, today } from "@/lib/format";
 import { addDays } from "@/lib/domain/dates";
@@ -14,10 +15,19 @@ import { PrintButton } from "@/components/print-button";
 export const metadata = { title: "Reports" };
 export const dynamic = "force-dynamic";
 
+/**
+ * `money: true` marks a report built on invoices and payments.
+ *
+ * Those two tables are readable only through `can_read_billing()` since
+ * migration 0017, so for a role without a billing capability the queries behind
+ * them return nothing. A money report that renders as "$0 revenue" for a
+ * dispatcher is worse than one they cannot open: it is a wrong answer that looks
+ * like a right one. So the tabs are filtered instead.
+ */
 const REPORTS = [
   { key: "operations", label: "Daily operations" },
-  { key: "revenue", label: "Revenue" },
-  { key: "receivables", label: "Outstanding payments" },
+  { key: "revenue", label: "Revenue", money: true },
+  { key: "receivables", label: "Outstanding payments", money: true },
   { key: "drivers", label: "Driver productivity" },
   { key: "vehicles", label: "Vehicle utilisation" },
   { key: "inventory", label: "Inventory position" },
@@ -29,9 +39,14 @@ type Search = { report?: string; from?: string; to?: string };
 
 export default async function ReportsPage({ searchParams }: { searchParams: Promise<Search> }) {
   const params = await searchParams;
-  await requireCapability("reports.read");
+  const session = await requireCapability("reports.read");
 
-  const report = (REPORTS.find((r) => r.key === params.report)?.key ?? "operations") as ReportKey;
+  // The money reports need a billing capability on top of `reports.read`, which
+  // dispatch and sales hold without it. Resolved before the requested report is
+  // read, so asking for one by URL lands on operations rather than on an empty
+  // page of zeroes.
+  const reports = REPORTS.filter((entry) => !("money" in entry) || can(session.role, "billing.read"));
+  const report = (reports.find((r) => r.key === params.report)?.key ?? "operations") as ReportKey;
   const to = params.to && /^\d{4}-\d{2}-\d{2}$/.test(params.to) ? params.to : today();
   const from = params.from && /^\d{4}-\d{2}-\d{2}$/.test(params.from) ? params.from : addDays(to, -30);
 
@@ -44,7 +59,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
       />
 
       <nav className="flex flex-wrap gap-2 print:hidden" aria-label="Reports">
-        {REPORTS.map((entry) => (
+        {reports.map((entry) => (
           <Link
             key={entry.key}
             href={`/reports?report=${entry.key}&from=${from}&to=${to}`}

@@ -94,7 +94,8 @@ describe("navigationFor", () => {
     // The Office manager keeps both sides.
     const office = navigationFor("operations_manager").find((item) => item.label === "Money");
     expect(office?.children?.map((child) => child.label)).toEqual([
-      "Invoices", "Laundry prices", "Xero", "Bills", "Suppliers", "Accounts",
+      "Invoices", "Awaiting invoice", "Laundry prices", "Xero",
+      "Bills", "Suppliers", "Accounts",
     ]);
 
     // Xero rides with the receivable side, so finance does not see it: they no
@@ -197,6 +198,96 @@ describe("navigationFor", () => {
     ] as const) {
       expect(navigationFor(role).map((item) => item.label), role).not.toContain("Jobs");
     }
+  });
+
+  /**
+   * The brief's role rule, asserted at the level a person experiences it.
+   *
+   * Operational users see jobs, runs and a customer's operational information
+   * and never pricing, invoice amounts or Xero. RLS is the real boundary
+   * (migration 0017, proved in `job_billing.test.sql`); these assertions are
+   * about the map — a rail row leading to a screen full of numbers a role is
+   * not meant to see would be a bug even with the data correctly hidden.
+   */
+  const OPERATIONAL: Role[] = ["driver", "dispatcher", "warehouse_operator", "customer_service"];
+
+  it("keeps every money screen off the operational roles' map", () => {
+    for (const role of OPERATIONAL) {
+      const hrefs = navigationFor(role).flatMap(
+        (item) => [item.href, ...(item.children ?? []).map((child) => child.href)],
+      );
+      for (const href of hrefs) {
+        expect(href.startsWith("/invoices"), `${role} → ${href}`).toBe(false);
+      }
+    }
+  });
+
+  it("holds no financial capability for any operational role", () => {
+    // Dispatch is the one that changed: it used to carry invoices.read and
+    // invoices.write. Stated here so putting either back trips a test rather
+    // than quietly re-opening the ledger to the people planning the day.
+    for (const role of OPERATIONAL) {
+      for (const capability of ["pricing.read", "pricing.write", "billing.read", "billing.write",
+                                "invoices.read", "invoices.write", "invoices.approve",
+                                "invoices.send", "invoices.bulk"] as const) {
+        expect(can(role, capability), `${role} must not hold ${capability}`).toBe(false);
+      }
+    }
+  });
+
+  it("gives finance the payable side and none of the receivable one", () => {
+    // The branch these capabilities arrived on gave finance the whole money
+    // surface. 0025 is the later decision and wins: billing the customer is
+    // half of job→invoice, which answers to the Owner and the Office manager.
+    // What finance keeps is what the business pays *out*.
+    for (const capability of ["purchases.read", "purchases.write", "reports.read"] as const) {
+      expect(can("finance", capability), capability).toBe(true);
+    }
+    for (const capability of ["billing.read", "billing.write", "pricing.read",
+                              "pricing.write", "invoices.read", "invoices.write",
+                              "invoices.approve", "invoices.send", "invoices.bulk",
+                              "orders.read", "orders.write", "orders.status"] as const) {
+      expect(can("finance", capability), capability).toBe(false);
+    }
+  });
+
+  it("keeps sales out of pricing, because pricing is half of job→invoice", () => {
+    // `pricing.*` is split from `billing.*` in the *database* (0017 gates them
+    // through different functions), which is why both names exist. Who holds
+    // them is a separate question, and the owner's answer is two roles — so
+    // sales negotiate a contract's terms and do not set its prices.
+    for (const capability of ["pricing.read", "pricing.write", "billing.read",
+                              "billing.write", "invoices.read"] as const) {
+      expect(can("sales", capability), capability).toBe(false);
+    }
+    expect(can("sales", "agreements.write")).toBe(true);
+  });
+
+  it("keeps the auditor out of the money as well as out of the jobs", () => {
+    // The auditor is read-everything *outside* the main flow. Pricing and
+    // billing joined that flow with the rate card, so they left the auditor
+    // with it — deliberately, and by the same subtraction.
+    for (const capability of ["pricing.read", "billing.read", "invoices.read",
+                              "billing.write", "invoices.write", "invoices.approve",
+                              "invoices.send", "invoices.bulk"] as const) {
+      expect(can("auditor", capability), capability).toBe(false);
+    }
+    // It still reads everything that is not the main flow.
+    expect(can("auditor", "customers.read")).toBe(true);
+    expect(can("auditor", "inventory.read")).toBe(true);
+  });
+
+  it("puts the awaiting-invoice queue under Money, for the two roles that bill", () => {
+    for (const role of ["super_admin", "operations_manager"] as const) {
+      const money = navigationFor(role).find((item) => item.label === "Money");
+      expect(money?.children?.map((child) => child.href), role)
+        .toContain("/invoices/awaiting");
+    }
+    // And nowhere at all for a role that holds no `billing.read` — finance
+    // still has a Money row, for the payable tabs, and the queue is not in it.
+    const finance = navigationFor("finance").find((item) => item.label === "Money");
+    expect(finance?.children?.map((child) => child.href))
+      .not.toContain("/invoices/awaiting");
   });
 });
 

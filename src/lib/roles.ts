@@ -87,8 +87,37 @@ export const CAPABILITIES = [
   "inventory.write",
   "warehouse.read",
   "warehouse.write",
+  // ---------------------------------------------------------------- money --
+  // The financial capabilities are split finer than everything above them,
+  // because the brief's rule is not "who can open the invoices screen" but
+  // "who may see a price at all". Operational roles — driver, warehouse
+  // operator, customer service and **dispatcher** — hold none of these, and
+  // that exclusion is enforced by RLS in migration 0017 as well as here: the
+  // read policies on `invoices`, `invoice_lines`, `payments`, the credit
+  // notes, `service_agreement_lines` and `job_charge_snapshots` all go through
+  // `can_read_pricing()` / `can_read_billing()`, so a session that gets past
+  // the UI still reads nothing.
+  //
+  // What a customer is charged. Sales negotiate it; nobody on the road or the
+  // floor sees it.
+  "pricing.read",
+  "pricing.write",
+  // A customer's billing settings and a job's own money: the rate card in use,
+  // the billing method, the Xero reference, and the charge snapshot.
+  "billing.read",
+  "billing.write",
   "invoices.read",
   "invoices.write",
+  // Approving a job's charges is what freezes them, so it is deliberately not
+  // `invoices.write` — raising a draft and signing off the price a customer
+  // will be held to are different decisions.
+  "invoices.approve",
+  // Generating an invoice never sends it. Sending is the act the customer sees,
+  // so it carries its own capability.
+  "invoices.send",
+  // Acting on a selection rather than a record. Same operations, but a mistake
+  // is multiplied by the size of the selection.
+  "invoices.bulk",
   // The payable side: suppliers, their bills, purchase orders and the chart of
   // accounts. Split from `invoices.*` rather than folded into it because the
   // two answer to different people — a dispatcher holds `invoices.read` so they
@@ -136,9 +165,19 @@ const ALL: Capability[] = [...CAPABILITIES];
  * about who pays the suppliers, and letting the payable side ride along on this
  * change would have taken the chart of accounts off the finance role for a
  * reason nobody asked for.
+ *
+ * **`pricing.*` and `billing.*` joined the block when the rate-card model was
+ * adopted** (2026-08-17). They arrived from a branch written *before* the
+ * narrowing, which gave pricing to `sales` and the ledger to `finance` — the
+ * design this app had until the owner said the flow answers to two people. What
+ * a customer is charged, and which rate card charges them, is the first half of
+ * job→invoice; leaving the two new blocks out of it would have reopened to six
+ * roles exactly what 0025 closed, and by the very mechanism this comment exists
+ * to warn about.
  */
 const JOB_TO_INVOICE: Capability[] = ALL.filter(
-  (c) => c.startsWith("orders.") || c.startsWith("invoices."),
+  (c) => c.startsWith("orders.") || c.startsWith("invoices.")
+      || c.startsWith("pricing.") || c.startsWith("billing."),
 );
 
 /** Everything a role may hold that is neither platform work nor the main flow. */
@@ -161,8 +200,14 @@ export const ROLE_CAPABILITIES: Record<Role, readonly Capability[]> = {
   super_admin: TENANT_ALL,
   // Everything except system settings.
   operations_manager: TENANT_ALL.filter((c) => c !== "admin.write"),
-  // Customers, routes, stops, drivers and vehicles. No jobs and no invoices:
-  // the main flow is the Owner's and the Office manager's alone.
+  // Customers, routes, stops, drivers and vehicles. No jobs, no invoices and no
+  // prices: the main flow is the Owner's and the Office manager's alone.
+  //
+  // 0017's RLS says the same thing from underneath — the read policies on
+  // `invoices`, `payments`, the credit notes, `service_agreement_lines` and
+  // `job_charge_snapshots` all go through `can_read_billing()` /
+  // `can_read_pricing()`, so a dispatcher's session reads nothing here even if
+  // it gets past the nav.
   dispatcher: [
     "customers.read", "customers.write",
     "agreements.read",
@@ -280,7 +325,7 @@ export const ROLE_SUMMARY: Record<Role, string> = {
   platform_admin: "Every laundry on this system, and the system itself",
   super_admin: "Everything, including settings and who can sign in",
   operations_manager: "Everything day to day, but not the settings",
-  dispatcher: "Customers, stops, drivers and trucks — not jobs or invoices",
+  dispatcher: "Customers, stops, drivers and trucks — no jobs, invoices or prices",
   driver: "Their own run, on their phone, and nothing else",
   finance: "Supplier bills, what you owe, and reports",
   warehouse_operator: "The plant floor and stock — not the customer's job",

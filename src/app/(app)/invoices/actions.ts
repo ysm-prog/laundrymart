@@ -14,21 +14,18 @@ import {
   consolidate, contractCharges,
   type BillableAgreement, type BillableLine,
 } from "@/lib/domain/invoicing";
-import {
-  buildLaundryCharges, describeUnpriced, priceListFor,
-  type BillableJob, type LaundryPriceRow, type UnpricedItem,
-} from "@/lib/domain/laundry-billing";
 import { toInstant } from "@/lib/domain/timezone";
 import {
   count, describeDbError, done, fail, firstIssue, money, optionalText,
   optionalUuid, requiredDate, returnTo, toObject,
 } from "@/lib/actions";
 import { loadInvoiceForPdf } from "@/lib/pdf/invoice-data";
-import { invoiceFileName, renderInvoicePdf } from "@/lib/pdf/render";
-import { buildInvoiceEmail } from "@/lib/email/invoice-email";
-import { sendEmail } from "@/lib/email/send";
 import { pushInvoiceToXero } from "@/lib/xero/push";
 import { pushPaymentToXero } from "@/lib/xero/push-payment";
+import { generateInvoicesForJobs } from "@/lib/invoices/from-jobs";
+import {
+  markInvoiceJobsPaid, releaseVoidedInvoiceJobs, sendInvoice,
+} from "@/lib/invoices/send";
 
 /**
  * Generate recurring invoices for a billing period — **one invoice per
@@ -51,21 +48,31 @@ import { pushPaymentToXero } from "@/lib/xero/push-payment";
  *     minimum charge and applies *its* levies and surcharges — a levy on one
  *     contract must not reach another contract's services;
  *  3. adds the period's replacement charges once, for the customer;
- *  4. lines up every item of every laundry job the customer had **completed** in
- *     the period, priced from their own laundry price list (0018);
- *  5. writes one invoice whose lines each keep their `agreement_id` and
- *     `location_id` — and, for a laundry line, the `laundry_order_id` of the job
- *     it bills — so every charge still says where it came from.
+ *  4. writes one invoice whose lines each keep their `agreement_id` and
+ *     `location_id`, so every charge still says where it came from.
+ *
+ * **Then it bills the jobs, and that is a separate half with different rules.**
+ * `generateInvoicesForJobs` sweeps every job in the period whose
+ * `billing_status` is `approved`, and writes its lines from the **frozen**
+ * `job_charge_snapshots` rather than pricing anything now. So the money on an
+ * invoice is the money a person signed off, and re-pricing a customer between
+ * approval and generation cannot move it.
+ *
+ * That half groups by the customer's own `billing_method` — one invoice per job,
+ * or one weekly/fortnightly/monthly — which is why switching a customer between
+ * those shapes is a column and not a second code path. A customer set to
+ * `manual` is deliberately left alone here: this is a sweep, not somebody's
+ * explicit selection, and "manual" means a person decides each time.
  *
  * A customer with no contract at all is still invoiced when they handed laundry
- * over the counter, which is the whole point of step 4: the counter's Jobs used
- * to carry no money, so a drop-off customer was never billed by the app.
+ * over the counter — their invoice simply comes entirely from the jobs half.
  *
- * Double-billing is refused twice over. Customers that already have a recurring
- * invoice for the exact period are skipped, so re-running after a fix does not
- * duplicate; and a job already carried on any invoice that is not void is left
- * out, so a job completed near a period boundary cannot be billed by two
- * different runs.
+ * Double-billing is refused three ways over. Customers that already have a
+ * recurring invoice for the exact period are skipped, so re-running after a fix
+ * does not duplicate; only `approved` jobs are swept, and generation moves them
+ * straight to `invoice_generated`; and underneath both,
+ * `uq_invoice_source_jobs_once` is a unique index on (tenant, job), so two runs
+ * racing each other end with one winner rather than two invoices.
  */
 export async function generateInvoices(formData: FormData): Promise<void> {
   const session = await assertCapability("invoices.write");
@@ -117,83 +124,24 @@ export async function generateInvoices(formData: FormData): Promise<void> {
   }
 
   // ------------------------------------------------ the period's laundry ---
-  // Completed jobs only: a job still in the plant is work in progress, not work
-  // done, and cancelled laundry was never washed. `completed_at` is a
-  // timestamptz, so the period's edges are composed in the business timezone —
-  // a job finished at 9pm on the 31st belongs to that month's invoice, not to
-  // whatever day UTC had already moved on to.
-  const periodStartedAt = toInstant(start, "00:00");
-  const periodEndedAt = toInstant(addDays(end, 1), "00:00");
-
-  const { data: jobRows, error: jobError } = await supabase
-    .from("laundry_orders")
-    .select("id, customer_id, order_number, completed_at, " +
-            "laundry_order_items(item_type, custom_description, quantity_type, " +
-            "exact_quantity, bag_count, estimated_quantity)")
-    .eq("status", "completed")
-    .gte("completed_at", periodStartedAt)
-    .lt("completed_at", periodEndedAt)
-    .order("completed_at")
-    .returns<Array<BillableJob & { customer_id: string; laundry_order_items: BillableJob["items"] }>>();
-  if (jobError) return fail("/invoices", describeDbError(jobError));
-
-  // A job already on an invoice is not billed again. Void invoices do not
-  // count: voiding one is how a mistake is undone, and the work still has to be
-  // billable afterwards.
-  const billedOrderIds = new Set<string>();
-  if ((jobRows ?? []).length > 0) {
-    const { data: billed, error: billedError } = await supabase
-      .from("invoice_lines")
-      .select("laundry_order_id, invoices!inner(status)")
-      .in("laundry_order_id", (jobRows ?? []).map((row) => row.id))
-      .neq("invoices.status", "void")
-      .returns<Array<{ laundry_order_id: string | null }>>();
-    if (billedError) return fail("/invoices", describeDbError(billedError));
-    for (const row of billed ?? []) {
-      if (row.laundry_order_id) billedOrderIds.add(row.laundry_order_id);
-    }
-  }
-
-  const jobsByCustomer = new Map<string, BillableJob[]>();
-  for (const row of jobRows ?? []) {
-    if (billedOrderIds.has(row.id)) continue;
-    const bucket = jobsByCustomer.get(row.customer_id) ?? [];
-    bucket.push({
-      id: row.id,
-      order_number: row.order_number,
-      items: row.laundry_order_items ?? [],
-    });
-    jobsByCustomer.set(row.customer_id, bucket);
-  }
-
-  // One read of the tenant's whole price list — the customer rows and the
-  // default rows together — resolved per customer in the loop below.
-  const priceRows = jobsByCustomer.size > 0
-    ? (await supabase
-        .from("laundry_prices")
-        .select("customer_id, item_type, unit_price, bag_price, taxable")
-        .returns<LaundryPriceRow[]>()).data ?? []
-    : [];
-
-  // One bill per customer. Grouping happens before anything is priced, because
-  // the weight allocation and the replacement charges below are facts about the
-  // customer's period and have to be computed once, not once per contract.
+  // **Counter laundry is no longer priced here.** It used to be: this action
+  // read every completed job, priced it from `laundry_prices` on the spot, and
+  // appended the lines to the customer's consolidated invoice.
+  //
+  // A job's money is now decided once, by a person, at review time — and frozen
+  // (0017). So the run bills what was *approved*, from `job_charge_snapshots`,
+  // through `generateInvoicesForJobs` below. That module also honours the
+  // customer's `billing_method`, which is what makes "one invoice per job" a
+  // column and not a second code path.
+  //
+  // The consequence worth stating: a job nobody has reviewed is **not billed**,
+  // where before it was billed automatically at list price. That is the point of
+  // the change, and it is why the Awaiting invoice queue carries a badge.
   const byCustomer = new Map<string, BillableAgreement[]>();
   for (const agreement of live) {
     const bucket = byCustomer.get(agreement.customer_id) ?? [];
     bucket.push(agreement);
     byCustomer.set(agreement.customer_id, bucket);
-  }
-  // A customer with laundry but no contract belongs in the run just as much —
-  // an empty contract list simply means every charge comes from their jobs.
-  for (const customerId of jobsByCustomer.keys()) {
-    if (!byCustomer.has(customerId)) byCustomer.set(customerId, []);
-  }
-
-  if (byCustomer.size === 0) {
-    return fail("/invoices",
-      "Nothing to bill for that period — no contract covers it and no laundry job was completed in it.",
-      { href: "/agreements", label: "Open contracts" });
   }
 
   // Terms fall back to the customer's own when their contracts disagree — the
@@ -207,8 +155,6 @@ export async function generateInvoices(formData: FormData): Promise<void> {
   let created = 0;
   let skipped = 0;
   let contractsBilled = 0;
-  let jobsBilled = 0;
-  const unpriced: UnpricedItem[] = [];
 
   for (const [customerId, contracts] of byCustomer) {
     const { data: existing } = await supabase
@@ -313,24 +259,6 @@ export async function generateInvoices(formData: FormData): Promise<void> {
       draft.push({ line, agreementId: null, locationId: null });
     }
 
-    // The counter's laundry: one line per item on every job finished in the
-    // period, at this customer's own price where they have one. It belongs to
-    // no contract — the laundry was handed over, not scheduled — so the line
-    // carries its job rather than an `agreement_id`.
-    const jobs = jobsByCustomer.get(customerId) ?? [];
-    if (jobs.length > 0) {
-      const charges = buildLaundryCharges({
-        jobs, prices: priceListFor(customerId, priceRows),
-      });
-      for (const entry of charges.lines) {
-        draft.push({
-          line: entry.line, agreementId: null, locationId: null, orderId: entry.orderId,
-        });
-      }
-      unpriced.push(...charges.unpriced);
-      jobsBilled += new Set(charges.lines.map((entry) => entry.orderId)).size;
-    }
-
     if (draft.length === 0) { skipped += 1; continue; }
 
     const { data: invoiceNumber, error: numberError } = await supabase
@@ -400,45 +328,93 @@ export async function generateInvoices(formData: FormData): Promise<void> {
     contractsBilled += contracts.length;
   }
 
+  // ------------------------------------------------- the jobs half of the run
+  // Contracts are one source of billable work; **completed jobs are the other**,
+  // and phase 7's whole point is that both end up on invoices without a second
+  // billing system. Approved jobs completed inside the period are swept here,
+  // grouped by each customer's own `billing_method`, and written by the same
+  // shared generator the queue's Generate Selected uses.
+  //
+  // `respectManual` is on: this is a scheduled-style run over everything, not a
+  // person's explicit selection, so a customer set to `manual` is left for
+  // somebody to decide about — which is the entire meaning of that setting.
+  //
+  // The period's edges are composed in the **business timezone**, not in UTC.
+  // `completed_at` is a `timestamptz`, so `${end}T23:59:59Z` would put a job
+  // finished at 9am Sydney on the 1st into the previous month's invoice — and
+  // silently, since the job simply appears on the wrong bill. `toInstant` is the
+  // same helper the rest of the app dates a receipt with.
+  const periodStartedAt = toInstant(start, "00:00");
+  const periodEndedAt = toInstant(addDays(end, 1), "00:00");
+
+  const { data: periodJobs } = await supabase
+    .from("laundry_orders")
+    .select("id")
+    .eq("billing_status", "approved")
+    .gte("completed_at", periodStartedAt)
+    .lt("completed_at", periodEndedAt)
+    .limit(1000)
+    .returns<Array<{ id: string }>>();
+
+  const jobRun = await generateInvoicesForJobs(
+    supabase, session, (periodJobs ?? []).map((row) => row.id),
+    { issueDate: end, respectManual: true },
+  );
+
   await recordAudit(session, {
     entity: "invoice", action: "generate",
-    summary: `${created} invoice(s) for ${start} – ${end}`,
+    summary: `${created} contract invoice(s) and ${jobRun.created.length} job invoice(s) for ${start} – ${end}`,
     metadata: {
-      start, end, created, skipped,
-      contracts: contractsBilled, jobs: jobsBilled, unpriced: unpriced.length,
+      start, end, created, skipped, contracts: contractsBilled,
+      jobInvoices: jobRun.created.length, jobsSkipped: jobRun.skipped.length,
     },
   });
   revalidatePath("/invoices");
+  revalidatePath("/invoices/awaiting");
 
-  // Laundry nobody has priced is reported whether or not anything was created:
-  // it is the one outcome an operator cannot see on the invoice itself, since a
-  // missing line looks exactly like laundry that was never taken in.
-  const unpricedNote = unpriced.length > 0 ? ` ${describeUnpriced(unpriced)}` : "";
-  const priceLink = unpriced.length > 0
-    ? { href: "/invoices/prices", label: "Set laundry prices" }
+  // Said separately rather than added together: "3 invoices" made of two
+  // different things, counted as one number, is the kind of summary somebody
+  // reconciles against and finds wrong.
+  const jobCount = jobRun.created.reduce((sum, entry) => sum + entry.jobIds.length, 0);
+  const jobNote = jobRun.created.length > 0
+    ? ` Also billed ${jobRun.created.length} invoice(s) from ${jobCount} approved job(s).`
+    : "";
+
+  // A job the run could not bill is reported rather than left silent — it is the
+  // one outcome an operator cannot see on the invoices themselves, because a
+  // missing job looks exactly like laundry that was never taken in. The link
+  // goes to the queue, which is where the job is and where it gets approved.
+  const skippedJobs = jobRun.skipped;
+  const jobSkipNote = skippedJobs.length > 0
+    ? ` ${skippedJobs.length} approved job(s) could not be billed: `
+      + `${skippedJobs.slice(0, 3).map((entry) => `${entry.orderNumber} (${entry.reason})`).join("; ")}`
+      + `${skippedJobs.length > 3 ? "…" : ""}`
+    : "";
+  const queueLink = skippedJobs.length > 0
+    ? { href: "/invoices/awaiting", label: "Open the queue" }
     : undefined;
 
-  if (created === 0) {
-    return fail("/invoices",
-      `Nothing to invoice — ${skipped} customer(s) were already billed for that period, `
-      + `or had no charges.${unpricedNote}`,
-      priceLink);
-  }
-  // Said in customers, contracts and jobs rather than in rows: the operator's
-  // question is "did everyone get billed", and a consolidated invoice covering
-  // two contracts should say so rather than looking like one was missed.
-  const parts = [
-    contractsBilled > 0 ? `${contractsBilled} contract(s)` : "",
-    jobsBilled > 0 ? `${jobsBilled} laundry job(s)` : "",
-  ].filter(Boolean);
-  const covers = parts.length > 0 ? ` covering ${parts.join(" and ")}` : "";
   const skippedNote = skipped > 0 ? ` ${skipped} customer(s) skipped.` : "";
 
-  const summary = `Created ${created} draft invoice(s)${covers}.${skippedNote}${unpricedNote}`;
-  // An unpriced item is a fact the operator has to act on, so it is said as a
+  if (created === 0 && jobRun.created.length === 0) {
+    return fail("/invoices",
+      `Nothing to invoice — ${skipped} customer(s) were already billed for that period, `
+      + `and no approved job was waiting.${jobSkipNote}`,
+      queueLink);
+  }
+
+  // Said in customers and contracts rather than in rows: the operator's question
+  // is "did everyone get billed", and a consolidated invoice covering two
+  // contracts should say so rather than looking like one contract was missed.
+  const covers = contractsBilled > created ? ` covering ${contractsBilled} contract(s)` : "";
+  const summary = created === 0
+    ? jobNote.trim()
+    : `Created ${created} draft invoice(s)${covers}.${skippedNote}${jobNote}`;
+
+  // An unbillable job is a fact the operator has to act on, so it is said as a
   // failure with the screen that fixes it — the invoices were still created.
-  return unpriced.length > 0
-    ? fail("/invoices", summary, priceLink)
+  return skippedJobs.length > 0
+    ? fail("/invoices", `${summary}${jobSkipNote}`, queueLink)
     : done("/invoices", summary);
 }
 
@@ -640,6 +616,11 @@ export async function recordPayment(formData: FormData): Promise<void> {
         paid_at: paid ? new Date().toISOString() : null,
       })
       .eq("id", parsed.data.invoice_id).eq("tenant_id", session.tenantId);
+
+    // Settling the invoice settles every job on it. A part payment moves
+    // nothing: a job is paid when the document covering it is, not when some
+    // of it is.
+    if (paid) await markInvoiceJobsPaid(supabase, session, parsed.data.invoice_id);
   }
 
   await recordAudit(session, {
@@ -712,12 +693,21 @@ export async function voidInvoice(formData: FormData): Promise<void> {
     .eq("id", parsed.data.id).eq("tenant_id", session.tenantId);
   if (error) return fail(backTo, describeDbError(error));
 
+  // Voiding is how a wrong invoice is undone, and the work on it still has to
+  // be billable afterwards — so the jobs go back to `approved` with their
+  // frozen charges intact. This is the *only* way out of an invoiced billing
+  // state, which is why the guard checks the link rows rather than trusting a
+  // caller (migration 0017).
+  await releaseVoidedInvoiceJobs(supabase, session, parsed.data.id);
+
   await recordAudit(session, {
     entity: "invoice", entityId: parsed.data.id, action: "status_change",
     summary: `voided: ${parsed.data.void_reason}`,
   });
   revalidatePath(backTo);
-  return done(backTo, "Invoice voided.");
+  revalidatePath("/invoices/awaiting");
+  return done(backTo,
+    "Invoice voided. Any jobs on it are back in the ready-to-invoice queue.");
 }
 
 /** Credit notes always reference the original invoice (acceptance criteria §10). */
@@ -822,43 +812,16 @@ export async function emailInvoice(formData: FormData): Promise<void> {
       owner ? { href: `/customers/${owner.customer_id}/edit`, label: "Add their billing email" } : undefined);
   }
 
-  const pdf = await renderInvoicePdf(data);
-  const { subject, html, text } = buildInvoiceEmail(data);
-
-  const result = await sendEmail({
-    to: recipient,
-    subject,
-    html,
-    text,
-    attachments: [{ filename: invoiceFileName(data.invoice.invoice_number), content: pdf }],
-  });
-
-  if (!result.ok) {
-    // Recorded even on failure: "we tried and it bounced" is exactly the thing
-    // someone needs to know when a customer says they never received it.
-    await recordAudit(session, {
-      entity: "invoice", entityId: parsed.data.id, action: "send_failed",
-      summary: `${recipient}: ${result.error}`,
-    });
-    return fail(backTo, `The invoice could not be sent. ${result.error}`);
-  }
-
+  // The send itself lives in `lib/invoices/send.ts`, shared with Send Selected —
+  // one implementation of putting a document in front of a customer, and one
+  // place where every job on the invoice moves to `invoice_sent`.
   const supabase = await createClient();
-  const { error } = await supabase
-    .from("invoices")
-    .update({ emailed_at: new Date().toISOString(), emailed_to: recipient })
-    .eq("id", parsed.data.id).eq("tenant_id", session.tenantId);
-  if (error) return fail(backTo, describeDbError(error));
-
-  await recordAudit(session, {
-    entity: "invoice", entityId: parsed.data.id, action: "send",
-    summary: `sent to ${recipient}`,
-    metadata: { providerId: result.id },
-  });
+  const result = await sendInvoice(supabase, session, parsed.data.id, recipient);
+  if (!result.ok) return fail(backTo, `The invoice could not be sent. ${result.error}`);
 
   revalidatePath(`/invoices/${parsed.data.id}`);
   revalidatePath("/invoices");
-  return done(backTo, `Invoice emailed to ${recipient}.`);
+  return done(backTo, `Invoice emailed to ${result.recipient}.`);
 }
 
 /** Marks overdue anything past its due date that is still unpaid. */

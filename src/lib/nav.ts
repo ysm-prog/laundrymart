@@ -26,7 +26,7 @@ import { can, type Capability, type Role } from "@/lib/roles";
 /** Counts the rail can surface. Resolved once per request in the layout. */
 export type NavCountKey =
   | "exceptions" | "batches" | "unpaidInvoices" | "overdueJobs"
-  | "unpaidBills";
+  | "unpaidBills" | "awaitingInvoice";
 
 /**
  * The rail's icon, named rather than imported.
@@ -180,8 +180,13 @@ export const NAVIGATION: NavItem[] = [
   },
   {
     // Renamed from "Invoices" when the payable side landed: the row now covers
-    // money in *and* money out, and an area named after one of its four tabs
+    // money in *and* money out, and an area named after one of its six tabs
     // would read as the odd one out.
+    //
+    // An operational role reaches none of it. That is enforced twice: no
+    // operational role holds `invoices.*`, `billing.*` or `purchases.*`, and
+    // the RLS policies on every billing table say the same thing independently
+    // through `can_read_billing()` (0017).
     label: "Money",
     href: "/invoices",
     icon: "invoices",
@@ -193,6 +198,15 @@ export const NAVIGATION: NavItem[] = [
         label: "Invoices", href: "/invoices", capability: "invoices.read",
         count: "unpaidInvoices",
         blurb: "Every invoice, and the one you are working on beside it.",
+      },
+      {
+        // A queue of *jobs*, living under Money rather than under Jobs because
+        // the question it answers is a billing one. `sectionFor` takes the
+        // longest match, so `/invoices/awaiting` lands here rather than on the
+        // register.
+        label: "Awaiting invoice", href: "/invoices/awaiting", capability: "billing.read",
+        count: "awaitingInvoice",
+        blurb: "Finished work that has not been billed. Approve the charges, then generate.",
       },
       {
         // The price list belongs to billing, not to Settings: it is what the

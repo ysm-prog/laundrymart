@@ -129,12 +129,36 @@ const GLOSSARY: Array<{ term: string; also?: string; meaning: string }> = [
     meaning: "How much of each item type you have and where it is — at a site, on a truck, at a customer, or somewhere in the plant.",
   },
   {
+    term: "Rate card", also: "agreement version",
+    meaning: "The prices you have agreed with one customer. It is a version of their contract, so changing a price means a new version — and every job already approved keeps the price it was approved at.",
+  },
+  {
     term: "Laundry price", also: "price list, rate",
-    meaning: "What you charge for each kind of laundry — per piece, and optionally per bag for bulk lots. Invoices › Laundry prices holds your usual prices; a customer who has agreed something different has their own list on their page. A kind of laundry with no price is left off the invoice and reported when you run the month, rather than being billed at nothing.",
+    meaning: "What you charge for each kind of laundry when a customer has no rate card — per piece, and optionally per bag for bulk lots. Money › Laundry prices holds your usual prices; a customer who has agreed something different has their own list on their page. A rate card beats both. A kind of laundry with no price anywhere is left off and reported, rather than being billed at nothing.",
+  },
+  {
+    term: "Billing method",
+    meaning: "How a customer's finished work becomes invoices: one invoice per job, or everything rolled onto one weekly, fortnightly or monthly bill. Set on the customer. \"Manual\" means you decide each time.",
+  },
+  {
+    term: "Awaiting review",
+    meaning: "A job whose work is finished and whose money is not. Finishing a job never bills anybody — it lands here for somebody to check the charges.",
+  },
+  {
+    term: "Approved",
+    meaning: "The charges on a job have been signed off. This is the moment the price freezes: after it, the job's charges cannot be changed by anyone, and changing the customer's rate card no longer affects it.",
   },
   {
     term: "Invoice",
-    meaning: "A bill sent to a customer. One a month per customer, carrying every job you completed for them in the period and anything their contract charges. A draft can be changed; an issued invoice cannot, and is voided with a reason instead.",
+    meaning: "A bill for a customer, carrying the jobs you approved for them in the period and anything their contract charges. A draft can be changed; an issued invoice cannot, and is voided with a reason instead.",
+  },
+  {
+    term: "Generate",
+    meaning: "Turning approved jobs into draft invoices. It does not send anything — the customer hears nothing until you send.",
+  },
+  {
+    term: "Send",
+    meaning: "Emailing an invoice, with its PDF, to the customer. A separate step from generating on purpose, so nothing reaches a customer by accident.",
   },
   {
     term: "Credit note",
@@ -152,11 +176,14 @@ const SAFE = [
   "Archiving a customer. They drop out of lists; their history, stops and invoices are all kept.",
   "Creating a job and moving it along. Every step is recorded on the job with your name and the time.",
   "Inviting somebody, or changing what they can see. Settings › People, and you can change your mind at any time.",
-  "Changing a laundry price. It applies to invoices you create from then on; invoices already made keep the prices they were made with.",
+  "Completing a job. It never bills anybody — it only puts the job in front of whoever checks the charges.",
+  "Pricing a job, re-pricing it, and editing its charges — right up until you approve them.",
+  "Changing a laundry price, a customer's rate card or their billing method. No invoice already raised moves, and no job already approved is re-priced.",
   "Creating this month's invoices. They arrive as drafts: you can add and remove lines, and nothing goes to a customer until you issue and email it.",
 ];
 
 const FINAL = [
+  "Approving a job's charges. That is the moment the price freezes — after it, nobody can change what that job cost, and a mistake is fixed with a credit note rather than by editing history.",
   "Issuing an invoice. After that it can only be voided with a reason, or corrected with a credit note.",
   "Emailing an invoice. The email leaves immediately.",
   "Voiding an invoice. The number is kept forever so your books have no gaps.",

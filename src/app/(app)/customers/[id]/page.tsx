@@ -17,6 +17,7 @@ import {
 } from "@/components/ui";
 import { Checkbox, Field, Input, SubmitButton } from "@/components/form";
 import { addContact, addLocation } from "../actions";
+import { BillingAndPricing } from "./billing-section";
 
 export const dynamic = "force-dynamic";
 
@@ -68,12 +69,15 @@ export default async function CustomerDetailPage({
       />
 
       <div className="grid gap-4 lg:grid-cols-3">
-        <Card title="Billing" className="lg:col-span-1">
+        {/* Contact details, not money. Payment terms and the invoice email moved
+            into the Billing & pricing section below, which is gated on
+            `billing.read` — they are finance answers, and this card is read by
+            dispatch and the counter. The ABN and the postal address stay here:
+            both are how you find and address the business. */}
+        <Card title="Contact &amp; address" className="lg:col-span-1">
           <dl className="space-y-2 text-sm">
             <Row label="ABN" value={customer.abn ?? "—"} />
-            <Row label="Email" value={customer.billing_email ?? "—"} />
             <Row label="Phone" value={customer.phone ?? "—"} />
-            <Row label="Terms" value={`${customer.payment_terms_days} days`} />
             <Row label="PO number" value={customer.purchase_order_number ?? "—"} />
             <Row
               label="Address"
@@ -101,6 +105,16 @@ export default async function CustomerDetailPage({
           </div>
         </Card>
       </div>
+
+      {/* Money is a separate permission from the customer record. A dispatcher
+          holds `customers.write` and none of the billing capabilities, so they
+          edit sites and contacts and never see a rate. RLS says the same thing
+          independently (migration 0017), so this is the courtesy, not the gate. */}
+      {can(session.role, "billing.read") ? (
+        <Suspense fallback={<SkeletonRows rows={3} />}>
+          <BillingAndPricing customerId={id} writable={can(session.role, "billing.write")} />
+        </Suspense>
+      ) : null}
 
       <Suspense fallback={<SkeletonRows rows={3} />}>
         <Sites customerId={id} writable={writable} />
