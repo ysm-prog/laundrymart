@@ -151,6 +151,7 @@ export async function updateMembership(formData: FormData): Promise<void> {
   const session = await assertCapability("admin.write");
   const parsed = z.object({
     user_id: z.string().uuid(),
+    full_name: optionalText,
     role: z.enum(MEMBERSHIP_ROLES),
     depot_id: optionalUuid,
   }).safeParse(toObject(formData));
@@ -163,6 +164,14 @@ export async function updateMembership(formData: FormData): Promise<void> {
   const supabase = await createClient();
   if (await wouldStrandTenant(supabase, session.tenantId, parsed.data.user_id, parsed.data.role)) {
     return fail(PEOPLE, "This is your last administrator. Give someone else that role first.");
+  }
+
+  // The name goes first, so a failure to save it refuses the whole change
+  // rather than leaving the row half-saved and the message about the half that
+  // did not land.
+  if (parsed.data.full_name) {
+    const named = await setMemberName(parsed.data.user_id, parsed.data.full_name);
+    if (!named.ok) return fail(PEOPLE, named.message);
   }
 
   const { error } = await supabase
@@ -183,6 +192,12 @@ const inviteSchema = z.object({
     (value) => (typeof value === "string" ? value.trim().toLowerCase() : value),
     z.string().email("Enter a valid email address"),
   ),
+  // Required, and that is the point of asking. Every screen that has to put a
+  // person beside a job — the assignment picker, the completion picker, the
+  // activity log — has only ever had an address or eight characters of a UUID
+  // to show. A name is what those screens are for, so it is collected once at
+  // the moment somebody is added rather than reconstructed later.
+  full_name: z.string().trim().min(2, "Enter the person's name"),
   role: z.enum(MEMBERSHIP_ROLES),
   depot_id: optionalUuid,
 });
@@ -214,6 +229,42 @@ type Invitee =
   | { ok: true; userId: string; invited: boolean }
   | { ok: false; message: string };
 
+/** Whether a login already carries a name, in either of the keys 0030 reads. */
+function hasName(metadata: Record<string, unknown> | undefined): boolean {
+  for (const key of ["full_name", "name"]) {
+    const value = metadata?.[key];
+    if (typeof value === "string" && value.trim() !== "") return true;
+  }
+  return false;
+}
+
+/**
+ * Set what a person is called.
+ *
+ * The name is read out of `auth.users` by a definer function (0030) and written
+ * through the auth admin API, which is the asymmetry worth knowing about: that
+ * table belongs to Supabase's own auth role, so nothing this deployment owns may
+ * update it directly. Existing metadata is spread back in so a key this app does
+ * not know about — the `role_profile` marker the seed script writes, say — is not
+ * dropped by a rename.
+ */
+async function setMemberName(
+  userId: string, fullName: string, existing?: Record<string, unknown>,
+): Promise<{ ok: true } | { ok: false; message: string }> {
+  let admin: ReturnType<typeof createAdminClient>;
+  try {
+    admin = createAdminClient();
+  } catch {
+    return { ok: false, message: "This deployment has no service key set up, so names cannot be changed here yet." };
+  }
+
+  const { error } = await admin.auth.admin.updateUserById(userId, {
+    user_metadata: { ...(existing ?? {}), full_name: fullName },
+  });
+  if (error) return { ok: false, message: `That name could not be saved. ${error.message}` };
+  return { ok: true };
+}
+
 /** Someone can already sign in with this address — here before, or elsewhere. */
 function isExistingAccount(error: { code?: string; status?: number; message: string }): boolean {
   if (error.code === "email_exists" || error.code === "user_already_exists") return true;
@@ -229,7 +280,9 @@ function isExistingAccount(error: { code?: string; status?: number; message: str
  * caller's own RLS-bound client, so which tenant a person joins stays the
  * database's decision rather than this file's.
  */
-async function resolveInvitee(email: string, redirectTo: string): Promise<Invitee> {
+async function resolveInvitee(
+  email: string, redirectTo: string, fullName: string,
+): Promise<Invitee> {
   let admin: ReturnType<typeof createAdminClient>;
   try {
     admin = createAdminClient();
@@ -240,7 +293,13 @@ async function resolveInvitee(email: string, redirectTo: string): Promise<Invite
     };
   }
 
-  const { data, error } = await admin.auth.admin.inviteUserByEmail(email, { redirectTo });
+  const { data, error } = await admin.auth.admin.inviteUserByEmail(email, {
+    redirectTo,
+    // Stored on the login rather than on the membership: a person is one
+    // person, and a second copy of their name per laundry is a second thing to
+    // keep in step. `tenant_members()` (0030) reads it straight back out.
+    data: { full_name: fullName },
+  });
   if (!error && data.user) return { ok: true, userId: data.user.id, invited: true };
 
   // They already have a login — with another laundry on this deployment, or
@@ -250,7 +309,14 @@ async function resolveInvitee(email: string, redirectTo: string): Promise<Invite
   if (error && isExistingAccount(error)) {
     const { data: link, error: linkError } =
       await admin.auth.admin.generateLink({ type: "magiclink", email });
-    if (!linkError && link.user) return { ok: true, userId: link.user.id, invited: false };
+    if (!linkError && link.user) {
+      // Their login is theirs and may serve another laundry, so their existing
+      // name is left alone; one is only set where there is none to overwrite.
+      if (!hasName(link.user.user_metadata)) {
+        await setMemberName(link.user.id, fullName, link.user.user_metadata);
+      }
+      return { ok: true, userId: link.user.id, invited: false };
+    }
   }
 
   return {
@@ -273,9 +339,9 @@ export async function inviteMember(formData: FormData): Promise<void> {
   const session = await assertCapability("admin.write");
   const parsed = inviteSchema.safeParse(toObject(formData));
   if (!parsed.success) return fail(PEOPLE, firstIssue(parsed.error));
-  const { email, role, depot_id } = parsed.data;
+  const { email, full_name, role, depot_id } = parsed.data;
 
-  const invitee = await resolveInvitee(email, await inviteRedirect());
+  const invitee = await resolveInvitee(email, await inviteRedirect(), full_name);
   if (!invitee.ok) return fail(PEOPLE, invitee.message);
 
   const supabase = await createClient();
@@ -301,15 +367,15 @@ export async function inviteMember(formData: FormData): Promise<void> {
 
   await recordAudit(session, {
     entity: "membership", entityId: invitee.userId, action: "create",
-    summary: `${email} invited as ${role}`,
+    summary: `${full_name} (${email}) invited as ${role}`,
   });
 
   revalidatePath(PEOPLE);
   return done(
     PEOPLE,
     invitee.invited
-      ? `Invitation emailed to ${email}. They can sign in as soon as they follow the link.`
-      : `${email} already had a login, so no email was sent — they have access now.`,
+      ? `Invitation emailed to ${full_name} at ${email}. They can sign in as soon as they follow the link.`
+      : `${full_name} already had a login, so no email was sent — they have access now.`,
   );
 }
 

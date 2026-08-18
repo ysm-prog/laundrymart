@@ -4,6 +4,11 @@ create extension if not exists pgcrypto;
 
 create schema if not exists auth;
 create table if not exists auth.users (id uuid primary key default gen_random_uuid(), email text);
+-- 0030 reads a member's name out of the metadata GoTrue stores it in. The shim
+-- predates that column, so add it rather than re-creating the table: an existing
+-- local database must gain it too, or `tenant_members` fails to compile there
+-- and passes in CI for the wrong reason.
+alter table auth.users add column if not exists raw_user_meta_data jsonb;
 create or replace function auth.uid() returns uuid language sql stable
   as $$ select nullif(current_setting('request.jwt.claim.sub', true),'')::uuid $$;
 

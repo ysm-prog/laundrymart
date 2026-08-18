@@ -89,9 +89,12 @@ const PREVIEW_LAUNDRY = [
   },
 ] as const;
 
+// People, not addresses. Every picker in the app labels somebody by their name
+// since 0030; the fixture showed two email addresses, which is exactly what the
+// change was made to stop.
 const PREVIEW_STAFF = [
-  { id: "u1", label: "counter@harbourlaundry.com.au", role: "Customer Service" },
-  { id: "u2", label: "kim@harbourlaundry.com.au", role: "Dispatcher" },
+  { id: "u1", label: "Priya Nair", role: "Customer Service" },
+  { id: "u2", label: "Kim Alvarez", role: "Dispatcher" },
 ];
 
 const DECISIONS = [
@@ -871,6 +874,11 @@ export default function DesignPreviewPage() {
                       description="Inline rather than a modal: date, time and who did it, defaulted to now.">
                   <CompleteJob action={previewApply} orderId="preview" delivered
                                staff={PREVIEW_STAFF} defaultStaffId="u1" />
+                </Card>
+
+                <Card title="Handing it back, with nobody to name"
+                      description="A laundry whose only members are platform administrators has no staff to pick. A required select with no options is a form that cannot be submitted and does not say why, so it says why.">
+                  <CompleteJob action={previewApply} orderId="preview" delivered staff={[]} />
                 </Card>
 
                 <Card title="Overlays"

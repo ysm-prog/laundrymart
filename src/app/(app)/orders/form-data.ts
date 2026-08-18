@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
-import { listStaff } from "@/lib/staff";
+import { listMembers, listStaff, withCurrentHolder } from "@/lib/directory";
 import type { JobCustomer, JobDriver, JobStaff } from "./job-form";
 
 /**
@@ -32,8 +32,14 @@ export type JobFormData = {
  *   with. It is fetched on its own if the capped list above did not include it,
  *   because a picker that cannot find the id it was handed renders as though
  *   nothing were selected while the hidden field still posts that customer.
+ * @param ensureStaffId whoever the job being edited is already assigned to. The
+ *   list is this laundry's people, which no longer includes platform
+ *   administrators — so without this, editing a job one of them holds would
+ *   open showing "Nobody yet" and clear the assignment on save.
  */
-export async function loadJobFormData(ensureCustomerId?: string): Promise<JobFormData> {
+export async function loadJobFormData(
+  ensureCustomerId?: string, ensureStaffId?: string,
+): Promise<JobFormData> {
   const supabase = await createClient();
 
   const [customersResult, locationsResult, driversResult, staff] = await Promise.all([
@@ -69,6 +75,7 @@ export async function loadJobFormData(ensureCustomerId?: string): Promise<JobFor
       .returns<JobDriver[]>(),
     listStaff(),
   ]);
+  const pickableStaff = withCurrentHolder(staff, await listMembers(), ensureStaffId);
 
   // First delivery site per customer wins; the query already sorts primaries up.
   const deliveryAddress = new Map<string, string>();
@@ -117,7 +124,7 @@ export async function loadJobFormData(ensureCustomerId?: string): Promise<JobFor
   return {
     customers,
     drivers: driversResult.data ?? [],
-    staff,
+    staff: pickableStaff,
     // Measured against what the search box actually covers, not against
     // `customers` — the row appended above is reachable only by already being
     // selected, so it must not make a truncated list look complete.

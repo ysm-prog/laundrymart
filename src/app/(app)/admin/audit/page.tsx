@@ -1,6 +1,7 @@
 import { Suspense } from "react";
 import { requireCapability } from "@/lib/auth/context";
 import { createClient } from "@/lib/supabase/server";
+import { listMembers, memberNames } from "@/lib/directory";
 import { dateTime } from "@/lib/format";
 import type { AuditLog } from "@/lib/db/types";
 import {
@@ -61,6 +62,13 @@ async function AuditList({ params }: { params: Search }) {
 
   const { data, count } = await query.returns<AuditLog[]>();
 
+  // Who did it, in words. This column showed eight characters of a UUID, which
+  // is the one thing an audit log must not do — a record of who changed what is
+  // only a record if the "who" is a person. Every member resolves here, platform
+  // administrators included: they are not offered in a picker anywhere, but a
+  // change one of them made still has to say so.
+  const names = memberNames(await listMembers());
+
   return (
     <>
       <DataTable
@@ -73,7 +81,9 @@ async function AuditList({ params }: { params: Search }) {
           { header: "Detail", cell: (row) => row.summary ?? "—", hideBelow: "sm" },
           {
             header: "Actor",
-            cell: (row) => (row.actor_id ? <span className="text-xs">{row.actor_id.slice(0, 8)}…</span> : "system"),
+            cell: (row) => (row.actor_id
+              ? names.get(row.actor_id) ?? <span className="text-xs">{row.actor_id.slice(0, 8)}…</span>
+              : "system"),
             hideBelow: "md",
           },
         ]}

@@ -4,7 +4,7 @@ import { requireCapability } from "@/lib/auth/context";
 import { createClient } from "@/lib/supabase/server";
 import { can } from "@/lib/roles";
 import { date as formatDate, dateTime } from "@/lib/format";
-import { listStaff, staffNames } from "@/lib/staff";
+import { listMembers, memberNames } from "@/lib/directory";
 import {
   ORDER_PRIORITIES, ORDER_STATUSES, ORDER_STATUS_LABELS, PRIORITY_LABELS,
   isOverdue, summariseItems,
@@ -396,8 +396,10 @@ async function JobList({ params, canCreate }: { params: Search; canCreate: boole
     );
   }
 
-  const staff = await listStaff();
-  const names = staffNames(staff);
+  // Every member, not just the pickable ones: this renders who a job is
+  // assigned to, and a record must still name somebody the picker no
+  // longer offers.
+  const names = memberNames(await listMembers());
   const filtered = isFiltered(params);
 
   return (

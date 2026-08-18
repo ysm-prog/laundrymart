@@ -82,6 +82,18 @@ The master spec names a .NET 9 Web API; this build follows the supplied skeleton
 - Invoice PDFs render server-side with `@react-pdf/renderer` (`src/lib/pdf/`), streamed from
   `/api/invoices/:id/pdf` and attached to the Resend email. `serverExternalPackages` keeps the
   renderer out of the client bundle.
+- **A person is shown by name, and the directory is one read** (`src/lib/directory.ts` over
+  `tenant_members()`, 0030). Every `assigned_to`, `created_by`, `actor_id` and `delivered_by`
+  column holds an `auth.users` id; the screens used to resolve those through the GoTrue admin
+  API one id at a time, which can only ever return an address and which **failed outright for
+  any login written straight into `auth.users`** — on this deployment, all eleven role profiles,
+  every one of which rendered as a short UUID. `memberDisplayName()` in `lib/domain/members.ts`
+  is the pure rule: the name they were invited under, then their linked driver record, then
+  their address, then a short id — and **never a name invented out of an email local part**,
+  because a wrong name reads as a different person. **Platform admins are filtered out of every
+  list people are picked from and are *not* filtered out of name resolution**: a job one of them
+  created still has to say so. That split is `staffMembers()` versus `memberNames()`, both pure
+  and both tested.
 - Notifications (`src/lib/notifications/`) have two writers and one reader. Server actions call
   `notify()` at the moment they cause an event, on the caller's RLS-bound client; the swept,
   time-based checks live in `/api/notifications/sweep`, which has no session and therefore uses
@@ -391,6 +403,15 @@ renders no tab strip. Tested in `src/lib/__tests__/nav.test.ts`.
   Adds no table, drops nothing, and changes no row until somebody asks. The three functions
   are `archivable_tables()` (the list, stated once and read by both the DDL loop and the
   stamper), `set_records_archived(t, archive)` and `archived_record_counts(t)`.
+- `0030_member_directory` — **`tenant_members(t)`: one laundry's people, with their names.**
+  A definer function returning `user_id`, address, the name out of `auth.users.raw_user_meta_data`,
+  the linked driver's name, role, site and an `is_platform_admin` flag, for a tenant the caller
+  belongs to (`is_member`, raising 42501 otherwise). Adds no table, no column, no policy, and
+  changes no row. It exists because `auth.users` is unreadable by an ordinary session and
+  PostgREST does not publish it — the same reason `platform_migrations()` (0019) and
+  `archived_record_counts()` (0017) are shaped this way. **Scoped by argument, which is the
+  other half of the fix:** `memberships` under RLS returns *every* laundry's rows to a platform
+  admin (0019), so the screens that read it directly listed one person once per laundry.
 - `0029_revoke_anon_table_grants` — **`anon` may not touch a table in `public`, and no future
   table hands it one back.** Revokes all table/sequence/function privileges from `anon`, then
   rewrites the **default privileges** that were re-granting them on every new table. Adds no
@@ -459,7 +480,7 @@ Proofs in `supabase/tests/`: `rls_isolation`, `rls_coverage`, `driver_scope`,
 `business_rules`, `media_scope`, `warehouse_rules`, `notifications_scope`, `laundry_orders`,
 `run_assignment`, `archive_records`, `laundry_pricing`, `platform_admin`, `main_flow_scope`,
 `job_billing`, `purchases_scope`, `supplier_payments_scope`, `import_helpers`,
-`import_activation` (**290 assertions**). Demo data in `supabase/seed.sql` — not
+`import_activation`, `member_directory` (**306 assertions**). Demo data in `supabase/seed.sql` — not
 applied by migrations.
 
 **Do not re-add `grant execute on all functions in schema public to anon`.** That
@@ -675,11 +696,36 @@ demote the other and lock the tenant out of its own People screen.
 
 ## 11. Hosted project
 `laundrymart-syd` · ref `xujhwljrmogenhvqpkrf` · ap-southeast-2 (Sydney) · org `ysm-prog`.
-Deployed on Vercel at `ats.coreit.com.au`. All migrations through `0027_xero_payments`
+Deployed on Vercel at `ats.coreit.com.au`. All migrations through `0030_member_directory`
 applied (0014 on 2026-08-13, 0015 and 0016 on 2026-08-14, 0017, 0018, 0019 and 0025 on
-2026-08-16, 0026 and 0027 on 2026-08-17), each verified by rolled-back probe rather than
-trusted. 0020–0024 are the renumbered branch migrations, already live under their original
+2026-08-16, 0026 and 0027 on 2026-08-17, 0030 on 2026-08-18), each verified by rolled-back probe
+rather than trusted. The ledger's last four entries are `0027_xero_payments`,
+`0028_archive_billing_policies`, `0029_revoke_anon_table_grants` and `0030_member_directory`. 0020–0024 are the renumbered branch migrations, already live under their original
 names (§7).
+
+For **0030** that was: pre-flight (function absent, **0** `anon`-executable functions so the
+migration's own assertion would pass, 0 `anon` table grants, 15 memberships, 2 platform admins);
+then the whole migration plus probes in two aborted transactions, read **as a real member** —
+the `operations_manager` role profile, who belongs to the demo laundry and nothing else. It saw
+**13 rows for Harbour, 2 of them platform administrators, 11 carrying a real name**, and was
+refused Adelaide at 42501 (`that business is not yours`) and refused a laundry id that does not
+exist. After the apply: still 0 `anon`-executable functions and 0 `anon` table grants,
+`authenticated` holding EXECUTE, and 647 invoices / 508 archived customers / 5 jobs / 15
+memberships untouched.
+
+**One live data repair went with it, and it is the reason the eleven test logins rendered as
+UUIDs.** They were written straight into `auth.users` by SQL (§3a records this), and GoTrue's
+admin API reads `confirmation_token`, `recovery_token`, `email_change` and
+`email_change_token_new` into non-nullable strings — all four were NULL on all eleven, so
+`getUserById` failed for every one of them while the two API-created logins resolved. Set to
+`''`, which is what GoTrue itself writes. Nothing else about those rows was touched. 0030 does
+not depend on this (it reads the table directly); **renaming somebody from the People screen
+does**, because that write still goes through the admin API.
+
+**Adelaide Towel Service has two members and both are platform administrators**, so with the
+owner's "never list a platform administrator" decision its People screen and its job pickers are
+now empty until somebody is invited. That is the decision working, not a fault — but it means
+the first thing to do in the real laundry is invite one real person.
 
 For **0026/0027** that was: the whole of both migrations plus probes in one aborted
 transaction, then applied for real and re-verified. `xero_connections` present with RLS on and
@@ -960,6 +1006,60 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-08-18 · People have names, and platform administrators are not staff
+Found on the deployed app: the job's Reassign picker offered `8c2b996b… · Driver`, two addresses
+listed twice each, and a third `Super Admin` nobody could identify. Three separate faults behind
+one screenshot. One migration (`0030`), no new table, no new column, no new policy, no new
+capability, and no row changed by the migration.
+
+- **The name was never asked for and never shown.** Every screen that puts a person beside a job
+  resolved `user_id` through the GoTrue admin API, which returns an *address* — so the best case
+  was an email and the worst was eight characters of a UUID. `tenant_members()` reads the name out
+  of `auth.users` in one query instead, and the invitation form now asks for a full name, required,
+  because a picker cannot show what nobody was ever asked for. An existing person can be renamed on
+  the People screen.
+- **Eleven of the thirteen logins were the worst case, for a reason worth writing down.** The role
+  profiles (§3a) were written into `auth.users` by hand SQL, leaving four token columns NULL —
+  which GoTrue reads into non-nullable strings, so `getUserById` failed for exactly those eleven
+  and succeeded for the two created through the API. That is why the two personal addresses
+  resolved and every test profile did not. Repaired live (§11); the new read path does not go
+  through GoTrue at all.
+- **The duplicates were a tenancy bug in plain sight.** `memberships` was read through RLS with no
+  `tenant_id` filter, and `is_member()` is true of *every* laundry for a platform admin (0019) — so
+  their session listed each of their memberships once per laundry. `tenant_members(t)` is scoped by
+  argument, and its proof asserts a platform admin reading one laundry at a time.
+- **Platform administrators are out of every list a person is picked from** — the job assignment
+  and completion pickers, the driver-login picker, and Administration → People. The owner's
+  decision, and it holds for the signed-in platform administrator too: they are not offered to
+  themselves. **They are deliberately still resolved by name**, because a job one of them created
+  still has to say who created it. `staffMembers()` versus `memberNames()` is that line, and both
+  are pure and tested.
+- **Two consequences that had to be built rather than discovered later.** A job assigned to
+  somebody the list no longer offers must not open showing "Nobody" — an unmatched `defaultValue`
+  selects the placeholder and the next save silently clears the assignment, so `withCurrentHolder`
+  adds the stored holder back, the way `receivedViaOptions()` already does for a legacy job.
+  And a laundry with **no** pickable staff — which `Adelaide Towel Service` is today, both its
+  members being platform administrators — would have rendered a `required` select with no options:
+  a completion form that cannot be submitted and does not say why. It now says why and links to
+  the People screen.
+- **The activity log stopped printing UUIDs too.** It showed `af9fed7e…` in the Actor column, which
+  is the one thing an audit log must not do.
+- `src/lib/staff.ts` and `src/lib/members.ts` are deleted, not left beside the new module: they
+  were two copies of the same admin-API lookup, and the second one existed because the first was
+  private to one screen.
+- 515 unit tests (was 496) and **306 pgTAP assertions (was 292)**. `verify` green; every migration
+  applied to a fresh Postgres 16 with the whole pgTAP suite and the seed run on top of it. The
+  gallery gained the empty-staff state and its staff fixture stopped being two email addresses;
+  asserted light and dark at 320/360/390/768/1440 — no console errors and no new overflow.
+
+**Applied to `laundrymart-syd` on 2026-08-18** (§11), rehearsed first and read back as a real
+member: 13 people in the demo laundry, 11 of them named, 2 platform administrators flagged and
+excluded, and Adelaide refused at 42501 to a member of the other laundry.
+
+**Before trusting it: invite one real person into `Adelaide Towel Service`.** Its only two members
+are platform administrators, so until then its People screen and its job pickers are empty by
+design.
+
 ### 2026-08-17 · The billing screens reach the gallery, and two hand-rolled checkboxes with them
 Closing the adoption properly. §10b requires a new module to land in `/design-preview`, and the
 rate-card merge had not: its two client components were unreachable to look at, on pages that are

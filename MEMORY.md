@@ -1,7 +1,37 @@
 # MEMORY — working session handoff
 > Auto-loaded each session. Canonical state is CLAUDE.md; this is the live delta.
 
-## Latest: one pricing model — the rate card adopted (`0028`)
+## Latest: people have names, and platform admins are not staff (`0030`)
+Deployed-app finding 2026-08-18: the job Reassign picker read `8c2b996b… · Driver`, with two
+addresses listed twice each. Three faults, one screenshot. CLAUDE.md §2, §7 (`0030`), §11 and the
+2026-08-18 entry have the detail.
+
+**`tenant_members(t)` (0030) is the one read.** Definer function over `memberships ⋈ auth.users`,
+returning the name from `raw_user_meta_data`, the linked driver's name, the address, the role and
+an `is_platform_admin` flag. Replaces the GoTrue admin API, which could only ever return an
+address, cost one HTTP call per member, and **failed outright for all eleven role profiles** —
+their `confirmation_token`/`recovery_token`/`email_change`/`email_change_token_new` were NULL
+(hand-written SQL, §3a) and GoTrue reads those into non-nullable strings. Repaired live to `''`.
+
+**Scoped by argument, and that is the duplicate fix.** `memberships` under RLS returns *every*
+laundry's rows to a platform admin (0019), so their session listed each membership once per
+laundry.
+
+**Platform admins are excluded from every list a person is picked from, People included** —
+owner's decision, and it holds for the signed-in platform admin too. **They are still resolved by
+name**: `staffMembers()` filters pickers, `memberNames()` renders records. A job one of them
+created still says who created it.
+
+**`Adelaide Towel Service` now has an empty People screen and empty job pickers** — its only two
+members are platform admins. By design; invite one real person there.
+
+**Names can be set**: the invite form asks for a full name (required) and the People row can
+rename. That write still goes through the admin API — the read does not.
+
+`src/lib/staff.ts` and `src/lib/members.ts` deleted; `src/lib/directory.ts` + pure rules in
+`src/lib/domain/members.ts`. 515 unit tests, 306 pgTAP assertions, `verify` green, 0030 applied.
+
+## Previously: one pricing model — the rate card adopted (`0028`)
 Owner's decision 2026-08-17: **adopt `customer-pricing-invoicing-sad9af`.** Two rival answers to
 "what is this customer charged?" had both been live since 15 Aug; only one has code now.
 CLAUDE.md §21/§22 and the 2026-08-17 entry have the design.

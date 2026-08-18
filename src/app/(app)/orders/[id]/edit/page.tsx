@@ -44,7 +44,8 @@ export default async function EditJobPage({
   if (order.status === "cancelled") redirect(`/orders/${id}`);
   if (order.status === "completed" && !can(session.role, "orders.manage")) redirect(`/orders/${id}`);
 
-  const { customers, drivers, staff } = await loadJobFormData(customer ?? order.customer_id);
+  const { customers, drivers, staff } =
+    await loadJobFormData(customer ?? order.customer_id, order.assigned_to ?? undefined);
 
   return (
     <PageContainer width="form">

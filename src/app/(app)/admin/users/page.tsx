@@ -1,7 +1,7 @@
 import { cache, Suspense } from "react";
 import { requireCapability } from "@/lib/auth/context";
 import { createClient } from "@/lib/supabase/server";
-import { memberEmails } from "@/lib/members";
+import { listMembers, staffMembers } from "@/lib/directory";
 import {
   can, isRole, presetForRole, MEMBERSHIP_ROLES, PRESET_ROLES, ROLE_LABELS, ROLE_PRESETS, ROLE_SUMMARY,
   type Role,
@@ -17,8 +17,6 @@ import { inviteMember, removeMember, updateMembership } from "../actions";
 
 export const metadata = { title: "People" };
 export const dynamic = "force-dynamic";
-
-type Row = { user_id: string; role: string; depot_id: string | null; created_at: string };
 
 export default async function UsersPage() {
   const session = await requireCapability("admin.read");
@@ -132,7 +130,14 @@ async function InviteCard() {
       description="They get an email with a link to set a password. Their access starts as soon as they follow it."
     >
       <form action={inviteMember} className="space-y-4">
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-[minmax(0,2fr)_minmax(0,1.5fr)_minmax(0,1.5fr)]">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,2fr)_minmax(0,1.5fr)_minmax(0,1.5fr)]">
+          {/* Asked for first, and required. This is the name the job pickers,
+              the completion form and the activity log will show — the screens
+              that had nothing but an address to put beside a person. */}
+          <Field label="Full name" name="full_name" required
+                 hint="How they appear on jobs and runs.">
+            <Input name="full_name" required autoComplete="off" placeholder="Mario Forte" />
+          </Field>
           <Field label="Email address" name="email" required
                  hint="The address they will sign in with.">
             <Input name="email" type="email" required autoComplete="off"
@@ -160,69 +165,76 @@ async function InviteCard() {
 async function MembershipList({
   canWrite, currentUserId,
 }: { canWrite: boolean; currentUserId: string }) {
-  const supabase = await createClient();
-  const [{ data: memberships }, depots] = await Promise.all([
-    supabase.from("memberships").select("user_id, role, depot_id, created_at").order("created_at")
-      .returns<Row[]>(),
-    activeDepots(),
-  ]);
-
+  const [members, depots] = await Promise.all([listMembers(), activeDepots()]);
   const depotName = new Map(depots.map((depot) => [depot.id, depot.name]));
-  const emails = await memberEmails((memberships ?? []).map((row) => row.user_id));
+
+  // Platform administrators are not this laundry's people. They hold a
+  // membership in every laundry on the deployment (0019) so that they can
+  // support one, and listing them here reads as two strangers on the payroll —
+  // the owner's decision. Platform → Administrators is where that list lives,
+  // and it is the only screen that shows it.
+  const rows = staffMembers(members);
 
   return (
     <Card title="Members" description="Only administrators can see and change this list.">
       <DataTable
-        rows={memberships ?? []}
-        empty={<EmptyState title="No memberships visible"
-                           description="Administrators see the full list; other roles only see themselves." />}
+        rows={rows}
+        empty={<EmptyState title="Nobody on the list yet"
+                           description="Invite your staff above. Platform administrators are not shown here — they support every laundry on this system rather than working in one." />}
         columns={[
           {
             header: "Person",
             cell: (row) => (
               <span className="flex items-center gap-2">
-                {emails.has(row.user_id) ? (
-                  <span className="min-w-0">
-                    <span className="block truncate text-[13px]">{emails.get(row.user_id)}</span>
-                    <span className="block text-3xs text-muted-foreground">
-                      {row.user_id.slice(0, 8)}
-                    </span>
-                  </span>
-                ) : (
-                  <span className="text-xs">{row.user_id.slice(0, 8)}…</span>
-                )}
-                {row.user_id === currentUserId ? <Badge tone="primary">you</Badge> : null}
+                <span className="min-w-0">
+                  <span className="block truncate text-[13px] font-medium">{row.label}</span>
+                  {/* The address underneath, because this is the one screen
+                      that is about logins rather than about people. When it is
+                      all we have, the label above is already showing it, so
+                      repeating it would just say the same thing twice. */}
+                  {row.named && row.email ? (
+                    <span className="block truncate text-xs text-muted-foreground">{row.email}</span>
+                  ) : null}
+                </span>
+                {row.id === currentUserId ? <Badge tone="primary">you</Badge> : null}
+                {row.named ? null : <Badge tone="warning">no name</Badge>}
               </span>
             ),
           },
           {
             header: "Role",
-            cell: (row) => (isRole(row.role) ? roleName(row.role) : row.role),
+            cell: (row) => (isRole(row.roleValue) ? roleName(row.roleValue) : row.roleValue),
           },
           {
             header: "Site",
-            cell: (row) => (row.depot_id ? depotName.get(row.depot_id) ?? "—" : "Every site"),
+            cell: (row) => (row.depotId ? depotName.get(row.depotId) ?? "—" : "Every site"),
             hideBelow: "sm",
           },
-          { header: "Added", cell: (row) => date(row.created_at), hideBelow: "md" },
+          { header: "Added", cell: (row) => date(row.joinedAt), hideBelow: "md" },
           {
             header: "",
             align: "right",
-            cell: (row) => (canWrite && row.user_id !== currentUserId ? (
+            cell: (row) => (canWrite && row.id !== currentUserId ? (
               <div className="flex flex-wrap items-center justify-end gap-2">
-                <form action={updateMembership} className="flex items-center gap-2">
-                  <input type="hidden" name="user_id" value={row.user_id} />
-                  <Select name="role" defaultValue={row.role} groups={ROLE_GROUPS} />
-                  <Select name="depot_id" placeholder="Every site" defaultValue={row.depot_id}
+                <form action={updateMembership} className="flex flex-wrap items-center gap-2">
+                  <input type="hidden" name="user_id" value={row.id} />
+                  {/* A name can be corrected here, which is what makes the rest
+                      of the app able to show one: eleven of the logins on this
+                      deployment predate ever being asked for a name, and a
+                      picker showing an address is not a list of people. */}
+                  <Input name="full_name" defaultValue={row.fullName ?? ""}
+                         aria-label={`Name for ${row.label}`} placeholder="Their name" />
+                  <Select name="role" defaultValue={row.roleValue} groups={ROLE_GROUPS} />
+                  <Select name="depot_id" placeholder="Every site" defaultValue={row.depotId}
                           options={depots.map((depot) => ({ value: depot.id, label: depot.name }))} />
                   <SubmitButton variant="secondary" pendingLabel="Saving…">Save</SubmitButton>
                 </form>
                 <form action={removeMember}>
-                  <input type="hidden" name="user_id" value={row.user_id} />
+                  <input type="hidden" name="user_id" value={row.id} />
                   <ConfirmSubmit
                     label="Remove"
                     eyebrow="Removes their access"
-                    consequence={`${emails.get(row.user_id) ?? "This person"} will no longer be able`
+                    consequence={`${row.label} will no longer be able`
                       + " to sign in to this laundry. Their login and everything they recorded stay"
                       + " as they are, and you can invite them back later."}
                     pendingLabel="Removing…"

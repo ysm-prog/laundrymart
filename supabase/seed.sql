@@ -10,9 +10,12 @@
 -- ============================================================================
 begin;
 
-insert into auth.users (id, email) values
-  ('00000000-0000-4000-8000-000000000001','ops@demo.laundry'),
-  ('00000000-0000-4000-8000-000000000002','driver@demo.laundry')
+-- Names as well as addresses: since 0030 every screen that names a person reads
+-- `raw_user_meta_data`, and a demo tenant whose people are all `00000000…` is a
+-- demo of the bug rather than of the app.
+insert into auth.users (id, email, raw_user_meta_data) values
+  ('00000000-0000-4000-8000-000000000001','ops@demo.laundry','{"full_name":"Olivia Ops"}'),
+  ('00000000-0000-4000-8000-000000000002','driver@demo.laundry','{"full_name":"Sam Okoye"}')
 on conflict (id) do nothing;
 
 insert into public.tenants (id, name, abn, timezone) values

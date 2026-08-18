@@ -4,7 +4,9 @@ import { requireCapability } from "@/lib/auth/context";
 import { createClient } from "@/lib/supabase/server";
 import { can } from "@/lib/roles";
 import { date as formatDate, dateTime, time as formatTime } from "@/lib/format";
-import { listStaff, staffNames } from "@/lib/staff";
+import {
+  defaultStaffId, listMembers, memberNames, staffMembers, withCurrentHolder,
+} from "@/lib/directory";
 import {
   DELIVERY_WINDOW_LABELS, PRIORITY_LABELS, RECEIVED_VIA_LABELS,
   actionsFor, describeItem, isOrderStatus, isOverdue,
@@ -75,7 +77,7 @@ export default async function JobDetailPage({
 
   if (!order || !isOrderStatus(order.status)) notFound();
 
-  const [items, activity, staff] = await Promise.all([
+  const [items, activity, members] = await Promise.all([
     supabase.from("laundry_order_items")
       .select("id, order_id, item_type, custom_description, quantity_type, exact_quantity, bag_count, estimated_quantity, notes")
       .eq("order_id", id).order("created_at")
@@ -84,10 +86,16 @@ export default async function JobDetailPage({
       .select("id, order_id, actor_id, activity_type, previous_value, new_value, note, created_at")
       .eq("order_id", id).order("created_at", { ascending: false }).limit(100)
       .returns<LaundryOrderActivity[]>(),
-    listStaff(),
+    listMembers(),
   ]);
 
-  const names = staffNames(staff);
+  // Two lists, on purpose. `names` covers every member, because a record has
+  // to say who created it even when that person is not somebody you can
+  // hand work to; `staff` is who this laundry can pick from, which excludes
+  // platform administrators (they administer the deployment, not this
+  // business).
+  const names = memberNames(members);
+  const staff = staffMembers(members);
   // An unrecognised value reads as `pending`, never as something further along:
   // a billing state nobody knows must not render as "approved".
   const storedBillingStatus = order.billing_status ?? "";
@@ -174,7 +182,7 @@ export default async function JobDetailPage({
                     orderId={order.id}
                     delivered={delivery}
                     staff={staff}
-                    defaultStaffId={order.assigned_to ?? session.userId}
+                    defaultStaffId={defaultStaffId(staff, order.assigned_to, session.userId)}
                   />
                 );
               }
@@ -315,9 +323,10 @@ export default async function JobDetailPage({
               <input type="hidden" name="id" value={order.id} />
               <Eyebrow>Reassign</Eyebrow>
               <Select name="assigned_to" placeholder="Nobody" defaultValue={order.assigned_to}
-                      options={staff.map((member) => ({
-                        value: member.id, label: `${member.label} · ${member.role}`,
-                      }))} />
+                      options={withCurrentHolder(staff, members, order.assigned_to)
+                        .map((member) => ({
+                          value: member.id, label: `${member.label} · ${member.role}`,
+                        }))} />
               <SubmitButton variant="secondary" pendingLabel="Saving…">Save</SubmitButton>
             </form>
           ) : null}

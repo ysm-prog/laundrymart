@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { SubmitButton } from "@/components/form";
-import { CONTROL, Eyebrow } from "@/components/ui";
+import { CONTROL, Eyebrow, Notice } from "@/components/ui";
 import { businessNowTime, businessToday } from "@/lib/domain/timezone";
 import type { JobStaff } from "./job-form";
 
@@ -26,11 +26,27 @@ export function CompleteJob({
   /** True for a delivery job, false for a customer pickup. */
   delivered: boolean;
   staff: JobStaff[];
-  defaultStaffId: string;
+  /** Undefined when nobody sensible can be pre-selected — see the select below. */
+  defaultStaffId?: string;
 }) {
   const [open, setOpen] = useState(false);
   const verb = delivered ? "delivered" : "collected";
   const label = delivered ? "Mark as delivered" : "Mark as collected";
+
+  // Recording a completion means naming who handed the laundry over, and the
+  // list is this laundry's own people — which excludes platform administrators
+  // (0030). A laundry whose only members administer the deployment therefore
+  // has nobody to name, and a `required` select with no options is a form that
+  // cannot be submitted and does not say why. Say why, and link to the fix.
+  if (staff.length === 0) {
+    return (
+      <Notice tone="warning" title="Nobody here can be recorded as handing this over">
+        This laundry has no staff logins yet. Add your people under{" "}
+        <a className="underline" href="/admin/users">Administration → People</a>, then
+        come back and close the job.
+      </Notice>
+    );
+  }
 
   if (!open) {
     return (
@@ -71,7 +87,13 @@ export function CompleteJob({
           <span className="block text-sm font-medium text-foreground">
             {delivered ? "Delivered by" : "Handed over by"}
           </span>
-          <select name="handled_by" required defaultValue={defaultStaffId} className={CONTROL}>
+          <select name="handled_by" required defaultValue={defaultStaffId ?? ""}
+                  className={CONTROL}>
+            {/* No default means the job is assigned to somebody this list no
+                longer offers. A browser selects the first option when the
+                default matches none of them, which would quietly record the
+                wrong person as having handed the laundry over — so ask. */}
+            {defaultStaffId ? null : <option value="" disabled>Choose who {verb} it…</option>}
             {staff.map((member) => (
               <option key={member.id} value={member.id}>{member.label} · {member.role}</option>
             ))}
