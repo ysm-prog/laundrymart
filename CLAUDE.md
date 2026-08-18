@@ -1051,6 +1051,10 @@ migration; no schema, RLS, capability or workflow change.
   orphan runs, their stops, and the cross-tenant customer on LJ00001 are all still there to look
   at, and none of them was deleted by this change.
 
+**Merged to `Prod` on 2026-08-18** with the entry below, so both are live on `ats.coreit.com.au`.
+No migration in this one: the database was already correct — it was the app that was reading
+across two businesses.
+
 ### 2026-08-18 · People have names, and platform administrators are not staff
 Found on the deployed app: the job's Reassign picker offered `8c2b996b… · Driver`, two addresses
 listed twice each, and a third `Super Admin` nobody could identify. Three separate faults behind
@@ -1104,6 +1108,9 @@ excluded, and Adelaide refused at 42501 to a member of the other laundry.
 **Before trusting it: invite one real person into `Adelaide Towel Service`.** Its only two members
 are platform administrators, so until then its People screen and its job pickers are empty by
 design.
+
+**Merged to `Prod` on 2026-08-18.** `0030` was applied to `laundrymart-syd` before the merge, so
+the schema led the code rather than the other way round — the safe order for an additive read.
 
 ### 2026-08-17 · The billing screens reach the gallery, and two hand-rolled checkboxes with them
 Closing the adoption properly. §10b requires a new module to land in `/design-preview`, and the

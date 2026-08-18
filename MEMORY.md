@@ -21,6 +21,10 @@ plus the jobs list, job form pickers, orders filter bar, dispatch card, and the 
 `createOrder` **and** `updateOrder`. Foreign job → a notice naming the laundry, not a dead picker.
 Reads across laundries still allowed; writes are not.
 
+**Both 2026-08-18 changes are on `Prod` and deployed.** `0030` is on `laundrymart-syd`; the whole
+repo ledger is applied there (0001–0030, four of them live under their original branch names).
+Nothing is pending on the database side.
+
 **Not swept (§23):** ~350 of 451 `.from(...)` reads still rely on RLS alone. Correct for the other
 ten roles; a two-business list for a platform admin. Cheapest option on the table: drop the
 platform-admin rows for darshan/jay — they hold `super_admin` in both laundries anyway.
