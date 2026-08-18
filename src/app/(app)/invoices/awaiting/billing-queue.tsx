@@ -70,15 +70,23 @@ export function BillingQueue({
           </caption>
           <thead className="border-b text-left text-muted-foreground">
             <tr>
-              <th scope="col" className="w-10 py-2 pr-2">
-                <input
-                  type="checkbox"
-                  className="size-4 rounded border"
-                  aria-label={allSelected ? "Clear the selection" : "Select every job listed"}
-                  checked={allSelected}
-                  onChange={() =>
-                    setSelected(allSelected ? new Set() : new Set(selectable.map((row) => row.id)))}
-                />
+              <th scope="col" className="w-11 py-2 pr-2">
+                {/* The skin is the shared `Checkbox`'s, and the padded label is
+                    the hit area rather than the 18px box — the same reason that
+                    component gives (§10b): a bare box is a 16px tap target, and
+                    this list is worked from a phone. `Checkbox` itself cannot be
+                    used here because it is uncontrolled and this selection is
+                    React state. */}
+                <label className="flex min-h-11 cursor-pointer items-center justify-center">
+                  <input
+                    type="checkbox"
+                    className="size-[1.15rem] shrink-0 rounded border-strong accent-primary"
+                    aria-label={allSelected ? "Clear the selection" : "Select every job listed"}
+                    checked={allSelected}
+                    onChange={() =>
+                      setSelected(allSelected ? new Set() : new Set(selectable.map((row) => row.id)))}
+                  />
+                </label>
               </th>
               <th scope="col" className="py-2 pr-3 font-medium">Job</th>
               <th scope="col" className="py-2 pr-3 font-medium">Customer</th>
@@ -94,16 +102,20 @@ export function BillingQueue({
               return (
                 <tr key={row.id} className={selected.has(row.id) ? "bg-primary/5" : undefined}>
                   <td className="py-2 pr-2">
-                    <input
-                      type="checkbox"
-                      name="selected"
-                      value={row.id}
-                      className="size-4 rounded border"
-                      aria-label={`Select job ${row.orderNumber}`}
-                      disabled={!canSelect}
-                      checked={selected.has(row.id)}
-                      onChange={() => toggle(row.id)}
-                    />
+                    <label className={`flex min-h-11 items-center justify-center ${
+                      canSelect ? "cursor-pointer" : "cursor-not-allowed"}`}>
+                      <input
+                        type="checkbox"
+                        name="selected"
+                        value={row.id}
+                        className="size-[1.15rem] shrink-0 rounded border-strong accent-primary
+                                   disabled:opacity-40"
+                        aria-label={`Select job ${row.orderNumber}`}
+                        disabled={!canSelect}
+                        checked={selected.has(row.id)}
+                        onChange={() => toggle(row.id)}
+                      />
+                    </label>
                   </td>
                   <td className="py-2 pr-3">
                     <Link href={`/orders/${row.id}`} className="font-medium text-primary hover:underline">

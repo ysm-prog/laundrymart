@@ -21,6 +21,8 @@ import {
 import { UNASSIGNED } from "@/app/(app)/routes/planner/plan";
 import { DateNav } from "@/app/(app)/my-runs/date-nav";
 import { DaySummary, JobCard, JobGroup } from "@/app/(app)/my-runs/run-view";
+import { BillingQueue, type QueueRow } from "@/app/(app)/invoices/awaiting/billing-queue";
+import { JobChargesEditor, type EditableCharge } from "@/app/(app)/orders/[id]/job-charges-editor";
 import { PriceTable } from "@/app/(app)/invoices/prices/price-table";
 import {
   defaultPriceList, priceListFor, type LaundryPriceRow,
@@ -967,8 +969,97 @@ export default function DesignPreviewPage() {
               submitLabel="Save their prices"
             />
           </section>
+
+          {/* --------------------------------------------- billing review ----- */}
+          {/* The two screens the rate-card adoption added, and the reason they
+              are here: both are **compose-locally-commit-once** client
+              components, which is the class that has shipped broken twice in
+              this repo behind a green `verify` — the job form's items and the
+              planner's whole board. The pages that host them are async server
+              components reading Supabase, so this gallery is the only place
+              their layout and their empty states can be looked at at all. */}
+          <section id="billing-review-preview" className="space-y-6 border-t pt-8">
+            <PageHeader
+              title="Awaiting invoice"
+              description="Finished work that has not been billed. Approve the charges, then generate."
+            />
+
+            <Card title="Approve" description="A job with no charges cannot be selected — it needs pricing first.">
+              <BillingQueue rows={PREVIEW_QUEUE} mode="approve" canAct />
+            </Card>
+
+            <Card title="Generate" description="Approved jobs, grouped by each customer's billing method.">
+              <BillingQueue rows={PREVIEW_QUEUE_APPROVED} mode="generate" canAct />
+            </Card>
+
+            <Card title="Nothing waiting" description="The state the queue is in most of the time.">
+              <BillingQueue rows={[]} mode="approve" canAct />
+            </Card>
+
+            <Card title="A job's charges"
+                  description="Editable right up until approval, and frozen the moment it is given.">
+              <JobChargesEditor orderId="preview" initial={PREVIEW_CHARGES}
+                                action={async () => { "use server"; }} />
+            </Card>
+          </section>
         </main>
       </div>
     </div>
   );
 }
+
+/**
+ * Fixtures for the billing review screens.
+ *
+ * `chargeCount: 0` on one row is deliberate and is the case worth looking at:
+ * that job cannot be approved, so the queue must render it unselectable with a
+ * reason beside it rather than offering a tick that would half-fail.
+ */
+const PREVIEW_QUEUE: QueueRow[] = [
+  {
+    id: "job-1", orderNumber: "LJ00042", customerId: "cust-1",
+    customerName: "Harbourview Hotel", billingMethod: "monthly_consolidated",
+    completedAt: "2026-08-14T04:20:00Z", chargeCount: 3, subtotal: 184.5,
+    hasRateCard: true,
+  },
+  {
+    id: "job-2", orderNumber: "LJ00043", customerId: "cust-2",
+    customerName: "Bondi Surf Club", billingMethod: "invoice_per_job",
+    completedAt: "2026-08-15T22:10:00Z", chargeCount: 1, subtotal: 42,
+    hasRateCard: false,
+  },
+  {
+    id: "job-3", orderNumber: "LJ00044", customerId: "cust-3",
+    customerName: "City Gym — Alexandria", billingMethod: "monthly_consolidated",
+    completedAt: "2026-08-16T01:05:00Z", chargeCount: 0, subtotal: 0,
+    hasRateCard: false,
+  },
+];
+
+const PREVIEW_QUEUE_APPROVED: QueueRow[] = PREVIEW_QUEUE
+  .filter((row) => row.chargeCount > 0)
+  .map((row) => ({ ...row }));
+
+const PREVIEW_CHARGES: EditableCharge[] = [
+  {
+    key: "c1", description: "Bath towels — 120", charge_type: "wash_only",
+    quantity: 120, unit_price: 1.1, taxable: true,
+    source_agreement_id: "agr-1", source_agreement_line_id: "line-1",
+    source_item_id: null, source_laundry_item_type: "bath_towels",
+    pricing_model: "per_item",
+  },
+  {
+    key: "c2", description: "Sheets — 40 (price list)", charge_type: "wash_only",
+    quantity: 40, unit_price: 2.4, taxable: true,
+    source_agreement_id: null, source_agreement_line_id: null,
+    source_item_id: null, source_laundry_item_type: "sheets",
+    pricing_model: "per_item",
+  },
+  {
+    key: "c3", description: "Fuel levy (5%)", charge_type: "fuel_levy",
+    quantity: 1, unit_price: 11.4, taxable: true,
+    source_agreement_id: "agr-1", source_agreement_line_id: null,
+    source_item_id: null, source_laundry_item_type: null,
+    pricing_model: "percentage",
+  },
+];

@@ -42,6 +42,13 @@ price and approve at Money › Awaiting invoice, run the month, read the draft.
 **A stray NUL byte was removed from `laundry-billing.ts`** — pre-existing, made the file read as
 *binary* to grep and ripgrep, which is how it hid.
 
+**The two billing client components are in `/design-preview` now**, and adding them found a real
+defect: both hand-rolled a 16px `size-4` checkbox instead of the shared `Checkbox`'s 18px box in a
+`min-h-11` label. Eleven of them. Fixed to the shared skin with a measured **44px hit area**.
+`Checkbox` itself cannot be used — it is uncontrolled and these hold React state. Asserted at ten
+widths, both themes: no section overflow, no console errors. The 7px doc overflow at 320/1024 is
+the pre-existing planner fixture.
+
 **CLOSED by `0029` (2026-08-17): the `anon` grants are gone.** It was worse than recorded — all
 seven privileges including **TRUNCATE**, on 52 of 53 tables — and **RLS does not apply to
 TRUNCATE**, so "inert because RLS is on" was the wrong reassurance. Live: 364 anon grants → 0,

@@ -137,10 +137,15 @@ export function JobChargesEditor({
             </div>
 
             <div className="flex flex-wrap items-center gap-4 sm:col-span-12">
-              <label className="flex items-center gap-2 text-sm">
+              {/* The shared `Checkbox`'s skin, and its padded label as the hit
+                  area (§10b). That component is uncontrolled, so it cannot be
+                  used for a row whose value is React state — but a bare 16px
+                  box at a call site is exactly what the one-input-skin rule
+                  exists to stop. */}
+              <label className="flex min-h-11 cursor-pointer items-center gap-2 text-sm">
                 <input
                   type="checkbox"
-                  className="size-4 rounded border"
+                  className="size-[1.15rem] shrink-0 rounded border-strong accent-primary"
                   checked={row.taxable !== false}
                   onChange={(event) => update(row.key, { taxable: event.target.checked })}
                 />

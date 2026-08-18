@@ -960,6 +960,32 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-08-17 · The billing screens reach the gallery, and two hand-rolled checkboxes with them
+Closing the adoption properly. §10b requires a new module to land in `/design-preview`, and the
+rate-card merge had not: its two client components were unreachable to look at, on pages that are
+async server components reading Supabase. No migration, no schema, no capability.
+
+- **Both are compose-locally-commit-once components**, which is the class that has shipped broken
+  twice in this repo behind a green `verify` — the job form's items and the planner's whole board.
+  `BillingQueue` (approve, generate and the empty state) and `JobChargesEditor` now render with
+  fixtures. One queue fixture deliberately carries `chargeCount: 0`: that job cannot be approved,
+  so the row must be unselectable with a reason beside it rather than offering a tick that would
+  half-fail.
+- **The gallery immediately earned it, which is the whole argument for §10b.** Both components
+  hand-rolled `<input type="checkbox" className="size-4 rounded border">` at the call site — a
+  bare **16px** tap target, where every other checkbox in the app is the shared `Checkbox`'s 18px
+  box inside a `min-h-11` padded label. That is precisely the "one input skin — import it, never
+  restyle an input at the call site" rule. Eleven of them, measured rather than noticed.
+- **The shared component could not simply be dropped in**, and the comments say why: `Checkbox` is
+  uncontrolled, and both of these hold their selection in React state. So they take its *skin* and
+  its *padded-label hit area* instead. Measured after: every checkbox now has a **44px** hit area
+  (36×44 in the queue, 103×44 on "GST applies").
+- **Asserted at 320/360/375/390/430/768/820/1024/1280/1440, light and dark**: no overflow inside
+  the section and no console errors anywhere. The 7px document overflow at 320 and 1024 is the
+  pre-existing dispatch-planner fixture that the 2026-08-16 entry already measured, unchanged by
+  this.
+- 496 unit tests, `verify` green. Nothing behind the auth gate changed behaviour.
+
 ### 2026-08-17 · `anon` could have truncated every table; the grants and their source are gone
 The last open security item from §11, closed. One migration (`0029`), no table, no column, no
 policy, no row changed — and nothing granted to `authenticated` or `service_role` touched.
