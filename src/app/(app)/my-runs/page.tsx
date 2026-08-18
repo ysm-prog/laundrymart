@@ -1,6 +1,6 @@
 import { Suspense } from "react";
 import { PackageCheck } from "lucide-react";
-import { requireCapability } from "@/lib/auth/context";
+import { requireCapability, requireSession } from "@/lib/auth/context";
 import { createClient } from "@/lib/supabase/server";
 import { can } from "@/lib/roles";
 import {
@@ -105,8 +105,9 @@ async function Day({
 }: {
   driverId: string; driverName: string; date: string; isSelf: boolean; canWork: boolean;
 }) {
+  const session = await requireSession();
   const supabase = await createClient();
-  const jobs = await loadDriverDayJobs(supabase, driverId, date);
+  const jobs = await loadDriverDayJobs(supabase, session.tenantId, driverId, date);
   const day = groupDriverDay(jobs);
   const returnTo = `/my-runs?date=${date}${isSelf ? "" : `&driver=${driverId}`}`;
 

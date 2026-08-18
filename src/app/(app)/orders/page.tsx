@@ -1,6 +1,6 @@
 import { Suspense } from "react";
 import Link from "next/link";
-import { requireCapability } from "@/lib/auth/context";
+import { requireCapability, requireSession } from "@/lib/auth/context";
 import { createClient } from "@/lib/supabase/server";
 import { can } from "@/lib/roles";
 import { date as formatDate, dateTime } from "@/lib/format";
@@ -191,16 +191,18 @@ const RUN_OPTIONS = [
  * input in the app — which is the drift `ListControls` exists to prevent.
  */
 async function Filters({ params }: { params: Search }) {
+  const session = await requireSession();
   const supabase = await createClient();
   const [{ data: customers }, drivers] = await Promise.all([
     supabase
       .from("customers")
       .select("id, business_name")
+      .eq("tenant_id", session.tenantId)
       .is("deleted_at", null)
       .order("business_name")
       .limit(200)
       .returns<{ id: string; business_name: string }[]>(),
-    listActiveDrivers(supabase),
+    listActiveDrivers(supabase, session.tenantId),
   ]);
 
   return (
@@ -305,6 +307,7 @@ async function Filters({ params }: { params: Search }) {
 /* ------------------------------------------------------------------- list */
 
 async function JobList({ params, canCreate }: { params: Search; canCreate: boolean }) {
+  const session = await requireSession();
   const supabase = await createClient();
   const today = businessToday();
   const page = pageFrom(params.page);
@@ -326,6 +329,10 @@ async function JobList({ params, canCreate }: { params: Search; canCreate: boole
       "bag_count, estimated_quantity)",
       { count: "exact" },
     )
+    // This laundry's jobs. For ten of the eleven roles RLS already says so;
+    // for a platform admin it does not (0019), and a list mixing two
+    // businesses' jobs is how one of them gets worked on from inside the other.
+    .eq("tenant_id", session.tenantId)
     .order("received_at", { ascending: false })
     .range(from, to);
 

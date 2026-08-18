@@ -77,6 +77,14 @@ export default async function JobDetailPage({
 
   if (!order || !isOrderStatus(order.status)) notFound();
 
+  // **Whose job this is.** A platform admin's session reads every laundry
+  // (0019) while every write is filtered to the one they are working in, so a
+  // job from another business opens here and then refuses every action — which
+  // used to surface as "somebody else changed this job's driver". The page
+  // stays readable, because looking is exactly what that role is for; what
+  // changes is that it now says so.
+  const foreign = order.tenant_id !== session.tenantId;
+
   const [items, activity, members] = await Promise.all([
     supabase.from("laundry_order_items")
       .select("id, order_id, item_type, custom_description, quantity_type, exact_quantity, bag_count, estimated_quantity, notes")
@@ -232,7 +240,8 @@ export default async function JobDetailPage({
         {/* ------------------------------------------------------ delivery --- */}
         {/* Which driver is taking it, and on what day. `routes.write` is the
             existing plan-and-assign capability — no new one is introduced. */}
-        <DispatchCard order={order} canAssign={can(session.role, "routes.write")} />
+        <DispatchCard order={order} canAssign={can(session.role, "routes.write") && !foreign}
+                      foreign={foreign} />
 
         {/* ------------------------------------------------------ customer --- */}
         <Card

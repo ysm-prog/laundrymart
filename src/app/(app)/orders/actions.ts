@@ -159,6 +159,7 @@ function toRow(input: OrderInput, deliveryAddress: string | null, receivedAt: st
  */
 async function resolveDeliveryAddress(
   supabase: Awaited<ReturnType<typeof createClient>>,
+  tenantId: string,
   input: OrderInput,
 ): Promise<string | null> {
   if (!input.delivery_required) return null;
@@ -167,6 +168,7 @@ async function resolveDeliveryAddress(
   const { data: location } = await supabase
     .from("customer_locations")
     .select("address_line1, suburb, state, postcode, is_primary")
+    .eq("tenant_id", tenantId)
     .eq("customer_id", input.customer_id)
     .eq("is_delivery", true)
     .is("deleted_at", null)
@@ -186,6 +188,7 @@ async function resolveDeliveryAddress(
   const { data: customer } = await supabase
     .from("customers")
     .select("billing_address_line1, billing_suburb, billing_state, billing_postcode")
+    .eq("tenant_id", tenantId)
     .eq("id", input.customer_id)
     .maybeSingle<{
       billing_address_line1: string | null; billing_suburb: string | null;
@@ -268,6 +271,11 @@ export async function createOrder(formData: FormData): Promise<void> {
   const { data: customer, error: customerError } = await supabase
     .from("customers")
     .select("id, business_name, depot_id")
+    // **This laundry's customer.** RLS says so for ten of the eleven roles and
+    // does not for a platform admin (0019), so without this a job could be
+    // raised in one business against a customer of another — which is how
+    // LJ00001 came to exist and could then never be given a driver.
+    .eq("tenant_id", session.tenantId)
     .eq("id", parsed.data.customer_id)
     .is("deleted_at", null)
     .maybeSingle<{ id: string; business_name: string; depot_id: string | null }>();
@@ -278,7 +286,7 @@ export async function createOrder(formData: FormData): Promise<void> {
     return fail(backTo, "That customer could not be found — please select one from the list.");
   }
 
-  const deliveryAddress = await resolveDeliveryAddress(supabase, parsed.data);
+  const deliveryAddress = await resolveDeliveryAddress(supabase, session.tenantId, parsed.data);
 
   // Sequential and allocated in Postgres, so two people taking laundry in at the
   // same moment cannot be handed the same number.
@@ -377,7 +385,21 @@ export async function updateOrder(formData: FormData): Promise<void> {
     return fail(backTo, "This job is already out for delivery, so it cannot become a customer pickup.");
   }
 
-  const deliveryAddress = await resolveDeliveryAddress(supabase, parsed.data);
+  // The customer is posted by the form and written back, so an edit is another
+  // door onto the same mistake creation had: `.eq("tenant_id")` because RLS does
+  // not narrow a platform admin to one laundry (0019).
+  const { data: customer } = await supabase
+    .from("customers").select("id")
+    .eq("tenant_id", session.tenantId)
+    .eq("id", parsed.data.customer_id)
+    .is("deleted_at", null)
+    .maybeSingle<{ id: string }>();
+  if (!customer) {
+    return fail(`/orders/${id.data}/edit`,
+      "That customer could not be found — please select one from the list.");
+  }
+
+  const deliveryAddress = await resolveDeliveryAddress(supabase, session.tenantId, parsed.data);
   // The stored time of day is carried over, so correcting the received *date*
   // does not move an 8am drop-off to whenever the correction was made.
   const row = toRow(

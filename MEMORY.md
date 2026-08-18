@@ -1,7 +1,31 @@
 # MEMORY — working session handoff
 > Auto-loaded each session. Canonical state is CLAUDE.md; this is the live delta.
 
-## Latest: people have names, and platform admins are not staff (`0030`)
+## Latest: Assign Driver always failed — platform admins read across laundries
+2026-08-18. "Somebody else changed this job's driver a moment ago" on a job nobody else touched.
+CLAUDE.md §3, §23 and the 2026-08-18 entry have it. **No migration.**
+
+**Cause:** `is_member()` is true of *every* laundry for a platform admin (0019); every write is
+filtered to the *active* laundry. So the job (Adelaide) opened fine, the driver picker offered
+Adelaide's and Harbour's drivers, and the tenant-filtered UPDATE matched no row — reported as a
+race that never happened.
+
+**Live wreckage it left (still there, nothing deleted):** RUN00003/JOB00012 and RUN00004/JOB00013
+in Harbour from the failed attempts — RUN00004 crewed by Mario Forte, an *Adelaide* driver;
+RUN00001/JOB00001 in Adelaide crewed by Sam Okoye, a *Harbour* driver (16 Aug); and **LJ00001, an
+Adelaide job whose customer belongs to Harbour**. Ask the owner before repairing any of it.
+
+**Fix:** a read that feeds a write must name its tenant. `lib/runs/my-runs.ts` and
+`my-runs/actions.ts` readers take `tenantId` as a **required argument** (typechecker enforces it);
+plus the jobs list, job form pickers, orders filter bar, dispatch card, and the customer lookup in
+`createOrder` **and** `updateOrder`. Foreign job → a notice naming the laundry, not a dead picker.
+Reads across laundries still allowed; writes are not.
+
+**Not swept (§23):** ~350 of 451 `.from(...)` reads still rely on RLS alone. Correct for the other
+ten roles; a two-business list for a platform admin. Cheapest option on the table: drop the
+platform-admin rows for darshan/jay — they hold `super_admin` in both laundries anyway.
+
+## Previously: people have names, and platform admins are not staff (`0030`)
 Deployed-app finding 2026-08-18: the job Reassign picker read `8c2b996b… · Driver`, with two
 addresses listed twice each. Three faults, one screenshot. CLAUDE.md §2, §7 (`0030`), §11 and the
 2026-08-18 entry have the detail.

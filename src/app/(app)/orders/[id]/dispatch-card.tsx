@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Card, Notice } from "@/components/ui";
 import { ConfirmSubmit } from "@/components/confirm-submit";
+import { requireSession } from "@/lib/auth/context";
 import { createClient } from "@/lib/supabase/server";
 import { checkAssignable, checkAssignmentRemovable } from "@/lib/domain/run-assignment";
 import { formatAdelaideDate, getAdelaideToday } from "@/lib/domain/timezone";
@@ -22,17 +23,26 @@ import { removeJobAssignment } from "@/app/(app)/my-runs/actions";
  * user back in the mental model this change removed.
  */
 export async function DispatchCard({
-  order, canAssign,
+  order, canAssign, foreign = false,
 }: {
   order: {
-    id: string; order_number: string; status: string;
+    id: string; order_number: string; status: string; tenant_id?: string;
     delivery_required: boolean; due_date: string | null;
     expected_delivery_date: string | null;
     assigned_driver_id: string | null;
     assigned_delivery_date: string | null;
   };
   canAssign: boolean;
+  /**
+   * True when this job belongs to a different laundry from the one the viewer
+   * is working in — only reachable by a platform admin, whose session reads
+   * every laundry (0019). Every write is filtered to the active laundry, so the
+   * assignment controls could only ever fail here; the card says which business
+   * it belongs to instead of offering a driver who works somewhere else.
+   */
+  foreign?: boolean;
 }) {
+  const session = await requireSession();
   const supabase = await createClient();
 
   // A customer pickup has no delivery story at all, so the card says the one
@@ -47,9 +57,25 @@ export async function DispatchCard({
     );
   }
 
+  if (foreign) {
+    return (
+      <Card title="Delivery" className="lg:col-span-3">
+        <Notice tone="warning" title="This job belongs to another laundry">
+          You are working in a different business right now, so this job cannot be
+          given a driver from here. Switch laundry in the account menu, then open
+          the job again.
+        </Notice>
+      </Card>
+    );
+  }
+
   const [driver, drivers] = await Promise.all([
-    order.assigned_driver_id ? driverById(supabase, order.assigned_driver_id) : null,
-    canAssign ? listActiveDrivers(supabase) : Promise.resolve([]),
+    order.assigned_driver_id
+      ? driverById(supabase, session.tenantId, order.assigned_driver_id) : null,
+    // This laundry's drivers, not every laundry's. A platform admin's session
+    // reads across all of them (0019), and offering another laundry's driver is
+    // how a run got crewed by somebody who works somewhere else.
+    canAssign ? listActiveDrivers(supabase, session.tenantId) : Promise.resolve([]),
   ]);
 
   const eligible = checkAssignable(order, { allowAssigned: true });

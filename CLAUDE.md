@@ -157,6 +157,17 @@ Resource-scoped beyond tenancy:
   each row narrows them further to the people who can act on it — but that is a UI filter
   applied in `src/lib/notifications/query.ts`, layered on top of RLS and never instead of it.
 
+**A platform admin's session reads *every* laundry, so RLS is not the tenant filter for
+them.** `is_member()` is true of every tenant for that role (0019) while every *write* in the app
+is filtered to the laundry they are currently working in — so any read that feeds a write must
+filter `tenant_id` explicitly or the two disagree. Left unfiltered it produced exactly that: a
+job raised in one business against a customer of another, a run crewed by a driver who works
+somewhere else, and an assignment that failed with "somebody else changed this job's driver"
+because the tenant-filtered UPDATE matched no row. The rule is the one §2 already states for the
+admin client, extended to the RLS-bound client wherever a platform admin can be the caller:
+**pickers, lookups and anything whose id is posted back must name the tenant.** The 2026-08-18
+entry has the list of what was fixed; the sweep is not finished (§23).
+
 **`platform_admin` is the one role above tenancy** (0019). It is not a membership — it is a row
 in `platform_admins`, a table with **no `tenant_id`**, and the check constraint on
 `memberships.role` deliberately refuses the value. It reaches every laundry because
@@ -1006,6 +1017,40 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-08-18 · Assign Driver refused every time, blaming a race that never happened
+"Somebody else changed this job's driver a moment ago" on a job nobody else had touched. No
+migration; no schema, RLS, capability or workflow change.
+
+- **The message was wrong and so was the model behind it.** The UPDATE is filtered to
+  `session.tenantId` as a race guard; it matched no row because the job belonged to a *different
+  laundry* from the one the person was working in. Only a platform admin can be in that position:
+  `is_member()` is true of every laundry for them (0019), so the job opened and read normally,
+  while every write is scoped to the active one.
+- **It had already written three kinds of wrong row, silently.** Live: two runs in Harbour created
+  by the failed attempts — one of them crewed by **Mario Forte, who drives for Adelaide, at
+  Adelaide's depot** — plus their stops; and `LJ00001`, a job raised in Adelaide against **a
+  Harbour customer**, from a picker that offered both laundries' customers. The assignment guard
+  (0016) never fired, because the job update failed before it.
+- **The fix is that a read which feeds a write must name its tenant.** Every reader in
+  `lib/runs/my-runs.ts` and `my-runs/actions.ts` now takes the tenant as a **required argument**
+  rather than accepting an unfiltered client — so the typechecker, not a reviewer, is what stops
+  the next call site forgetting. The same filter went on the jobs list, the job form's customers,
+  sites, drivers and staff, the orders filter bar, the dispatch card, and the customer lookup in
+  both `createOrder` and `updateOrder` (an edit posts the customer back, so it was the same door).
+- **Two things now say what is true.** A job from another laundry shows "This job belongs to
+  another laundry — switch laundry in the account menu", instead of a driver picker that cannot
+  work; and if the action is posted anyway it names the business rather than inventing a race.
+  One extra query, only on the failure path.
+- **`/orders/:id` deliberately still opens a job from another laundry.** Looking is what that role
+  is for; what it may not do is *act*. Reads across, writes within.
+- **What is not swept is written down rather than left to be rediscovered** (§23): ~350 of 451
+  `.from(...)` reads in `src/` still rely on RLS alone. Every one is correct for the other ten
+  roles. Three options are recorded there, including the cheapest — stop using `platform_admin`
+  as an everyday identity, since both holders also hold `super_admin` in both laundries.
+- 515 unit tests, `verify` green. Reproduced from the live rows rather than assumed: the two
+  orphan runs, their stops, and the cross-tenant customer on LJ00001 are all still there to look
+  at, and none of them was deleted by this change.
+
 ### 2026-08-18 · People have names, and platform administrators are not staff
 Found on the deployed app: the job's Reassign picker offered `8c2b996b… · Driver`, two addresses
 listed twice each, and a third `Super Admin` nobody could identify. Three separate faults behind
@@ -2463,6 +2508,25 @@ invitation round trip — the mail, the redirect, the fragment, the password —
 end to end. **Before trusting it: add `<origin>/auth/invite` to the Supabase project's allowed
 redirect URLs, then invite one real address and follow the link.** Everything else was checked
 by typecheck, lint, 297 unit tests, the production build and the rendered page.
+
+## 23. Open: tenant filtering for platform admins
+`0019` gave platform admins read access to every laundry by widening `is_member()`, and left
+every screen written against "RLS scopes me to one tenant" — which is true for the other ten
+roles and false for them. Writes were always filtered to the active laundry, so the failure mode
+is not a leak: it is a session that can *see* two businesses, *write* to one, and mix them.
+
+Fixed on 2026-08-18: the jobs list and job form (customers, sites, drivers, staff), both job
+write actions, the whole assignment path (`lib/runs/my-runs.ts` and `my-runs/actions.ts` — every
+read there now takes a tenant as a **required argument**, so a new call site cannot forget), the
+dispatch card, and the orders filter bar.
+
+**Not yet swept:** roughly 350 of the 451 `.from(...)` reads in `src/` still rely on RLS alone —
+customers, contracts, invoices, inventory, warehouse, reports, search. For ten of the eleven roles
+every one of them is correct. For a platform admin each is a list that may span two businesses.
+The candidates are (a) finish the sweep by hand, (b) a `from()` wrapper that appends the filter
+for tenant-scoped tables, or (c) stop using `platform_admin` as an everyday working identity —
+both holders also hold `super_admin` memberships in both laundries, and dropping the platform row
+makes RLS correct for them everywhere at once, at the cost of the Platform area.
 
 ## 21. Customer pricing and job billing
 **Two lifecycles on one job, and they meet at exactly one point.** The operational status says

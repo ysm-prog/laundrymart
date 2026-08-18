@@ -1,3 +1,4 @@
+import { requireSession } from "@/lib/auth/context";
 import { createClient } from "@/lib/supabase/server";
 import { listMembers, listStaff, withCurrentHolder } from "@/lib/directory";
 import type { JobCustomer, JobDriver, JobStaff } from "./job-form";
@@ -40,12 +41,18 @@ export type JobFormData = {
 export async function loadJobFormData(
   ensureCustomerId?: string, ensureStaffId?: string,
 ): Promise<JobFormData> {
+  const session = await requireSession();
   const supabase = await createClient();
 
   const [customersResult, locationsResult, driversResult, staff] = await Promise.all([
     supabase
       .from("customers")
       .select(CUSTOMER_COLUMNS, { count: "exact" })
+      // This laundry's customers. RLS says so for ten of the eleven roles, and
+      // does not for a platform admin (0019) — whose picker offered the other
+      // laundry's customers, which is how a job came to be raised in one
+      // business against a customer of another.
+      .eq("tenant_id", session.tenantId)
       .is("deleted_at", null)
       .in("status", ["active", "prospect", "on_hold"])
       .order("business_name")
@@ -59,6 +66,7 @@ export async function loadJobFormData(
     supabase
       .from("customer_locations")
       .select("customer_id, address_line1, suburb, state, postcode, is_primary")
+      .eq("tenant_id", session.tenantId)
       .eq("is_delivery", true)
       .is("deleted_at", null)
       .order("is_primary", { ascending: false })
@@ -69,6 +77,7 @@ export async function loadJobFormData(
     supabase
       .from("drivers")
       .select("id, full_name")
+      .eq("tenant_id", session.tenantId)
       .eq("status", "active")
       .is("deleted_at", null)
       .order("full_name")
@@ -115,6 +124,7 @@ export async function loadJobFormData(
     const { data: missing } = await supabase
       .from("customers")
       .select(CUSTOMER_COLUMNS)
+      .eq("tenant_id", session.tenantId)
       .eq("id", ensureCustomerId)
       .is("deleted_at", null)
       .maybeSingle<Parameters<typeof toJobCustomer>[0]>();

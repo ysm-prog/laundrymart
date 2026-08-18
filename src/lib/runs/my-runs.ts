@@ -19,10 +19,20 @@ import type { Session } from "@/lib/auth/context";
  * plain `in` filters are boring, are covered by the indexes 0004 and 0015
  * declare, and cannot develop that class of fault.
  *
- * RLS does the security. A driver's session already sees only their own
+ * **Every read here filters `tenant_id`, and that is not belt-and-braces.** RLS
+ * scopes an ordinary member to one laundry, so for ten of the eleven roles the
+ * filter really would be a statement of intent — but `is_member()` is true of
+ * *every* laundry for a platform admin (0019), and they work inside one laundry
+ * at a time. Without the filter their driver picker offered another laundry's
+ * driver, the assignment then wrote a run in the laundry they were *looking at*
+ * with a driver from the one they were not, and the final tenant-filtered UPDATE
+ * matched no row — surfacing as "somebody else changed this job's driver". So
+ * the tenant is a required argument here rather than something a caller may
+ * forget: RLS is still the boundary, and this is what keeps the *answer* right.
+ *
+ * A driver's own scoping is unchanged: their session already sees only their own
  * `daily_routes`, only their own `jobs`, and — since 0015 — only the
- * `laundry_orders` sitting on their own stops. The explicit `driver_id` filter
- * below is a statement of intent, not the boundary.
+ * `laundry_orders` sitting on their own stops.
  */
 
 type Supabase = Awaited<ReturnType<typeof createClient>>;
@@ -105,11 +115,12 @@ export type Run = {
 
 /** The driver record behind a login, if there is one. */
 export async function driverForUser(
-  supabase: Supabase, userId: string,
+  supabase: Supabase, tenantId: string, userId: string,
 ): Promise<RunDriver | null> {
   const { data } = await supabase
     .from("drivers")
     .select("id, full_name, status, phone")
+    .eq("tenant_id", tenantId)
     .eq("user_id", userId)
     .is("deleted_at", null)
     .maybeSingle<RunDriver>();
@@ -122,10 +133,13 @@ export async function driverForUser(
  * An inactive driver whose *historical* runs are being reviewed still resolves
  * by id through `driverById`.
  */
-export async function listActiveDrivers(supabase: Supabase): Promise<RunDriver[]> {
+export async function listActiveDrivers(
+  supabase: Supabase, tenantId: string,
+): Promise<RunDriver[]> {
   const { data } = await supabase
     .from("drivers")
     .select("id, full_name, status, phone")
+    .eq("tenant_id", tenantId)
     .eq("status", "active")
     .is("deleted_at", null)
     .order("full_name")
@@ -133,9 +147,12 @@ export async function listActiveDrivers(supabase: Supabase): Promise<RunDriver[]
   return data ?? [];
 }
 
-export async function driverById(supabase: Supabase, id: string): Promise<RunDriver | null> {
+export async function driverById(
+  supabase: Supabase, tenantId: string, id: string,
+): Promise<RunDriver | null> {
   const { data } = await supabase
     .from("drivers").select("id, full_name, status, phone")
+    .eq("tenant_id", tenantId)
     .eq("id", id).maybeSingle<RunDriver>();
   return data ?? null;
 }
@@ -161,20 +178,20 @@ export async function resolveDriverScope(
   isSelf: boolean;
   drivers: RunDriver[];
 }> {
-  const own = await driverForUser(supabase, session.userId);
+  const own = await driverForUser(supabase, session.tenantId, session.userId);
   const canChooseDriver = can(session.role, "routes.write");
 
   if (!canChooseDriver) {
     return { driver: own, canChooseDriver: false, isSelf: true, drivers: [] };
   }
 
-  const drivers = await listActiveDrivers(supabase);
+  const drivers = await listActiveDrivers(supabase, session.tenantId);
   if (!requested || requested === "me") {
     return { driver: own, canChooseDriver: true, isSelf: true, drivers };
   }
 
   const chosen = drivers.find((entry) => entry.id === requested)
-    ?? await driverById(supabase, requested);
+    ?? await driverById(supabase, session.tenantId, requested);
   return {
     driver: chosen,
     canChooseDriver: true,
@@ -195,7 +212,7 @@ export async function resolveDriverScope(
  * `maybeSingle()` was quietly showing one of them and hiding the other.
  */
 export async function loadRuns(
-  supabase: Supabase, driverId: string, routeDate: string,
+  supabase: Supabase, tenantId: string, driverId: string, routeDate: string,
 ): Promise<Run[]> {
   const { data: routes } = await supabase
     .from("daily_routes")
@@ -203,6 +220,7 @@ export async function loadRuns(
       "id, code, name, route_date, status, driver_id, vehicle_id, inspection_id, " +
       "load_confirmed_at, started_at, returned_at, unloaded_at, closed_at, notes",
     )
+    .eq("tenant_id", tenantId)
     .eq("driver_id", driverId)
     .eq("route_date", routeDate)
     .is("deleted_at", null)
@@ -211,7 +229,7 @@ export async function loadRuns(
 
   if (!routes?.length) return [];
 
-  const stops = await loadStops(supabase, routes.map((route) => route.id));
+  const stops = await loadStops(supabase, tenantId, routes.map((route) => route.id));
   return routes.map((route) => ({
     ...route,
     stops: stops.filter((stop) => stop.routeId === route.id).map(({ routeId, ...stop }) => {
@@ -223,7 +241,9 @@ export async function loadRuns(
 
 type StopWithRoute = RunStop & { routeId: string };
 
-async function loadStops(supabase: Supabase, routeIds: string[]): Promise<StopWithRoute[]> {
+async function loadStops(
+  supabase: Supabase, tenantId: string, routeIds: string[],
+): Promise<StopWithRoute[]> {
   const { data } = await supabase
     .from("jobs")
     .select(
@@ -232,6 +252,7 @@ async function loadStops(supabase: Supabase, routeIds: string[]): Promise<StopWi
       "customers(id, business_name, phone, special_instructions), " +
       "customer_locations(name, address_line1, suburb, state, postcode, access_notes)",
     )
+    .eq("tenant_id", tenantId)
     .in("route_id", routeIds)
     .is("deleted_at", null)
     // The existing route order, not a new one. §16 is explicit that a second
@@ -242,7 +263,7 @@ async function loadStops(supabase: Supabase, routeIds: string[]): Promise<StopWi
   const stops = data ?? [];
   if (stops.length === 0) return [];
 
-  const jobs = await loadJobsForStops(supabase, stops.map((stop) => stop.id));
+  const jobs = await loadJobsForStops(supabase, tenantId, stops.map((stop) => stop.id));
   return stops.map(({ route_id, ...stop }) => ({
     ...stop,
     routeId: route_id,
@@ -250,7 +271,9 @@ async function loadStops(supabase: Supabase, routeIds: string[]): Promise<StopWi
   }));
 }
 
-export async function loadJobsForStops(supabase: Supabase, stopIds: string[]): Promise<RunJob[]> {
+export async function loadJobsForStops(
+  supabase: Supabase, tenantId: string, stopIds: string[],
+): Promise<RunJob[]> {
   if (stopIds.length === 0) return [];
   const { data } = await supabase
     .from("laundry_orders")
@@ -261,6 +284,7 @@ export async function loadJobsForStops(supabase: Supabase, stopIds: string[]): P
       "laundry_order_items(item_type, custom_description, quantity_type, exact_quantity, " +
       "bag_count, estimated_quantity, notes)",
     )
+    .eq("tenant_id", tenantId)
     .in("stop_id", stopIds)
     // Urgent laundry first inside a stop, then oldest promise first.
     .order("priority", { ascending: false })
@@ -324,11 +348,12 @@ const DAY_JOB_COLUMNS =
  * filter below is a statement of intent rather than the boundary.
  */
 export async function loadDriverDayJobs(
-  supabase: Supabase, driverId: string, date: string,
+  supabase: Supabase, tenantId: string, driverId: string, date: string,
 ): Promise<DayJob[]> {
   const { data } = await supabase
     .from("laundry_orders")
     .select(DAY_JOB_COLUMNS)
+    .eq("tenant_id", tenantId)
     .eq("assigned_driver_id", driverId)
     .eq("assigned_delivery_date", date)
     .in("status", DRIVER_DAY_STATUSES)
@@ -343,11 +368,12 @@ export async function loadDriverDayJobs(
 
 /** One assigned job, for the driver's read-only job view. */
 export async function loadDriverJob(
-  supabase: Supabase, id: string,
+  supabase: Supabase, tenantId: string, id: string,
 ): Promise<DayJob | null> {
   const { data } = await supabase
     .from("laundry_orders")
     .select(DAY_JOB_COLUMNS)
+    .eq("tenant_id", tenantId)
     .eq("id", id)
     .maybeSingle<DayJob>();
   return data ?? null;
@@ -367,11 +393,13 @@ export type UnassignedJob = DayJob;
  * guard then has to refuse.
  */
 export async function loadUnassignedDeliveryJobs(
-  supabase: Supabase, options: { onOrBefore?: string; limit?: number } = {},
+  supabase: Supabase, tenantId: string,
+  options: { onOrBefore?: string; limit?: number } = {},
 ): Promise<UnassignedJob[]> {
   let query = supabase
     .from("laundry_orders")
     .select(DAY_JOB_COLUMNS)
+    .eq("tenant_id", tenantId)
     .is("assigned_driver_id", null)
     .eq("delivery_required", true)
     .eq("status", "ready_for_delivery");
@@ -389,11 +417,12 @@ export async function loadUnassignedDeliveryJobs(
 
 /** The runs a job could be added to: this driver, this date, still open. */
 export async function loadOpenRuns(
-  supabase: Supabase, driverId: string, routeDate: string,
+  supabase: Supabase, tenantId: string, driverId: string, routeDate: string,
 ): Promise<Array<Pick<Run, "id" | "code" | "name" | "status">>> {
   const { data } = await supabase
     .from("daily_routes")
     .select("id, code, name, status")
+    .eq("tenant_id", tenantId)
     .eq("driver_id", driverId)
     .eq("route_date", routeDate)
     .is("deleted_at", null)

@@ -67,10 +67,13 @@ const ASSIGNABLE_COLUMNS =
   "id, order_number, status, delivery_required, customer_id, stop_id, due_date, " +
   "assigned_driver_id, assigned_delivery_date";
 
-async function loadAssignable(supabase: Supabase, id: string): Promise<AssignableOrder | null> {
+async function loadAssignable(
+  supabase: Supabase, tenantId: string, id: string,
+): Promise<AssignableOrder | null> {
   const { data } = await supabase
     .from("laundry_orders")
     .select(ASSIGNABLE_COLUMNS)
+    .eq("tenant_id", tenantId)
     .eq("id", id)
     .maybeSingle<AssignableOrder>();
   return data ?? null;
@@ -84,6 +87,41 @@ function revalidateAssignmentScreens(orderId?: string): void {
     revalidatePath(`/orders/${orderId}`);
     revalidatePath(`${MY_RUNS}/jobs/${orderId}`);
   }
+}
+
+/**
+ * Why a job this laundry does not own could not be found.
+ *
+ * `loadAssignable` is scoped to the active laundry, so for ten of the eleven
+ * roles a miss really is "no such job" — RLS would have refused it anyway. A
+ * platform admin is the exception: their session reads *every* laundry (0019)
+ * while every write here is filtered to the one they are working in, so they can
+ * open a job they cannot act on. Before this, that combination produced a run
+ * and a stop in the wrong business and then a tenant-filtered UPDATE that
+ * matched nothing — reported to the user as "somebody else changed this job's
+ * driver a moment ago", which was untrue and unactionable.
+ *
+ * One extra read, only on the failure path, to turn a dead end into an
+ * instruction. Two plain queries rather than a `tenants(name)` embed: this repo
+ * has been bitten by an embed that compiled and died at request time.
+ */
+async function jobNotHere(
+  supabase: Supabase, session: Session, orderId: string,
+): Promise<string> {
+  const { data: order } = await supabase
+    .from("laundry_orders").select("order_number, tenant_id").eq("id", orderId)
+    .maybeSingle<{ order_number: string; tenant_id: string }>();
+  if (!order || order.tenant_id === session.tenantId) return "That job could not be found.";
+
+  const { data: owner } = await supabase
+    .from("tenants").select("name").eq("id", order.tenant_id)
+    .maybeSingle<{ name: string }>();
+
+  return owner?.name
+    ? `Job ${order.order_number} belongs to ${owner.name}. Switch laundry in the account `
+      + "menu, then open the job again."
+    : `Job ${order.order_number} belongs to another laundry. Switch laundry in the account `
+      + "menu, then open the job again.";
 }
 
 /* ------------------------------------------------------------ assignment */
@@ -118,8 +156,8 @@ export async function assignJobToDriver(formData: FormData): Promise<void> {
   const deliveryDate = parsed.data.assigned_delivery_date;
   const supabase = await createClient();
 
-  const order = await loadAssignable(supabase, orderId);
-  if (!order) return fail(backTo, "That job could not be found.");
+  const order = await loadAssignable(supabase, session.tenantId, orderId);
+  if (!order) return fail(backTo, await jobNotHere(supabase, session, orderId));
 
   const reassigning = !!order.assigned_driver_id;
 
@@ -133,7 +171,7 @@ export async function assignJobToDriver(formData: FormData): Promise<void> {
   const eligible = checkAssignable(order, { allowAssigned: true });
   if (!eligible.ok) return fail(backTo, eligible.reason);
 
-  const driver = await activeDriver(supabase, driverId);
+  const driver = await activeDriver(supabase, session.tenantId, driverId);
   if ("error" in driver) return fail(backTo, driver.error);
 
   if (order.assigned_driver_id === driverId && order.assigned_delivery_date === deliveryDate) {
@@ -143,7 +181,7 @@ export async function assignJobToDriver(formData: FormData): Promise<void> {
   }
 
   const previousDriverName = order.assigned_driver_id
-    ? (await driverName(supabase, order.assigned_driver_id))
+    ? (await driverName(supabase, session.tenantId, order.assigned_driver_id))
     : null;
   const previousStopId = order.stop_id;
 
@@ -242,13 +280,14 @@ export async function removeJobAssignment(formData: FormData): Promise<void> {
   if (!parsed.success) return fail(backTo, firstIssue(parsed.error));
 
   const supabase = await createClient();
-  const order = await loadAssignable(supabase, parsed.data.order_id);
-  if (!order) return fail(backTo, "That job could not be found.");
+  const order = await loadAssignable(supabase, session.tenantId, parsed.data.order_id);
+  if (!order) return fail(backTo, await jobNotHere(supabase, session, parsed.data.order_id));
 
   const removable = checkAssignmentRemovable(order);
   if (!removable.ok) return fail(backTo, removable.reason);
 
-  const previousDriverName = await driverName(supabase, order.assigned_driver_id as string);
+  const previousDriverName =
+    await driverName(supabase, session.tenantId, order.assigned_driver_id as string);
   const previousStopId = order.stop_id;
 
   const { error } = await supabase
@@ -306,7 +345,8 @@ async function mayWorkTheDay(
   }
 
   const { data: own } = await supabase
-    .from("drivers").select("id").eq("user_id", session.userId)
+    .from("drivers").select("id")
+    .eq("tenant_id", session.tenantId).eq("user_id", session.userId)
     .is("deleted_at", null).maybeSingle<{ id: string }>();
   if (!own) return { ok: false, reason: "Your login is not linked to a driver record." };
   if (own.id !== driverId) return { ok: false, reason: "That is somebody else's day." };
@@ -335,7 +375,7 @@ export async function confirmDayLoad(formData: FormData): Promise<void> {
   const permitted = await mayWorkTheDay(supabase, session, parsed.data.driver_id);
   if (!permitted.ok) return fail(backTo, permitted.reason);
 
-  const jobs = await loadDriverDayJobs(supabase, parsed.data.driver_id, parsed.data.date);
+  const jobs = await loadDriverDayJobs(supabase, session.tenantId, parsed.data.driver_id, parsed.data.date);
   const loadable = checkConfirmLoad(jobs);
   if (!loadable.ok) return fail(backTo, loadable.reason);
 
@@ -389,7 +429,7 @@ export async function startDayRoute(formData: FormData): Promise<void> {
   const permitted = await mayWorkTheDay(supabase, session, parsed.data.driver_id);
   if (!permitted.ok) return fail(backTo, permitted.reason);
 
-  const jobs = await loadDriverDayJobs(supabase, parsed.data.driver_id, parsed.data.date);
+  const jobs = await loadDriverDayJobs(supabase, session.tenantId, parsed.data.driver_id, parsed.data.date);
   const startable = checkStartRoute(jobs);
   if (!startable.ok) return fail(backTo, startable.reason);
 
@@ -456,8 +496,8 @@ export async function markJobDelivered(formData: FormData): Promise<void> {
   if (!parsed.success) return fail(backTo, firstIssue(parsed.error));
 
   const supabase = await createClient();
-  const order = await loadAssignable(supabase, parsed.data.order_id);
-  if (!order) return fail(backTo, "That job could not be found.");
+  const order = await loadAssignable(supabase, session.tenantId, parsed.data.order_id);
+  if (!order) return fail(backTo, await jobNotHere(supabase, session, parsed.data.order_id));
 
   const permitted = await mayCompleteOnTheRoad(supabase, session, order);
   if (!permitted.ok) return fail(backTo, permitted.reason);
@@ -494,7 +534,8 @@ async function mayCompleteOnTheRoad(
   }
 
   const { data: driver } = await supabase
-    .from("drivers").select("id").eq("user_id", session.userId)
+    .from("drivers").select("id")
+    .eq("tenant_id", session.tenantId).eq("user_id", session.userId)
     .is("deleted_at", null).maybeSingle<{ id: string }>();
   if (!driver) return { ok: false, reason: "Your login is not linked to a driver record." };
   if (order.assigned_driver_id !== driver.id) {
@@ -506,10 +547,11 @@ async function mayCompleteOnTheRoad(
 /* ------------------------------------------------------------- resolution */
 
 async function activeDriver(
-  supabase: Supabase, driverId: string,
+  supabase: Supabase, tenantId: string, driverId: string,
 ): Promise<{ id: string; full_name: string } | { error: string }> {
   const { data } = await supabase
     .from("drivers").select("id, full_name, status")
+    .eq("tenant_id", tenantId)
     .eq("id", driverId).is("deleted_at", null)
     .maybeSingle<{ id: string; full_name: string; status: string }>();
   if (!data) return { error: "That driver could not be found." };
@@ -519,9 +561,12 @@ async function activeDriver(
   return { id: data.id, full_name: data.full_name };
 }
 
-async function driverName(supabase: Supabase, driverId: string): Promise<string | null> {
+async function driverName(
+  supabase: Supabase, tenantId: string, driverId: string,
+): Promise<string | null> {
   const { data } = await supabase
-    .from("drivers").select("full_name").eq("id", driverId)
+    .from("drivers").select("full_name")
+    .eq("tenant_id", tenantId).eq("id", driverId)
     .maybeSingle<{ full_name: string }>();
   return data?.full_name ?? null;
 }
@@ -549,6 +594,7 @@ async function resolveRun(
   const { data: open } = await supabase
     .from("daily_routes")
     .select("id, code, route_date, depot_id, driver_id, vehicle_id")
+    .eq("tenant_id", session.tenantId)
     .eq("driver_id", driverId).eq("route_date", runDate)
     .is("deleted_at", null)
     .not("status", "in", "(closed,cancelled)")
@@ -571,7 +617,8 @@ async function createRun(
   if (numberError) return { error: describeDbError(numberError) };
 
   const { data: driver } = await supabase
-    .from("drivers").select("depot_id").eq("id", driverId)
+    .from("drivers").select("depot_id")
+    .eq("tenant_id", session.tenantId).eq("id", driverId)
     .maybeSingle<{ depot_id: string | null }>();
 
   const { data: run, error } = await supabase
@@ -612,6 +659,7 @@ async function findOrCreateStop(
   const { data: existing } = await supabase
     .from("jobs")
     .select("id, job_number")
+    .eq("tenant_id", session.tenantId)
     .eq("route_id", run.id).eq("customer_id", customerId)
     .is("deleted_at", null)
     .not("status", "in", "(cancelled)")
@@ -629,6 +677,7 @@ async function findOrCreateStop(
   // slotted into the middle.
   const { data: last } = await supabase
     .from("jobs").select("sequence")
+    .eq("tenant_id", session.tenantId)
     .eq("route_id", run.id).is("deleted_at", null)
     .order("sequence", { ascending: false }).limit(1)
     .maybeSingle<{ sequence: number }>();
@@ -636,6 +685,7 @@ async function findOrCreateStop(
   const { data: location } = await supabase
     .from("customer_locations")
     .select("id")
+    .eq("tenant_id", session.tenantId)
     .eq("customer_id", customerId).eq("is_delivery", true)
     .is("deleted_at", null)
     .order("is_primary", { ascending: false })
@@ -681,12 +731,14 @@ async function retireStopIfEmpty(
   const { count: remaining } = await supabase
     .from("laundry_orders")
     .select("id", { count: "exact", head: true })
+    .eq("tenant_id", session.tenantId)
     .eq("stop_id", stopId);
   if ((remaining ?? 0) > 0) return;
 
   const { data: stop } = await supabase
     .from("jobs")
     .select("id, status, progress_status, arrived_at, completed_at, service_type")
+    .eq("tenant_id", session.tenantId)
     .eq("id", stopId).is("deleted_at", null)
     .maybeSingle<{
       id: string; status: string; progress_status: string;
@@ -702,6 +754,7 @@ async function retireStopIfEmpty(
   const { count: paperwork } = await supabase
     .from("deliveries")
     .select("id", { count: "exact", head: true })
+    .eq("tenant_id", session.tenantId)
     .eq("job_id", stopId);
   if ((paperwork ?? 0) > 0) return;
 

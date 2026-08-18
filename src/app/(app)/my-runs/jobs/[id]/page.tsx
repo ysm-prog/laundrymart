@@ -49,7 +49,7 @@ export default async function DriverJobPage({
   const session = await requireCapability("routes.read");
 
   const supabase = await createClient();
-  const job = await loadDriverJob(supabase, id);
+  const job = await loadDriverJob(supabase, session.tenantId, id);
 
   // Not found *or* not theirs — RLS makes those the same answer, which is the
   // right one to give: a 404 tells an attacker nothing a 403 would not.
@@ -64,7 +64,7 @@ export default async function DriverJobPage({
   const backTo = `/my-runs?date=${backDate}`;
 
   const driver = job.assigned_driver_id
-    ? await driverById(supabase, job.assigned_driver_id)
+    ? await driverById(supabase, session.tenantId, job.assigned_driver_id)
     : null;
 
   const finished = job.status === "completed" || job.status === "cancelled";
