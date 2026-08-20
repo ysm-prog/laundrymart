@@ -1216,6 +1216,14 @@ board accepted, Remove Assignment clearing the board, and the item trigger
 overruling a wrong category). 647 invoices, 508 archived customers and 15
 memberships untouched; five jobs keep their original driver.
 
+**Merged to `Prod` on 2026-08-20** (`e3cb0a8`), so it is live on
+`ats.coreit.com.au`. CI green on all three jobs — verify, gitleaks, and the DB
+job against a fresh Postgres 16 with the whole pgTAP suite and the seed. The
+migrations went on **before** the merge, so the schema led the code: the safe
+order, and the same one the 2026-08-18 entry records. `Dev` is still the stale
+branch the 2026-08-16 entry noted; this took the same route as the last seven
+features.
+
 **The screens have still not been opened with real rows in them.** No board
 exists yet, so §24's cutover is the first thing to do.
 

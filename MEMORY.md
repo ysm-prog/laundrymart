@@ -57,6 +57,9 @@ still 0 jobs / 1 run. 647 invoices, 508 archived customers, 15 memberships untou
 their original driver. Advisors 16 → 18 (`current_board_id`, `is_board_only` — the documented
 definer shape).
 
+**Merged to `Prod` and deployed 2026-08-20** (`e3cb0a8`), CI green on all three jobs. Migrations
+went on before the merge — schema leads code. `Dev` is still stale.
+
 ## Do these next — the database is ready, the data is not
 - **Create the real boards and link a login to each** (§24). **No board exists yet**, so nothing
   is assigned to one and My Runs is empty for any board account. This is the cutover.
