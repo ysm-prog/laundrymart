@@ -46,12 +46,23 @@ built** — needs the real export file, per §14 of the brief.
 621 unit tests (was 535), **342 pgTAP assertions** (was 306). `verify` green. Gallery asserted
 light/dark at 320/360/390/768/1024/1440 — no console errors, no overflow in either new section.
 
-## Do these before trusting any of it
-- **Apply `0031` and `0032`** to `laundrymart-syd`, rehearsed in a rolled-back transaction the
-  way CLAUDE.md §11 requires. Neither has been applied anywhere.
-- **Create one board, link a login, assign a job, sign in as it.** The failure to watch for is a
-  login that works and shows nothing — the unlinked-driver bug one level up.
-- **Check `items.item_code` backfilled from `sku`** on all live rows (0032 asserts it, but see it).
+## Applied live 2026-08-20 — 0031 and 0032 are on `laundrymart-syd`
+CLAUDE.md §11 has the record. Pre-flight confirmed the live transition guard still carried
+0017's billing hook **before** it was rebuilt (the trap that would have been silent), and zero
+live rows violated any constraint either migration adds. Five probes against real rows, rolled
+back: driver-only assignment refused, cross-tenant board refused, own board accepted with
+`assigned_at` stamped, Remove Assignment clearing the board, item trigger storing `bath_towels`
+for a row sent `sheets`. Office member still sees 4 jobs / 13 stops / 8 runs; the driver profile
+still 0 jobs / 1 run. 647 invoices, 508 archived customers, 15 memberships untouched; 5 jobs keep
+their original driver. Advisors 16 → 18 (`current_board_id`, `is_board_only` — the documented
+definer shape).
+
+## Do these next — the database is ready, the data is not
+- **Create the real boards and link a login to each** (§24). **No board exists yet**, so nothing
+  is assigned to one and My Runs is empty for any board account. This is the cutover.
+- **Set `laundry_category` on the items customers hand in** (§25). All 6 items backfilled an
+  `item_code` from `sku`, but none has a category yet — so a coded job item keeps whatever kind
+  the counter chose. Correct, but the item is not yet deciding.
 - **Take one job in, complete it, price it, approve it, then bill a period** — the roll-up has
   never run against real rows.
 

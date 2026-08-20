@@ -772,11 +772,56 @@ rather than trusted. The ledger's last four entries are `0027_xero_payments`,
 `0028_archive_billing_policies`, `0029_revoke_anon_table_grants` and `0030_member_directory`. 0020–0024 are the renumbered branch migrations, already live under their original
 names (§7).
 
-**`0031_boards` and `0032_item_master` are NOT applied.** They are the 2026-08-20 change-request
-build and want the rehearsal this section requires before they are trusted — read back as a real
-member, and for 0031 as a board account too. Two things to do first, in order: create one board
-and link a login to it (§24), and check that `items.item_code` backfilled from `sku` on all
-existing rows, which 0032 asserts but which is worth seeing.
+**`0031_boards` and `0032_item_master` were applied on 2026-08-20**, in that order, each
+verified before the next. The ledger's last two entries are now `0031_boards` and
+`0032_item_master`.
+
+Pre-flight, before anything was written: every object both migrations create was **absent**;
+every constraint and index they drop **by name** was present (`memberships_role_check`,
+`uq_laundry_prices_scope`, the four 0016 assignment checks, `idx_laundry_orders_ready_unassigned`);
+0 `anon`-executable functions and 0 `anon` table grants, so both migrations' own assertions would
+pass; and — **the check that mattered most** — the live `guard_laundry_order_transition` was
+confirmed to carry 0017's `awaiting_review` and `not_billable` hooks, so rebuilding it from 0017's
+body preserved them rather than reverting anything. That is the trap the local pgTAP run caught
+first (§18) and the reason it was checked here before, not after.
+
+Every constraint both migrations add was then evaluated against live data first: **0 violations**
+across all four restated assignment checks, the widened membership role list, and the
+case-insensitive item-code index. `apply_migration` is atomic, so a failed assertion rolls the
+whole thing back — which is what makes it safe to apply a self-asserting migration directly.
+
+After 0031: `boards` present with RLS on and its tenant policy; the billing hook **survived** the
+guard rebuild; the assignment guard is board-aware; all three of 0025's restrictive
+`laundry_orders` policies name `current_board_id` (the insert one in its `with check`, which is
+the only half an INSERT policy has); both permissive policies still carry `archived_at is null`
+— the 0028 trap, checked from the other direction; 0 `anon` functions and 0 `anon` table grants;
+and 647 invoices / 508 archived customers / 6 jobs / 15 memberships / 3 drivers / 10 runs all
+untouched, with **5 jobs keeping their original `assigned_driver_id`**.
+
+After 0032: all 6 live items backfilled with an `item_code` from `sku`, the coherence trigger
+attached, `save_laundry_order_items()` carrying `item_id`, and `uq_laundry_prices_scope` rewritten
+to `(tenant_id, customer_id, item_type, item_id) NULLS NOT DISTINCT`.
+
+**Then read back as real members, in one rolled-back transaction.** The `operations_manager`
+profile saw 4 jobs, 13 stops, 8 runs and 6 items — its own laundry only, unchanged. The
+`driver` profile was still narrowed to 0 jobs and 1 run, so no driver's visibility moved. Five
+behavioural probes against **real rows**, all rolled back: a driver-only assignment refused
+(*"a job is assigned to a board, not to a driver"*), another laundry's board refused (*"that board
+could not be found"*), this laundry's own board **accepted** with the status moving to `assigned`
+and `assigned_at` stamped, Remove Assignment clearing the board, and the item trigger storing
+`bath_towels` for a row that was sent `sheets`. Nothing survived the rollback: 0 boards, 0 coded
+job items, 0 categorised items.
+
+Advisors went **16 → 18**, the two additions being `current_board_id` and `is_board_only` — the
+documented definer shape, internally scoped to `auth.uid()`, and the exact counterparts of
+`current_driver_id`/`is_driver_only` already on the list. `sync_laundry_item_type` is *not* on it,
+because its EXECUTE is revoked — the trigger-function trap 0019 recorded.
+
+**Still to do in the app, not the database:** create the real boards and link a login to each
+(§24), and set `laundry_category` on the items that are laundry a customer hands in (§25) —
+without it a coded job item keeps whatever kind the counter chose, which is correct but means the
+item is not yet deciding. **No board exists yet, so nothing is assigned to one and My Runs is
+empty for every board account until one is made.**
 
 For **0030** that was: pre-flight (function absent, **0** `anon`-executable functions so the
 migration's own assertion would pass, 0 `anon` table grants, 15 memberships, 2 platform admins);
@@ -1162,9 +1207,17 @@ the bulk move, the period filter and the consolidated lines built by the real
 rule; asserted light and dark at 320/360/390/768/1024/1440 — no console errors
 and no overflow inside either new section.
 
-**Not applied to any live project, and not verified against one.** This container
-has no Supabase credentials. `0031` and `0032` want the rehearsal §11 requires
-before they are trusted, and the two things to do first are in §24 and §25.
+**Applied to `laundrymart-syd` on 2026-08-20** — §11 has the full record: the
+pre-flight that confirmed the live transition guard still carried 0017's billing
+hook before it was rebuilt, zero constraint violations against live data, and
+five behavioural probes against real rows in a rolled-back transaction (a
+driver-only assignment refused, a cross-tenant board refused, the laundry's own
+board accepted, Remove Assignment clearing the board, and the item trigger
+overruling a wrong category). 647 invoices, 508 archived customers and 15
+memberships untouched; five jobs keep their original driver.
+
+**The screens have still not been opened with real rows in them.** No board
+exists yet, so §24's cutover is the first thing to do.
 
 ### 2026-08-20 · The owner login was at an address nothing tells you about
 Reported as "password and emails are not working for owner email address — says invalid details".
