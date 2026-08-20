@@ -1082,6 +1082,14 @@ column is generated from it), password still verifying, membership still
 confirmed, every password verifying, the driver still holding its `drivers` row, and none of them
 a platform admin. Nothing else on the project was touched.
 
+**Merged to `Prod` on 2026-08-20**, so it is live on `ats.coreit.com.au`. CI green on all three
+jobs (verify, gitleaks, and the DB job — migrations, the whole pgTAP suite and the seed against a
+fresh Postgres 16). **No migration in this one, and nothing to apply**: the ledger's last entry is
+still `0030_member_directory`. The only live change was the login rename above, which was applied
+before the merge — so the address existed before the code that documents it shipped, which is the
+safe order. `Dev` is still the stale branch the 2026-08-16 entry recorded; this went the same
+route the last six features took.
+
 **Still true and not fixed here: this deployment cannot send any auth email.** The magic link now
 *says* so instead of pretending, but saying so is not sending. Configure custom SMTP on the
 Supabase project — Supabase's built-in sender only delivers to members of the `ysm-prog`

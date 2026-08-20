@@ -33,6 +33,10 @@ auth log. 535 unit tests (was 525), `verify` green.
 `super-admin@roles.example.com` → `owner@roles.example.com`, same user id `0289aa41-…`, identity
 data updated with it, membership `Harbour Commercial Laundry = super_admin` intact.
 
+**Merged to `Prod` and deployed 2026-08-20**, CI green on all three jobs. No migration — the
+Supabase ledger is unchanged at `0030_member_directory`; the login rename was the whole of the
+database side and it went on before the merge.
+
 **All 11 role logins, password `RoleTest!2026`, all in Harbour Commercial Laundry:**
 `owner@`, `operations-manager@`, `dispatcher@`, `driver@` (has its `drivers` row), `finance@`,
 `warehouse-operator@`, `customer-service@`, `sales@`, `branch-manager@`, `regional-manager@`,
