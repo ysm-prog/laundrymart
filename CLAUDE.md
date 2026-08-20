@@ -56,9 +56,12 @@ The master spec names a .NET 9 Web API; this build follows the supplied skeleton
   goes in a plain module with a test, never in the action. Mind what such a module imports:
   `plan.ts` is in the client bundle, so it may not reach `lib/actions` (→ `next/headers`), and
   that failure shows up only at `next build`.
-- **The assignment model is `Job → Driver → Delivery Date`, and it lives on the job.**
-  `laundry_orders.assigned_driver_id` + `assigned_delivery_date` (0016) are the user-facing
-  truth and what My Runs queries. `stop_id → jobs.route_id → daily_routes` (0015) survives as
+- **The assignment model is `Job → Board → Delivery Date`, and it lives on the job.**
+  `laundry_orders.assigned_board_id` + `assigned_delivery_date` (0016, retargeted by 0031) are
+  the user-facing truth and what My Runs queries. A **board** is a standing delivery round with
+  its own login; a **driver** is a person, kept beside it because
+  `daily_routes.operated_by_driver_id` is how the business still answers "who was holding that
+  parcel?". `assigned_driver_id` survives on jobs assigned before 0031 and is no longer written. `stop_id → jobs.route_id → daily_routes` (0015) survives as
   the *operational placement* — the depot load, the run sheet and the inventory unload sweep are
   all built on it — and is resolved by the server action, never chosen by a person. No run code
   appears in any office or driver screen. Two copies of one fact is normally the bug 0015 was
@@ -112,12 +115,17 @@ so a new table cannot ship without a policy.
 
 Resource-scoped beyond tenancy:
 - `daily_routes` / `jobs`: when the caller's role is `driver`, rows are filtered to their own
-  `drivers.id` via `current_driver_id()`.
+  `drivers.id` via `current_driver_id()`; when it is `board`, to their own `boards.id` via
+  `current_board_id()` (0031). The two narrowings are independent terms, so no driver's
+  visibility moved when boards landed.
 - `pickups` / `deliveries` / `*_lines` / `vehicle_inspections`: scoped through the parent's
   own RLS, so a driver never reaches another driver's paperwork.
 - `laundry_orders` (+ its items and activity, through the parent): tenant-wide for office
   roles; for a **driver-only** member, narrowed by 0015/0016 to jobs **assigned to them** or
-  sitting on a stop of one of their own runs. My Runs is the first screen to give a driver a reason to read the table, and
+  sitting on a stop of one of their own runs, and for a **board-only** member narrowed the same
+  way by 0031. **0025's restrictive write layer carries the board carve-out too** — without it a
+  board completing its own delivery matches zero rows and raises nothing, and the job sits at
+  `out_for_delivery` for ever. My Runs is the first screen to give a driver a reason to read the table, and
   a tenant-wide policy would have handed them every customer's laundry through PostgREST at
   the same moment. No non-driver role's predicate changed.
 - `invoices` and friends (+ `job_charge_snapshots`, `invoice_source_jobs`): **readable only through
@@ -288,6 +296,13 @@ key remains the way to reset or re-assert them through the Auth API, but nothing
   work billable again, which is what voiding is for. Archiving (0017) hides a job and the
   invoice lines that bill it in the same call, so the two halves of this check can never
   disagree — the generator reads both through the RLS-bound client.
+- **A job's laundry names an item, and the item decides what kind of laundry it is**
+  (`sync_laundry_item_type`, 0032). `item_type` is what three pricing tiers, every report and
+  every pre-0032 row match on; `item_id` is the coded item. A trigger derives the first from the
+  second, so a job of TOW001 filed as "sheets" — which would be priced at the sheet rate with
+  nobody able to see why — is impossible however the row is written. An item with no
+  `laundry_category` leaves the caller's own answer, because "this is a rented tablecloth" is not
+  an answer to "what kind of laundry is this".
 - **A laundry job's seven statuses are enforced by `guard_laundry_order_transition`**, not just
   by the screen: no skipping the middle, no going backwards, `completed`/`cancelled` terminal,
   a customer pickup never reaches `assigned` or `out_for_delivery`, a delivery job must be
@@ -299,15 +314,18 @@ key remains the way to reset or re-assert them through the Auth API, but nothing
   asked, where `due_date` is a generated column (delivery date, or collection date for a
   pickup job). A job's laundry list is replaced through `save_laundry_order_items()`, one
   transaction, because a delete-then-insert over PostgREST has a window with no items in it.
-- **A job is assigned to a Driver and a Delivery Date, and the two records of that cannot
-  disagree** (`guard_laundry_order_assignment`, 0016). Eligibility first: a customer pickup is
-  refused outright, so is a job still in the plant and a completed or cancelled one, the driver
-  must be an active driver of the same tenant, and the stop has to belong to the same tenant
-  *and* the same customer. Then coherence: the stop's run must name the same driver and the
-  same date, and — the case worth naming — **a job on a crewed run must name a driver**, since
-  otherwise it sits on somebody's route sheet and on nobody's My Runs. Three check constraints
-  hold the rest: `assigned` requires both columns, both columns require a non-ready status, and
-  a driver without a date is refused. The guard fires only when the stop or the assignment
+- **A job is assigned to a Board and a Delivery Date, and the two records of that cannot
+  disagree** (`guard_laundry_order_assignment`, 0016 retargeted by 0031). Eligibility first: a
+  customer pickup is refused outright, so is a job still in the plant and a completed or
+  cancelled one, the board must be an active board of the same tenant, and the stop has to belong
+  to the same tenant *and* the same customer. Then coherence: the stop's run must name the same
+  board and the same date, and — the case worth naming — **a job on a crewed run must name a
+  board**, since otherwise it sits on somebody's route sheet and on nobody's My Runs. Four check
+  constraints hold the rest, each restated by 0031 to accept **either** assignee so no historical
+  row is invalidated: `assigned` requires an assignee and a date, an assignee requires a
+  non-ready status, an assignee and a date travel together, and a customer pickup has neither.
+  **Every assignment written from 0031 on names a board**, refused by the guard rather than by a
+  constraint — the guard fires only when an assignment changes, so history is never re-judged. The guard fires only when the stop or the assignment
   changes, so completing an assigned job never re-runs eligibility.
 - A production batch cannot start with an empty manifest, cannot be completed except from
   `ready_for_dispatch`, and cannot be reopened once finished (`guard_batch_transition`). Its
@@ -323,7 +341,8 @@ branches deploy. Never force-push `Prod`.
 `/` landing · `/login` · `/auth/callback` · `/auth/invite` · `/offline` · `/api/sync` ·
 `/api/media` · `/api/invoices/:id/pdf` ·
 `/api/notifications/sweep` (cron, bearer-token authed, no session)
-`(app)`: `/dashboard` · `/my-runs[/jobs/:id]` ·
+`(app)`: `/dashboard` · `/my-runs[/jobs/:id]` · `/runs` · `/boards` ·
+`/billing[/:customerId]` ·
 `/customers[/new|/:id|/:id/edit|/:id/prices]` · `/agreements[/new|/:id]` ·
 `/invoices/awaiting` (the billing queue — a list of *jobs*, under Money because the decision is a
 billing one; `sectionFor` takes the longest match so it lands there rather than on the register;
@@ -345,9 +364,10 @@ navigation href starts with `/routes/`. Drivers and Vehicles were tabs under the
 and are not run management, so they moved to their own **Fleet** area rather than vanishing
 with it.
 
-**"My Runs" (`/my-runs`) is the driver's whole workspace**: the jobs assigned to them for a
-date they choose, grouped To deliver / Out for delivery / Completed, with Confirm Load and
-Start Route in front of them. Gated on `routes.read` so a manager can open it for a driver.
+**"My Runs" (`/my-runs`) is a board's whole workspace**: the jobs assigned to that round for a
+date it chooses, grouped To deliver / Out for delivery / Completed, in the order the office set
+and with each stop's position printed on the card, with Confirm Load and Start Route in front of
+them. Gated on `routes.read` so a manager can open it for a board.
 `/run` survives as the second tab ("At the depot") because it owns the offline outbox, the
 service worker and the unload inventory sweep, and is the one screen that must work with no
 signal.
@@ -457,6 +477,24 @@ renders no tab strip. Tested in `src/lib/__tests__/nav.test.ts`.
   in filename order on a fresh database and in timestamp order live, and those orders disagree;
   see the §3 note. Touches no restrictive policy (0025's), adds nothing and changes no row. It
   asserts its own outcome, so it fails rather than half-applying.
+- `0031_boards` — **the round, not the person.** `boards` (a standing delivery
+  round with its own login), `laundry_orders.assigned_board_id`,
+  `daily_routes.board_id` + `operated_by_driver_id`, `current_board_id()`,
+  `is_board_only()`, the twelfth value on the `memberships.role` check
+  constraint, four restated integrity constraints, three rewritten permissive
+  policies and 0025's three restrictive `laundry_orders` policies widened.
+  **Drops nothing and invalidates no row**: `assigned_driver_id` keeps every
+  historical job's driver, and the constraints accept either assignee. New
+  assignments must name a board, enforced by the guard — which fires only when an
+  assignment changes, so history is never re-judged. `apply_tenant_policy` and
+  **not** `apply_archive_policy`: a board is configuration, like a depot.
+- `0032_item_master` — **one item vocabulary.** `items` gains `item_code`,
+  `description`, `is_sell`/`is_buy`, `sell_price`/`cost_price`, `tax_code`,
+  `laundry_category`, `myob_item_id`/`myob_item_code`, `external_synced_at`;
+  `laundry_order_items.item_id`; `laundry_prices.item_id` and a rewritten unique
+  index; `sync_laundry_item_type()` and its trigger; `save_laundry_order_items()`
+  carrying `item_id` through. `item_code` is backfilled from `sku` and asserted
+  non-null afterwards. **Adds no table, drops nothing and invalidates no row.**
 - `0013_notifications` — `tenants.settings jsonb` (AD-3) and the `notifications` table
   (AD-4). Beware the numbering drift: the unmerged branch
   `claude/warehouse-inventory-flow-psooyq` carries its own `0012_return_count.sql`, which
@@ -510,7 +548,8 @@ Proofs in `supabase/tests/`: `rls_isolation`, `rls_coverage`, `driver_scope`,
 `business_rules`, `media_scope`, `warehouse_rules`, `notifications_scope`, `laundry_orders`,
 `run_assignment`, `archive_records`, `laundry_pricing`, `platform_admin`, `main_flow_scope`,
 `job_billing`, `purchases_scope`, `supplier_payments_scope`, `import_helpers`,
-`import_activation`, `member_directory` (**306 assertions**). Demo data in `supabase/seed.sql` — not
+`import_activation`, `member_directory`, `boards_scope`, `item_master`
+(**342 assertions**). Demo data in `supabase/seed.sql` — not
 applied by migrations.
 
 **Do not re-add `grant execute on all functions in schema public to anon`.** That
@@ -732,6 +771,12 @@ applied (0014 on 2026-08-13, 0015 and 0016 on 2026-08-14, 0017, 0018, 0019 and 0
 rather than trusted. The ledger's last four entries are `0027_xero_payments`,
 `0028_archive_billing_policies`, `0029_revoke_anon_table_grants` and `0030_member_directory`. 0020–0024 are the renumbered branch migrations, already live under their original
 names (§7).
+
+**`0031_boards` and `0032_item_master` are NOT applied.** They are the 2026-08-20 change-request
+build and want the rehearsal this section requires before they are trusted — read back as a real
+member, and for 0031 as a board account too. Two things to do first, in order: create one board
+and link a login to it (§24), and check that `items.item_code` backfilled from `sku` on all
+existing rows, which 0032 asserts but which is worth seeing.
 
 For **0030** that was: pre-flight (function absent, **0** `anon`-executable functions so the
 migration's own assertion would pass, 0 `anon` table grants, 15 memberships, 2 platform admins);
@@ -1038,6 +1083,89 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-08-20 · The client's change requests: periodic billing, boards, run order, item codes
+Nineteen change requests, reviewed against the code first
+(`docs/CHANGE-REVIEW-2026-08-20.md`) and then built in the order that review
+recommended. **Two migrations (`0031`, `0032`), two new tables, nothing dropped
+and no existing row invalidated.**
+
+**Priority 1 — the invoice now summarises.** A consolidated invoice wrote one
+line per job charge, prefixed with the job number, so ten jobs of towels, sheets
+and pillowcases came out as thirty lines. `consolidateChargeLines` rolls them
+into one line per item; the rule is pure and lives in `lib/domain/` because a
+rule stated in `lib/invoices/` reaches `lib/env` and is unreachable from a test.
+Three decisions in it, each tested: unit price and GST are part of the grouping
+key, so a mid-period rate change stays two lines at the two rates actually
+charged rather than one at an average nobody agreed to; a charge merges only
+when it names a kind of laundry, so three deliveries' fuel levies stay three
+lines with their job numbers on them — an event is not a quantity; and amounts
+are summed rather than recomputed, so the invoice total equals the frozen
+snapshots to the cent. **`invoice_lines.laundry_order_id` is null on a rolled-up
+line**, which is safe only because the billed-once constraint is
+`uq_invoice_source_jobs_once` and not that column — the pointer is still written
+wherever a line belongs to exactly one job, so a per-job invoice is unchanged.
+The breakdown is neither lost nor duplicated: `loadInvoiceBreakdown` reads it
+back through `invoice_source_jobs → laundry_orders → job_charge_snapshots` and
+renders it under the lines on screen and in the PDF, grouped into ISO weeks. A
+second stored copy would be the one that goes stale. New `/billing` screen under
+Money: quick filters defaulting to **last month**, the period in the URL, then a
+customer list with jobs, pieces of laundry, value and a three-state invoice
+status — *part invoiced* is a real answer, and reporting it as invoiced is how
+the rest never gets billed. **No migration**; every column it needs existed.
+
+**Priority 2 — the round is the operational unit, not the person** (`0031`).
+Work is given to **Board 1**, and whoever is driving Board 1 today signs in as
+it. **Drivers are kept**: a board is a round and a driver is a person, and when
+a delivery goes astray the business still has to say who was holding it —
+`daily_routes.operated_by_driver_id` is one field instead of the reassignment
+sweep the client is asking to be rid of. **The half that is not labels is RLS**:
+`current_driver_id()` scopes four policy families, and a board login without a
+board equivalent signs in successfully and sees an empty application, which
+reads as a broken app rather than a missing link — the failure already shipped
+here once with an unlinked driver. See §24.
+
+**Priority 3 — Runs is back, as an ordering screen** (no migration). Not the
+run-management area the 2026-08-14 simplification removed: no run codes, no run
+CRUD, `/routes/*` still unlinked and `nav.test.ts` still asserts it. Pick a day
+and a board, drag the stops or use the arrows, Save order. **Ordering is by
+stop**, because a customer with two jobs on one day is one visit and ordering
+them apart would mean driving there twice; each position lists the jobs at it,
+so for the ordinary case it reads exactly as the client describes. A stop the
+round has already worked cannot move. My Runs sorts by that sequence and prints
+the position — an order the round cannot see is a decision that was never made.
+
+**Priority 4 — one item vocabulary, under the code the staff know** (`0032`).
+See §25. Additive by construction, and the MYOB **importer is deliberately not
+built**: §14 of the brief says the developer must inspect the real export rather
+than assume its column names, and it is right.
+
+**Three defects found by the tools rather than by review, each worth recording:**
+- rebuilding `guard_laundry_order_transition` from 0016 silently dropped the
+  billing hook 0017 added underneath it, so completing a job stopped setting
+  `awaiting_review` and no finished job would ever have reached the billing
+  queue — a revenue bug behind a green build. `job_billing.test.sql` caught it.
+  **A `create or replace` must be rebuilt from the latest ancestor, not the one
+  that introduced the feature you are changing.**
+- 0025's *restrictive* write layer carves out the driver only, so a board could
+  never complete its own delivery: zero rows, no error, job stuck at
+  `out_for_delivery` for ever. Widened in 0031, and proved by removing the fix
+  and watching the assertion that the write **landed** fail — `lives_ok` passed
+  throughout, which is the shape of the bug.
+- the reorder arrows were 34px wide against the 36px floor and the job-number
+  link in a stop row was an 18px tap target. Found by *measuring* the gallery,
+  not by looking at it. Both now 36×36 and 60×36.
+
+621 unit tests (was 535) and **342 pgTAP assertions (was 306)**. `verify` green;
+every migration applied to a fresh Postgres 16 with the whole pgTAP suite and the
+seed on top of it. The gallery gained the run sequencing board in three states,
+the bulk move, the period filter and the consolidated lines built by the real
+rule; asserted light and dark at 320/360/390/768/1024/1440 — no console errors
+and no overflow inside either new section.
+
+**Not applied to any live project, and not verified against one.** This container
+has no Supabase credentials. `0031` and `0032` want the rehearsal §11 requires
+before they are trusted, and the two things to do first are in §24 and §25.
+
 ### 2026-08-20 · The owner login was at an address nothing tells you about
 Reported as "password and emails are not working for owner email address — says invalid details".
 It was one fault with two faces, and neither was the account. **No migration; no schema, RLS,
@@ -2694,6 +2822,64 @@ The candidates are (a) finish the sweep by hand, (b) a `from()` wrapper that app
 for tenant-scoped tables, or (c) stop using `platform_admin` as an everyday working identity —
 both holders also hold `super_admin` memberships in both laundries, and dropping the platform row
 makes RLS correct for them everywhere at once, at the cost of the Platform area.
+
+## 24. Boards: the round as the operational unit
+A job is given to a **Board** — a standing delivery round with its own login — and a date. The
+person driving that round changes constantly (leave, sickness, cover, turnover), and re-pointing
+every open job at a different employee each time is administration the work does not need.
+
+- **Drivers are kept and are not renamed.** A board is a round; a driver is a person. Who drove
+  a round on a day is `daily_routes.operated_by_driver_id`, stamped when the load is confirmed —
+  one field rather than a reassignment sweep. Collapsing the two would lose exactly the audit
+  trail the client's own cover scenario needs.
+- **The substance is RLS, not labels.** `current_board_id()` is the board counterpart of
+  `current_driver_id()`, and three policy families read it. A `board` membership with no `boards`
+  row leaves it null, every board-scoped policy then matches nothing, and the result is a login
+  that works with empty screens — which reads as a broken app. `/boards` calls that state out
+  rather than leaving a blank cell, and `boards_scope.test.sql` asserts both halves: a board
+  **sees its own** run, stops and laundry, and sees none of another's.
+- **`board` is the twelfth membership role and holds a driver's exact capabilities**, pinned by a
+  test so the two cannot drift without somebody deciding they should. It deliberately does not
+  hold `routes.write`: the client's rule is that a board sees the sequence the office set and
+  cannot change it.
+- **`lib/runs/assign.ts` is the assignment write, shared** by the job page's Assign and the Runs
+  screen's bulk Move — the same reason `lib/orders/complete.ts` exists. What stays in the actions
+  is what a person is told, which differs between one job and forty.
+- **Cutover:** the owner creates and names their boards (the migration seeds none — a laundry
+  with three rounds should not be handed four), links a login to each, and reassigns open jobs.
+  **Do not auto-create a board per driver**: it manufactures junk boards named after people,
+  which is the model this is leaving.
+
+**Before trusting it: create one board, link a login, assign one job to it, and sign in as it.**
+The empty-screen failure is the one to watch for.
+
+## 25. The item master, and MYOB
+`items` is the one item vocabulary: what the laundry rents out *and* what arrives in a customer's
+bag, under the code the business already uses (0032). Staff type TOW001.
+
+- **This overrides 0014's decision, deliberately.** 0014 kept `laundry_order_items.item_type` as
+  its own nine-value list so a counter hand would not have to create a stock record before taking
+  in a bag of sheets. That was right for a counter with no item list; the client has one, and the
+  speed concern is answered by a code-first type-ahead instead.
+- **Additive by construction.** `item_type` stays `not null`; an item carries a
+  `laundry_category`, and `sync_laundry_item_type()` derives `item_type` from it. So a row can
+  never name an item and a category that disagree, and every pre-0032 job, price tier, report and
+  filter keeps working untouched. The trigger is in the database because
+  `save_laundry_order_items()` inserts directly and so would any import.
+- **Pricing gained one tier of specificity and kept its shape.** Within the rate card, a line for
+  the exact item beats a line for its category; within the price list, the same. The card still
+  beats the list however specific the list is, because somebody negotiated it. `priceListFor`
+  excludes per-item rows, so a rate agreed for TOW001 can never answer for every kind of towel.
+- **The MYOB importer is not built, and that is the correct state.** The client's own note says
+  the developer should inspect the real export rather than assume its field names; guessing is
+  how the dropped-column bug in the bills import happened. `MYOB_KINDS` still lists eight kinds
+  and items is not one. The columns are here and waiting for the file.
+- **The open question is above this work, not inside it.** This app posts invoices and payments
+  to **Xero** (§20) while MYOB is a one-off migration source (`docs/IMPORT-MYOB.md`). An item
+  code is only worth carrying if it reconciles to the ledger that receives the invoice. Staying
+  on MYOB, moving to Xero, or running both are three different builds of the sync half — and
+  none of them changes the item master, the codes on job items, or the search, which is why
+  those were built first.
 
 ## 21. Customer pricing and job billing
 **Two lifecycles on one job, and they meet at exactly one point.** The operational status says

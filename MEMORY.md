@@ -1,101 +1,85 @@
 # MEMORY — working session handoff
 > Auto-loaded each session. Canonical state is CLAUDE.md; this is the live delta.
 
-## Latest: the owner login was at an address nothing tells you about
-2026-08-20, branch `claude/owner-email-login-failure-densi6`. CLAUDE.md §3a and the new 2026-08-20
-entry have it. **No migration.**
+## Latest: the client's 19 change requests — reviewed, then built
+2026-08-20, branch `claude/electro-services-implementation-8l4f4c`. CLAUDE.md §6, §7, §24, §25
+and the new 2026-08-20 entry have it. **Two migrations (`0031`, `0032`), neither applied live.**
 
-Reported as "password and emails are not working for owner email address — says invalid details".
-One fault, two faces, and neither was the account:
+Reviewed first (`docs/CHANGE-REVIEW-2026-08-20.md`, also published as an artifact), then built
+in the order that review recommended. Four of the five priorities were smaller than they read.
 
-1. **`owner@roles.example.com` did not exist.** The owner test profile was provisioned at
-   `super-admin@roles.example.com` — `profileEmail()` derived the local part from the role
-   *identifier*, while `ROLE_PRESETS`, the People picker and the profile's own name ("Test Owner")
-   all say **Owner**. A profile may now carry an `email` local part; `super_admin` does. It also
-   carries `formerly`, so the runner renames the same login in place instead of leaving a second
-   owner behind at an address nothing documents.
-2. **The magic link had never sent an email and claimed it had, every time.** `sendMagicLink`
-   swallowed every error. Live proof it has never worked: **0 `one_time_tokens`, 0 `flow_state`,
-   and `confirmation_sent_at`/`recovery_sent_at`/`invited_at` NULL on all 13 logins, ever.**
-   `src/lib/auth/magic-link.ts` (pure, tested) now names deployment faults — `error_sending_email`,
-   `email_provider_disabled`, both rate limits, rejected redirect, any 5xx — while "no such login"
-   still answers exactly as success does. `otp_disabled` stays unnamed on purpose: it is what an
-   unknown address returns.
-3. **`shouldCreateUser` was at its default `true`**, so a mistyped address minted an orphan
-   `auth.users` row with no membership. Now `false` — access comes from an invitation (§10c).
+**P1 · Periodic billing — no migration.** `consolidateChargeLines` (pure, in `lib/domain/`,
+19 tests) rolls a consolidated invoice up per item instead of one line per job charge. Unit price
+and GST are in the grouping key (a mid-period rate change stays two lines); only item-identified
+charges merge (three fuel levies stay three lines); amounts are summed not recomputed. New
+`/billing` screen: period → customer → one invoice, defaulting to **last month**. The breakdown
+is read back through `invoice_source_jobs → job_charge_snapshots` and rendered under the lines on
+screen and in the PDF — no second stored copy.
+**`invoice_lines.laundry_order_id` is null on a rolled-up line**; safe only because the
+billed-once constraint is `uq_invoice_source_jobs_once`.
 
-Proved rather than assumed: all 11 test logins verify against `RoleTest!2026` via
-`encrypted_password = crypt(...)`, identities well-formed; both real owner logins are healthy and
-`jay@` signed in **successfully** at 05:06 that morning, two minutes before the failures in the
-auth log. 535 unit tests (was 525), `verify` green.
+**P2 · Boards (`0031`).** `boards` = a standing round with its own login; the assignment target.
+**Drivers kept** — `daily_routes.operated_by_driver_id` records who drove.
+`current_board_id()` / `is_board_only()` + three rewritten permissive policies + 0025's three
+*restrictive* `laundry_orders` policies widened. `board` is the twelfth membership role, a
+driver's exact capabilities and no `routes.write`.
 
-**Applied live to `laundrymart-syd`** (rehearsed in a rolled-back transaction first):
-`super-admin@roles.example.com` → `owner@roles.example.com`, same user id `0289aa41-…`, identity
-data updated with it, membership `Harbour Commercial Laundry = super_admin` intact.
+**P3 · Runs (`/runs`), no migration.** Day + board, drag or arrows, Save order. **Ordering is by
+stop.** A worked stop cannot move. My Runs sorts by it and prints the position.
 
-**Merged to `Prod` and deployed 2026-08-20**, CI green on all three jobs. No migration — the
-Supabase ledger is unchanged at `0030_member_directory`; the login rename was the whole of the
-database side and it went on before the merge.
+**P4 · Item master (`0032`).** `items` gains `item_code`, is_sell/is_buy, sell/cost price,
+tax_code, `laundry_category`, MYOB ref fields. `laundry_order_items.item_id` +
+`sync_laundry_item_type()` so item and category can never disagree. Pricing gained one tier of
+specificity (item beats category, card still beats list). **MYOB importer deliberately not
+built** — needs the real export file, per §14 of the brief.
 
-**All 11 role logins, password `RoleTest!2026`, all in Harbour Commercial Laundry:**
-`owner@`, `operations-manager@`, `dispatcher@`, `driver@` (has its `drivers` row), `finance@`,
-`warehouse-operator@`, `customer-service@`, `sales@`, `branch-manager@`, `regional-manager@`,
-`auditor@` — all `@roles.example.com`.
+**Three defects found by the tools, not by review:**
+1. rebuilding `guard_laundry_order_transition` from 0016 dropped 0017's billing hook →
+   completing a job stopped setting `awaiting_review`. Revenue bug behind a green build; caught
+   by `job_billing.test.sql`. **Rebuild a `create or replace` from the LATEST ancestor.**
+2. 0025's restrictive layer carved out the driver only → a board could never complete its own
+   delivery. Zero rows, no error. Proved by removing the fix: `lives_ok` still passed, the
+   assertion that the write *landed* failed.
+3. reorder arrows 34px wide (36px floor) and an 18px job link. Found by **measuring** the
+   gallery. Now 36×36 and 60×36; every checkbox in a 44px label.
 
-**Decided 2026-08-20: keep the eleven SQL-provisioned test logins as they are.** They were
-compared column-by-column against `jay@` (Auth-API created) and match everywhere GoTrue reads,
-including the seven token columns being `''` not NULL. The only gap is `role_profile_note` in
-`user_metadata`, which no code reads. Do not re-provision them or revert the `owner@` rename;
-`npm run seed:roles` is still there if a password ever needs resetting.
+621 unit tests (was 535), **342 pgTAP assertions** (was 306). `verify` green. Gallery asserted
+light/dark at 320/360/390/768/1024/1440 — no console errors, no overflow in either new section.
 
-**Open: this deployment still cannot send any auth email.** The link now says so rather than
-pretending, but that is not sending. Custom SMTP needs configuring on the Supabase project —
-the built-in sender only reaches `ysm-prog` org members and is capped at ~2/hour. That blocks
-magic links, invitations (§10c) and password resets alike.
+## Do these before trusting any of it
+- **Apply `0031` and `0032`** to `laundrymart-syd`, rehearsed in a rolled-back transaction the
+  way CLAUDE.md §11 requires. Neither has been applied anywhere.
+- **Create one board, link a login, assign a job, sign in as it.** The failure to watch for is a
+  login that works and shows nothing — the unlinked-driver bug one level up.
+- **Check `items.item_code` backfilled from `sku`** on all live rows (0032 asserts it, but see it).
+- **Take one job in, complete it, price it, approve it, then bill a period** — the roll-up has
+  never run against real rows.
 
-## Previous: month end made pressable — pricing, bulk price, last-month default, bulk issue
-2026-08-20, branch `claude/job-invoice-workflow-review-i66do9`. CLAUDE.md §6, §17, §21, §23 and the
-2026-08-20 entry have it. **No migration.**
-
-Started as a review of "job completed → invoice pool → one button at month end". The spine was
-already right (completion sets `awaiting_review` in the DB and never bills; the dated run sweeps
-`approved` jobs from frozen snapshots). Four things blocked it, all fixed:
-
-1. **`priceJobCharges` refused every customer without a rate card** and discarded the list-priced
-   lines it had already computed. 508/508 live customers hold none, so the Price button was inert
-   for the whole business. Now `priceAndSaveJob` (`lib/orders/job-billing.ts`), shared with the new
-   bulk action; refuses on "nothing came back priced", not on "no card".
-2. **Price Selected** on `/invoices/awaiting`. Review mode now has two verbs over one selection, so
-   unpriced rows became selectable (approving one is still refused by name).
-3. **Month-end run defaults to the previous month** (`previousMonth` in `domain/dates.ts`). It used
-   to default to 1st-of-this-month → today: on 1 Sept that billed Sept 1–1 and said "nothing to
-   invoice", which reads as *everything is billed*.
-4. **Issue Selected** — the missing rung; without it the bulk send was unreachable (it refuses
-   drafts). `lib/invoices/issue.ts` is the shared implementation. `SendSelected` → `InvoiceSelection`,
-   one component with the verb passed in.
-
-Also: four §23 tenant filters added (queue, issue list, send list, and the price-list read — that
-one takes `tenantId` as a required argument). 525 unit tests (was 515), `verify` green, gallery
-asserted light/dark at 320/360/390/768/1024/1440.
-
-**Merged to `Prod` and deployed 2026-08-20** (`b5184a2`), CI green on all three jobs. The feature
-branch and `Prod` are the same commit; `Dev` is still stale and wants a catch-up merge before it
-is trusted as staging again.
-
-**Not verified against a live project** — no Supabase credentials here. Before trusting it, on
-`ats.coreit.com.au`: take a job in, complete it, **Price this job**, approve, run last month, then
-Issue drafts → Send. The pricing fix is the one to watch: it is the first time the price-list tier
-has been reachable from a screen.
+## Open question above the item work
+The app posts to **Xero**; MYOB is a one-off migration source. §18 of the brief asks for ongoing
+MYOB sync. **Staying on MYOB / moving to Xero / both** are three different builds of the sync
+half. None of them changes the item master, the codes on job items or the search — which is why
+those were built and the importer was not.
 
 ## Still open (unchanged)
-- **§23 sweep:** ~345 of 451 `.from(...)` reads still rely on RLS alone. Correct for the other ten
-  roles; a platform admin's session spans two laundries. Cheapest fix remains dropping the platform
-  row from the two holders, who are `super_admin` in both laundries anyway.
+- **§23 sweep:** ~345 of 451 `.from(...)` reads still rely on RLS alone. Correct for the other
+  eleven roles; a platform admin's session spans two laundries. Cheapest fix remains dropping the
+  platform row from the two holders, who are `super_admin` in both laundries anyway.
 - **Live wreckage from the 2026-08-18 bug, still there, nothing deleted:** RUN00003/JOB00012 and
   RUN00004/JOB00013 in Harbour (RUN00004 crewed by Mario Forte, an *Adelaide* driver);
-  RUN00001/JOB00001 in Adelaide crewed by Sam Okoye, a *Harbour* driver; and **LJ00001, an Adelaide
-  job whose customer belongs to Harbour**. Ask the owner before repairing any of it.
-- **`Adelaide Towel Service` has no pickable staff** — both its members are platform admins, who are
-  filtered out of every picker by design. Invite one real person before trusting its screens.
+  RUN00001/JOB00001 in Adelaide crewed by Sam Okoye, a *Harbour* driver; and **LJ00001, an
+  Adelaide job whose customer belongs to Harbour**. Ask the owner before repairing any of it.
+- **`Adelaide Towel Service` has no pickable staff** — both members are platform admins, filtered
+  out of every picker by design. Invite one real person before trusting its screens.
 - **Nothing has talked to Xero yet.** `XERO_CLIENT_ID`/`SECRET` unset by the owner's decision.
-- Database: 0001–0030 all applied to `laundrymart-syd`. Nothing pending.
+- **This deployment cannot send any auth email.** Custom SMTP still needs configuring.
+- Database: 0001–0030 applied to `laundrymart-syd`. **0031 and 0032 pending.**
+
+## Environment readiness
+- node v22.22.2, deps installed
+- Postgres 16 + pgTAP installed locally; `PGDATABASE=lm_test bash scripts/run-db-tests.sh`
+  against a fresh `createdb lm_test` runs every migration, the whole proof suite and the seed
+- env missing (copy .env.example) — no live Supabase credentials in this container
+
+Reminders: RLS on every tenant table (tenant_id); admin client must filter tenant_id;
+getClaims not getUser; region syd1.
