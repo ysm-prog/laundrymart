@@ -1079,6 +1079,12 @@ on `ats.coreit.com.au`, complete it, press Price this job in Money › Awaiting 
 it, run last month, then Issue drafts and Send.** The pricing fix is the one to watch — it is
 the first time the price-list tier has been reachable from a screen.
 
+**Merged to `Prod` on 2026-08-20**, so it is live on `ats.coreit.com.au`. CI green on all three
+jobs (verify, gitleaks, and the DB job — migrations, the whole pgTAP suite and the seed against a
+fresh Postgres 16). No migration in this one: the database was already correct, and `Dev` is still
+the 15-commits-behind branch the 2026-08-16 entry recorded — this went the same route the last
+five features took.
+
 ### 2026-08-18 · Assign Driver refused every time, blaming a race that never happened
 "Somebody else changed this job's driver a moment ago" on a job nobody else had touched. No
 migration; no schema, RLS, capability or workflow change.

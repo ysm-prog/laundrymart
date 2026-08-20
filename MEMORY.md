@@ -26,6 +26,10 @@ Also: four §23 tenant filters added (queue, issue list, send list, and the pric
 one takes `tenantId` as a required argument). 525 unit tests (was 515), `verify` green, gallery
 asserted light/dark at 320/360/390/768/1024/1440.
 
+**Merged to `Prod` and deployed 2026-08-20** (`b5184a2`), CI green on all three jobs. The feature
+branch and `Prod` are the same commit; `Dev` is still stale and wants a catch-up merge before it
+is trusted as staging again.
+
 **Not verified against a live project** — no Supabase credentials here. Before trusting it, on
 `ats.coreit.com.au`: take a job in, complete it, **Price this job**, approve, run last month, then
 Issue drafts → Send. The pricing fix is the one to watch: it is the first time the price-list tier
