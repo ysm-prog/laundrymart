@@ -58,6 +58,14 @@ The three new assertions were proved to fail without the migration (10, 13, 14).
   against a customer rather than a bug's leftover — the owner's call.
   The two *cross-tenant runs* from the same bug **were** cleared (both `planned`, 0 stops worked,
   0 deliveries, 0 pickups, so `driver_id` recorded nothing); ids are in the changelog.
+- **Two more tenant-wide reads the board sweep turned up, both pre-existing and neither money.**
+  `service_agreements` and `audit_logs` are `for all … using is_member(tenant_id)`, so an
+  operational login reads every contract *header* (not its prices — `service_agreement_lines` is
+  gated by `can_read_pricing()` and returned 0) and the whole tenant activity log. The contract
+  header is deliberately open per §22, *"when a customer is served is operational information"* —
+  but §22 says `agreements.read`, and the policy says any member, so the two disagree. The audit
+  log has been tenant-wide since 0001 for every role including drivers. Both want a decision
+  rather than a quiet narrowing; neither exposes a price or an amount.
 - **§23 sweep:** ~345 of 451 `.from(...)` reads still rely on RLS alone. Correct for eleven of
   twelve roles; a platform admin's session spans two laundries.
 - **Nothing has talked to Xero yet.** `XERO_CLIENT_ID`/`SECRET` unset by the owner's decision.
