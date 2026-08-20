@@ -1,99 +1,77 @@
 # MEMORY — working session handoff
 > Auto-loaded each session. Canonical state is CLAUDE.md; this is the live delta.
 
-## Latest: the client's 19 change requests — reviewed, then built
-2026-08-20, branch `claude/electro-services-implementation-8l4f4c`. CLAUDE.md §6, §7, §24, §25
-and the new 2026-08-20 entry have it. **Two migrations (`0031`, `0032`), neither applied live.**
+## Latest: the cutover, and a price list every member could read
+2026-08-20, branch `claude/electro-services-implementation-8l4f4c`. CLAUDE.md §3, §7, §11, §24,
+§25 and the newest changelog entry have it. **One migration (`0033`), applied live.**
 
-Reviewed first (`docs/CHANGE-REVIEW-2026-08-20.md`, also published as an artifact), then built
-in the order that review recommended. Four of the five priorities were smaller than they read.
+The database was ready and the data was not. Putting the first price list on the project is what
+exposed the defect: **0018 gated who may *change* `laundry_prices` and left the read at
+`is_member(tenant_id)`** — the identical shape 0006 shipped on `invoices` and 0017 replaced one
+migration earlier. Driver, counter, warehouse, dispatcher and (since 0031) a board could read
+every price straight off PostgREST.
 
-**P1 · Periodic billing — no migration.** `consolidateChargeLines` (pure, in `lib/domain/`,
-19 tests) rolls a consolidated invoice up per item instead of one line per job charge. Unit price
-and GST are in the grouping key (a mid-period rate change stays two lines); only item-identified
-charges merge (three fuel levies stay three lines); amounts are summed not recomputed. New
-`/billing` screen: period → customer → one invoice, defaulting to **last month**. The breakdown
-is read back through `invoice_source_jobs → job_charge_snapshots` and rendered under the lines on
-screen and in the PDF — no second stored copy.
-**`invoice_lines.laundry_order_id` is null on a rolled-up line**; safe only because the
-billed-once constraint is `uq_invoice_source_jobs_once`.
+Two things kept it invisible: the table was **empty on every deployment** until 2026-08-20, and
+`laundry_pricing.test.sql` positively asserted *"the counter can read the tenant's prices"*.
+**A proof that encodes the defect defends it** — that assertion was rewritten to the decision.
 
-**P2 · Boards (`0031`).** `boards` = a standing round with its own login; the assignment target.
-**Drivers kept** — `daily_routes.operated_by_driver_id` records who drove.
-`current_board_id()` / `is_board_only()` + three rewritten permissive policies + 0025's three
-*restrictive* `laundry_orders` policies widened. `board` is the twelfth membership role, a
-driver's exact capabilities and no `routes.write`.
+`0033` narrows the read to `can_read_pricing()` **and** splits 0018's permissive `for all` write
+policy into three, because **a `for all` policy's USING half grants SELECT too** — narrowing the
+read alone would have left the list readable through the write policy to `dispatcher`. Same trap
+§22 records for 0017. No write set changed in substance (0025's restrictive layer already ANDs).
 
-**P3 · Runs (`/runs`), no migration.** Day + board, drag or arrows, Save order. **Ordering is by
-stop.** A worked stop cannot move. My Runs sorts by it and prints the position.
+Found by **probing, not reading**: counting every table in `public` as a real `board` session.
+The three new assertions were proved to fail without the migration (10, 13, 14).
 
-**P4 · Item master (`0032`).** `items` gains `item_code`, is_sell/is_buy, sell/cost price,
-tax_code, `laundry_category`, MYOB ref fields. `laundry_order_items.item_id` +
-`sync_laundry_item_type()` so item and category can never disagree. Pricing gained one tier of
-specificity (item beats category, card still beats list). **MYOB importer deliberately not
-built** — needs the real export file, per §14 of the brief.
+621 unit tests, **348 pgTAP assertions** (was 342). `verify` green.
 
-**Three defects found by the tools, not by review:**
-1. rebuilding `guard_laundry_order_transition` from 0016 dropped 0017's billing hook →
-   completing a job stopped setting `awaiting_review`. Revenue bug behind a green build; caught
-   by `job_billing.test.sql`. **Rebuild a `create or replace` from the LATEST ancestor.**
-2. 0025's restrictive layer carved out the driver only → a board could never complete its own
-   delivery. Zero rows, no error. Proved by removing the fix: `lives_ok` still passed, the
-   assertion that the write *landed* failed.
-3. reorder arrows 34px wide (36px floor) and an 18px job link. Found by **measuring** the
-   gallery. Now 36×36 and 60×36; every checkbox in a 44px label.
+## Live state after the cutover (all read back, §11 has the record)
+- **Boards exist.** Adelaide (the real laundry) has **Board 1–4**, at the Adelaide depot,
+  **none linked** — no login exists and this deployment cannot send an invitation. Harbour (demo)
+  has **Board 1**, linked, `RUN00002` as its run, LJ00004/LJ00005 on it,
+  `operated_by_driver_id` = Sam Okoye.
+- **Twelfth role profile live:** `board@roles.example.com` / `RoleTest!2026`, Harbour only.
+  Written by SQL like the other eleven and checked column-for-column against `driver@`.
+- **Signed in as the board:** 1 board, 1 run, 2 stops, 3 jobs, 4 customers, **0 invoices**,
+  0 prices. Not the empty-screen failure.
+- **Item categories set on Harbour's five laundry items**; the laundry bag is null on purpose.
+  **Adelaide has zero items** — its master is what the unbuilt MYOB import would fill.
+- **Harbour has a default price list (9 kinds). Adelaide deliberately does not** — inventing
+  rates for a real business is not a repair. Before that there were **0 prices and 0 rate cards
+  on the whole project**, so "Price this job" was inert for every job in both laundries.
+- Prices after 0033: board/driver/counter/dispatcher/warehouse **0**;
+  sales/auditor/finance/owner/office **9**. Advisors still 18.
+- 647 invoices, 508 archived customers, 6 jobs, 16 memberships, 10 runs, 15 stops — untouched.
 
-621 unit tests (was 535), **342 pgTAP assertions** (was 306). `verify` green. Gallery asserted
-light/dark at 320/360/390/768/1024/1440 — no console errors, no overflow in either new section.
-
-## Applied live 2026-08-20 — 0031 and 0032 are on `laundrymart-syd`
-CLAUDE.md §11 has the record. Pre-flight confirmed the live transition guard still carried
-0017's billing hook **before** it was rebuilt (the trap that would have been silent), and zero
-live rows violated any constraint either migration adds. Five probes against real rows, rolled
-back: driver-only assignment refused, cross-tenant board refused, own board accepted with
-`assigned_at` stamped, Remove Assignment clearing the board, item trigger storing `bath_towels`
-for a row sent `sheets`. Office member still sees 4 jobs / 13 stops / 8 runs; the driver profile
-still 0 jobs / 1 run. 647 invoices, 508 archived customers, 15 memberships untouched; 5 jobs keep
-their original driver. Advisors 16 → 18 (`current_board_id`, `is_board_only` — the documented
-definer shape).
-
-**Merged to `Prod` and deployed 2026-08-20** (`e3cb0a8`), CI green on all three jobs. Migrations
-went on before the merge — schema leads code. `Dev` is still stale.
-
-## Do these next — the database is ready, the data is not
-- **Create the real boards and link a login to each** (§24). **No board exists yet**, so nothing
-  is assigned to one and My Runs is empty for any board account. This is the cutover.
-- **Set `laundry_category` on the items customers hand in** (§25). All 6 items backfilled an
-  `item_code` from `sku`, but none has a category yet — so a coded job item keeps whatever kind
-  the counter chose. Correct, but the item is not yet deciding.
-- **Take one job in, complete it, price it, approve it, then bill a period** — the roll-up has
-  never run against real rows.
-
-## Open question above the item work
-The app posts to **Xero**; MYOB is a one-off migration source. §18 of the brief asks for ongoing
-MYOB sync. **Staying on MYOB / moving to Xero / both** are three different builds of the sync
-half. None of them changes the item master, the codes on job items or the search — which is why
-those were built and the importer was not.
+## Do these next
+- **Take one job through complete → Price this job → Approve → run the month.** Needs a browser;
+  it has never been exercised against real rows. Use **Harbour** — it is the laundry with prices.
+- **Invite one real person into `Adelaide Towel Service`** and link them to a board. Both its
+  members are platform admins and are filtered out of every picker by design, so until then its
+  People screen and job pickers are empty and its four boards stay unlinked.
+- **Enter Adelaide's own laundry prices** at Money › Laundry prices. Until then the pricer will
+  keep refusing by name, which is correct and unusable.
 
 ## Still open (unchanged)
-- **§23 sweep:** ~345 of 451 `.from(...)` reads still rely on RLS alone. Correct for the other
-  eleven roles; a platform admin's session spans two laundries. Cheapest fix remains dropping the
-  platform row from the two holders, who are `super_admin` in both laundries anyway.
-- **Live wreckage from the 2026-08-18 bug, still there, nothing deleted:** RUN00003/JOB00012 and
-  RUN00004/JOB00013 in Harbour (RUN00004 crewed by Mario Forte, an *Adelaide* driver);
-  RUN00001/JOB00001 in Adelaide crewed by Sam Okoye, a *Harbour* driver; and **LJ00001, an
-  Adelaide job whose customer belongs to Harbour**. Ask the owner before repairing any of it.
-- **`Adelaide Towel Service` has no pickable staff** — both members are platform admins, filtered
-  out of every picker by design. Invite one real person before trusting its screens.
+- **`LJ00001` deliberately not repaired:** an Adelaide job whose customer belongs to Harbour,
+  still `ready_for_delivery`. The remedy is cancellation, which is terminal, and it is a job
+  against a customer rather than a bug's leftover — the owner's call.
+  The two *cross-tenant runs* from the same bug **were** cleared (both `planned`, 0 stops worked,
+  0 deliveries, 0 pickups, so `driver_id` recorded nothing); ids are in the changelog.
+- **§23 sweep:** ~345 of 451 `.from(...)` reads still rely on RLS alone. Correct for eleven of
+  twelve roles; a platform admin's session spans two laundries.
 - **Nothing has talked to Xero yet.** `XERO_CLIENT_ID`/`SECRET` unset by the owner's decision.
-- **This deployment cannot send any auth email.** Custom SMTP still needs configuring.
-- Database: 0001–0030 applied to `laundrymart-syd`. **0031 and 0032 pending.**
+- **This deployment cannot send any auth email.** Custom SMTP still needs configuring — which is
+  what blocks linking a login to Adelaide's boards.
+- Database: **0001–0033 applied to `laundrymart-syd`.** Nothing pending.
 
 ## Environment readiness
 - node v22.22.2, deps installed
-- Postgres 16 + pgTAP installed locally; `PGDATABASE=lm_test bash scripts/run-db-tests.sh`
-  against a fresh `createdb lm_test` runs every migration, the whole proof suite and the seed
-- env missing (copy .env.example) — no live Supabase credentials in this container
+- Postgres 16 + pgTAP local: `sudo pg_ctlcluster 16 main start`, then
+  `sudo -u postgres createdb lm_v && PGDATABASE=lm_v bash scripts/run-db-tests.sh`
+  runs every migration, the whole proof suite and the seed
+- env missing (copy .env.example) — no Supabase credentials in this container; live work is done
+  through the Supabase MCP tools
 
 Reminders: RLS on every tenant table (tenant_id); admin client must filter tenant_id;
 getClaims not getUser; region syd1.

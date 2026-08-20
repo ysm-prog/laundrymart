@@ -135,9 +135,20 @@ Resource-scoped beyond tenancy:
   — the agreement header stays open to `agreements.read`, because when a customer is served is
   operational information; only the prices moved. 0025's restrictive write policies AND on top of
   all of this. See §20.
-- `laundry_prices` (0018) is role-gated the same way — a price list is a finance record — and
-  `apply_tenant_policy` is deliberately *not* used on it, because its permissive `for all` policy
-  would OR with the role gate and let any member re-price the work.
+- `laundry_prices` is role-gated the same way, but **the read half only since `0033`** — and this
+  file said otherwise for two days, which is the part worth reading. 0018 gated who may *change* a
+  price and left the read policy at `is_member(tenant_id)`: the identical shape 0006 shipped on
+  `invoices` and that 0017 had replaced one migration earlier. So every member — driver, counter,
+  warehouse, and from 0031 a board — could read every price the laundry charges. It hid because the
+  table was **empty on every deployment** until a price list was first entered (2026-08-20), and
+  because `laundry_pricing.test.sql` positively asserted *"the counter can read the tenant's
+  prices"*: **a proof that encodes the defect defends it.** 0033 narrows the read to
+  `can_read_pricing()` and splits 0018's permissive `for all` write policy into explicit
+  INSERT/UPDATE/DELETE — because **a `for all` policy's USING half grants SELECT too**, so
+  narrowing the read policy alone would have left the list readable through the write one to
+  `dispatcher`. The same trap §22 records for 0017, one table later.
+  `apply_tenant_policy` is deliberately *not* used on this table, because its permissive `for all`
+  policy would OR with the role gate and let any member re-price the work.
 - **`0028` exists because two migrations are numbered 0017 and filename order is not the order
   they went on live.** `0017_customer_pricing_billing` replaces the policies on the five billing
   tables and on `service_agreement_lines`; `0017_archive_records` wraps whatever policies it
@@ -495,6 +506,15 @@ renders no tab strip. Tested in `src/lib/__tests__/nav.test.ts`.
   index; `sync_laundry_item_type()` and its trigger; `save_laundry_order_items()`
   carrying `item_id` through. `item_code` is backfilled from `sku` and asserted
   non-null afterwards. **Adds no table, drops nothing and invalidates no row.**
+- `0033_laundry_prices_read` — **the read half of 0018's role gate, which was never
+  written.** Replaces `laundry_prices_read` (`is_member`) with `can_read_pricing()`,
+  and splits the permissive `for all` `laundry_prices_write` into explicit
+  INSERT/UPDATE/DELETE policies so no USING half is a second door onto SELECT.
+  Self-asserting on both halves. Adds no table, no column, no function and no
+  capability, and changes no row. Narrows no write: 0025's restrictive layer
+  already ANDs `super_admin`/`operations_manager` on top. Not in
+  `archivable_tables()`, so there is no `archived_at` clause to preserve — the
+  0028 trap does not apply.
 - `0013_notifications` — `tenants.settings jsonb` (AD-3) and the `notifications` table
   (AD-4). Beware the numbering drift: the unmerged branch
   `claude/warehouse-inventory-flow-psooyq` carries its own `0012_return_count.sql`, which
@@ -549,7 +569,7 @@ Proofs in `supabase/tests/`: `rls_isolation`, `rls_coverage`, `driver_scope`,
 `run_assignment`, `archive_records`, `laundry_pricing`, `platform_admin`, `main_flow_scope`,
 `job_billing`, `purchases_scope`, `supplier_payments_scope`, `import_helpers`,
 `import_activation`, `member_directory`, `boards_scope`, `item_master`
-(**342 assertions**). Demo data in `supabase/seed.sql` — not
+(**348 assertions**). Demo data in `supabase/seed.sql` — not
 applied by migrations.
 
 **Do not re-add `grant execute on all functions in schema public to anon`.** That
@@ -773,8 +793,56 @@ rather than trusted. The ledger's last four entries are `0027_xero_payments`,
 names (§7).
 
 **`0031_boards` and `0032_item_master` were applied on 2026-08-20**, in that order, each
-verified before the next. The ledger's last two entries are now `0031_boards` and
-`0032_item_master`.
+verified before the next. **`0033_laundry_prices_read` followed the same day** and is now the
+ledger's last entry, so the last three are `0031_boards`, `0032_item_master` and
+`0033_laundry_prices_read`.
+
+**0033 was found by probing, not by review, and only because the cutover put data in the table.**
+Every table in `public` was counted as a real `board` session — the sweep the boards work made
+possible for the first time — and `laundry_prices` came back **9**. Before it: all eight roles
+probed (board, driver, counter, dispatcher, warehouse operator, sales, finance, owner) read all
+nine rows. After it: board, driver, counter, dispatcher and warehouse read **0**; sales, auditor,
+finance, owner and the office manager read 9 — exactly `can_read_pricing()`. `xero_connections`
+answered −1 (refused at the grant level) throughout, which is the 0026 design holding. 9 price
+rows still present, 7 policies on the table (1 read + 3 write + 0025's 3 restrictive), 0 `anon`
+table grants, and 647 invoices / 508 archived customers / 6 jobs / 16 memberships untouched.
+Advisors stayed at **18** — 0033 adds no function.
+
+**The live cutover data went on the same day** (§24, §25), all of it read back afterwards:
+
+- **Five boards.** `Adelaide Towel Service` — the real laundry — has **Board 1–4** at the Adelaide
+  depot, **none linked to a login**, because none exists and this deployment cannot send an
+  invitation. `Harbour Commercial Laundry` has **Board 1**, linked, at Sydney Depot.
+- **A twelfth role profile.** `board@roles.example.com` / `RoleTest!2026`, `board` in Harbour and
+  nowhere else. Written by SQL like the other eleven (§3a) and checked column by column against
+  `driver@roles.example.com`: `aud`/`role`, confirmed, all eight token columns `''` rather than
+  NULL (the 2026-08-18 trap), `email_change_confirm_status` 0, `app_meta`, a bcrypt `$2a$` hash
+  that verifies against the shared password, exactly one email identity, and **not** a platform
+  admin.
+- **The demo round is real work, not an empty screen.** `RUN00002` is Board 1's run, with
+  `operated_by_driver_id` = Sam Okoye — the field §24 exists for — and LJ00004/LJ00005 name the
+  board. LJ00006 is completed history on the same run and the guard rightly refuses to reassign a
+  finished job, so it was left exactly as it is. Read back **as the board**: 1 board, RUN00002,
+  2 stops, LJ00004/5/6, 4 customers, **0 invoices**, `current_board_id` resolving and
+  `is_board_only` true. Adelaide's 510 customers are outside it.
+- **Item categories.** The five Harbour items that are laundry a customer hands in carry a
+  `laundry_category` (apron → `uniforms`, bath towel → `bath_towels`, hand towel → `hand_towels`,
+  tea towel → `towels`, table cloth → `linen`). `LB-STD-01` is deliberately left null: a laundry
+  bag is a container the laundry lends, not laundry. Adelaide has **no items at all**, so there
+  was nothing to categorise there.
+- **The first price list on the project.** There were **zero** `laundry_prices` rows and **zero**
+  rate cards, so "Price this job" could only ever answer *nothing came back priced* — correct, and
+  inert for every job in both laundries. Harbour now carries a tenant default for all nine kinds.
+  **Adelaide's was deliberately left empty**: inventing rates for a real business is not a repair.
+- **Two false rows cleared, and one deliberately not.** The 2026-08-18 cross-tenant bug left
+  `RUN00001` (Adelaide) crewed by Sam Okoye and `RUN00004` (Harbour) crewed by Mario Forte. Both
+  were `planned` — never loaded, never started, never closed, **0 stops worked, 0 deliveries, 0
+  pickups** — so `driver_id` recorded nothing that happened. Cleared on both; nothing deleted, 10
+  runs and 15 stops unchanged, and the ids are in the changelog if it ever needs putting back.
+  Harbour's own `RUN00001` (Sam Okoye, `in_progress`) is correct and untouched.
+  **`LJ00001` is left alone**: an Adelaide job whose customer belongs to Harbour, still
+  `ready_for_delivery`. Its remedy is to cancel it, which is terminal, and it is a job against a
+  customer rather than a bug's leftover — the owner's call, not this session's.
 
 Pre-flight, before anything was written: every object both migrations create was **absent**;
 every constraint and index they drop **by name** was present (`memberships_role_check`,
@@ -1128,6 +1196,64 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-08-20 · The cutover, and a price list every member could read
+The database was ready and the data was not: no board existed, no item said what kind of laundry
+it was, and **the project held zero prices and zero rate cards**, so the Price button was inert
+for every job in both laundries. Putting the first price list in is what exposed the defect below.
+One migration (`0033`), no new table, no new column, no new function, no new capability, and no
+row changed by the migration.
+
+- **Every member of the laundry could read every price.** 0018 gated who may *change*
+  `laundry_prices` and left the read policy at `is_member(tenant_id)` — the identical shape 0006
+  shipped on `invoices` and that 0017 had replaced **one migration earlier**. Driver, counter,
+  warehouse operator, dispatcher and, since 0031, a board: all nine rows, straight off PostgREST.
+- **It hid behind an empty table and a proof that asserted it.** Nothing could leak while no
+  price existed, and `laundry_pricing.test.sql` said in as many words *"the counter can read the
+  tenant's prices"*, count 2. **A proof that encodes the defect defends it** — that assertion was
+  rewritten to the decision rather than satisfied, the way the rate-card adoption rewrote four.
+- **Two policies, and the second is the half that is easy to miss.** A permissive `for all`
+  policy's USING clause grants SELECT as well, so narrowing `laundry_prices_read` alone would have
+  left the whole list readable through `laundry_prices_write` to `dispatcher`, who holds no
+  pricing capability at all. 0018's `for all` is now three explicit policies. The same trap §22
+  records for 0017, one table later. **No write set changed in substance**: 0025's restrictive
+  layer already ANDs `super_admin`/`operations_manager` over all of it.
+- **Found by probing, not by reading.** Every table in `public` counted as a real `board` session
+  — a sweep the boards work made possible for the first time. It is also what confirmed
+  `invoices` 0, `service_agreement_lines` 0 and `xero_connections` refused at the grant level.
+- **The three new assertions were proved to fail without the migration** — 10, 13 and 14 — rather
+  than assumed to be doing something.
+- 621 unit tests (unchanged: this adds no logic) and **348 pgTAP assertions (was 342)**. `verify`
+  green; all thirty-three migrations applied to a fresh Postgres 16 with the whole suite and the
+  seed on top.
+
+**The cutover itself, applied live** (§11 has the read-backs):
+
+- **Boards exist.** Adelaide Towel Service — the real laundry — has **Board 1–4**, unlinked,
+  because no login exists for them and this deployment cannot send an invitation. Harbour has
+  **Board 1**, linked to a new `board@roles.example.com` profile (§3a), with `RUN00002` as its run
+  and LJ00004/LJ00005 on it. `operated_by_driver_id` carries Sam Okoye, which is the whole reason
+  §24 kept drivers. Signed-in-as check: 1 board, 1 run, 2 stops, 3 jobs, 4 customers, **0
+  invoices** — not the empty application the unlinked-driver failure produced in July.
+- **Five items now decide their own kind of laundry.** The sixth, a laundry bag, is left null on
+  purpose: it is a container the laundry lends, not laundry a customer hands in.
+- **Harbour has a default price list; Adelaide deliberately does not.** Inventing rates for a real
+  business is not a repair — the owner enters theirs at Money › Laundry prices, and until they do
+  the pricer will keep saying so by name.
+- **Two false rows from the 2026-08-18 cross-tenant bug were cleared**: `RUN00001` (Adelaide,
+  crewed by a Harbour driver) and `RUN00004` (Harbour, crewed by an Adelaide driver). Both were
+  `planned` with **0 stops worked, 0 deliveries and 0 pickups**, so `driver_id` recorded nothing
+  that happened. Nothing was deleted and the ids are recorded: Sam Okoye
+  `60000000-0000-4000-8000-000000000001` on Adelaide's `RUN00001`, Mario Forte
+  `fa1a7cb7-dcf0-484b-a5fe-65755c55f1ce` on Harbour's `RUN00004`.
+- **`LJ00001` was deliberately not repaired.** It is an Adelaide job whose customer belongs to
+  Harbour, still `ready_for_delivery`. Its remedy is cancellation, which is terminal, and it is a
+  job against a customer rather than a bug's leftover — the owner's call.
+
+**Still not done, and it needs a browser rather than this container: take one job through
+complete → Price this job → Approve → run the month.** The roll-up has never been exercised
+against real rows. Harbour is now the laundry where that will work, because it is the one with
+prices in it.
+
 ### 2026-08-20 · The client's change requests: periodic billing, boards, run order, item codes
 Nineteen change requests, reviewed against the code first
 (`docs/CHANGE-REVIEW-2026-08-20.md`) and then built in the order that review
@@ -2911,8 +3037,20 @@ every open job at a different employee each time is administration the work does
   **Do not auto-create a board per driver**: it manufactures junk boards named after people,
   which is the model this is leaving.
 
-**Before trusting it: create one board, link a login, assign one job to it, and sign in as it.**
-The empty-screen failure is the one to watch for.
+**Cutover status, 2026-08-20.** Boards exist. `Adelaide Towel Service` carries **Board 1–4** at
+the Adelaide depot with **no login on any of them** — none exists, and this deployment cannot send
+an invitation (custom SMTP is still unconfigured), so `/boards` will show all four as unlinked and
+their My Runs is empty by design until a login is made and linked. `Harbour Commercial Laundry`
+carries **Board 1**, linked to the `board@roles.example.com` test profile, with `RUN00002` as its
+run and LJ00004/LJ00005 on it.
+
+**The empty-screen failure was checked for and did not happen**: signed in as that board, RLS
+returns 1 board, 1 run, 2 stops, 3 jobs and 4 customers — and **0 invoices**, so the billing gate
+holds for the twelfth role too.
+
+**What is left of the cutover is the real laundry's, not the code's**: invite one person into
+Adelaide (its only two members are platform admins and are filtered out of every picker by
+design), link them to a board, and move its open jobs across.
 
 ## 25. The item master, and MYOB
 `items` is the one item vocabulary: what the laundry rents out *and* what arrives in a customer's
@@ -2935,6 +3073,10 @@ bag, under the code the business already uses (0032). Staff type TOW001.
   the developer should inspect the real export rather than assume its field names; guessing is
   how the dropped-column bug in the bills import happened. `MYOB_KINDS` still lists eight kinds
   and items is not one. The columns are here and waiting for the file.
+- **Categories are set on the demo laundry only, because the real one has no items.**
+  `Adelaide Towel Service` holds **zero** `items` rows — its item master is exactly what the
+  unbuilt MYOB import would fill. Harbour's five laundry items carry a category; its laundry bag
+  does not, on purpose, because a container the laundry lends is not laundry a customer hands in.
 - **The open question is above this work, not inside it.** This app posts invoices and payments
   to **Xero** (§20) while MYOB is a one-off migration source (`docs/IMPORT-MYOB.md`). An item
   code is only worth carrying if it reconciles to the ledger that receives the invoice. Staying
