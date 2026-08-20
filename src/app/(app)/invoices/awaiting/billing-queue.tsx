@@ -6,10 +6,10 @@ import { money } from "@/lib/format";
 import { formatMoney } from "@/lib/domain/pricing";
 import { Badge, Button } from "@/components/ui";
 import { SubmitButton } from "@/components/form";
-import { approveSelectedJobs, generateSelectedInvoices } from "../bulk-actions";
+import { approveSelectedJobs, generateSelectedInvoices, priceSelectedJobs } from "../bulk-actions";
 
 /**
- * Select → Approve Selected, and Select → Generate Selected.
+ * Select → Price Selected / Approve Selected, and Select → Generate Selected.
  *
  * The selection is held here and posted as one form with a `selected` checkbox
  * group, so **one press is one request**. That is the difference the brief asks
@@ -20,6 +20,14 @@ import { approveSelectedJobs, generateSelectedInvoices } from "../bulk-actions";
  * they are about to do. The server re-reads every id and re-checks every job's
  * state, so a stale checkbox is refused rather than acted on — this is a
  * summary, not a source of truth.
+ *
+ * **Review mode carries two verbs over one selection, and that is why an
+ * unpriced row is now selectable.** It was not, deliberately: approving a job
+ * with no charges half-fails, so a tick that could only do that was worse than
+ * no tick. Price Selected is a verb that applies to exactly those rows, so the
+ * tick now means something for every row in the list — and approving an unpriced
+ * one is still refused by `checkBillingTransition`, named job by job, rather
+ * than being prevented by a disabled checkbox.
  */
 
 export type QueueRow = {
@@ -35,20 +43,17 @@ export type QueueRow = {
 };
 
 export function BillingQueue({
-  rows, mode, canAct,
+  rows, mode, canAct, canPrice = false,
 }: {
   rows: QueueRow[];
   mode: "approve" | "generate";
   canAct: boolean;
+  /** `billing.write` + `invoices.bulk` — pricing is a separate capability from approving. */
+  canPrice?: boolean;
 }) {
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
 
-  // Approving needs charges on the job; a job nobody has priced cannot be
-  // approved and the server would refuse it, so it is not selectable here
-  // either — an unselectable row with a reason beside it beats a selection
-  // that half fails.
-  const selectable = rows.filter((row) => mode === "generate" || row.chargeCount > 0);
-  const allSelected = selectable.length > 0 && selectable.every((row) => selected.has(row.id));
+  const allSelected = rows.length > 0 && rows.every((row) => selected.has(row.id));
 
   const toggle = (id: string) =>
     setSelected((current) => {
@@ -84,7 +89,7 @@ export function BillingQueue({
                     aria-label={allSelected ? "Clear the selection" : "Select every job listed"}
                     checked={allSelected}
                     onChange={() =>
-                      setSelected(allSelected ? new Set() : new Set(selectable.map((row) => row.id)))}
+                      setSelected(allSelected ? new Set() : new Set(rows.map((row) => row.id)))}
                   />
                 </label>
               </th>
@@ -98,20 +103,16 @@ export function BillingQueue({
           <tbody className="divide-y">
             {rows.map((row) => {
               const priced = row.chargeCount > 0;
-              const canSelect = mode === "generate" || priced;
               return (
                 <tr key={row.id} className={selected.has(row.id) ? "bg-primary/5" : undefined}>
                   <td className="py-2 pr-2">
-                    <label className={`flex min-h-11 items-center justify-center ${
-                      canSelect ? "cursor-pointer" : "cursor-not-allowed"}`}>
+                    <label className="flex min-h-11 cursor-pointer items-center justify-center">
                       <input
                         type="checkbox"
                         name="selected"
                         value={row.id}
-                        className="size-[1.15rem] shrink-0 rounded border-strong accent-primary
-                                   disabled:opacity-40"
+                        className="size-[1.15rem] shrink-0 rounded border-strong accent-primary"
                         aria-label={`Select job ${row.orderNumber}`}
-                        disabled={!canSelect}
                         checked={selected.has(row.id)}
                         onChange={() => toggle(row.id)}
                       />
@@ -159,7 +160,21 @@ export function BillingQueue({
             ? "Nothing selected"
             : `${selected.size} selected · ${formatMoney(chosenValue)} before GST`}
         </span>
-        <div className="ml-auto">
+        <div className="ml-auto flex flex-wrap items-center gap-3">
+          {/* Price first, then approve — the order the work is done in, and the
+              order they read in on the row. Pricing is the secondary variant
+              because approving is what the operator came here for; an already
+              priced selection needs only the second button. */}
+          {mode === "approve" && canPrice ? (
+            <SubmitButton
+              size="md"
+              variant="secondary"
+              formAction={priceSelectedJobs}
+              pendingLabel="Pricing…"
+            >
+              Price selected{selected.size ? ` (${selected.size})` : ""}
+            </SubmitButton>
+          ) : null}
           {canAct ? (
             <SubmitButton
               size="md"

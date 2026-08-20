@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { billableQuantity, jobChargeSubtotal, priceJob, type RateLine } from "@/lib/domain/job-pricing";
+import {
+  billableQuantity, jobChargeSubtotal, priceJob, pricingSourceLabel, type RateLine,
+} from "@/lib/domain/job-pricing";
 import type { OrderItemInput } from "@/lib/domain/laundry-orders";
 
 /**
@@ -368,5 +370,39 @@ describe("priceJob — the price-list fallback", () => {
 
     expect(result.lines).toHaveLength(0);
     expect(result.unpriced).toHaveLength(1);
+  });
+});
+
+/**
+ * Which tier answered, said back to the reviewer.
+ *
+ * The reason this is computed rather than assumed: both tiers can price parts of
+ * the same job, and the action that used to name only the rate card was the same
+ * action that refused to run without one.
+ */
+describe("pricingSourceLabel", () => {
+  const CARD = { agreement_number: "AGR00007", version: 2 };
+  const fromCard = { source_agreement_id: "agreement-1" };
+  const fromList = { source_agreement_id: null };
+
+  it("names the card when the card priced everything", () => {
+    expect(pricingSourceLabel([fromCard, fromCard], CARD)).toBe("AGR00007 v2");
+  });
+
+  it("names the price list when there is no card at all", () => {
+    expect(pricingSourceLabel([fromList], null)).toBe("the laundry price list");
+  });
+
+  it("names both when a card covered part of the job and the list the rest", () => {
+    expect(pricingSourceLabel([fromCard, fromList], CARD))
+      .toBe("AGR00007 v2 and the laundry price list");
+  });
+
+  it("names the list when a card exists but answered nothing", () => {
+    expect(pricingSourceLabel([fromList, fromList], CARD)).toBe("the laundry price list");
+  });
+
+  it("does not claim a card priced an empty job", () => {
+    expect(pricingSourceLabel([], CARD)).toBe("the laundry price list");
   });
 });

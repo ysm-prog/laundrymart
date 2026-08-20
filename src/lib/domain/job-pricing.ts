@@ -337,3 +337,29 @@ const CHARGE_TYPES = new Set<string>([
 function asChargeType(value: string): ChargeType {
   return (CHARGE_TYPES.has(value) ? value : "other") as ChargeType;
 }
+
+/**
+ * Which tier actually answered, in the words a reviewer reads back.
+ *
+ * There are two tiers and both can contribute to the same job — a rate card
+ * covering towels and a price list covering the sheets it says nothing about is
+ * the ordinary case (§21). So "priced from the rate card" is a half-truth often
+ * enough to be worth computing rather than assuming, and the provenance is
+ * already on every line: a list-priced line carries no `source_agreement_id`.
+ *
+ * Pure, and shared by the single Price button and the bulk one, so twenty jobs
+ * cannot be described differently from one.
+ */
+export function pricingSourceLabel(
+  lines: readonly Pick<JobChargeLine, "source_agreement_id">[],
+  card: { agreement_number: string; version: number } | null,
+): string {
+  const list = "the laundry price list";
+  if (!card) return list;
+
+  const named = `${card.agreement_number} v${card.version}`;
+  const fromCard = lines.some((line) => line.source_agreement_id);
+  const fromList = lines.some((line) => !line.source_agreement_id);
+  if (fromCard && fromList) return `${named} and ${list}`;
+  return fromCard ? named : list;
+}

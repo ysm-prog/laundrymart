@@ -76,9 +76,17 @@ export async function ChargesCard({
         </p>
       ) : (
         <p className="mb-4 text-sm text-muted-foreground">
-          This customer has no rate card, so charges are added by hand.{" "}
+          {/* The price list is the tier beneath the card (§21), and this line
+              used to deny it existed — which was the same mistake the Price
+              button made: it refused outright without a card, and every customer
+              on this deployment has none. */}
+          This customer has no rate card, so pricing falls back to your{" "}
+          <Link href="/invoices/prices" className="text-primary hover:underline">
+            laundry price list
+          </Link>
+          . Anything neither covers is added by hand.{" "}
           <Link href={`/customers/${customerId}`} className="text-primary hover:underline">
-            Set one
+            Set a rate card
           </Link>
           .
         </p>
@@ -110,8 +118,10 @@ export async function ChargesCard({
               {/* Replaces every line with today's rate card. Said plainly on the
                   button, because a reviewer who has hand-edited a line needs to
                   know this is not an "update the ones I haven't touched". */}
+              {/* Named by tier rather than by "rate card", because the button
+                  works for a customer who has none — the price list answers. */}
               <SubmitButton variant="secondary" size="md" pendingLabel="Pricing…">
-                {charges.length > 0 ? "Re-price from the rate card" : "Price from the rate card"}
+                {charges.length > 0 ? "Re-price this job" : "Price this job"}
               </SubmitButton>
             </form>
 

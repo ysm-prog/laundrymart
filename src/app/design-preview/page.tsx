@@ -23,6 +23,9 @@ import { DateNav } from "@/app/(app)/my-runs/date-nav";
 import { DaySummary, JobCard, JobGroup } from "@/app/(app)/my-runs/run-view";
 import { BillingQueue, type QueueRow } from "@/app/(app)/invoices/awaiting/billing-queue";
 import { JobChargesEditor, type EditableCharge } from "@/app/(app)/orders/[id]/job-charges-editor";
+import {
+  InvoiceSelection, type SelectableInvoice,
+} from "@/app/(app)/invoices/invoice-selection";
 import { PriceTable } from "@/app/(app)/invoices/prices/price-table";
 import {
   defaultPriceList, priceListFor, type LaundryPriceRow,
@@ -992,8 +995,9 @@ export default function DesignPreviewPage() {
               description="Finished work that has not been billed. Approve the charges, then generate."
             />
 
-            <Card title="Approve" description="A job with no charges cannot be selected — it needs pricing first.">
-              <BillingQueue rows={PREVIEW_QUEUE} mode="approve" canAct />
+            <Card title="Price and approve"
+                  description="Two verbs over one selection. An unpriced job is selectable because Price Selected is the verb that applies to it; approving one is refused by name.">
+              <BillingQueue rows={PREVIEW_QUEUE} mode="approve" canAct canPrice />
             </Card>
 
             <Card title="Generate" description="Approved jobs, grouped by each customer's billing method.">
@@ -1001,7 +1005,35 @@ export default function DesignPreviewPage() {
             </Card>
 
             <Card title="Nothing waiting" description="The state the queue is in most of the time.">
-              <BillingQueue rows={[]} mode="approve" canAct />
+              <BillingQueue rows={[]} mode="approve" canAct canPrice />
+            </Card>
+
+            {/* The rung between generating and sending, and the reason it is
+                worth looking at: the same component carries both verbs, so a
+                change to the tap targets or the running total has to be right
+                for the issue list and the send list at once. */}
+            <Card title="Issue drafts"
+                  description="Generating writes drafts; this turns them into documents. It emails nobody.">
+              <InvoiceSelection
+                invoices={PREVIEW_DRAFTS}
+                returnTo="/invoices?tool=issue"
+                action={async () => { "use server"; }}
+                verb="Issue selected"
+                pendingLabel="Issuing…"
+                selectAllLabel="Select every draft listed"
+              />
+            </Card>
+
+            <Card title="Send invoices"
+                  description="Issued invoices with a billing email. Re-sending is legitimate and simply labelled.">
+              <InvoiceSelection
+                invoices={PREVIEW_SENDABLE}
+                returnTo="/invoices?tool=send"
+                action={async () => { "use server"; }}
+                verb="Send selected"
+                pendingLabel="Sending…"
+                selectAllLabel="Select every invoice listed"
+              />
             </Card>
 
             <Card title="A job's charges"
@@ -1041,6 +1073,30 @@ const PREVIEW_QUEUE: QueueRow[] = [
     customerName: "City Gym — Alexandria", billingMethod: "monthly_consolidated",
     completedAt: "2026-08-16T01:05:00Z", chargeCount: 0, subtotal: 0,
     hasRateCard: false,
+  },
+];
+
+/**
+ * Drafts waiting to be issued, and issued invoices waiting to be sent.
+ *
+ * Two fixtures rather than one, because the two lists differ in exactly the
+ * detail worth looking at: a draft can legitimately total nothing, and a
+ * sendable invoice can carry the "already sent" label.
+ */
+const PREVIEW_DRAFTS: SelectableInvoice[] = [
+  { id: "inv-1", invoiceNumber: "INV00311", customerName: "Harbourview Hotel", total: 1284.5, status: "draft" },
+  { id: "inv-2", invoiceNumber: "INV00312", customerName: "Bondi Surf Club", total: 42, status: "draft" },
+  { id: "inv-3", invoiceNumber: "INV00313", customerName: "City Gym — Alexandria", total: 0, status: "draft" },
+];
+
+const PREVIEW_SENDABLE: SelectableInvoice[] = [
+  {
+    id: "inv-4", invoiceNumber: "INV00308", customerName: "Harbourview Hotel",
+    total: 1190.25, status: "issued",
+  },
+  {
+    id: "inv-5", invoiceNumber: "INV00309", customerName: "Parkside Aged Care",
+    total: 763.4, status: "overdue", alreadyEmailed: true,
   },
 ];
 

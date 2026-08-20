@@ -308,7 +308,8 @@ branches deploy. Never force-push `Prod`.
 `(app)`: `/dashboard` · `/my-runs[/jobs/:id]` ·
 `/customers[/new|/:id|/:id/edit|/:id/prices]` · `/agreements[/new|/:id]` ·
 `/invoices/awaiting` (the billing queue — a list of *jobs*, under Money because the decision is a
-billing one; `sectionFor` takes the longest match so it lands there rather than on the register) ·
+billing one; `sectionFor` takes the longest match so it lands there rather than on the register;
+Price Selected → Approve Selected → Generate Selected) ·
 `/orders[/new|/:id|/:id/edit]` ·
 `/items[/:id]` · `/drivers` · `/vehicles` · `/routes/templates[/:id]` ·
 `/routes/daily[/:id|/:id/sheet]` · `/routes/planner` · `/jobs[/:id]` ·
@@ -945,7 +946,9 @@ Both are compositions over existing tables — neither added a migration.
   so it never implies one.
 - `/invoices` is the register + working pane. The left list is a chase queue, the right pane
   is issue / send / take payment, and selection lives in `?selected=` so filters and page
-  survive. Pane actions post a `return_to` and come back to the pane — `returnTo()` in
+  survive. `?tool=` opens the bulk panes instead: `recurring` (the month-end run, defaulting to
+  the **previous** month), `issue` (Issue Selected over the drafts) and `send` (Send Selected
+  over the issued). `InvoiceSelection` is one component serving the last two. Pane actions post a `return_to` and come back to the pane — `returnTo()` in
   `lib/actions.ts` only honours a plain same-site path, since an absolute one would make every
   action an open redirect. `/invoices/:id` stays as the printable record and the place lines
   are edited and invoices voided.
@@ -1017,6 +1020,65 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-08-20 · Month end is a month-end button, and every customer can be priced
+A review of "job completed → invoice pool → one press at month end" against the code. The
+spine was already right — completion never bills, the pool is real, the dated run sweeps
+approved jobs from frozen snapshots — and four things stood between it and being usable.
+**No migration; no schema, RLS, capability or workflow change.**
+
+- **The automatic pricer refused every real customer, and threw away the answer it had.**
+  `priceJobCharges` computed the lines — `priceJobFromRateCard` reads the rate card *and* the
+  laundry price list beneath it — and then returned "this customer has no rate card, so nothing
+  can be priced automatically" before saving them. **508 of 508 live customers hold no rate
+  card**, so the button was inert for every job in the business and hand-entry was the only
+  path to a priced job. The tier beneath the card is the whole reason 0018 survived the rate-card
+  adoption (§21), and the action was the one place that did not know. It now refuses on the fact
+  that matters — *nothing came back priced*, whichever tier was asked — and the message names the
+  screen that fixes it, the rate card or the price list depending on which is missing.
+- **Nothing could be priced in bulk, which is what made month end a per-job errand.** Approving
+  in bulk needs charges on every job, and the only way to put them there was to open each job.
+  **Price Selected** is the queue's new verb. Review mode now carries two verbs over one
+  selection, which is why an unpriced row became selectable — it was deliberately not, because a
+  tick that could only half-fail is worse than no tick, and that reasoning ends the moment there
+  is a verb that applies to exactly those rows. Approving an unpriced job is still refused, by
+  `checkBillingTransition`, named job by job.
+- **The month-end run defaulted to the month you are standing in.** The period fields read
+  1st-of-this-month → today, so pressing it on 1 September billed September 1–1, found nothing,
+  and reported "nothing to invoice" — which reads as *everything is billed*, not as *wrong
+  month*. It defaults to the previous month now (`previousMonth` in `dates.ts`, tested at the
+  year boundary and on a leap February, because an inline `getMonth() - 1` gets both wrong).
+  The button and the card say "last month's invoices" so the default is not a surprise.
+- **Issue had no bulk form, so Send Selected could not be reached.** Generating writes drafts,
+  sending refuses a draft — correctly — and issuing was one invoice at a time. Forty invoices was
+  forty presses before the bulk send was usable at all. **Issue Selected** is the missing rung;
+  `lib/invoices/issue.ts` is now the single implementation, shared with the single button, so the
+  Xero push and its never-block-the-money contract cannot drift between them. A Xero refusal is
+  **not** an issue failure and is counted separately rather than hidden.
+- **`update` matching nothing is not an error to PostgREST**, and in bulk that is the outcome
+  most needing a name: an invoice already issued, already void, or belonging to another laundry
+  would otherwise count as a success and the operator reads "issued 40" over a batch of 37.
+  `issueOneInvoice` selects the updated row back and says "it is no longer a draft".
+- **Four reads that feed a write now name their tenant** (§23): the billing queue, the issue
+  list, the send list, and the price-list read inside `priceJobFromRateCard` — where `tenantId`
+  is a **required argument**, so the typechecker stops the next call site forgetting. That last
+  one matters more than it did yesterday: the default price list is the row with
+  `customer_id is null`, and unfiltered a platform admin's session brings back two laundries'
+  defaults and `priceListFor` takes whichever the plan returned first.
+- `SendSelected` became `InvoiceSelection`, one component with the verb passed in, rather than a
+  copy for the issue list — and picked up the shared checkbox skin on the way, since it still
+  carried the bare 16px box the 2026-08-17 entry swept out of the other two billing components.
+  Measured after: every control in the section is ≥36px and every checkbox sits in a 44px label.
+- 525 unit tests (was 515). `verify` green. The gallery gained the issue and send lists and the
+  two-verb queue; asserted light and dark at 320/360/390/768/1024/1440 — no console errors and
+  no overflow inside the section. The 7px document overflow at 320 and 1024 is the pre-existing
+  dispatch-planner fixture the 2026-08-16 entry already measured, unchanged by this.
+
+**Not verified against a live project.** This container has no Supabase credentials, so no job
+was priced and no invoice issued with real rows behind it. **Before trusting it: take one job in
+on `ats.coreit.com.au`, complete it, press Price this job in Money › Awaiting invoice, approve
+it, run last month, then Issue drafts and Send.** The pricing fix is the one to watch — it is
+the first time the price-list tier has been reachable from a screen.
+
 ### 2026-08-18 · Assign Driver refused every time, blaming a race that never happened
 "Somebody else changed this job's driver a moment ago" on a job nobody else had touched. No
 migration; no schema, RLS, capability or workflow change.
@@ -2527,7 +2589,13 @@ write actions, the whole assignment path (`lib/runs/my-runs.ts` and `my-runs/act
 read there now takes a tenant as a **required argument**, so a new call site cannot forget), the
 dispatch card, and the orders filter bar.
 
-**Not yet swept:** roughly 350 of the 451 `.from(...)` reads in `src/` still rely on RLS alone —
+Fixed on 2026-08-20: the four reads behind the billing bulk actions — the awaiting-invoice queue,
+the issue list, the send list, and the laundry price list inside `priceJobFromRateCard` (where the
+tenant is a **required argument**, the same convention as `lib/runs/my-runs.ts`). The price list
+mattered most: its default row is the one with `customer_id is null`, so unfiltered it returns two
+laundries' defaults and the pricer takes whichever came back first.
+
+**Not yet swept:** roughly 345 of the 451 `.from(...)` reads in `src/` still rely on RLS alone —
 customers, contracts, invoices, inventory, warehouse, reports, search. For ten of the eleven roles
 every one of them is correct. For a platform admin each is a list that may span two businesses.
 The candidates are (a) finish the sweep by hand, (b) a `from()` wrapper that appends the filter
@@ -2563,6 +2631,13 @@ financial    pending → awaiting_review → approved → invoice_generated → 
   minimum to the period, the only unit it means anything on.
 - **Laundry the rate card cannot price is reported, never billed at zero.** `priceJob` returns it in
   `unpriced` for a person to decide about — a zero line reads as a decision somebody took.
+- **The price list is a tier, not a fallback of last resort, and the *action* has to know that too.**
+  `priceJob` has read both since the adoption; `priceJobCharges` refused outright whenever the
+  customer held no rate card and discarded the list-priced lines it had already computed — inert
+  for all 508 live customers, who hold none. `priceAndSaveJob` in `lib/orders/job-billing.ts` is now
+  the one implementation, shared by the job page's Price button and the queue's **Price Selected**,
+  and it refuses on *nothing came back priced* rather than on the absence of a card.
+  `pricingSourceLabel` names which tier actually answered, because both can price parts of one job.
 - **A completed job is a billable source**, and `customers.billing_method` decides the shape at
   generation time: `invoice_per_job` → one invoice each; `*_consolidated` → one invoice carrying
   all of them; `manual` → only ever by explicit selection. Whether August is fifteen invoices or one
@@ -2581,7 +2656,11 @@ financial    pending → awaiting_review → approved → invoice_generated → 
   `guard_invoice_source_job` refuses any way the two could disagree.
 - **Bulk means one request, not a loop of server actions.** `/invoices/awaiting` posts a whole
   selection to one action which reads it in one query; partial success reports both numbers and
-  names the reason. Capped at 200 and **refused** rather than truncated past that.
+  names the reason. Capped at 200 and **refused** rather than truncated past that. The full set is
+  **price → approve → generate → issue → send**, and every rung has a bulk form: without Issue
+  Selected the bulk send was unreachable, since a draft is rightly refused by the send path.
+  Review mode carries *two* verbs over one selection (Price and Approve), which is why an unpriced
+  row is selectable there — approving one is still refused by name.
 - **Xero is recorded, not integrated.** `customers.xero_contact_id/_name` and
   `invoices.xero_invoice_id/_number/_status/_synced_at` are typed in by a person so the two systems
   can be reconciled. There is no Xero client in this codebase, authentication and invoice-state

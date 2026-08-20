@@ -43,6 +43,12 @@ export default async function AwaitingInvoicePage() {
       "id, order_number, customer_id, status, billing_status, completed_at, due_date, " +
       "customers(id, business_name, billing_method, rate_card_agreement_id)",
     )
+    // Named rather than left to RLS (§23). Every id on this screen is posted
+    // back into a write — pricing, approving, generating — and each of those is
+    // filtered to the laundry the person is working in, so a list that spans two
+    // (which it does for a platform admin, since `is_member()` is true of every
+    // laundry for them) offers ticks that can only fail.
+    .eq("tenant_id", session.tenantId)
     .in("billing_status", ["awaiting_review", "approved"])
     .order("completed_at", { ascending: true })
     .limit(500)
@@ -99,18 +105,19 @@ export default async function AwaitingInvoicePage() {
 
       <Card
         title="Awaiting review"
-        description="Check the charges on each job, then approve them. Approving freezes the price."
+        description="Price the jobs that need it, check the charges, then approve them. Approving freezes the price."
       >
         {awaiting.length === 0 ? (
           <EmptyState
             title="Nothing waiting on a review"
-            description="Completed jobs land here for their charges to be checked."
+            description="Completed jobs land here for their charges to be priced and checked."
           />
         ) : (
           <BillingQueue
             rows={awaiting}
             mode="approve"
             canAct={can(session.role, "invoices.approve") && can(session.role, "invoices.bulk")}
+            canPrice={can(session.role, "billing.write") && can(session.role, "invoices.bulk")}
           />
         )}
       </Card>

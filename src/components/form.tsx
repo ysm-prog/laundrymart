@@ -156,7 +156,7 @@ export function WeekdayPicker({
 /** Disables itself while the server action is in flight. */
 export function SubmitButton({
   children = "Save", variant = "primary", pendingLabel = "Saving…", size = "lg", formId,
-  className,
+  className, formAction,
 }: {
   children?: ReactNode;
   variant?: "primary" | "danger" | "secondary";
@@ -165,6 +165,16 @@ export function SubmitButton({
   formId?: string;
   /** For the few places the button should fill its column — a sign-in form. */
   className?: string;
+  /**
+   * A second verb for the same selection — the billing queue's Price and
+   * Approve act on one set of ticks, so they are two buttons in one form rather
+   * than two forms whose checkboxes would have to be kept in step.
+   *
+   * `useFormStatus` is form-wide, so while either is pending both show their own
+   * pending label and neither can be pressed. That is the honest state: one
+   * request is in flight over this selection.
+   */
+  formAction?: (formData: FormData) => void | Promise<void>;
 }) {
   const { pending } = useFormStatus();
   // Mirrors BUTTON_VARIANTS in ui.tsx.
@@ -175,7 +185,7 @@ export function SubmitButton({
   } as const;
   const sizes = { md: "min-h-10 px-4", lg: "min-h-11 px-5" } as const;
   return (
-    <button type="submit" disabled={pending} form={formId}
+    <button type="submit" disabled={pending} form={formId} formAction={formAction}
             className={cx(
               "inline-flex items-center justify-center gap-2 rounded-lg text-sm font-medium transition",
               "disabled:pointer-events-none disabled:opacity-60 [&_svg]:size-4 [&_svg]:shrink-0",

@@ -24,6 +24,7 @@ import { pushInvoiceToXero } from "@/lib/xero/push";
 import { pushPaymentToXero } from "@/lib/xero/push-payment";
 import { pushVoidToXero } from "@/lib/xero/push-void";
 import { generateInvoicesForJobs } from "@/lib/invoices/from-jobs";
+import { issueOneInvoice } from "@/lib/invoices/issue";
 import {
   markInvoiceJobsPaid, releaseVoidedInvoiceJobs, sendInvoice,
 } from "@/lib/invoices/send";
@@ -531,29 +532,19 @@ export async function issueInvoice(formData: FormData): Promise<void> {
 
   const backTo = returnTo(formData, `/invoices/${id.data}`);
   const supabase = await createClient();
-  await supabase.rpc("recalculate_invoice", { p_invoice: id.data });
 
-  const { error } = await supabase
-    .from("invoices")
-    .update({ status: "issued", issued_at: new Date().toISOString() })
-    .eq("id", id.data).eq("tenant_id", session.tenantId).eq("status", "draft");
-  if (error) return fail(backTo, describeDbError(error));
-
-  await recordAudit(session, { entity: "invoice", entityId: id.data, action: "status_change", summary: "issued" });
-
-  // Xero comes after the invoice is issued, and never blocks it. The money
-  // record is ours; Xero is a copy. A provider outage must leave the invoice
-  // issued with a visible failure and a retry, not refuse to issue an invoice
-  // the customer is about to be sent.
-  const push = await pushInvoiceToXero(supabase, id.data, session.tenantId);
+  // The rules — recalculate, draft-only, then Xero without ever blocking the
+  // issue — live in `issueOneInvoice`, shared with Issue Selected.
+  const issued = await issueOneInvoice(supabase, session, id.data);
 
   revalidatePath(`/invoices/${id.data}`);
   revalidatePath("/invoices");
 
-  if (push.ok) return done(backTo, "Invoice issued and sent to Xero.");
+  if (!issued.ok) return fail(backTo, `This invoice could not be issued — ${issued.error}.`);
+  if (issued.xero === "pushed") return done(backTo, "Invoice issued and sent to Xero.");
   // A laundry that has not connected Xero is not failing at anything.
-  if (push.skipped) return done(backTo, "Invoice issued.");
-  return done(backTo, `Invoice issued, but Xero did not accept it. ${push.reason}`,
+  if (issued.xero === "skipped") return done(backTo, "Invoice issued.");
+  return done(backTo, `Invoice issued, but Xero did not accept it. ${issued.reason ?? ""}`.trim(),
               { href: `/invoices/${id.data}`, label: "Open the invoice" });
 }
 

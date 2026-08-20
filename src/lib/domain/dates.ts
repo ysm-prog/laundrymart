@@ -73,3 +73,27 @@ export function formatIso(date: IsoDate, locale = "en-AU"): string {
     weekday: "short", day: "numeric", month: "short", year: "numeric", timeZone: "UTC",
   });
 }
+
+/**
+ * The calendar month before the one `date` falls in.
+ *
+ * The month-end billing run's default period. It is a helper rather than two
+ * expressions at the call site because the interesting case is the one an
+ * inline `getMonth() - 1` gets wrong: January's previous month is December of
+ * the year before, and a run on 1 January that quietly billed December of the
+ * *same* year would find nothing and report "nothing to invoice" — which reads
+ * as "everything is billed" rather than as a wrong date.
+ *
+ * The end is the last day of that month, found by stepping back one day from
+ * its successor's first, so no month-length table is needed and February is
+ * right in a leap year without being special-cased.
+ */
+export function previousMonth(date: IsoDate): { start: IsoDate; end: IsoDate } {
+  const d = parseIso(date);
+  const year = d.getUTCFullYear();
+  const month = d.getUTCMonth(); // 0-based; this month.
+  const start = new Date(Date.UTC(year, month - 1, 1));
+  const end = new Date(Date.UTC(year, month, 1));
+  end.setUTCDate(end.getUTCDate() - 1);
+  return { start: toIso(start), end: toIso(end) };
+}

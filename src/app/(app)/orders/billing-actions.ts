@@ -13,7 +13,7 @@ import { jobChargeSubtotal } from "@/lib/domain/job-pricing";
 import { money } from "@/lib/format";
 import { logOrderActivity } from "@/lib/orders/activity";
 import {
-  approveJob, loadJobCharges, loadJobForBilling, priceJobFromRateCard, saveJobCharges,
+  approveJob, loadJobCharges, loadJobForBilling, priceAndSaveJob, saveJobCharges,
 } from "@/lib/orders/job-billing";
 import { parseJobCharges } from "./job-charges";
 
@@ -48,13 +48,16 @@ function backTo(formData: FormData, orderId: string): string {
 /* ------------------------------------------------------------- price it --- */
 
 /**
- * (Re-)price a job from its customer's current rate card.
+ * (Re-)price a job from its customer's current rates.
  *
  * Deliberately a button rather than something that happens on completion. A job
  * completes when the driver hands it over, which may be days before anybody
  * looks at the money, and pricing at that instant would freeze a rate card
- * nobody had checked. Pricing on demand means the reviewer sees today's card and
- * can say so.
+ * nobody had checked. Pricing on demand means the reviewer sees today's rates
+ * and can say so.
+ *
+ * The rules live in `priceAndSaveJob`, shared with Price Selected on the queue.
+ * Everything here is the sentence the operator reads back.
  */
 export async function priceJobCharges(formData: FormData): Promise<void> {
   const session = await assertCapability("billing.write");
@@ -64,53 +67,30 @@ export async function priceJobCharges(formData: FormData): Promise<void> {
   const back = backTo(formData, parsed.data.id);
   const supabase = await createClient();
 
-  const job = await loadJobForBilling(supabase, parsed.data.id);
-  if (!job) return fail(LIST, "That job could not be found.");
-  if (job.billing_status !== "awaiting_review") {
-    return fail(back, "Charges can only be changed while a job is awaiting review.");
+  const priced = await priceAndSaveJob(supabase, session, parsed.data.id);
+
+  // A refusal names the screen that fixes it, and which screen that is depends
+  // on which tier is missing: a customer with a rate card that does not cover
+  // the laundry is a rate-card problem, and one without a card is a price-list
+  // problem. Neither is "add it by hand", though that stays available in the
+  // editor above the button.
+  if (!priced.ok) {
+    const link = priced.card
+      ? { href: `/agreements/${priced.card.id}`, label: "Open the rate card" }
+      : { href: "/invoices/prices", label: "Set your laundry prices" };
+    return fail(back, priced.error, priced.customerId ? link : undefined);
   }
 
-  const { lines, unpriced, card } = await priceJobFromRateCard(supabase, job);
-
-  if (lines.length === 0 && unpriced.length === 0) {
-    return fail(back, "This job has no laundry on it, so there is nothing to price.");
-  }
-  if (!card) {
-    return fail(back,
-      "This customer has no rate card, so nothing can be priced automatically. "
-      + "Add the charges by hand, or set a rate card first.",
-      { href: `/customers/${job.customer_id}`, label: "Set their rate card" });
-  }
-
-  const saved = await saveJobCharges(supabase, job.id, lines);
-  if (!saved.ok) return fail(back, saved.error);
-
-  await logOrderActivity(supabase, session, job.id, {
-    activity_type: "updated",
-    next: {
-      billing: "priced",
-      rate_card: `${card.agreement_number} v${card.version}`,
-      lines: lines.length,
-      subtotal: jobChargeSubtotal(lines),
-    },
-  });
-  await recordAudit(session, {
-    entity: "laundry_order", entityId: job.id, action: "update",
-    summary: `${job.order_number}: priced from ${card.agreement_number} v${card.version}`,
-    metadata: { lines: lines.length, unpriced: unpriced.length },
-  });
-
-  revalidatePath(`/orders/${job.id}`);
+  revalidatePath(`/orders/${parsed.data.id}`);
   revalidatePath(LIST);
 
   // The gap is said out loud rather than left for the reviewer to notice. It is
   // a success — the rest of the job *was* priced — so it is a `done` with a
   // caveat, not a failure that would have thrown the priced lines away.
-  const gap = unpriced.length > 0
-    ? ` ${unpriced.length} item(s) had no rate on the card and were not priced.`
+  const gap = priced.unpriced > 0
+    ? ` ${priced.unpriced} item(s) had no rate on the card or the price list and were not priced.`
     : "";
-  return done(back,
-    `Priced ${lines.length} charge(s) from ${card.agreement_number} v${card.version}.${gap}`);
+  return done(back, `Priced ${priced.lines} charge(s) from ${priced.source}.${gap}`);
 }
 
 /* -------------------------------------------------------------- edit it --- */
