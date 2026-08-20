@@ -36,6 +36,41 @@ const data: InvoicePdfData = {
     { description: "Bulk wash — 260 kg over 4 collection(s)", charge_type: "weight_charge",
       quantity: 260, unit_price: 1, amount: 260, taxable: true },
   ],
+  // A consolidated invoice: the lines above are rolled up per item, and this is
+  // the per-job detail that has to travel with the PDF.
+  breakdown: {
+    jobCount: 2,
+    weeks: [
+      {
+        weekStart: "2026-07-06",
+        total: 300,
+        jobs: [
+          {
+            jobId: "job-1", orderNumber: "LJ00021", date: "2026-07-07", total: 300,
+            items: [{ description: "Bath Towel", charge_type: "rental", quantity: 220,
+                      unit_price: 0.55, amount: 121, source_item_id: "item-1",
+                      source_laundry_item_type: null }],
+          },
+        ],
+      },
+      {
+        weekStart: "2026-07-13",
+        total: 180,
+        jobs: [
+          {
+            jobId: "job-2", orderNumber: "LJ00028", date: "2026-07-14", total: 180,
+            items: [{ description: "Bath Towel", charge_type: "rental", quantity: 180,
+                      unit_price: 0.55, amount: 99, source_item_id: "item-1",
+                      source_laundry_item_type: null }],
+          },
+        ],
+      },
+    ],
+    totals: [
+      { key: "item:item-1", description: "Bath Towel", source_item_id: "item-1",
+        source_laundry_item_type: null, quantity: 400, amount: 220 },
+    ],
+  },
 };
 
 describe("renderInvoicePdf", () => {
@@ -98,5 +133,31 @@ describe("buildInvoiceEmail", () => {
 describe("escapeHtml", () => {
   it("escapes every character that can break out of markup", () => {
     expect(escapeHtml(`<&>"'`)).toBe("&lt;&amp;&gt;&quot;&#39;");
+  });
+});
+
+describe("the service breakdown on a consolidated PDF", () => {
+  it("carries the per-job detail behind the rolled-up lines", async () => {
+    const pdf = await renderInvoicePdf(data);
+    const text = pdf.toString("latin1");
+    expect(pdf.byteLength).toBeGreaterThan(1000);
+    // The rendered stream is compressed, so the assertion that earns its place
+    // is that adding the breakdown changed the document rather than that a
+    // particular string appears in it.
+    const withoutBreakdown = await renderInvoicePdf({
+      ...data, breakdown: { weeks: [], totals: [], jobCount: 0 },
+    });
+    expect(pdf.byteLength).toBeGreaterThan(withoutBreakdown.byteLength);
+    expect(text.startsWith("%PDF")).toBe(true);
+  });
+
+  it("renders nothing extra for a single-job invoice — the lines are the detail", async () => {
+    const single = await renderInvoicePdf({
+      ...data, breakdown: { ...data.breakdown, jobCount: 1 },
+    });
+    const none = await renderInvoicePdf({
+      ...data, breakdown: { weeks: [], totals: [], jobCount: 0 },
+    });
+    expect(single.byteLength).toBe(none.byteLength);
   });
 });

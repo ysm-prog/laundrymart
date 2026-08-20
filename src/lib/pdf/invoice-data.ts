@@ -10,6 +10,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import type { ChargeType } from "@/lib/domain/pricing";
+import { loadInvoiceBreakdown, type InvoiceBreakdown } from "@/lib/invoices/breakdown";
 
 export type InvoicePdfLine = {
   description: string;
@@ -48,6 +49,15 @@ export type InvoicePdfData = {
     notes: string | null;
   };
   lines: InvoicePdfLine[];
+  /**
+   * The per-job detail behind a consolidated invoice, or empty.
+   *
+   * On the page the lines are rolled up per item, so a customer holding ten
+   * jobs' worth of towels reads one line. This is the audit trail that has to
+   * travel with it — otherwise the emailed PDF is the one copy of the invoice
+   * that cannot answer "which day were those 1,450 towels?".
+   */
+  breakdown: InvoiceBreakdown;
 };
 
 export async function loadInvoiceForPdf(
@@ -111,5 +121,6 @@ export async function loadInvoiceForPdf(
     },
     invoice,
     lines: lines ?? [],
+    breakdown: await loadInvoiceBreakdown(supabase, tenantId, invoiceId),
   };
 }

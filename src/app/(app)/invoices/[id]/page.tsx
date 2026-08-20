@@ -5,6 +5,8 @@ import { createClient } from "@/lib/supabase/server";
 import { can } from "@/lib/roles";
 import { date, money, today } from "@/lib/format";
 import { CHARGE_TYPE_LABELS, type ChargeType } from "@/lib/domain/pricing";
+import { formatIso } from "@/lib/domain/dates";
+import { loadInvoiceBreakdown } from "@/lib/invoices/breakdown";
 import type { Invoice, InvoiceLine, Payment } from "@/lib/db/types";
 import {
   Button, ButtonLink, Card, DataTable, EmptyState, Notice,
@@ -106,6 +108,7 @@ export default async function InvoiceDetailPage({
 
       <Suspense fallback={<SkeletonRows rows={5} />}>
         <Lines invoiceId={id} editable={editable} />
+        <ServiceBreakdown invoiceId={id} tenantId={session.tenantId} />
       </Suspense>
 
       <Suspense fallback={<SkeletonRows rows={3} />}>
@@ -198,6 +201,72 @@ function Meta({ label, value }: { label: string; value: string }) {
       <dt className="text-xs text-muted-foreground">{label}</dt>
       <dd className="font-medium">{value}</dd>
     </div>
+  );
+}
+
+/**
+ * The per-job detail behind a consolidated invoice.
+ *
+ * The lines above say what the customer owes; this says what was actually
+ * processed and when. Both are read from the same frozen charges, so they cannot
+ * disagree — and a per-job invoice renders nothing here, because the lines
+ * already are the detail.
+ */
+async function ServiceBreakdown({ invoiceId, tenantId }: { invoiceId: string; tenantId: string }) {
+  const supabase = await createClient();
+  const breakdown = await loadInvoiceBreakdown(supabase, tenantId, invoiceId);
+  if (breakdown.jobCount < 2) return null;
+
+  return (
+    <Card
+      title="Service breakdown"
+      description={`What was processed on this invoice — ${breakdown.jobCount} jobs, week by week.`}
+    >
+      <div className="space-y-4">
+        {breakdown.weeks.map((week) => (
+          <div key={week.weekStart ?? "undated"} className="space-y-1.5">
+            <div className="flex items-baseline justify-between gap-4 border-b border-border pb-1.5">
+              <h3 className="text-sm font-semibold">
+                {week.weekStart ? `Week of ${formatIso(week.weekStart)}` : "No completion date"}
+              </h3>
+              <span className="text-sm tabular-nums text-muted-foreground">{money(week.total)}</span>
+            </div>
+            {week.jobs.map((job) => (
+              <div key={job.jobId} className="pl-1 text-sm">
+                <div className="flex items-baseline justify-between gap-4">
+                  <span className="text-muted-foreground">
+                    {job.date ? formatIso(job.date) : "—"} · {job.orderNumber}
+                  </span>
+                  <span className="tabular-nums">{money(job.total)}</span>
+                </div>
+                <ul className="pl-4 text-muted-foreground">
+                  {job.items.map((item, index) => (
+                    <li key={`${job.jobId}-${index}`} className="flex justify-between gap-4">
+                      <span>{item.description}</span>
+                      <span className="tabular-nums">{item.quantity.toLocaleString("en-AU")}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+        ))}
+
+        {breakdown.totals.length > 0 ? (
+          <div className="space-y-1.5 rounded-lg border border-border bg-surface-muted p-3">
+            <h3 className="text-sm font-semibold">Total for the period</h3>
+            <ul className="text-sm">
+              {breakdown.totals.map((total) => (
+                <li key={total.key} className="flex justify-between gap-4">
+                  <span className="text-muted-foreground">{total.description}</span>
+                  <span className="tabular-nums">{total.quantity.toLocaleString("en-AU")}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+      </div>
+    </Card>
   );
 }
 

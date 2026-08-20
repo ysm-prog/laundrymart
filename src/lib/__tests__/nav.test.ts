@@ -94,7 +94,7 @@ describe("navigationFor", () => {
     // The Office manager keeps both sides.
     const office = navigationFor("operations_manager").find((item) => item.label === "Money");
     expect(office?.children?.map((child) => child.label)).toEqual([
-      "Invoices", "Awaiting invoice", "Laundry prices", "Xero",
+      "Invoices", "Billing", "Awaiting invoice", "Laundry prices", "Xero",
       "Bills", "Suppliers", "Accounts",
     ]);
 
@@ -307,6 +307,10 @@ describe("sectionFor", () => {
     expect(label("/warehouse/batch-1")).toBe("Linen");
     expect(label("/vehicles")).toBe("Fleet");
     expect(label("/bills")).toBe("Money");
+    expect(label("/billing")).toBe("Money");
+    // The customer's period, which is a detail route of the billing screen and
+    // must not fall out of Money onto the customer record.
+    expect(label("/billing/cust-1")).toBe("Money");
     expect(label("/suppliers")).toBe("Money");
     expect(label("/accounts")).toBe("Money");
   });

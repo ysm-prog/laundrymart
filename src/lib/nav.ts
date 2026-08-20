@@ -200,6 +200,13 @@ export const NAVIGATION: NavItem[] = [
         blurb: "Every invoice, and the one you are working on beside it.",
       },
       {
+        // The month-end screen: a period, a customer, one invoice for everything
+        // they had done in it. Distinct from the queue below, which asks the
+        // other question — *what needs pricing?* — over no period at all.
+        label: "Billing", href: "/billing", capability: "billing.read",
+        blurb: "Bill a customer for a week or a month in one invoice.",
+      },
+      {
         // A queue of *jobs*, living under Money rather than under Jobs because
         // the question it answers is a billing one. `sectionFor` takes the
         // longest match, so `/invoices/awaiting` lands here rather than on the

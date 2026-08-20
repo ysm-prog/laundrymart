@@ -3,8 +3,10 @@ import type { Session } from "@/lib/auth/context";
 import { recordAudit } from "@/lib/audit";
 import { describeDbError } from "@/lib/actions";
 import { addDays } from "@/lib/domain/dates";
+import { toZonedDate } from "@/lib/domain/timezone";
 import { isBillingMethod, type BillingMethod } from "@/lib/domain/billing";
 import { groupJobsForInvoicing } from "@/lib/domain/invoice-grouping";
+import { consolidateChargeLines, type ChargeEntry } from "@/lib/domain/invoice-consolidation";
 import { logOrderActivity } from "@/lib/orders/activity";
 import { loadChargesForJobs, type StoredCharge } from "@/lib/orders/job-billing";
 
@@ -27,6 +29,18 @@ import { loadChargesForJobs, type StoredCharge } from "@/lib/orders/job-billing"
  * **Generating never sends.** Nothing in this file emails anybody; the invoice
  * lands as a draft, and `invoice_sent` is reached only through the send action.
  * That separation is the whole of phase 5 and it is why the two live apart.
+ *
+ **Consolidated invoices roll up per item.** Ten jobs' worth of towels become one
+ * line carrying 1,450, not thirty lines each naming a job number — the rule is
+ * `consolidateChargeLines`, which is pure and tested. The per-job detail is not
+ * lost: `invoice_source_jobs` and the frozen `job_charge_snapshots` behind each
+ * job are the breakdown, and the invoice screen renders it underneath.
+ *
+ * **`invoice_lines.laundry_order_id` is null on a rolled-up line**, and that is
+ * safe for one specific reason: the billed-once constraint is
+ * `uq_invoice_source_jobs_once`, not that column. The pointer is still written
+ * whenever a line belongs to exactly one job, so a per-job invoice is unchanged
+ * and a consolidated invoice keeps the pointer on the lines that can carry one.
  *
  * The same job cannot be billed twice, and that is enforced in the database
  * rather than here: `uq_invoice_source_jobs_once` is a unique index on
@@ -69,7 +83,9 @@ export type GenerationResult = {
  *   1. the invoice header (no `source_job_id` yet — the guard in 0017 refuses
  *      one that does not yet have a matching source row);
  *   2. `invoice_source_jobs`, which is where the "billed once" constraint bites;
- *   3. the lines, copied from the **frozen snapshot** and never re-priced;
+ *   3. the lines — rolled up per item on a consolidated invoice, one per charge
+ *      on a per-job one, and in both cases copied from the **frozen snapshot**
+ *      and never re-priced;
  *   4. `recalculate_invoice`, then `source_job_id` for the single-job case;
  *   5. last of all, the jobs move to `invoice_generated`.
  *
@@ -82,13 +98,23 @@ async function writeInvoiceForGroup(
   chargesByJob: ReadonlyMap<string, StoredCharge[]>,
   customer: { payment_terms_days: number; depot_id: string | null; purchase_order_number: string | null },
   issueDate: string,
+  period?: { start: string; end: string } | null,
 ): Promise<{ ok: true; invoice: GeneratedInvoice } | { ok: false; error: string }> {
   const jobIds = group.jobs.map((job) => job.id);
-  const lines = jobIds.flatMap((jobId) =>
-    (chargesByJob.get(jobId) ?? []).map((charge) => ({ jobId, charge })),
+  const entries: ChargeEntry[] = group.jobs.flatMap((job) =>
+    (chargesByJob.get(job.id) ?? []).map((charge) => ({
+      job: {
+        id: job.id,
+        orderNumber: job.order_number,
+        // The business-timezone day the work finished — what the breakdown groups
+        // into weeks. Null is carried rather than guessed at.
+        date: job.completed_at ? toZonedDate(job.completed_at) : null,
+      },
+      charge,
+    })),
   );
 
-  if (lines.length === 0) {
+  if (entries.length === 0) {
     return { ok: false, error: "no charges on the approved job(s)" };
   }
 
@@ -98,6 +124,38 @@ async function writeInvoiceForGroup(
 
   const terms = Number(customer.payment_terms_days ?? 14);
   const singleJob = group.jobs.length === 1 && group.method === "invoice_per_job";
+  // A per-job invoice keeps one line per charge, as it always has: there is
+  // nothing to roll up, and the customer is reading one job.
+  const lines = singleJob
+    ? entries.map((entry) => ({
+        description: entry.charge.description,
+        charge_type: entry.charge.charge_type,
+        quantity: entry.charge.quantity,
+        unit_price: entry.charge.unit_price,
+        amount: entry.charge.amount,
+        taxable: entry.charge.taxable,
+        source_item_id: entry.charge.source_item_id,
+        source_agreement_id: entry.charge.source_agreement_id,
+        jobId: entry.job.id as string | null,
+      }))
+    : consolidateChargeLines(entries).map((line) => ({
+        // A line that came from exactly one job keeps its job number in front of
+        // it — a fuel levy says which delivery it was charged on. A rolled-up
+        // line drops the prefix, because naming one of its ten jobs would be a lie.
+        description: line.contributions.length === 1 && !line.merged
+          ? `${line.contributions[0]!.orderNumber} — ${line.description}`
+          : line.description,
+        charge_type: line.charge_type,
+        quantity: line.quantity,
+        unit_price: line.unit_price,
+        amount: line.amount,
+        taxable: line.taxable,
+        source_item_id: line.source_item_id,
+        source_agreement_id: line.source_agreement_id,
+        // Null once a line spans more than one job. Safe because the billed-once
+        // constraint is `invoice_source_jobs`; see this file's header.
+        jobId: line.contributions.length === 1 ? line.contributions[0]!.jobId : null,
+      }));
 
   const { data: invoice, error } = await supabase
     .from("invoices")
@@ -115,6 +173,9 @@ async function writeInvoiceForGroup(
       due_date: addDays(issueDate, terms),
       payment_terms_days: terms,
       purchase_order_number: customer.purchase_order_number,
+      // Stamped when the invoice came from a billing period, so the register says
+      // what it covers and a second run over the same month can recognise it.
+      ...(period ? { period_start: period.start, period_end: period.end } : {}),
     })
     .select("id, invoice_number")
     .single();
@@ -142,23 +203,19 @@ async function writeInvoiceForGroup(
   }
 
   const { error: lineError } = await supabase.from("invoice_lines").insert(
-    lines.map((entry, index) => ({
+    lines.map((line, index) => ({
       tenant_id: session.tenantId,
       created_by: session.userId,
       invoice_id: invoice.id,
-      laundry_order_id: entry.jobId,
-      item_id: entry.charge.source_item_id,
-      agreement_id: entry.charge.source_agreement_id,
-      // Prefixed with the job number on a consolidated invoice so a customer
-      // reading fifteen jobs' worth of lines can tell which is which.
-      description: singleJob
-        ? entry.charge.description
-        : `${group.jobs.find((job) => job.id === entry.jobId)?.order_number ?? ""} — ${entry.charge.description}`,
-      charge_type: entry.charge.charge_type,
-      quantity: entry.charge.quantity,
-      unit_price: entry.charge.unit_price,
-      amount: entry.charge.amount,
-      taxable: entry.charge.taxable,
+      laundry_order_id: line.jobId,
+      item_id: line.source_item_id,
+      agreement_id: line.source_agreement_id,
+      description: line.description,
+      charge_type: line.charge_type,
+      quantity: line.quantity,
+      unit_price: line.unit_price,
+      amount: line.amount,
+      taxable: line.taxable,
       sequence: index + 1,
     })),
   );
@@ -221,7 +278,12 @@ export async function generateInvoicesForJobs(
   supabase: Client,
   session: Session,
   orderIds: readonly string[],
-  options: { issueDate: string; respectManual?: boolean } ,
+  options: {
+    issueDate: string;
+    respectManual?: boolean;
+    /** Stamped on the invoices, when this run covers a billing period. */
+    period?: { start: string; end: string } | null;
+  },
 ): Promise<GenerationResult> {
   const result: GenerationResult = { created: [], skipped: [] };
   if (orderIds.length === 0) return result;
@@ -287,7 +349,7 @@ export async function generateInvoicesForJobs(
     }
 
     const written = await writeInvoiceForGroup(
-      supabase, session, group, chargesByJob, customer, options.issueDate,
+      supabase, session, group, chargesByJob, customer, options.issueDate, options.period ?? null,
     );
     if (!written.ok) {
       for (const job of group.jobs) {
