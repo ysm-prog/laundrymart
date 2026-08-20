@@ -1,7 +1,49 @@
 # MEMORY — working session handoff
 > Auto-loaded each session. Canonical state is CLAUDE.md; this is the live delta.
 
-## Latest: month end made pressable — pricing, bulk price, last-month default, bulk issue
+## Latest: the owner login was at an address nothing tells you about
+2026-08-20, branch `claude/owner-email-login-failure-densi6`. CLAUDE.md §3a and the new 2026-08-20
+entry have it. **No migration.**
+
+Reported as "password and emails are not working for owner email address — says invalid details".
+One fault, two faces, and neither was the account:
+
+1. **`owner@roles.example.com` did not exist.** The owner test profile was provisioned at
+   `super-admin@roles.example.com` — `profileEmail()` derived the local part from the role
+   *identifier*, while `ROLE_PRESETS`, the People picker and the profile's own name ("Test Owner")
+   all say **Owner**. A profile may now carry an `email` local part; `super_admin` does. It also
+   carries `formerly`, so the runner renames the same login in place instead of leaving a second
+   owner behind at an address nothing documents.
+2. **The magic link had never sent an email and claimed it had, every time.** `sendMagicLink`
+   swallowed every error. Live proof it has never worked: **0 `one_time_tokens`, 0 `flow_state`,
+   and `confirmation_sent_at`/`recovery_sent_at`/`invited_at` NULL on all 13 logins, ever.**
+   `src/lib/auth/magic-link.ts` (pure, tested) now names deployment faults — `error_sending_email`,
+   `email_provider_disabled`, both rate limits, rejected redirect, any 5xx — while "no such login"
+   still answers exactly as success does. `otp_disabled` stays unnamed on purpose: it is what an
+   unknown address returns.
+3. **`shouldCreateUser` was at its default `true`**, so a mistyped address minted an orphan
+   `auth.users` row with no membership. Now `false` — access comes from an invitation (§10c).
+
+Proved rather than assumed: all 11 test logins verify against `RoleTest!2026` via
+`encrypted_password = crypt(...)`, identities well-formed; both real owner logins are healthy and
+`jay@` signed in **successfully** at 05:06 that morning, two minutes before the failures in the
+auth log. 535 unit tests (was 525), `verify` green.
+
+**Applied live to `laundrymart-syd`** (rehearsed in a rolled-back transaction first):
+`super-admin@roles.example.com` → `owner@roles.example.com`, same user id `0289aa41-…`, identity
+data updated with it, membership `Harbour Commercial Laundry = super_admin` intact.
+
+**All 11 role logins, password `RoleTest!2026`, all in Harbour Commercial Laundry:**
+`owner@`, `operations-manager@`, `dispatcher@`, `driver@` (has its `drivers` row), `finance@`,
+`warehouse-operator@`, `customer-service@`, `sales@`, `branch-manager@`, `regional-manager@`,
+`auditor@` — all `@roles.example.com`.
+
+**Open: this deployment still cannot send any auth email.** The link now says so rather than
+pretending, but that is not sending. Custom SMTP needs configuring on the Supabase project —
+the built-in sender only reaches `ysm-prog` org members and is capped at ~2/hour. That blocks
+magic links, invitations (§10c) and password resets alike.
+
+## Previous: month end made pressable — pricing, bulk price, last-month default, bulk issue
 2026-08-20, branch `claude/job-invoice-workflow-review-i66do9`. CLAUDE.md §6, §17, §21, §23 and the
 2026-08-20 entry have it. **No migration.**
 

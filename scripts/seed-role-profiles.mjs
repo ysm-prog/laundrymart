@@ -29,7 +29,7 @@
 import { createClient } from "@supabase/supabase-js";
 import {
   DEFAULT_EMAIL_DOMAIN, DEFAULT_PASSWORD, DEFAULT_TENANT,
-  profileEmail, selectedProfiles,
+  formerProfileEmail, profileEmail, selectedProfiles,
 } from "./role-profiles.mjs";
 
 // ------------------------------------------------------------------ args ---
@@ -157,14 +157,21 @@ async function ensureUser(existing, profile, email) {
     role_profile_note: profile.note,
   };
   if (existing) {
-    if (opts.dryRun) return { user: existing, action: "reset password" };
+    // A profile that has moved address is found under its old one, so the same
+    // login is renamed and keeps its id — and with it its membership, its
+    // driver row and every `created_by` still pointing at it. Creating the new
+    // address instead would strand all of that on a login nothing mentions.
+    const moved = (existing.email ?? "").toLowerCase() !== email.toLowerCase();
+    const action = moved ? `renamed from ${existing.email}; reset password` : "reset password";
+    if (opts.dryRun) return { user: existing, action: moved ? `rename from ${existing.email}` : "reset password" };
     const data = must(
       `Updating ${email}`,
       await admin.auth.admin.updateUserById(existing.id, {
+        ...(moved ? { email } : {}),
         password: opts.password, email_confirm: true, user_metadata: metadata,
       }),
     );
-    return { user: data.user, action: "reset password" };
+    return { user: data.user, action };
   }
   if (opts.dryRun) return { user: null, action: "create login" };
   const data = must(
@@ -305,7 +312,9 @@ console.log(`
 const rows = [];
 for (const profile of profiles) {
   const email = profileEmail(profile, opts.domain);
-  const existing = usersByEmail.get(email.toLowerCase()) ?? null;
+  const former = formerProfileEmail(profile, opts.domain);
+  const existing = usersByEmail.get(email.toLowerCase())
+    ?? (former ? usersByEmail.get(former.toLowerCase()) ?? null : null);
 
   if (opts.remove) {
     const steps = opts.dryRun

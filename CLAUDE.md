@@ -209,7 +209,15 @@ JS — the runner is bare Node with no build step, and `role-profiles.test.ts` i
 file, so there is no second copy); `scripts/seed-role-profiles.mjs` is the runner. Addresses are
 `<role-with-hyphens>@roles.example.com` — reserved by RFC 2606, so a stray invitation or overdue
 chase aimed at a test profile can never leave the building — and the shared password is printed
-on every run. Needs `SUPABASE_SERVICE_ROLE_KEY`: creating a login is an Auth admin call and the
+on every run. **The exception is the owner, who is `owner@roles.example.com` and not
+`super-admin@`**: a profile may carry an `email` local part, and `super_admin` does, because
+"Owner" is what `ROLE_PRESETS`, the People picker and the profile's own name all call that role.
+Deriving the address from the role *identifier* made the one string an operator has to type the
+only place in the app that said "super-admin", and an owner working from a list of test logins
+typed `owner@` and was told their details were invalid — true, and useless. A moved profile also
+carries `formerly`, which the runner looks it up under, so a rerun **renames** the same login
+(keeping its id, its membership and every row pointing at it) rather than leaving a second owner
+behind at an address nothing mentions. Needs `SUPABASE_SERVICE_ROLE_KEY`: creating a login is an Auth admin call and the
 membership insert writes a `tenant_id` no session is bound to, so every statement in it filters
 `tenant_id` by hand.
 
@@ -1020,6 +1028,66 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-08-20 · The owner login was at an address nothing tells you about
+Reported as "password and emails are not working for owner email address — says invalid details".
+It was one fault with two faces, and neither was the account. **No migration; no schema, RLS,
+capability or workflow change.**
+
+- **`owner@roles.example.com` did not exist.** The owner test profile is provisioned at
+  `super-admin@roles.example.com`, because `profileEmail()` derived the local part from the role
+  *identifier* — while `ROLE_PRESETS` labels `super_admin` "Owner", the People picker offers it
+  that way, and the profile is literally named "Test Owner". Every word the app puts in front of
+  a person said Owner; the one string they had to type said super-admin. Typing `owner@` got
+  "That email and password combination was not recognised", which was true and told them nothing.
+  A profile may now carry its own `email` local part, and `super_admin` does.
+- **The account was never the problem, and that was worth proving rather than assuming.** All
+  eleven test logins verify against `RoleTest!2026` on the live project — checked with
+  `encrypted_password = crypt(...)` — with well-formed `auth.identities`, `email_verified` true
+  and `app_metadata.provider = email`. Both real owner logins (`darshan@`, `jay@`) are
+  `super_admin` in both laundries and platform admins, and `jay@` signed in **successfully** at
+  05:06 the same morning, two minutes before the two `invalid_credentials` failures in the auth
+  log. Nothing was broken; an address simply did not exist.
+- **`formerly` is why the rename is not a second owner.** Renaming a profile without it would
+  leave the old login holding the same `super_admin` membership in the demo laundry, at an
+  address nothing documents, with `--remove` cleaning up neither. The runner looks a profile up
+  under its former address and renames that login in place, so its id — and its membership, its
+  driver row, every `created_by` pointing at it — survives.
+- **The magic link had never sent an email, and said it had, every time.** `sendMagicLink`
+  swallowed every error and always answered "a sign-in link is on its way". The live project has
+  **never issued one**: zero `auth.one_time_tokens`, zero `flow_state`, and
+  `confirmation_sent_at`/`recovery_sent_at`/`invited_at` NULL on all thirteen logins since the
+  project was created. So the second half of the report — "emails are not working" — was a
+  deployment with no working mail sender wearing a success message. The anti-enumeration
+  reasoning was right and is kept: **a failure true of every address says nothing about any
+  address**, so `error_sending_email`, `email_provider_disabled`, both rate limits, a rejected
+  redirect and any 5xx are now named plainly, while "no such login" still answers exactly as
+  success does. `otp_disabled` is deliberately *not* named — it is what an unknown address comes
+  back as, and is precisely the fact the form must not confirm.
+- **The link form could also mint orphan logins.** `signInWithOtp` defaults to
+  `shouldCreateUser: true`, so a mistyped address created a real `auth.users` row with no
+  membership — a login that exists, receives mail and dead-ends on "not linked to a laundry yet".
+  Access here is granted by an administrator inviting somebody (§10c), never by turning up at the
+  login screen, so it is `false` now.
+- The rule lives in `src/lib/auth/magic-link.ts` rather than in the action, for the reason §2
+  gives: a `"use server"` module can export nothing but server actions, and a rule written inside
+  one is unreachable from a unit test — the trap `plan.ts` and `order-items.ts` both record, and
+  both of those shipped broken behind a green `verify`.
+- 535 unit tests (was 525). `verify` green — typecheck, lint, tests and the production build.
+
+**Applied to `laundrymart-syd` on 2026-08-20**, rehearsed first in a rolled-back transaction the
+way §11 requires: `super-admin@roles.example.com` → `owner@roles.example.com`, same user id
+`0289aa41-…`, `auth.identities.identity_data.email` updated with it (the `identities.email`
+column is generated from it), password still verifying, membership still
+`Harbour Commercial Laundry = super_admin`. All eleven role logins re-read afterwards: every one
+confirmed, every password verifying, the driver still holding its `drivers` row, and none of them
+a platform admin. Nothing else on the project was touched.
+
+**Still true and not fixed here: this deployment cannot send any auth email.** The magic link now
+*says* so instead of pretending, but saying so is not sending. Configure custom SMTP on the
+Supabase project — Supabase's built-in sender only delivers to members of the `ysm-prog`
+organisation and is capped at a couple of messages an hour — before relying on the link, an
+invitation (§10c) or a password reset.
+
 ### 2026-08-20 · Month end is a month-end button, and every customer can be priced
 A review of "job completed → invoice pool → one press at month end" against the code. The
 spine was already right — completion never bills, the pool is real, the dated run sweeps

@@ -5,6 +5,7 @@ import { headers } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
+import { magicLinkOutcome } from "@/lib/auth/magic-link";
 
 const credentials = z.object({
   email: z.string().email("Enter a valid email address"),
@@ -51,12 +52,29 @@ export async function sendMagicLink(formData: FormData): Promise<void> {
   const supabase = await createClient();
   const { error } = await supabase.auth.signInWithOtp({
     email: parsed.data.email,
-    options: { emailRedirectTo: `${origin}/auth/callback` },
+    options: {
+      emailRedirectTo: `${origin}/auth/callback`,
+      // Access to this app is granted by an administrator inviting somebody
+      // (§10c), never by turning up at the login screen. Left at its default of
+      // true, a mistyped address here would silently mint a real `auth.users`
+      // row with no membership behind it — a login that exists, receives mail,
+      // and dead-ends on "not linked to a laundry yet".
+      shouldCreateUser: false,
+    },
   });
-  // Same response either way so the form can't be used to enumerate accounts.
-  if (error) console.error("magic link request failed", error.message);
 
-  back({ ok: "If that address has an account, a sign-in link is on its way." });
+  if (error) {
+    // Never the address, and never which half of it was wrong.
+    console.error("magic link request failed", {
+      code: error.code, status: error.status, message: error.message,
+    });
+  }
+
+  // Success and "no such login" answer identically, so the form cannot be used
+  // to enumerate accounts. A broken *deployment* is told plainly: it is true of
+  // every address, so it reveals nothing, and swallowing it made a project that
+  // has never sent a single email look exactly like one that just sent yours.
+  back(magicLinkOutcome(error));
 }
 
 export async function signOut(): Promise<void> {

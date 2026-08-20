@@ -40,6 +40,14 @@ export const ROLE_PROFILES = [
     role: "super_admin",
     name: "Test Owner",
     note: "The owner. Everything in one laundry, including Settings and the job→invoice flow.",
+    // Every word this app puts in front of a person for `super_admin` is
+    // "Owner" — ROLE_PRESETS labels it that, the People picker offers it that
+    // way, and the note above says it. Deriving the address from the *role
+    // identifier* made the one string an operator has to type the only place
+    // that said "super-admin", and an owner handed a list of test logins typed
+    // `owner@` and was told their details were invalid. Say the same word here.
+    email: "owner",
+    formerly: "super-admin",
   },
   {
     role: "operations_manager",
@@ -97,9 +105,26 @@ export const ROLE_PROFILES = [
   },
 ];
 
-/** `super_admin` → `super-admin@roles.example.com`. */
+/**
+ * The address to sign in as. `operations_manager` →
+ * `operations-manager@roles.example.com`; a profile carrying `email` says its
+ * own local part instead, for a role the app names differently from its
+ * identifier (`super_admin` is "Owner" everywhere a person can read it).
+ */
 export function profileEmail(profile, domain = DEFAULT_EMAIL_DOMAIN) {
-  return `${profile.role.replaceAll("_", "-")}@${domain}`;
+  return `${profile.email ?? profile.role.replaceAll("_", "-")}@${domain}`;
+}
+
+/**
+ * The address this profile used to be provisioned at, if it has moved.
+ *
+ * Renaming a profile without this would leave the old login sitting in the
+ * laundry holding the same membership — two Owner logins, one of them at an
+ * address nothing tells you about, and `--remove` cleaning up neither. The
+ * runner adopts it instead, so a rerun renames rather than duplicates.
+ */
+export function formerProfileEmail(profile, domain = DEFAULT_EMAIL_DOMAIN) {
+  return profile.formerly ? `${profile.formerly}@${domain}` : null;
 }
 
 /** The profiles to provision: memberships always, the platform row on request. */
