@@ -236,6 +236,16 @@ Four decisions worth keeping:
 `role-profiles.test.ts` pins the list against `ROLES`, so a twelfth role added to `roles.ts`
 fails a test rather than shipping with no way to be signed in as.
 
+**The eleven live profiles were written by SQL rather than by this script, and the owner's
+decision (2026-08-20) is to keep them as they are.** Do not "correct" the provenance by
+re-provisioning or by reverting the `owner@` rename. They were checked against a login Supabase's
+own Auth API created (`jay@`) and match it in every column GoTrue reads — `aud`/`role`, confirmed,
+all seven token columns `''` rather than NULL (the 2026-08-18 trap), `email_change_confirm_status`
+0, `app_meta`, a bcrypt `$2a$` hash and exactly one email identity. The only difference is a
+missing `role_profile_note` in `user_metadata`, which **nothing in `src/` reads** — the script
+writes it as documentation. Running `npm run seed:roles` from a machine holding the service-role
+key remains the way to reset or re-assert them through the Auth API, but nothing is waiting on it.
+
 ## 4. Business rules enforced in the database
 - Run cannot start without `load_confirmed_at`; cannot close before `unloaded_at`
   (`guard_route_transition`). The vehicle inspection is recorded and surfaced but is **not**

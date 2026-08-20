@@ -42,6 +42,12 @@ database side and it went on before the merge.
 `warehouse-operator@`, `customer-service@`, `sales@`, `branch-manager@`, `regional-manager@`,
 `auditor@` — all `@roles.example.com`.
 
+**Decided 2026-08-20: keep the eleven SQL-provisioned test logins as they are.** They were
+compared column-by-column against `jay@` (Auth-API created) and match everywhere GoTrue reads,
+including the seven token columns being `''` not NULL. The only gap is `role_profile_note` in
+`user_metadata`, which no code reads. Do not re-provision them or revert the `owner@` rename;
+`npm run seed:roles` is still there if a password ever needs resetting.
+
 **Open: this deployment still cannot send any auth email.** The link now says so rather than
 pretending, but that is not sending. Custom SMTP needs configuring on the Supabase project —
 the built-in sender only reaches `ysm-prog` org members and is capped at ~2/hour. That blocks
