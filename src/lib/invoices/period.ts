@@ -123,7 +123,7 @@ async function loadItemsForJobs(
   if (jobIds.length === 0) return byJob;
   const { data } = await supabase
     .from("laundry_order_items")
-    .select("order_id, item_type, custom_description, quantity_type, exact_quantity, " +
+    .select("order_id, item_id, item_type, custom_description, quantity_type, exact_quantity, " +
             "bag_count, estimated_quantity, notes")
     .eq("tenant_id", tenantId)
     .in("order_id", [...jobIds])

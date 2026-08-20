@@ -52,6 +52,11 @@ import { CountRow } from "@/app/(app)/warehouse/count-row";
  */
 
 import { notFound } from "next/navigation";
+import { SequenceBoard, type SequenceStop } from "@/app/(app)/runs/sequence-board";
+import { MoveToBoard } from "@/app/(app)/runs/move-to-board";
+import { consolidateChargeLines } from "@/lib/domain/invoice-consolidation";
+import { PeriodFilter } from "@/app/(app)/billing/period-filter";
+import { money } from "@/lib/format";
 
 export const metadata = { title: "Design preview" };
 
@@ -1045,11 +1050,165 @@ export default function DesignPreviewPage() {
                                 action={async () => { "use server"; }} />
             </Card>
           </section>
+
+          {/* ------------------------------------------------- period billing --- */}
+          {/* The month-end screen. Its three parts are computed from one set of
+              charges in one pass, so the summary can never disagree with the
+              history above it — which is the whole point of building the roll-up
+              and the breakdown together. */}
+          <section id="period-billing-preview" className="space-y-4 border-t pt-8">
+            <PageHeader
+              eyebrow="Money"
+              title="ABC Hotel"
+              description="1 August to 31 August 2026"
+            />
+
+            <Card title="Billing period"
+                  description="Quick filters, defaulting to last month — the month you are standing in bills nothing on the 1st and says so in a way that reads as “all done”.">
+              <PeriodFilter basePath="/design-preview" start="2026-08-01" end="2026-08-31"
+                            today="2026-09-03" />
+            </Card>
+
+            <Card title="Invoice summary"
+                  description="What the invoice carries. Identical items are added together; a rate that changed mid-period stays two lines, at the two rates actually charged.">
+              <DataTable
+                bare
+                label="Consolidated invoice lines"
+                empty="No lines"
+                rows={PREVIEW_CONSOLIDATED}
+                columns={[
+                  {
+                    header: "Description",
+                    cell: (line) => (
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-medium">{line.description}</span>
+                        {line.merged ? (
+                          <Badge tone="info">{line.contributions.length} jobs</Badge>
+                        ) : null}
+                      </div>
+                    ),
+                  },
+                  { header: "Quantity", align: "right",
+                    cell: (line) => line.quantity.toLocaleString("en-AU") },
+                  { header: "Unit price", align: "right", cell: (line) => money(line.unit_price) },
+                  { header: "Amount", align: "right", cell: (line) => money(line.amount) },
+                ]}
+              />
+            </Card>
+          </section>
+
+          {/* ------------------------------------------------------ the run --- */}
+          {/* Both of these are compose-locally-commit-once components, which is
+              the class that has shipped broken here three times behind a green
+              `verify` — the job form's items, the planner's whole board, and the
+              planner's payload again. They are in the gallery so they can be
+              looked at without a live database. */}
+          <section id="run-sequence-preview" className="space-y-4 border-t pt-8">
+            <PageHeader
+              title="Runs"
+              description="What each board is delivering on a day, and the order it drives in."
+            />
+
+            <Card title="Board 1 — Friday, 21 August 2026"
+                  description="Drag a stop, or use the arrows. Nothing is saved until Save order.">
+              <SequenceBoard boardId="b1" boardName="Board 1" date="2026-08-21"
+                             stops={PREVIEW_RUN_STOPS} canWrite />
+            </Card>
+
+            <Card title="Part of the run has been driven"
+                  description="A stop the round has already worked stays where it is, and says so — moving anything past it would rewrite where work that has already happened happened.">
+              <SequenceBoard boardId="b1" boardName="Board 1" date="2026-08-21"
+                             stops={PREVIEW_RUN_STOPS_WORKED} canWrite />
+            </Card>
+
+            <Card title="What a board sees"
+                  description="The final sequence, read-only. A board holds routes.read and not routes.write, so the arrows and Save are simply not there.">
+              <SequenceBoard boardId="b1" boardName="Board 1" date="2026-08-21"
+                             stops={PREVIEW_RUN_STOPS} canWrite={false} />
+            </Card>
+
+            <MoveToBoard
+              date="2026-08-21"
+              fromBoard={PREVIEW_RUN_BOARDS[0]!}
+              boards={PREVIEW_RUN_BOARDS}
+              jobs={PREVIEW_RUN_STOPS.flatMap((stop) =>
+                stop.jobs.map((job) => ({ ...job, customerName: stop.customerName })))}
+            />
+          </section>
         </main>
       </div>
     </div>
   );
 }
+
+/**
+ * A month of one customer's jobs, rolled up.
+ *
+ * Built by the real rule rather than hand-written, so the gallery shows what the
+ * screen will show: three jobs of towels become one line carrying 460, and the
+ * fuel levy on each delivery stays three lines because a levy is an event and
+ * not a quantity.
+ */
+const PREVIEW_CONSOLIDATED = consolidateChargeLines(
+  [
+    { job: "LJ01041", date: "2026-08-02", qty: 150, amount: 225 },
+    { job: "LJ01045", date: "2026-08-09", qty: 130, amount: 195 },
+    { job: "LJ01051", date: "2026-08-16", qty: 180, amount: 270 },
+  ].flatMap((entry, index) => [
+    {
+      job: { id: `job-${index}`, orderNumber: entry.job, date: entry.date },
+      charge: {
+        description: "TOW001 — Bath Towel", charge_type: "wash_only",
+        quantity: entry.qty, unit_price: 1.5, amount: entry.amount, taxable: true,
+        source_item_id: "item-tow001", source_agreement_id: null,
+        source_laundry_item_type: "bath_towels",
+      },
+    },
+    {
+      job: { id: `job-${index}`, orderNumber: entry.job, date: entry.date },
+      charge: {
+        description: "Fuel levy", charge_type: "fuel_levy",
+        quantity: 1, unit_price: 6.5, amount: 6.5, taxable: true,
+        source_item_id: null, source_agreement_id: null, source_laundry_item_type: null,
+      },
+    },
+  ]),
+);
+
+/**
+ * A board's day, fixed.
+ *
+ * Three stops, because three is the smallest number that shows an order worth
+ * changing, and one of them carries two jobs — the case the whole
+ * order-by-stop decision turns on: one customer, one visit, two lots of laundry.
+ */
+const PREVIEW_RUN_STOPS: SequenceStop[] = [
+  {
+    id: "s1", status: "assigned", progressStatus: "not_started",
+    customerName: "ABC Hotel", address: "123 Main Street, Adelaide, SA",
+    jobs: [
+      { id: "j1", orderNumber: "LJ01041", itemCount: 3 },
+      { id: "j2", orderNumber: "LJ01042", itemCount: 1 },
+    ],
+  },
+  {
+    id: "s2", status: "assigned", progressStatus: "not_started",
+    customerName: "XYZ Medical", address: "55 North Terrace, Adelaide, SA",
+    jobs: [{ id: "j3", orderNumber: "LJ01045", itemCount: 2 }],
+  },
+  {
+    id: "s3", status: "assigned", progressStatus: "not_started",
+    customerName: "City Gym", address: "19 King William Street, Adelaide, SA",
+    jobs: [{ id: "j4", orderNumber: "LJ01051", itemCount: 1 }],
+  },
+];
+
+/** The same day, with the first call already made. */
+const PREVIEW_RUN_STOPS_WORKED: SequenceStop[] = [
+  { ...PREVIEW_RUN_STOPS[0]!, status: "completed", progressStatus: "delivery_completed" },
+  PREVIEW_RUN_STOPS[1]!,
+  { ...PREVIEW_RUN_STOPS[2]!, progressStatus: "at_customer" },
+];
 
 /**
  * Fixtures for the billing review screens.

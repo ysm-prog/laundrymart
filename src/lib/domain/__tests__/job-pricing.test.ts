@@ -406,3 +406,81 @@ describe("pricingSourceLabel", () => {
     expect(pricingSourceLabel([], CARD)).toBe("the laundry price list");
   });
 });
+
+describe("pricing a coded item (0032)", () => {
+  const towelItem = {
+    item_id: "item-tow001", item_type: "towels",
+    quantity_type: "exact", exact_quantity: 100,
+  };
+
+  it("prefers a rate line for the exact item over one for its category", () => {
+    const result = priceJob({
+      items: [towelItem],
+      rateLines: [
+        // The category line first, so the result cannot come from ordering.
+        rate({ id: "cat", laundry_item_type: "towels", unit_price: 1 }),
+        rate({ id: "item", item_id: "item-tow001", laundry_item_type: null, unit_price: 2 }),
+      ],
+    });
+    expect(result.lines).toHaveLength(1);
+    expect(result.lines[0]!.unit_price).toBe(2);
+    expect(result.lines[0]!.source_agreement_line_id).toBe("item");
+  });
+
+  it("falls back to the category rate line when the card names no item", () => {
+    const result = priceJob({
+      items: [towelItem],
+      rateLines: [rate({ id: "cat", laundry_item_type: "towels", unit_price: 1 })],
+    });
+    expect(result.lines[0]!.unit_price).toBe(1);
+    expect(result.lines[0]!.source_agreement_line_id).toBe("cat");
+  });
+
+  it("prefers the item's own listed price over the category's", () => {
+    const result = priceJob({
+      items: [towelItem],
+      rateLines: [],
+      priceList: new Map([["towels", { unitPrice: 1, bagPrice: null, taxable: true, source: "default" as const }]]),
+      itemPriceList: new Map([["item-tow001", { unitPrice: 3, bagPrice: null, taxable: true, source: "customer" as const }]]),
+    });
+    expect(result.lines).toHaveLength(1);
+    expect(result.lines[0]!.unit_price).toBe(3);
+  });
+
+  it("keeps the rate card ahead of the price list, however specific the list is", () => {
+    // A negotiated agreement beats a default list, even when the list names the
+    // exact item and the agreement names only its category.
+    const result = priceJob({
+      items: [towelItem],
+      rateLines: [rate({ id: "cat", laundry_item_type: "towels", unit_price: 1 })],
+      itemPriceList: new Map([["item-tow001", { unitPrice: 9, bagPrice: null, taxable: true, source: "default" as const }]]),
+    });
+    expect(result.lines[0]!.unit_price).toBe(1);
+  });
+
+  it("records which item was billed, whichever tier priced it", () => {
+    const fromCard = priceJob({
+      items: [towelItem],
+      rateLines: [rate({ id: "cat", laundry_item_type: "towels", unit_price: 1 })],
+    });
+    expect(fromCard.lines[0]!.source_item_id).toBe("item-tow001");
+
+    const fromList = priceJob({
+      items: [towelItem],
+      rateLines: [],
+      itemPriceList: new Map([["item-tow001", { unitPrice: 3, bagPrice: null, taxable: true, source: "default" as const }]]),
+    });
+    expect(fromList.lines[0]!.source_item_id).toBe("item-tow001");
+  });
+
+  it("prices an uncoded item exactly as it did before", () => {
+    // Every job written before the item master has no item_id, and must be
+    // unaffected — this is the assertion that the change is additive.
+    const result = priceJob({
+      items: [{ item_type: "towels", quantity_type: "exact", exact_quantity: 100 }],
+      rateLines: [rate({ id: "cat", laundry_item_type: "towels", unit_price: 1 })],
+    });
+    expect(result.lines[0]!.unit_price).toBe(1);
+    expect(result.lines[0]!.source_item_id).toBeNull();
+  });
+});

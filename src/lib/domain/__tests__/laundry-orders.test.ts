@@ -362,3 +362,25 @@ describe("isOverdue", () => {
     expect(isOverdue({ status: "ready_for_delivery", due_date: null }, today)).toBe(false);
   });
 });
+
+describe("describeItem with a coded item", () => {
+  it("says what the counter would say — the code and the name", () => {
+    const line = describeItem(
+      { item_id: "i1", item_type: "towels", quantity_type: "exact", exact_quantity: 12 },
+      "TOW001 — Bath Towel",
+    );
+    expect(line).toBe("12 × TOW001 — Bath Towel");
+  });
+
+  it("falls back to the kind of laundry when no item is named", () => {
+    // Every job written before the item master, and every uncoded row after it.
+    expect(describeItem({ item_type: "towels", quantity_type: "exact", exact_quantity: 12 }))
+      .toBe("12 × Towels");
+  });
+
+  it("ignores a blank label rather than rendering an empty name", () => {
+    expect(describeItem(
+      { item_type: "towels", quantity_type: "exact", exact_quantity: 12 }, "   ",
+    )).toBe("12 × Towels");
+  });
+});

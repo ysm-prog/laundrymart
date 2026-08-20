@@ -5,7 +5,7 @@ import { describeDbError } from "@/lib/actions";
 import {
   jobChargeSubtotal, priceJob, pricingSourceLabel, type JobChargeLine, type RateLine,
 } from "@/lib/domain/job-pricing";
-import { priceListFor, type LaundryPriceRow } from "@/lib/domain/laundry-billing";
+import { itemPriceListFor, priceListFor, type LaundryPriceRow } from "@/lib/domain/laundry-billing";
 import type { OrderItemInput } from "@/lib/domain/laundry-orders";
 import { checkBillingTransition, isBillingStatus, type BillingStatus } from "@/lib/domain/billing";
 import { logOrderActivity } from "@/lib/orders/activity";
@@ -169,7 +169,7 @@ export async function loadRateCard(supabase: Client, customerId: string): Promis
 export async function loadJobItems(supabase: Client, orderId: string): Promise<OrderItemInput[]> {
   const { data } = await supabase
     .from("laundry_order_items")
-    .select("item_type, custom_description, quantity_type, exact_quantity, bag_count, estimated_quantity, notes")
+    .select("item_id, item_type, custom_description, quantity_type, exact_quantity, bag_count, estimated_quantity, notes")
     .eq("order_id", orderId)
     .order("created_at")
     .returns<OrderItemInput[]>();
@@ -211,7 +211,7 @@ export async function priceJobFromRateCard(
     // exactly the case that rule exists for.
     supabase
       .from("laundry_prices")
-      .select("customer_id, item_type, unit_price, bag_price, taxable")
+      .select("customer_id, item_type, item_id, unit_price, bag_price, taxable")
       .eq("tenant_id", tenantId)
       .returns<LaundryPriceRow[]>(),
   ]);
@@ -221,6 +221,9 @@ export async function priceJobFromRateCard(
     rateLines: rateCard.lines,
     rateCard: rateCard.card ? { id: rateCard.card.id, fuel_levy_pct: rateCard.card.fuel_levy_pct } : null,
     priceList: priceListFor(job.customer_id, priceRows.data ?? []),
+    // The same list keyed on the item, which is the more specific answer within
+    // this tier — a price written against TOW001 is a price for TOW001.
+    itemPriceList: itemPriceListFor(job.customer_id, priceRows.data ?? []),
   });
 
   return { lines, unpriced, card: rateCard.card };

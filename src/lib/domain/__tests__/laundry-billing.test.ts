@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  defaultPriceList, itemLabel, priceListFor, type LaundryPriceRow,
+  defaultPriceList, itemLabel, itemPriceListFor, priceListFor, type LaundryPriceRow,
 } from "../laundry-billing";
 
 function priceRow(overrides: Partial<LaundryPriceRow> = {}): LaundryPriceRow {
@@ -72,5 +72,50 @@ describe("defaultPriceList", () => {
     ]);
     expect(prices.get("towels")?.unitPrice).toBe(2);
     expect(prices.get("towels")?.source).toBe("default");
+  });
+});
+
+describe("itemPriceListFor (0032)", () => {
+  it("resolves a per-item price, customer over default", () => {
+    const prices = itemPriceListFor("customer-1", [
+      priceRow({ item_type: "towels", item_id: "tow001", customer_id: null, unit_price: 1 }),
+      priceRow({ item_type: "towels", item_id: "tow001", customer_id: "customer-1", unit_price: 2 }),
+    ]);
+    expect(prices.get("tow001")?.unitPrice).toBe(2);
+    expect(prices.get("tow001")?.source).toBe("customer");
+  });
+
+  it("falls back to the tenant's list where the customer has no price of their own", () => {
+    const prices = itemPriceListFor("customer-1", [
+      priceRow({ item_type: "towels", item_id: "tow001", customer_id: null, unit_price: 1 }),
+    ]);
+    expect(prices.get("tow001")?.unitPrice).toBe(1);
+    expect(prices.get("tow001")?.source).toBe("default");
+  });
+
+  it("holds only rows written against an item", () => {
+    const prices = itemPriceListFor("customer-1", [
+      priceRow({ item_type: "towels", item_id: null, customer_id: null, unit_price: 1 }),
+    ]);
+    expect(prices.size).toBe(0);
+  });
+});
+
+describe("priceListFor with per-item rows beside it", () => {
+  it("never lets one item's price answer for its whole category", () => {
+    // A rate agreed for TOW001 is not the rate for every kind of towel, and
+    // letting it answer here would charge bath towels at the hand-towel price.
+    const prices = priceListFor("customer-1", [
+      priceRow({ item_type: "towels", item_id: "tow001", customer_id: null, unit_price: 9 }),
+    ]);
+    expect(prices.has("towels")).toBe(false);
+  });
+
+  it("still resolves the category row when there is one", () => {
+    const prices = priceListFor("customer-1", [
+      priceRow({ item_type: "towels", item_id: "tow001", customer_id: null, unit_price: 9 }),
+      priceRow({ item_type: "towels", item_id: null, customer_id: null, unit_price: 1 }),
+    ]);
+    expect(prices.get("towels")?.unitPrice).toBe(1);
   });
 });

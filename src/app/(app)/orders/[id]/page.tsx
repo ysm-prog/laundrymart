@@ -88,7 +88,7 @@ export default async function JobDetailPage({
 
   const [items, activity, members] = await Promise.all([
     supabase.from("laundry_order_items")
-      .select("id, order_id, item_type, custom_description, quantity_type, exact_quantity, bag_count, estimated_quantity, notes")
+      .select("id, order_id, item_id, item_type, custom_description, quantity_type, exact_quantity, bag_count, estimated_quantity, notes")
       .eq("order_id", id).order("created_at")
       .returns<LaundryOrderItem[]>(),
     supabase.from("laundry_order_activity")

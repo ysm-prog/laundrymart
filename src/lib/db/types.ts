@@ -72,17 +72,46 @@ export type CustomerContact = {
   is_primary: boolean;
 };
 
+/**
+ * The item master (0002, extended into one by 0032).
+ *
+ * One vocabulary: what the laundry rents out *and* what arrives in a customer's
+ * bag, carrying the code the business already uses in its books.
+ */
 export type Item = {
   id: Uuid;
   sku: string;
+  /**
+   * The code staff actually know — TOW001 — from MYOB where there is one.
+   * Backfilled from `sku` by 0032 and free to diverge from it afterwards.
+   */
+  item_code: string | null;
   name: string;
+  description: string | null;
   category: string;
+  /**
+   * Which of the nine kinds of laundry this is, or null for something a
+   * customer never hands over. The bridge that lets a job name an item while
+   * every existing price tier keeps matching on `item_type`.
+   */
+  laundry_category: string | null;
   ownership_type: string;
+  /** MYOB's "Item I Sell" / "Item I Buy". Both, neither and either are real. */
+  is_sell: boolean;
+  is_buy: boolean;
+  sell_price: number;
+  cost_price: number;
+  /** The ledger's tax code (GST, FRE, …). Somebody else's vocabulary, so a string. */
+  tax_code: string | null;
   replacement_cost: number;
   rental_price: number;
   wash_only_price: number;
   weight_kg: number;
   reorder_level: number;
+  myob_item_id: string | null;
+  myob_item_code: string | null;
+  /** When this row last agreed with the external ledger. Null until something syncs. */
+  external_synced_at: string | null;
   status: string;
 };
 
@@ -515,6 +544,14 @@ export type LaundryOrder = {
 export type LaundryOrderItem = {
   id: Uuid;
   order_id: Uuid;
+  /**
+   * The item master row this is (0032), where the counter picked a coded item.
+   *
+   * Null on every job written before the item master. When it is set,
+   * `item_type` is derived from the item by a trigger, so the two cannot
+   * disagree — which is what keeps every existing price tier and report working.
+   */
+  item_id: Uuid | null;
   item_type: string;
   custom_description: string | null;
   quantity_type: string;

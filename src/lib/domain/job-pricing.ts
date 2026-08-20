@@ -141,24 +141,54 @@ export function priceJob(input: {
    * absent — and would put 508 rate cards between the owner and their first
    * invoice.
    *
-   * Precedence is strict and there is no blending: a rate line for a kind of
-   * laundry wins outright, and the price list answers only where the card is
-   * silent. Two half-answers averaged together is not a price anybody agreed to.
+   * Precedence is strict and there is no blending: a rate line wins outright,
+   * and the price list answers only where the card is silent. Two half-answers
+   * averaged together is not a price anybody agreed to.
+   *
+   * Keyed on the kind of laundry. `itemPriceList` below is the same list keyed
+   * on the item itself, which is the more specific answer within this tier.
    */
   priceList?: ReadonlyMap<string, LaundryListPrice> | null;
+  /**
+   * The same price list, keyed on the item master row (0032).
+   *
+   * Consulted before `priceList`, because a price written against TOW001 is a
+   * price for TOW001 and a price written against "towels" is a price for every
+   * kind of towel.
+   */
+  itemPriceList?: ReadonlyMap<string, LaundryListPrice> | null;
 }): JobPricingResult {
-  const { items, rateLines, rateCard, priceList } = input;
+  const { items, rateLines, rateCard, priceList, itemPriceList } = input;
 
   // A rate card may carry more than one line for the same kind of laundry
   // (a wash-only rate and a rental rate for towels, say). The first wins, which
   // is the order the agreement itself stores them in — deterministic, and the
   // reviewer can see which line was used because every snapshot row names it.
+  //
+  // Two indexes since 0032, because a rate line may name **an item** (TOW001)
+  // or **a kind of laundry** (towels). The item is the more specific agreement
+  // and wins; see `rateFor` below.
+  const byItemId = new Map<string, RateLine>();
   const byItemType = new Map<string, RateLine>();
   for (const line of rateLines) {
-    if (!line.laundry_item_type) continue;
     if (!PER_UNIT_MODELS.has(line.pricing_model)) continue;
+    if (line.item_id && !byItemId.has(line.item_id)) byItemId.set(line.item_id, line);
+    if (!line.laundry_item_type) continue;
     if (!byItemType.has(line.laundry_item_type)) byItemType.set(line.laundry_item_type, line);
   }
+
+  /**
+   * Which agreed rate covers this item, in order of how specifically it was
+   * agreed: a line for this exact item, then a line for its kind of laundry.
+   *
+   * The precedence is *specificity within a tier*, and the tiers themselves stay
+   * as they were: the rate card is a negotiated agreement and answers first,
+   * whichever of its lines matched; the price list answers where the card is
+   * silent. A card that names towels and a list that names TOW001 is the card's
+   * answer, because somebody negotiated it.
+   */
+  const rateFor = (item: OrderItemInput): RateLine | undefined =>
+    (item.item_id ? byItemId.get(item.item_id) : undefined) ?? byItemType.get(item.item_type);
 
   const lines: JobChargeLine[] = [];
   const unpriced: JobPricingResult["unpriced"] = [];
@@ -168,7 +198,7 @@ export function priceJob(input: {
       ? (item.custom_description?.trim() || "Other")
       : ITEM_TYPE_LABELS[item.item_type as ItemType] ?? item.item_type;
 
-    const rate = byItemType.get(item.item_type);
+    const rate = rateFor(item);
     const quantity = billableQuantity(item);
 
     // No usable rate line — try the price list before giving up. A quantity of
@@ -176,7 +206,10 @@ export function priceJob(input: {
     // lot with neither an estimate nor a bag count, so there is nothing to
     // multiply any rate by and the gap is in what was measured, not in pricing.
     if (!rate || rate.unit_price <= 0) {
-      const listed = priceList?.get(item.item_type);
+      // Same specificity rule one tier down: this item's own listed price, then
+      // the price for its kind of laundry.
+      const listed = (item.item_id ? itemPriceList?.get(item.item_id) : undefined)
+        ?? priceList?.get(item.item_type);
       const fallback = listed && quantity !== null
         ? priceFromList(item, listed, label, lines.length + 1)
         : null;
@@ -212,7 +245,9 @@ export function priceJob(input: {
         taxable: rate.taxable,
         source_agreement_id: rate.agreement_id,
         source_agreement_line_id: rate.id,
-        source_item_id: rate.item_id,
+        // The item actually in the bag where there is one — that is what the
+        // consolidated invoice groups by, and what a reviewer needs to see.
+        source_item_id: item.item_id ?? rate.item_id,
         source_laundry_item_type: item.item_type,
         pricing_model: rate.pricing_model,
       });
@@ -231,7 +266,7 @@ export function priceJob(input: {
       taxable: rate.taxable,
       source_agreement_id: rate.agreement_id,
       source_agreement_line_id: rate.id,
-      source_item_id: rate.item_id,
+      source_item_id: item.item_id ?? rate.item_id,
       source_laundry_item_type: item.item_type,
       pricing_model: rate.pricing_model,
     });
@@ -309,7 +344,10 @@ function priceFromList(
     taxable: price.taxable,
     source_agreement_id: null,
     source_agreement_line_id: null,
-    source_item_id: null,
+    // Carried even though the price came from the list rather than a rate line:
+    // this is what the consolidated invoice groups by, and "which item was
+    // billed" is a different question from "which agreement priced it".
+    source_item_id: item.item_id ?? null,
     source_laundry_item_type: item.item_type,
     pricing_model: useBags ? "per_bag" : "per_item",
   };

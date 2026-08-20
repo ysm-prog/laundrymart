@@ -10,6 +10,7 @@ import {
 import { Field, FormActions, Input, Select, SubmitButton } from "@/components/form";
 import { ITEM_CATEGORIES } from "../categories";
 import { archiveItem, updateItem } from "../actions";
+import { ITEM_TYPES, ITEM_TYPE_LABELS } from "@/lib/domain/laundry-orders";
 
 export const dynamic = "force-dynamic";
 
@@ -25,7 +26,10 @@ export default async function ItemDetailPage({
   const supabase = await createClient();
   const [{ data: item }, { data: pools }] = await Promise.all([
     supabase.from("items")
-      .select("id, sku, name, category, ownership_type, replacement_cost, rental_price, wash_only_price, weight_kg, reorder_level, status")
+      .select("id, sku, item_code, name, description, category, laundry_category, " +
+              "ownership_type, is_sell, is_buy, sell_price, cost_price, tax_code, " +
+              "replacement_cost, rental_price, wash_only_price, weight_kg, reorder_level, " +
+              "myob_item_id, myob_item_code, external_synced_at, status")
       .eq("id", id).maybeSingle<Item>(),
     supabase.from("inventory_pools")
       .select("id, item_id, owner_type, state, customer_id, depot_id, vehicle_id, quantity, reorder_level")
@@ -41,7 +45,7 @@ export default async function ItemDetailPage({
     <div className="max-w-3xl space-y-6">
       <PageHeader
         title={item.name}
-        description={`${item.sku} · ${humanise(item.category)} · ${number(onHand)} in circulation`}
+        description={`${item.item_code ?? item.sku} · ${humanise(item.category)} · ${number(onHand)} in circulation`}
         actions={<ButtonLink href="/items">Back to items</ButtonLink>}
       />
 
@@ -63,11 +67,51 @@ export default async function ItemDetailPage({
             <Card title="Details">
               <input type="hidden" name="id" value={item.id} />
               <div className="grid gap-4 sm:grid-cols-2">
+                <Field label="Item code" name="item_code" required
+                       hint="What staff type. No spaces, and unique in this laundry.">
+                  <Input name="item_code" required defaultValue={item.item_code ?? ""} />
+                </Field>
                 <Field label="Name" name="name" required>
                   <Input name="name" required defaultValue={item.name} />
                 </Field>
                 <Field label="SKU" name="sku" required>
                   <Input name="sku" required defaultValue={item.sku} />
+                </Field>
+                <Field label="Description" name="description" className="sm:col-span-2">
+                  <Input name="description" defaultValue={item.description ?? ""} />
+                </Field>
+                <Field label="Kind of laundry" name="laundry_category"
+                       hint="What this counts as when a customer hands it in.">
+                  <Select name="laundry_category" defaultValue={item.laundry_category ?? ""}
+                          placeholder="Not laundry a customer hands in"
+                          options={ITEM_TYPES.map((value) => ({
+                            value, label: ITEM_TYPE_LABELS[value],
+                          }))} />
+                </Field>
+                <Field label="I sell this" name="is_sell">
+                  <Select name="is_sell" defaultValue={String(item.is_sell)}
+                          options={[{ value: "true", label: "Yes" }, { value: "false", label: "No" }]} />
+                </Field>
+                <Field label="I buy this" name="is_buy">
+                  <Select name="is_buy" defaultValue={String(item.is_buy)}
+                          options={[{ value: "true", label: "Yes" }, { value: "false", label: "No" }]} />
+                </Field>
+                <Field label="Sell price" name="sell_price">
+                  <Input name="sell_price" type="number" step="0.01" min={0}
+                         defaultValue={item.sell_price} />
+                </Field>
+                <Field label="Cost price" name="cost_price">
+                  <Input name="cost_price" type="number" step="0.01" min={0}
+                         defaultValue={item.cost_price} />
+                </Field>
+                <Field label="Tax code" name="tax_code">
+                  <Input name="tax_code" defaultValue={item.tax_code ?? ""} />
+                </Field>
+                <Field label="MYOB item ID" name="myob_item_id"
+                       hint={item.external_synced_at
+                         ? `Last synchronised ${item.external_synced_at.slice(0, 10)}.`
+                         : "Not synchronised with an external ledger yet."}>
+                  <Input name="myob_item_id" defaultValue={item.myob_item_id ?? ""} />
                 </Field>
                 <Field label="Category" name="category">
                   <Select name="category" defaultValue={item.category}

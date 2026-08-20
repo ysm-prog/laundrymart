@@ -17,6 +17,7 @@ import {
 } from "@/lib/domain/laundry-orders";
 import { businessToday, toZonedDate } from "@/lib/domain/timezone";
 import type { LaundryOrder, LaundryOrderItem } from "@/lib/db/types";
+import { itemLabel } from "@/lib/domain/items";
 
 /**
  * Taking laundry in, on one screen.
@@ -57,6 +58,8 @@ export type JobStaff = { id: string; label: string; role: string };
 
 type ItemRow = {
   key: number;
+  /** The item master row, or "" for a row entered as a bare kind of laundry. */
+  itemId: string;
   itemType: string;
   customDescription: string;
   quantityType: "exact" | "bulk_lot";
@@ -71,6 +74,7 @@ const QUICK_CREATE_FORM = "job-customer-quick-create";
 function blankItem(key: number): ItemRow {
   return {
     key,
+    itemId: "",
     itemType: "towels",
     customDescription: "",
     quantityType: "exact",
@@ -91,7 +95,7 @@ function numberOrNull(value: string): number | null {
 
 export function JobForm({
   action, customerAction, customers, drivers, staff,
-  order, items, defaultCustomerId, canBackdate, returnPath,
+  order, items, catalogue = [], defaultCustomerId, canBackdate, returnPath,
 }: {
   action: (formData: FormData) => Promise<void>;
   /** The existing `createCustomer` action — this module adds no customer flow. */
@@ -101,6 +105,14 @@ export function JobForm({
   staff: JobStaff[];
   order?: LaundryOrder;
   items?: LaundryOrderItem[];
+  /**
+   * The laundry's item master, code-first. Empty for a laundry that has not set
+   * one up, which is why the kind-of-laundry select stays.
+   */
+  catalogue?: Array<{
+    id: string; item_code: string | null; name: string;
+    description?: string | null; laundry_category: string | null;
+  }>;
   defaultCustomerId?: string;
   /** `orders.manage` — only they may record a job as arriving on an earlier day. */
   canBackdate: boolean;
@@ -138,6 +150,7 @@ export function JobForm({
     if (!items?.length) return [blankItem(0)];
     return items.map((item, index) => ({
       key: index,
+      itemId: item.item_id ?? "",
       itemType: item.item_type,
       customDescription: item.custom_description ?? "",
       quantityType: item.quantity_type === "bulk_lot" ? "bulk_lot" : "exact",
@@ -165,8 +178,19 @@ export function JobForm({
     ].some((field) => field?.toLowerCase().includes(term))).slice(0, 12);
   }, [customers, query]);
 
+  /**
+   * The item list as the picker needs it, labelled code-first and ordered by
+   * code — the order it is scanned in, since staff look for TOW001 and read down.
+   */
+  const itemOptions = useMemo(
+    () => catalogue.map((entry) => ({ id: entry.id, label: itemLabel(entry) })),
+    [catalogue],
+  );
+  const itemById = useMemo(() => new Map(catalogue.map((entry) => [entry.id, entry])), [catalogue]);
+
   const itemsPayload = useMemo(() => JSON.stringify(
     rows.map((row) => ({
+      item_id: row.itemId || null,
       item_type: row.itemType,
       custom_description: row.customDescription.trim() || null,
       quantity_type: row.quantityType,
@@ -436,11 +460,51 @@ export function JobForm({
                 </div>
 
                 <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  {/* **The item, by code.** Staff know TOW001 and type it; the
+                      nine kinds of laundry are the fallback beneath, for a
+                      laundry that has not set an item list up yet and for
+                      anything the list does not cover. Picking an item fills the
+                      kind in from the item master, which is also what the
+                      database trigger does — so the two cannot disagree however
+                      the row is written. */}
+                  <label className="space-y-1 sm:col-span-2">
+                    <span className="block text-sm font-medium text-foreground">
+                      Item
+                    </span>
+                    {itemOptions.length > 0 ? (
+                      <select
+                        className={CONTROL}
+                        value={row.itemId}
+                        onChange={(event) => {
+                          const picked = itemById.get(event.target.value);
+                          patch(row.key, {
+                            itemId: event.target.value,
+                            // An item that says which kind of laundry it is sets
+                            // it; one that does not leaves the row's own answer.
+                            ...(picked?.laundry_category
+                              ? { itemType: picked.laundry_category }
+                              : {}),
+                          });
+                        }}
+                      >
+                        <option value="">Not on the item list</option>
+                        {itemOptions.map((option) => (
+                          <option key={option.id} value={option.id}>{option.label}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">
+                        No items set up yet — choose a kind of laundry beside this.
+                      </p>
+                    )}
+                  </label>
+
                   <label className="space-y-1">
                     <span className="block text-sm font-medium text-foreground">
-                      Item type
+                      Kind of laundry
                     </span>
                     <select className={CONTROL} value={row.itemType}
+                            disabled={Boolean(itemById.get(row.itemId)?.laundry_category)}
                             onChange={(event) => patch(row.key, { itemType: event.target.value })}>
                       {ITEM_TYPES.map((value) => (
                         <option key={value} value={value}>{ITEM_TYPE_LABELS[value]}</option>

@@ -115,13 +115,20 @@ export function SequenceBoard({
                 {stop.address ? (
                   <p className="truncate text-sm text-muted-foreground">{stop.address}</p>
                 ) : null}
-                <ul className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-sm text-muted-foreground">
+                <ul className="mt-1 flex flex-wrap items-center gap-x-3 text-sm text-muted-foreground">
                   {stop.jobs.map((job) => (
-                    <li key={job.id}>
-                      <Link href={`/orders/${job.id}`} className="hover:underline">
+                    <li key={job.id} className="flex items-center gap-1">
+                      {/* A padded hit area, not a bare line of text: this row is
+                          reordered from a phone, and an 18px-tall link beside a
+                          drag handle is a mis-tap waiting to happen. */}
+                      <Link
+                        href={`/orders/${job.id}`}
+                        className="inline-flex min-h-9 items-center rounded-lg px-1 font-medium
+                                   hover:underline focus:outline-none focus:ring-2 focus:ring-primary/25"
+                      >
                         {job.orderNumber}
                       </Link>
-                      <span> · {job.itemCount} item(s)</span>
+                      <span>· {job.itemCount} item(s)</span>
                     </li>
                   ))}
                   {stop.jobs.length === 0 ? <li>No laundry on this stop</li> : null}
@@ -132,8 +139,12 @@ export function SequenceBoard({
                 <div className="flex shrink-0 flex-col gap-1">
                   {/* The accessible name is the text, not an aria-label: the
                       arrow alone would announce as "up" with no object. */}
+                  {/* `min-w-9` because `size="sm"` sizes on the *content*, and a
+                      single arrow measured 34px wide — under the 36px floor,
+                      found by measuring the gallery rather than by looking at
+                      it. Height was already 36. */}
                   <Button
-                    type="button" variant="ghost" size="sm"
+                    type="button" variant="ghost" size="sm" className="min-w-9"
                     onClick={() => move(stop.id, "up")}
                     disabled={locked || index === 0}
                   >
@@ -141,7 +152,7 @@ export function SequenceBoard({
                     <span className="sr-only">Move {stop.customerName} up</span>
                   </Button>
                   <Button
-                    type="button" variant="ghost" size="sm"
+                    type="button" variant="ghost" size="sm" className="min-w-9"
                     onClick={() => move(stop.id, "down")}
                     disabled={locked || index === rows.length - 1}
                   >

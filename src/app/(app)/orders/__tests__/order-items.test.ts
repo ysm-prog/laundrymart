@@ -110,3 +110,44 @@ describe("parseOrderItems", () => {
     expect(result.ok).toBe(false);
   });
 });
+
+describe("the coded item on a row (0032)", () => {
+  it("carries the item the counter picked", () => {
+    const result = parseOrderItems(JSON.stringify([
+      {
+        item_id: "3f1b2c4d-1111-4a2b-8c3d-000000000001",
+        item_type: "towels", custom_description: null, quantity_type: "exact",
+        exact_quantity: 12, bag_count: null, estimated_quantity: null, notes: null,
+      },
+    ]));
+    expect(result.ok).toBe(true);
+    expect(result.ok && result.items[0]!.item_id).toBe("3f1b2c4d-1111-4a2b-8c3d-000000000001");
+  });
+
+  it("reads a row entered as a bare kind of laundry, item_id null", () => {
+    // The form spells an unanswered field `null`, and a plain `.optional()`
+    // refuses that — the single fault that made every job creation fail for this
+    // module's first week. Asserted with the real spelling rather than by
+    // omitting the key.
+    const result = parseOrderItems(JSON.stringify([
+      {
+        item_id: null,
+        item_type: "sheets", custom_description: null, quantity_type: "exact",
+        exact_quantity: 6, bag_count: null, estimated_quantity: null, notes: null,
+      },
+    ]));
+    expect(result.ok).toBe(true);
+    expect(result.ok && result.items[0]!.item_id).toBeNull();
+  });
+
+  it("reads a row from before the item master, with no item_id key at all", () => {
+    const result = parseOrderItems(JSON.stringify([
+      {
+        item_type: "sheets", custom_description: null, quantity_type: "exact",
+        exact_quantity: 6, bag_count: null, estimated_quantity: null, notes: null,
+      },
+    ]));
+    expect(result.ok).toBe(true);
+    expect(result.ok && result.items[0]!.item_id).toBeNull();
+  });
+});
