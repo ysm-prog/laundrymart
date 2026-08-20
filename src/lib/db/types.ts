@@ -179,13 +179,39 @@ export type RouteTemplateStop = {
   notes: string | null;
 };
 
+/**
+ * A standing delivery round with its own login (migration 0031).
+ *
+ * The assignment target. A `drivers` row remains the record of a *person*, and
+ * `daily_routes.operated_by_driver_id` is where "who drove this round today"
+ * lives — which is the whole reason both tables exist.
+ */
+export type Board = {
+  id: Uuid;
+  code: string;
+  name: string;
+  user_id: Uuid | null;
+  depot_id: Uuid | null;
+  default_vehicle_id: Uuid | null;
+  notes: string | null;
+  status: string;
+};
+
 export type DailyRoute = {
   id: Uuid;
   route_date: string;
   code: string;
   name: string;
   status: string;
+  /** The round this run belongs to (migration 0031). */
+  board_id: Uuid | null;
+  /**
+   * Pre-0031 runs only. A run is a board's now; this is kept so a historical
+   * one still reads correctly and is no longer written.
+   */
   driver_id: Uuid | null;
+  /** Who actually drove this round on this day. Recorded for accountability. */
+  operated_by_driver_id: Uuid | null;
   vehicle_id: Uuid | null;
   depot_id: Uuid | null;
   template_id: Uuid | null;
@@ -439,29 +465,35 @@ export type LaundryOrder = {
   /** Generated: the delivery date, or the collection date for a pickup job. */
   due_date: string | null;
   /**
-   * The stop on a driver's run that carries this job (migration 0015).
+   * The stop on a board's run that carries this job (migration 0015).
    *
    * The *operational* placement: which visit on which run, for the depot load,
    * the run sheet and the inventory sweep. Since 0016 it is no longer where the
-   * assignment is read from — `assigned_driver_id` and `assigned_delivery_date`
+   * assignment is read from — `assigned_board_id` and `assigned_delivery_date`
    * below are — and `guard_laundry_order_assignment()` keeps the two from
    * disagreeing. Null means the job is on nobody's run.
    */
   stop_id: Uuid | null;
 
   /**
-   * Who is delivering this job, and on which Adelaide day (migration 0016).
+   * Which round is delivering this job, and on which Adelaide day (0016, moved
+   * to boards by 0031).
    *
    * The user-facing assignment, and the pair My Runs queries on. Both are set
    * together or neither is: a check constraint refuses half an assignment, and
    * another refuses status `assigned` without them.
+   */
+  assigned_board_id: Uuid | null;
+  /**
+   * The pre-0031 assignment. Historical jobs keep it and read correctly; the
+   * app no longer writes it, and the assignment guard refuses a new one.
    */
   assigned_driver_id: Uuid | null;
   assigned_delivery_date: string | null;
   assigned_at: string | null;
   assigned_by: Uuid | null;
 
-  /** When the driver confirmed this job was on the van, and who confirmed it. */
+  /** When the round confirmed this job was on the van, and who confirmed it. */
   load_confirmed_at: string | null;
   load_confirmed_by: Uuid | null;
 

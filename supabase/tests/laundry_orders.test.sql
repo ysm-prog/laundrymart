@@ -39,12 +39,18 @@ insert into public.laundry_orders
   ('d0000000-0000-0000-0000-00000000000b','bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
    'c0000000-0000-0000-0000-00000000000b','LJ00001', false, '2026-08-21');
 
--- A driver for tenant A, so the assignment step below has somebody to give the
--- job to. Deliberately only in A: the guard's "that driver could not be found"
--- branch is what stops a job naming another tenant's driver.
+-- A driver for tenant A. Since 0031 a driver is the *person* rather than the
+-- assignment target, and is kept here because the run still records who drove.
 insert into public.drivers (id, tenant_id, full_name, status) values
   ('44444444-4444-4444-4444-44444444444a','aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
    'Michael Driver','active');
+
+-- A board for tenant A, so the assignment step below has a round to give the job
+-- to. Deliberately only in A: the guard's "that board could not be found" branch
+-- is what stops a job naming another tenant's round.
+insert into public.boards (id, tenant_id, code, name, status) values
+  ('55555555-5555-5555-5555-55555555555a','aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+   'BOARD1','Board 1','active');
 
 insert into public.laundry_order_items
   (tenant_id, order_id, item_type, quantity_type, exact_quantity) values
@@ -135,11 +141,11 @@ select throws_ok(
   $$update public.laundry_orders set status = 'completed'
      where id = 'd0000000-0000-0000-0000-00000000000a'$$,
   'P0001',
-  'a delivery job must be assigned to a driver and go out before it is completed',
+  'a delivery job must be assigned to a board and go out before it is completed',
   'a delivery job cannot be completed off the shelf');
 
 -- Since 0016 a delivery job cannot jump the assignment step either: it needs a
--- driver and a date before it can go out.
+-- board and a date before it can go out.
 select throws_ok(
   $$update public.laundry_orders set status = 'out_for_delivery'
      where id = 'd0000000-0000-0000-0000-00000000000a'$$,
@@ -152,15 +158,15 @@ select throws_ok(
      where id = 'd0000000-0000-0000-0000-00000000000a'$$,
   '23514',
   null,
-  'a job cannot be Assigned without a driver and a delivery date');
+  'a job cannot be Assigned without a board and a delivery date');
 
 select lives_ok(
   $$update public.laundry_orders
        set status = 'assigned',
-           assigned_driver_id = '44444444-4444-4444-4444-44444444444a',
+           assigned_board_id = '55555555-5555-5555-5555-55555555555a',
            assigned_delivery_date = '2026-08-20'
      where id = 'd0000000-0000-0000-0000-00000000000a'$$,
-  'a ready delivery job takes a driver and a date');
+  'a ready delivery job takes a board and a date');
 
 select isnt((select assigned_at from public.laundry_orders
               where id = 'd0000000-0000-0000-0000-00000000000a'), null,

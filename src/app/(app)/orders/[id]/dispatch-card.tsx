@@ -5,15 +5,15 @@ import { requireSession } from "@/lib/auth/context";
 import { createClient } from "@/lib/supabase/server";
 import { checkAssignable, checkAssignmentRemovable } from "@/lib/domain/run-assignment";
 import { formatAdelaideDate, getAdelaideToday } from "@/lib/domain/timezone";
-import { driverById, listActiveDrivers } from "@/lib/runs/my-runs";
+import { boardById, listActiveBoards } from "@/lib/runs/my-runs";
 import { AssignForm } from "@/app/(app)/my-runs/assign-form";
 import { removeJobAssignment } from "@/app/(app)/my-runs/actions";
 
 /**
- * Assign Driver, on the job's own page.
+ * Assign Board, on the job's own page.
  *
  * The assignment controls are only rendered for `routes.write` — the existing
- * plan-and-assign capability. Everyone else, drivers included, sees the
+ * plan-and-assign capability. Everyone else, rounds included, sees the
  * read-only half, because "who is bringing this and when" is a useful answer for
  * the counter to have when a customer rings even though changing it is not their
  * job. That is a display decision; the actions behind it carry their own guards.
@@ -29,7 +29,7 @@ export async function DispatchCard({
     id: string; order_number: string; status: string; tenant_id?: string;
     delivery_required: boolean; due_date: string | null;
     expected_delivery_date: string | null;
-    assigned_driver_id: string | null;
+    assigned_board_id: string | null;
     assigned_delivery_date: string | null;
   };
   canAssign: boolean;
@@ -38,7 +38,7 @@ export async function DispatchCard({
    * is working in — only reachable by a platform admin, whose session reads
    * every laundry (0019). Every write is filtered to the active laundry, so the
    * assignment controls could only ever fail here; the card says which business
-   * it belongs to instead of offering a driver who works somewhere else.
+   * it belongs to instead of offering a round that works somewhere else.
    */
   foreign?: boolean;
 }) {
@@ -51,7 +51,7 @@ export async function DispatchCard({
     return (
       <Card title="Delivery" className="lg:col-span-3">
         <Notice tone="info">
-          The customer is collecting this job, so it is never assigned to a delivery driver.
+          The customer is collecting this job, so it is never assigned to a delivery round.
         </Notice>
       </Card>
     );
@@ -62,20 +62,20 @@ export async function DispatchCard({
       <Card title="Delivery" className="lg:col-span-3">
         <Notice tone="warning" title="This job belongs to another laundry">
           You are working in a different business right now, so this job cannot be
-          given a driver from here. Switch laundry in the account menu, then open
+          given a board from here. Switch laundry in the account menu, then open
           the job again.
         </Notice>
       </Card>
     );
   }
 
-  const [driver, drivers] = await Promise.all([
-    order.assigned_driver_id
-      ? driverById(supabase, session.tenantId, order.assigned_driver_id) : null,
-    // This laundry's drivers, not every laundry's. A platform admin's session
-    // reads across all of them (0019), and offering another laundry's driver is
+  const [board, boards] = await Promise.all([
+    order.assigned_board_id
+      ? boardById(supabase, session.tenantId, order.assigned_board_id) : null,
+    // This laundry's boards, not every laundry's. A platform admin's session
+    // reads across all of them (0019), and offering another laundry's round is
     // how a run got crewed by somebody who works somewhere else.
-    canAssign ? listActiveDrivers(supabase, session.tenantId) : Promise.resolve([]),
+    canAssign ? listActiveBoards(supabase, session.tenantId) : Promise.resolve([]),
   ]);
 
   const eligible = checkAssignable(order, { allowAssigned: true });
@@ -85,14 +85,14 @@ export async function DispatchCard({
   return (
     <Card
       title="Delivery"
-      description="Which driver is taking this job out, and on which day."
+      description="Which board is taking this job out, and on which day."
       className="lg:col-span-3"
     >
-      {order.assigned_driver_id ? (
+      {order.assigned_board_id ? (
         <div className="mb-4 rounded-lg bg-surface-sunken px-4 py-3">
           <p className="text-sm">
             Assigned to:{" "}
-            <span className="font-semibold">{driver?.full_name ?? "a driver"}</span>
+            <span className="font-semibold">{board?.name ?? "a board"}</span>
           </p>
           <p className="mt-0.5 text-sm">
             Assigned delivery date:{" "}
@@ -100,26 +100,26 @@ export async function DispatchCard({
               {formatAdelaideDate(order.assigned_delivery_date, "medium")}
             </span>
           </p>
-          {order.assigned_delivery_date && order.assigned_driver_id ? (
+          {order.assigned_delivery_date && order.assigned_board_id ? (
             <p className="mt-1.5 text-sm text-muted-foreground">
               <Link
-                href={`/my-runs?date=${order.assigned_delivery_date}&driver=${order.assigned_driver_id}`}
+                href={`/my-runs?date=${order.assigned_delivery_date}&board=${order.assigned_board_id}`}
                 className="hover:underline"
               >
-                See that driver&apos;s day
+                See that board&apos;s day
               </Link>
             </p>
           ) : null}
         </div>
       ) : (
         <p className="mb-4 text-sm text-muted-foreground">
-          This job has not been assigned to a driver.
+          This job has not been assigned to a board.
         </p>
       )}
 
       {!canAssign ? (
         <p className="text-sm text-muted-foreground">
-          Assigning work to a driver is done by dispatch.
+          Assigning work to a board is done by dispatch.
         </p>
       ) : !eligible.ok ? (
         <Notice tone="info">{eligible.reason}</Notice>
@@ -127,15 +127,15 @@ export async function DispatchCard({
         <div className="space-y-4">
           <AssignForm
             orderId={order.id}
-            defaultDriverId={order.assigned_driver_id}
+            defaultBoardId={order.assigned_board_id}
             defaultDate={getAdelaideToday()}
             expectedDeliveryDate={order.expected_delivery_date ?? order.due_date}
-            drivers={drivers}
+            boards={boards}
             returnTo={returnTo}
             currentAssignment={
-              order.assigned_driver_id
+              order.assigned_board_id
                 ? {
-                    driverName: driver?.full_name ?? "a driver",
+                    boardName: board?.name ?? "a board",
                     deliveryDate: order.assigned_delivery_date ?? "",
                   }
                 : null
@@ -148,7 +148,7 @@ export async function DispatchCard({
               <input type="hidden" name="return_to" value={returnTo} />
               <ConfirmSubmit
                 label="Remove Assignment"
-                eyebrow="Take it off this driver"
+                eyebrow="Take it off this board"
                 consequence={
                   "The job goes back to Ready for delivery and into the unassigned queue. "
                   + "It is not cancelled: the laundry, the customer, the instructions and the "
@@ -157,7 +157,7 @@ export async function DispatchCard({
                 pendingLabel="Removing…"
               />
             </form>
-          ) : order.assigned_driver_id ? (
+          ) : order.assigned_board_id ? (
             <p className="border-t pt-4 text-sm text-muted-foreground">{removable.reason}</p>
           ) : null}
         </div>

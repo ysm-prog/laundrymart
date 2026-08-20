@@ -24,11 +24,14 @@ insert into public.memberships (user_id, tenant_id, role) values
   ('33333333-3333-3333-3333-333333333333','aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','warehouse_operator'),
   ('44444444-4444-4444-4444-444444444444','aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','customer_service'),
   ('55555555-5555-5555-5555-555555555555','aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','finance'),
-  ('66666666-6666-6666-6666-666666666666','aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','driver');
+  -- Since 0031 the round is the operational actor, so this is the role whose
+  -- carve-out matters. A `driver` membership still exists and is still scoped
+  -- the same way; it is simply no longer what work is assigned to.
+  ('66666666-6666-6666-6666-666666666666','aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','board');
 
-insert into public.drivers (id, tenant_id, user_id, full_name) values
+insert into public.boards (id, tenant_id, user_id, code, name) values
   ('66660000-0000-0000-0000-00000000000a','aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
-   '66666666-6666-6666-6666-666666666666','Mario');
+   '66666666-6666-6666-6666-666666666666','BOARD1','Board 1');
 
 insert into public.customers (id, tenant_id, customer_number, business_name) values
   ('c0000000-0000-0000-0000-00000000000a','aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','CUST00001','Cafe A');
@@ -39,7 +42,7 @@ values ('d0000000-0000-0000-0000-00000000000a','aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaa
 
 insert into public.laundry_orders
   (id, tenant_id, customer_id, order_number, received_at, status,
-   delivery_required, expected_delivery_date, assigned_driver_id, assigned_delivery_date)
+   delivery_required, expected_delivery_date, assigned_board_id, assigned_delivery_date)
 values ('d0000000-0000-0000-0000-00000000000b','aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
         'c0000000-0000-0000-0000-00000000000a','LJ00002', now(), 'out_for_delivery',
         true, current_date, '66660000-0000-0000-0000-00000000000a', current_date);
@@ -149,10 +152,10 @@ select throws_ok(
      values ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','towels',5.00) $$,
   '42501', null, 'finance cannot set the laundry price list');
 
--- ---------------------------------------------------------- the driver -----
--- The carve-out that keeps the app working. A driver finishing a delivery
--- writes to `laundry_orders` — that is what completeLaundryOrder does — and
--- without this clause the update is refused silently and the job sits at
+-- ----------------------------------------------------------- the board -----
+-- The carve-out that keeps the app working. A round finishing a delivery writes
+-- to `laundry_orders` — that is what completeLaundryOrder does — and without
+-- this clause the update is refused silently and the job sits at
 -- `out_for_delivery` for ever. Executing your own run is not working the
 -- office's flow.
 set local "request.jwt.claim.sub" = '66666666-6666-6666-6666-666666666666';
@@ -162,16 +165,16 @@ update public.laundry_orders set status = 'completed'
 select is(
   (select status from public.laundry_orders
     where id = 'd0000000-0000-0000-0000-00000000000b'), 'completed',
-  'a driver can finish the delivery assigned to them');
+  'a board can finish the delivery assigned to it');
 
--- And no further than that: a job that is not theirs is not even visible, so
--- the carve-out cannot be turned into a way round the restriction.
+-- And no further than that: a job that is not this round's is not even visible,
+-- so the carve-out cannot be turned into a way round the restriction.
 select is((select count(*) from public.laundry_orders
             where id = 'd0000000-0000-0000-0000-00000000000a')::int, 0,
-          'a driver cannot see, let alone change, a job that is not theirs');
+          'a board cannot see, let alone change, a job that is not on its round');
 
 -- ------------------------------------------------------ reading is open -----
--- Deliberately not restricted: a driver must be able to read the job they are
+-- Deliberately not restricted: a round must be able to read the job it is
 -- delivering, and the app is what decides who is shown the screens.
 set local "request.jwt.claim.sub" = '33333333-3333-3333-3333-333333333333';
 select is((select count(*) from public.laundry_orders)::int, 2,

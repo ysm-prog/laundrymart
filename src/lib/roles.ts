@@ -14,6 +14,12 @@ export const MEMBERSHIP_ROLES = [
   "operations_manager",
   "dispatcher",
   "driver",
+  // The round, not the person (0031). A board holds a login, and whoever is
+  // operating that round today signs in as it — which is the whole point: a
+  // driver resigning, being off sick or covering somebody else's route must not
+  // mean re-pointing every open job at a different employee. Next to `driver`
+  // because they are the two operational logins and hold the same capabilities.
+  "board",
   "finance",
   "warehouse_operator",
   "customer_service",
@@ -52,6 +58,7 @@ export const ROLE_LABELS: Record<Role, string> = {
   branch_manager: "Branch Manager",
   regional_manager: "Regional Manager",
   auditor: "Auditor",
+  board: "Board",
 };
 
 // Capabilities are coarse on purpose — one per navigable area plus a write flag.
@@ -257,6 +264,16 @@ export const ROLE_CAPABILITIES: Record<Role, readonly Capability[]> = {
   regional_manager: outsideMainFlow(TENANT_ALL.filter((c) => c !== "admin.write")),
   // Read-only access to compliance and history.
   auditor: outsideMainFlow(READ_ONLY),
+  // A round's own work, on the phone in the van. Identical to `driver` and that
+  // is deliberate rather than lazy: the two are the same job done by the same
+  // person, and the only difference is what the work is filed under. RLS is what
+  // makes `routes.status` here mean "my round" rather than "any round" —
+  // `is_board_only()` narrows every routes row to `current_board_id()`.
+  //
+  // What it deliberately does **not** hold: `routes.write`. Ordering the day is
+  // the office's decision and the round follows it, which is the client's own
+  // rule — a board sees the final sequence and cannot change it.
+  board: ["run.execute", "routes.read", "routes.status", "operations.read", "operations.write"],
 };
 
 /**
@@ -283,6 +300,11 @@ export const ROLE_CAPABILITIES: Record<Role, readonly Capability[]> = {
 export const ROLE_PRESETS = [
   { key: "owner", role: "super_admin", label: "Owner" },
   { key: "office", role: "operations_manager", label: "Office" },
+  // The operational login a small laundry actually creates. It leads the other
+  // two operational roles because a round is what work is assigned to now; a
+  // `driver` membership is still offered further down for a laundry that tracks
+  // people rather than rounds.
+  { key: "board", role: "board", label: "Board" },
   { key: "driver", role: "driver", label: "Driver" },
 ] as const satisfies readonly { key: string; role: Role; label: string }[];
 
@@ -334,6 +356,7 @@ export const ROLE_SUMMARY: Record<Role, string> = {
   branch_manager: "Everything at one site except jobs and invoices",
   regional_manager: "Everything across sites except jobs and invoices",
   auditor: "Can look at everything except jobs and invoices, changes nothing",
+  board: "One delivery round, on the phone in the van — its own jobs and nothing else",
 };
 
 export function can(role: Role, capability: Capability): boolean {

@@ -69,6 +69,16 @@ export const ROLE_PROFILES = [
     driver: true,
   },
   {
+    role: "board",
+    name: "Test Board",
+    note: "One round's own jobs. Sees the sequence the office set and cannot change it.",
+    // A `board` membership with no `boards` row makes `current_board_id()` null,
+    // and every board-scoped policy then matches nothing — the login works and
+    // every screen is empty, which reads as a bug in the screens rather than as
+    // a missing link. The same trap the driver profile below records.
+    board: true,
+  },
+  {
     role: "finance",
     name: "Test Finance",
     note: "The payable side: bills, suppliers, accounts. Must be refused customer invoicing.",

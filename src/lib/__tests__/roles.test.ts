@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  CAPABILITIES, PRESET_ROLES, ROLES, ROLE_LABELS, ROLE_PRESETS, ROLE_SUMMARY,
+  CAPABILITIES, PRESET_ROLES, ROLES, ROLE_CAPABILITIES, ROLE_LABELS, ROLE_PRESETS, ROLE_SUMMARY,
   can, isRole, membershipRolesWith, MEMBERSHIP_ROLES, presetForRole, rolesWith, type Role,
 } from "@/lib/roles";
 
@@ -20,10 +20,12 @@ describe("role presets", () => {
     expect(new Set(ROLE_PRESETS.map((preset) => preset.key)).size).toBe(ROLE_PRESETS.length);
   });
 
-  it("covers the three answers a small laundry gives", () => {
-    // Owner, office, driver — the roadmap's D1 shape. Pinned because dropping
-    // one of the three would quietly send an owner back into the eleven.
-    expect(PRESET_ROLES).toEqual(["super_admin", "operations_manager", "driver"]);
+  it("covers the answers a small laundry gives", () => {
+    // Owner, office, board, driver. Pinned because dropping one would quietly
+    // send an owner back into the full list. `board` leads the two operational
+    // ones since 0031: a round is what work is assigned to, and a `driver`
+    // membership is now for a laundry that tracks people rather than rounds.
+    expect(PRESET_ROLES).toEqual(["super_admin", "operations_manager", "board", "driver"]);
   });
 
   it("round-trips a role back to its preset, and knows when there is none", () => {
@@ -33,19 +35,43 @@ describe("role presets", () => {
     expect(presetForRole("auditor")).toBeUndefined();
   });
 
-  it("leaves the eleven roles and their capabilities untouched", () => {
+  it("leaves the membership roles and their capabilities untouched", () => {
     // The presets are presentation. If adding them had changed who can do what,
     // this is the assertion that would have caught it.
     //
-    // MEMBERSHIP_ROLES rather than ROLES since 0019: the eleven this test is
-    // about are the ones a membership can hold, and `platform_admin` is a
-    // twelfth that deliberately cannot. Pinning ROLES here would have made the
-    // new role look like a regression in the preset model, which it is not.
-    expect(MEMBERSHIP_ROLES).toHaveLength(11);
+    // MEMBERSHIP_ROLES rather than ROLES since 0019: the ones this test is
+    // about are those a membership can hold, and `platform_admin` deliberately
+    // cannot. Pinning ROLES here would have made that role look like a
+    // regression in the preset model, which it is not.
+    expect(MEMBERSHIP_ROLES).toHaveLength(12);
     expect(can("super_admin", "admin.write")).toBe(true);
     expect(can("operations_manager", "admin.write")).toBe(false);
     expect(can("driver", "run.execute")).toBe(true);
     expect(can("driver", "orders.write")).toBe(false);
+  });
+
+  it("gives a board a round's work and not the office's", () => {
+    // The client's rule, stated as capabilities: a board sees the sequence the
+    // office set and cannot change it, and reaches nothing financial or
+    // administrative. `routes.status` means "my round" only because
+    // `is_board_only()` narrows every routes row to `current_board_id()`.
+    expect(can("board", "run.execute")).toBe(true);
+    expect(can("board", "routes.read")).toBe(true);
+    expect(can("board", "routes.status")).toBe(true);
+    expect(can("board", "routes.write")).toBe(false);
+    for (const capability of [
+      "orders.write", "invoices.read", "billing.read", "pricing.read",
+      "admin.read", "admin.write", "customers.read", "items.write",
+    ] as const) {
+      expect(can("board", capability), capability).toBe(false);
+    }
+  });
+
+  it("gives a board exactly a driver's capabilities", () => {
+    // Same job, same phone, different filing. Pinned so the two cannot drift
+    // apart without somebody deciding they should.
+    expect([...ROLE_CAPABILITIES.board].sort())
+      .toEqual([...ROLE_CAPABILITIES.driver].sort());
   });
 
   it("describes and labels every role, preset or not", () => {
@@ -98,8 +124,8 @@ describe("platform_admin (0019)", () => {
     // not to the column, the failure is an insert error in production; this is
     // the cheaper place to find out.
     expect([...MEMBERSHIP_ROLES].sort()).toEqual([
-      "auditor", "branch_manager", "customer_service", "dispatcher", "driver",
-      "finance", "operations_manager", "regional_manager", "sales",
+      "auditor", "board", "branch_manager", "customer_service", "dispatcher",
+      "driver", "finance", "operations_manager", "regional_manager", "sales",
       "super_admin", "warehouse_operator",
     ]);
   });

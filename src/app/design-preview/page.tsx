@@ -217,7 +217,7 @@ const PREVIEW_REGISTER = [
 /* --------------------------------------------------------- my runs fixture */
 
 /**
- * A driver's morning, fixed. The date is the day the redesign fixtures use, so
+ * A round's morning, fixed. The date is the day the redesign fixtures use, so
  * the screenshots are byte-stable across builds; the two stops are the two
  * shapes that matter — one customer with several jobs under a single stop, and
  * one already done.
@@ -226,12 +226,13 @@ const PREVIEW_DAY_JOBS: DayJob[] = [
   {
     id: "j1", order_number: "LJ01041", status: "assigned", priority: "urgent",
     delivery_required: true, due_date: "2026-08-16", expected_delivery_date: "2026-08-16",
-    assigned_delivery_date: "2026-08-16", assigned_driver_id: "d1",
+    assigned_delivery_date: "2026-08-16", assigned_board_id: "d1",
     load_confirmed_at: null, completed_at: null,
     delivery_window: "morning", expected_delivery_time: null,
     delivery_address: "123 Main Street, Adelaide SA 5000",
     delivery_instructions: "Ring the bell at the roller door.",
     special_instructions: null, customer_id: "c1",
+    stop_id: "s1", jobs: { sequence: 1 },
     customers: { id: "c1", business_name: "ABC Fitness", phone: "08 1234 5678" },
     laundry_order_items: [
       { item_type: "towels", custom_description: null, quantity_type: "exact",
@@ -241,11 +242,12 @@ const PREVIEW_DAY_JOBS: DayJob[] = [
   {
     id: "j2", order_number: "LJ01045", status: "out_for_delivery", priority: "normal",
     delivery_required: true, due_date: "2026-08-16", expected_delivery_date: "2026-08-16",
-    assigned_delivery_date: "2026-08-16", assigned_driver_id: "d1",
+    assigned_delivery_date: "2026-08-16", assigned_board_id: "d1",
     load_confirmed_at: "2026-08-15T22:10:00Z", completed_at: null,
     delivery_window: null, expected_delivery_time: null,
     delivery_address: "55 North Terrace, Adelaide SA 5000",
     delivery_instructions: null, special_instructions: null, customer_id: "c2",
+    stop_id: "s2", jobs: { sequence: 2 },
     customers: { id: "c2", business_name: "XYZ Medical", phone: "08 8888 1010" },
     laundry_order_items: [
       { item_type: "sheets", custom_description: null, quantity_type: "bulk_lot",
@@ -255,11 +257,12 @@ const PREVIEW_DAY_JOBS: DayJob[] = [
   {
     id: "j3", order_number: "LJ01051", status: "completed", priority: "normal",
     delivery_required: true, due_date: "2026-08-16", expected_delivery_date: "2026-08-16",
-    assigned_delivery_date: "2026-08-16", assigned_driver_id: "d1",
+    assigned_delivery_date: "2026-08-16", assigned_board_id: "d1",
     load_confirmed_at: "2026-08-15T22:10:00Z", completed_at: "2026-08-16T01:12:00Z",
     delivery_window: null, expected_delivery_time: null,
     delivery_address: "19 King William Street, Adelaide SA 5000",
     delivery_instructions: null, special_instructions: null, customer_id: "c3",
+    stop_id: "s3", jobs: { sequence: 3 },
     customers: { id: "c3", business_name: "City Gym", phone: null },
     laundry_order_items: [
       { item_type: "bath_towels", custom_description: null, quantity_type: "exact",
@@ -268,10 +271,10 @@ const PREVIEW_DAY_JOBS: DayJob[] = [
   },
 ];
 
-/** The planner's driver fixture is `{value,label}`; My Runs wants real rows. */
-const PREVIEW_RUN_DRIVERS = [
-  { id: "d1", full_name: "John Smith", status: "active", phone: "0400 000 111" },
-  { id: "d2", full_name: "Mel Nguyen", status: "active", phone: null },
+/** The planner's fixture is `{value,label}`; My Runs wants real board rows. */
+const PREVIEW_RUN_BOARDS = [
+  { id: "d1", code: "BOARD1", name: "Board 1", status: "active" },
+  { id: "d2", code: "BOARD2", name: "Board 2", status: "active" },
 ];
 
 /**
@@ -910,18 +913,18 @@ export default function DesignPreviewPage() {
             <PageHeader
               eyebrow="Sunday, 16 August 2026"
               title="My Runs"
-              description="Good morning, John. Here is your work for the day."
+              description="Good morning. Here is Board 1&apos;s work for the day."
             />
 
             <DateNav
               date="2026-08-16"
-              driverParam="me"
-              drivers={PREVIEW_RUN_DRIVERS}
-              canChooseDriver
+              boardParam="me"
+              boards={PREVIEW_RUN_BOARDS}
+              canChooseBoard
             />
 
             <DaySummary
-              driverName="John Smith"
+              boardName="John Smith"
               date="2026-08-16"
               toDeliver={1}
               outForDelivery={1}
@@ -952,10 +955,10 @@ export default function DesignPreviewPage() {
             >
               <AssignForm
                 orderId="preview"
-                defaultDriverId="d1"
+                defaultBoardId="d1"
                 defaultDate="2026-08-16"
                 expectedDeliveryDate="2026-08-16"
-                drivers={PREVIEW_RUN_DRIVERS}
+                boards={PREVIEW_RUN_BOARDS}
                 returnTo="/design-preview"
               />
             </Card>

@@ -41,6 +41,14 @@ describe("test role profiles", () => {
     expect(selectedProfiles({ includePlatformAdmin: true })).toHaveLength(ROLES.length);
   });
 
+  it("gives the board profile a board record, since RLS reads one", () => {
+    // `current_board_id()` resolves `boards.user_id`; without a row it is null
+    // and every board-scoped policy matches nothing. The login would work and
+    // every screen would be empty — the same trap the driver profile records,
+    // and the one this project has already shipped once.
+    expect(profiles.filter((p) => p.board).map((p) => p.role)).toEqual(["board"]);
+  });
+
   it("gives the driver profile a driver record, since RLS reads one", () => {
     // `current_driver_id()` resolves `drivers.user_id`; without a row it is
     // null and every driver-scoped policy matches nothing. The login would work

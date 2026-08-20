@@ -6,11 +6,11 @@ import { ORDER_STATUS_LABELS, summariseItems, type OrderStatus } from "@/lib/dom
 import type { DayJob } from "@/lib/runs/my-runs";
 
 /**
- * What a driver reads: the day's totals, and one card per job.
+ * What a round reads: the day's totals, and one card per job.
  *
  * There is no run card, no stop card and no sequence number here any more. A
- * driver's day is a list of deliveries — the run underneath is bookkeeping and
- * naming it on screen only ever made the driver responsible for understanding
+ * round's day is a list of deliveries — the run underneath is bookkeeping and
+ * naming it on screen only ever made the operator responsible for understanding
  * it. What is left is the four things they need at a glance: who, where, what,
  * and whether it is done.
  *
@@ -20,15 +20,15 @@ import type { DayJob } from "@/lib/runs/my-runs";
  * *looked at* without a live project — which is how a doubled hairline and an
  * invisible dark-mode edge both survived a green `verify` once already. These
  * are the leaf components, they take plain props, and the gallery renders the
- * same ones the driver gets.
+ * same ones the round gets.
  */
 
 /* ---------------------------------------------------------------- summary */
 
 export function DaySummary({
-  driverName, date, toDeliver, outForDelivery, completed,
+  boardName, date, toDeliver, outForDelivery, completed,
 }: {
-  driverName: string; date: string;
+  boardName: string; date: string;
   toDeliver: number; outForDelivery: number; completed: number;
 }) {
   const total = toDeliver + outForDelivery + completed;
@@ -44,7 +44,7 @@ export function DaySummary({
     <Card>
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
-          <p className="text-lg font-semibold">{driverName}</p>
+          <p className="text-lg font-semibold">{boardName}</p>
           <p className="text-sm text-muted-foreground">{formatAdelaideDate(date, "long")}</p>
         </div>
         <div className="flex gap-6">
@@ -90,7 +90,7 @@ function ProgressBar({ done, total }: { done: number; total: number }) {
 /**
  * One delivery, as a card.
  *
- * Cards rather than a table at every width, not just on a phone: a driver's list
+ * Cards rather than a table at every width, not just on a phone: a round's list
  * is never wide, and the address — the thing they are actually navigating by —
  * has to be the second most prominent line on it. The address and the phone are
  * real links, so a tap opens maps or dials rather than selecting text.
@@ -99,7 +99,7 @@ export function JobCard({
   job, actionable,
 }: {
   job: DayJob;
-  /** The driver may open and work this job, rather than merely view it. */
+  /** The round may open and work this job, rather than merely view it. */
   actionable: boolean;
 }) {
   const finished = job.status === "completed";
@@ -114,6 +114,17 @@ export function JobCard({
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
           <p className="flex flex-wrap items-center gap-2">
+            {/* The position the office set on the Runs screen. Shown because a
+                sequence nobody can see is a decision that was not made — the
+                round drives in this order, so it has to read it. */}
+            {job.jobs?.sequence ? (
+              <span
+                className="flex size-7 shrink-0 items-center justify-center rounded-lg
+                           bg-surface-sunken text-sm font-semibold tabular-nums"
+              >
+                <span className="sr-only">Stop </span>{job.jobs.sequence}
+              </span>
+            ) : null}
             <span className="text-base font-semibold">{job.order_number}</span>
             {job.priority === "urgent" ? <Badge tone="warning">Urgent</Badge> : null}
           </p>
@@ -211,14 +222,14 @@ export function JobGroup({
 
 /** The office's read-only view of who has a job, used on the Jobs screens. */
 export function AssignmentSummary({
-  driverName, deliveryDate,
+  boardName, deliveryDate,
 }: {
-  driverName: string; deliveryDate: string | null;
+  boardName: string; deliveryDate: string | null;
 }) {
   return (
     <div className="rounded-lg bg-surface-sunken px-4 py-3">
       <p className="text-sm">
-        Assigned to: <span className="font-semibold">{driverName}</span>
+        Assigned to: <span className="font-semibold">{boardName}</span>
       </p>
       <p className="mt-0.5 text-sm">
         Assigned delivery date:{" "}
@@ -228,7 +239,7 @@ export function AssignmentSummary({
   );
 }
 
-/** A plain link back into a job, for lists that are not the driver's own day. */
+/** A plain link back into a job, for lists that are not the round's own day. */
 export function JobLink({ id, label }: { id: string; label: string }) {
   return <Link href={`/orders/${id}`} className="hover:underline">{label}</Link>;
 }

@@ -9,8 +9,8 @@ import {
 import {
   OPERATIONS_TIMEZONE, formatAdelaideDate, getAdelaideNow, getAdelaideToday, isCalendarDate,
 } from "@/lib/domain/timezone";
-import { groupDriverDay } from "@/lib/domain/run-assignment";
-import { loadDriverDayJobs, resolveDriverScope } from "@/lib/runs/my-runs";
+import { groupRunDay } from "@/lib/domain/run-assignment";
+import { loadBoardDayJobs, resolveBoardScope } from "@/lib/runs/my-runs";
 import { DateNav } from "./date-nav";
 import { DayWorkflow } from "./run-workflow";
 import { DaySummary, JobCard, JobGroup } from "./run-view";
@@ -18,10 +18,10 @@ import { DaySummary, JobCard, JobGroup } from "./run-view";
 export const metadata = { title: "My Runs" };
 export const dynamic = "force-dynamic";
 
-type Search = { date?: string; driver?: string };
+type Search = { date?: string; board?: string };
 
 /**
- * My Runs — the driver's whole workspace, and nothing else.
+ * My Runs — a delivery round's whole workspace, and nothing else.
  *
  * The screen answers one question: **what am I delivering on this day?** It used
  * to answer that by showing runs, each with its code, its own five-stage
@@ -35,7 +35,7 @@ type Search = { date?: string; driver?: string };
  * still maintained, but it has stopped being the driver's problem.
  *
  * The date is Adelaide's throughout — the default, the arrows, the day a job is
- * filed under. `?date=` and `?driver=` carry the state, so the view is
+ * filed under. `?date=` and `?board=` carry the state, so the view is
  * bookmarkable, survives a round trip into a job and back, and a dispatcher can
  * send someone a link to it.
  */
@@ -47,20 +47,20 @@ export default async function MyRunsPage({ searchParams }: { searchParams: Promi
   // only get there by hand, and an operator staring at a validation message on a
   // screen they open every morning is worse than a screen that just works.
   const date = params.date && isCalendarDate(params.date) ? params.date : getAdelaideToday();
-  const driverParam = params.driver ?? "me";
+  const boardParam = params.board ?? "me";
 
   const supabase = await createClient();
-  const scope = await resolveDriverScope(supabase, session, driverParam);
+  const scope = await resolveBoardScope(supabase, session, boardParam);
 
   return (
     <PageContainer>
       <PageHeader
         title="My Runs"
         description={
-          scope.driver && scope.isSelf
-            ? `${greeting()}, ${firstName(scope.driver.full_name)}. Here is your work for the day.`
-            : scope.driver
-              ? `${scope.driver.full_name}'s work for the day.`
+          scope.board && scope.isSelf
+            ? `${greeting()}. Here is ${scope.board.name}'s work for the day.`
+            : scope.board
+              ? `${scope.board.name}'s work for the day.`
               : "The deliveries assigned to you, for any day you choose."
         }
         eyebrow={formatAdelaideDate(date, "long")}
@@ -68,18 +68,18 @@ export default async function MyRunsPage({ searchParams }: { searchParams: Promi
 
       <DateNav
         date={date}
-        driverParam={scope.driver && !scope.isSelf ? scope.driver.id : "me"}
-        drivers={scope.drivers}
-        canChooseDriver={scope.canChooseDriver}
+        boardParam={scope.board && !scope.isSelf ? scope.board.id : "me"}
+        boards={scope.boards}
+        canChooseBoard={scope.canChooseBoard}
       />
 
-      {!scope.driver ? (
-        <NoDriver canChooseDriver={scope.canChooseDriver} />
+      {!scope.board ? (
+        <NoBoard canChooseBoard={scope.canChooseBoard} />
       ) : (
-        <Suspense key={`${date}:${scope.driver.id}`} fallback={<SkeletonRows rows={5} />}>
+        <Suspense key={`${date}:${scope.board.id}`} fallback={<SkeletonRows rows={5} />}>
           <Day
-            driverId={scope.driver.id}
-            driverName={scope.driver.full_name}
+            boardId={scope.board.id}
+            boardName={scope.board.name}
             date={date}
             isSelf={scope.isSelf}
             // Working the day — Confirm Load, Start Route, Mark Delivered — is
@@ -101,15 +101,15 @@ export default async function MyRunsPage({ searchParams }: { searchParams: Promi
 /* ------------------------------------------------------------------- day */
 
 async function Day({
-  driverId, driverName, date, isSelf, canWork,
+  boardId, boardName, date, isSelf, canWork,
 }: {
-  driverId: string; driverName: string; date: string; isSelf: boolean; canWork: boolean;
+  boardId: string; boardName: string; date: string; isSelf: boolean; canWork: boolean;
 }) {
   const session = await requireSession();
   const supabase = await createClient();
-  const jobs = await loadDriverDayJobs(supabase, session.tenantId, driverId, date);
-  const day = groupDriverDay(jobs);
-  const returnTo = `/my-runs?date=${date}${isSelf ? "" : `&driver=${driverId}`}`;
+  const jobs = await loadBoardDayJobs(supabase, session.tenantId, boardId, date);
+  const day = groupRunDay(jobs);
+  const returnTo = `/my-runs?date=${date}${isSelf ? "" : `&board=${boardId}`}`;
 
   if (day.total === 0) {
     return (
@@ -117,7 +117,7 @@ async function Day({
         icon={<PackageCheck className="size-5" />}
         title="No jobs assigned"
         description={
-          `${isSelf ? "You do not have" : `${driverName} does not have`} any delivery jobs `
+          `${isSelf ? "You do not have" : `${boardName} does not have`} any delivery jobs `
           + `assigned for ${formatAdelaideDate(date, "long")}.`
         }
       />
@@ -139,7 +139,7 @@ async function Day({
       </div>
 
       <DaySummary
-        driverName={driverName}
+        boardName={boardName}
         date={date}
         toDeliver={day.toDeliver.length}
         outForDelivery={day.outForDelivery.length}
@@ -147,7 +147,7 @@ async function Day({
       />
 
       {canWork ? (
-        <DayWorkflow jobs={jobs} driverId={driverId} date={date} returnTo={returnTo} />
+        <DayWorkflow jobs={jobs} boardId={boardId} date={date} returnTo={returnTo} />
       ) : null}
 
       <JobGroup title="To deliver" count={day.toDeliver.length}>
@@ -175,19 +175,23 @@ async function Day({
 
 /* ----------------------------------------------------------------- bits */
 
-function NoDriver({ canChooseDriver }: { canChooseDriver: boolean }) {
+/**
+ * The empty state that exists because the alternative reads as a broken app.
+ *
+ * A `board` membership with no `boards` row leaves `current_board_id()` null and
+ * every board-scoped policy matching nothing — a login that works perfectly and
+ * shows nothing at all. Saying so, and saying who fixes it, is the difference
+ * between a missing link and a bug report.
+ */
+function NoBoard({ canChooseBoard }: { canChooseBoard: boolean }) {
   return (
-    <Notice tone="warning" title="No driver profile linked to your login">
-      {canChooseDriver
-        ? "Your own login is not linked to a driver record, so there is no personal day to show. "
-          + "Choose a driver above to see their work."
-        : "A manager needs to link your account to a driver record before your jobs appear here."}
+    <Notice tone="warning" title="No board linked to your login">
+      {canChooseBoard
+        ? "Your own login is not linked to a board, so there is no round to show. "
+          + "Choose a board above to see its work."
+        : "A manager needs to link your account to a board before your jobs appear here."}
     </Notice>
   );
-}
-
-function firstName(fullName: string): string {
-  return fullName.trim().split(/\s+/)[0] ?? fullName;
 }
 
 /** Morning / afternoon / evening, decided in Adelaide rather than on the server. */

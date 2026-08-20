@@ -237,6 +237,47 @@ async function ensureDriverRecord(userId, tenantId, profile, email) {
   return depot ? "driver record created" : "driver record created (no depot on this laundry)";
 }
 
+/**
+ * The board profile needs a `boards` row pointed at its login, or
+ * `current_board_id()` is null and every board-scoped policy matches nothing —
+ * a login that works and shows an empty application, which is the failure this
+ * project has already shipped once with an unlinked driver.
+ *
+ * The code is derived from the profile's own name rather than invented, so a
+ * rerun finds the same board instead of making a second one.
+ */
+async function ensureBoardRecord(userId, tenantId, profile) {
+  const existing = must(
+    "Reading boards",
+    await admin.from("boards").select("id, status")
+      .eq("tenant_id", tenantId).eq("user_id", userId).maybeSingle(),
+  );
+  if (existing) {
+    if (existing.status === "active") return "board record linked";
+    if (opts.dryRun) return "reactivate board record";
+    must(
+      "Reactivating board",
+      await admin.from("boards").update({ status: "active" })
+        .eq("id", existing.id).eq("tenant_id", tenantId),
+    );
+    return "board record reactivated";
+  }
+  if (opts.dryRun) return "create board record";
+  const depot = must(
+    "Reading depots",
+    await admin.from("depots").select("id")
+      .eq("tenant_id", tenantId).eq("status", "active").order("code").limit(1).maybeSingle(),
+  );
+  must(
+    "Creating board",
+    await admin.from("boards").insert({
+      tenant_id: tenantId, user_id: userId, depot_id: depot?.id ?? null,
+      code: "TESTBOARD", name: profile.name, status: "active",
+    }),
+  );
+  return depot ? "board record created" : "board record created (no depot on this laundry)";
+}
+
 async function ensurePlatformAdmin(userId, profile) {
   const existing = must(
     "Reading platform admins",
@@ -263,6 +304,17 @@ async function removeProfile(user, tenantId, profile, email) {
   );
   steps.push("membership removed");
 
+  if (profile.board) {
+    // Unlinked rather than deleted, for the same reason as the driver row
+    // below: runs and stops point at a board, and the history of which round
+    // did the work outlives the test login.
+    must(
+      "Unlinking board",
+      await admin.from("boards").update({ user_id: null, status: "inactive" })
+        .eq("tenant_id", tenant.id).eq("user_id", userId),
+    );
+    steps.push("board record unlinked");
+  }
   if (profile.driver) {
     // Unlinked rather than deleted: runs, stops and inspections point at a
     // driver row, and the history of who did the work outlives the test login.
@@ -332,11 +384,13 @@ for (const profile of profiles) {
     if (profile.platform) steps.push(await ensurePlatformAdmin(userId, profile));
     else steps.push(await ensureMembership(userId, tenant.id, profile.role));
     if (profile.driver) steps.push(await ensureDriverRecord(userId, tenant.id, profile, email));
+    if (profile.board) steps.push(await ensureBoardRecord(userId, tenant.id, profile));
   } else {
     // Dry run against an address that does not exist yet — nothing to point at.
     if (profile.platform) steps.push("grant platform admin");
     else steps.push("add membership");
     if (profile.driver) steps.push("create driver record");
+    if (profile.board) steps.push("create board record");
   }
 
   rows.push({ role: profile.role, email, note: profile.note });

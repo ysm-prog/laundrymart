@@ -92,23 +92,44 @@ export const NAVIGATION: NavItem[] = [
     ],
   },
   {
-    // **There is no "Runs" area any more.** Planning a day used to mean opening
-    // Runs, creating RUN-001 and putting stops on it; a job is now given
-    // straight to a driver and a date from the Jobs screen, and the
-    // `daily_routes` row underneath is created by the action. `/routes/daily`,
-    // `/routes/planner` and `/routes/templates` still exist and still work —
-    // nothing was deleted and no history was lost — but they are no longer part
-    // of the normal operator's map, so no rail row points at them.
-    //
-    // Drivers and Vehicles were children of that area and are emphatically not
-    // run management, so they keep their place under their own heading rather
-    // than disappearing with it.
+    /**
+     * Runs — a day, a board, and the order it drives in.
+     *
+     * **Not the run-management area the 2026-08-14 simplification removed.**
+     * Nobody creates a run here, opens one, or reads a run code: a job is still
+     * given straight to a board and a date, and the `daily_routes` row
+     * underneath is still found-or-created by the action. `/routes/daily`,
+     * `/routes/planner` and `/routes/templates` remain unlinked, and
+     * `nav.test.ts` still asserts that no rail href starts with `/routes/`.
+     *
+     * What this row is for is the one decision the office was left unable to
+     * make — *in what order does the board drive?* — plus moving work between
+     * boards. Gated on `routes.read` so a board can see the sequence it will
+     * drive; changing it needs `routes.write`, which a board deliberately does
+     * not hold.
+     */
+    label: "Runs",
+    href: "/runs",
+    icon: "runs",
+    capability: "routes.read",
+    blurb: "A board's day, in the order it drives.",
+  },
+  {
+    // Drivers and Vehicles were children of the old Runs area and are
+    // emphatically not run management, so they keep their place under their own
+    // heading. Boards leads it, because a board is what work is assigned to.
     label: "Fleet",
-    href: "/drivers",
+    href: "/boards",
     icon: "runs",
     capability: "fleet.read",
     blurb: "The people who drive, and what they drive.",
     children: [
+      {
+        // First, because a board is what work is assigned to. Drivers sit beside
+        // it as the record of which *person* did the work.
+        label: "Boards", href: "/boards", capability: "fleet.read",
+        blurb: "The delivery rounds. Jobs are assigned to a board, not to a person.",
+      },
       {
         label: "Drivers", href: "/drivers", capability: "fleet.read",
         blurb: "The people who drive, and the login each one uses.",

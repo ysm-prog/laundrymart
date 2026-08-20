@@ -57,7 +57,7 @@ describe("navigationFor", () => {
     // tabs they can open, and Settings stays out of the rail entirely.
     const fleet = navigationFor("dispatcher").find((item) => item.label === "Fleet");
     expect(fleet).toBeDefined();
-    expect(fleet?.children?.map((child) => child.label)).toEqual(["Drivers", "Vehicles"]);
+    expect(fleet?.children?.map((child) => child.label)).toEqual(["Boards", "Drivers", "Vehicles"]);
     expect(navigationFor("dispatcher").map((item) => item.label)).not.toContain("Settings");
   });
 
@@ -65,12 +65,14 @@ describe("navigationFor", () => {
   // area of its own. The number is not sacred — the promise it stands for is
   // that the rail lists areas of work rather than tables, and that a role only
   // ever sees the ones it can open.
-  it("stays inside the eleven rows the redesign promises", () => {
-    // Every role that works inside a laundry. `platform_admin` is checked
-    // separately below: it gets a twelfth row that none of these can see, and
-    // folding it in here would have quietly raised the ceiling for all of them.
+  it("stays inside the twelve rows the rail promises", () => {
+    // Eleven when the redesign landed; twelve since Runs came back as an
+    // *ordering* screen rather than the run-management area that was removed.
+    // `platform_admin` is checked separately below: it gets a thirteenth row
+    // none of these can see, and folding it in here would have quietly raised
+    // the ceiling for all of them.
     for (const role of MEMBERSHIP_ROLES) {
-      expect(navigationFor(role).length, role).toBeLessThanOrEqual(11);
+      expect(navigationFor(role).length, role).toBeLessThanOrEqual(12);
     }
   });
 
@@ -114,7 +116,7 @@ describe("navigationFor", () => {
     }
 
     const rows = navigationFor("platform_admin");
-    expect(rows).toHaveLength(12);
+    expect(rows).toHaveLength(13);
     const platform = rows.find((item) => item.label === "Platform");
     expect(platform?.href).toBe("/platform");
     expect(platform?.children?.map((child) => child.href)).toEqual([
@@ -154,13 +156,12 @@ describe("navigationFor", () => {
     }
   });
 
-  it("has no user-facing Runs area, for any role", () => {
-    // The whole point of the simplification: nobody creates, opens or manages a
-    // run. The `/routes/*` screens still exist and still work — they are simply
-    // off the map — so this asserts on the rail, not on the routes.
+  it("still keeps the old run-management screens off the map, for any role", () => {
+    // The simplification's promise, which survives Runs coming back: nobody
+    // creates, opens or manages a run, and no rail row points at `/routes/*`.
+    // The new Runs row is an *ordering* screen at `/runs` — a different thing,
+    // and the reason this assertion is about the hrefs rather than the label.
     for (const role of ROLES) {
-      const labels = navigationFor(role).map((item) => item.label);
-      expect(labels, role).not.toContain("Runs");
       const hrefs = navigationFor(role).flatMap(
         (item) => [item.href, ...(item.children ?? []).map((child) => child.href)]);
       for (const href of hrefs) {
@@ -169,17 +170,32 @@ describe("navigationFor", () => {
     }
   });
 
+  it("shows Runs to the office and to a board, and lets only the office change it", () => {
+    // The client's rule as capabilities: a board reads the sequence the office
+    // set. `routes.write` is what the reorder screen guards on, and a board
+    // does not hold it.
+    for (const role of ["super_admin", "operations_manager", "dispatcher", "board"] as const) {
+      expect(navigationFor(role).map((item) => item.label), role).toContain("Runs");
+    }
+    expect(navigationFor("finance").map((item) => item.label)).not.toContain("Runs");
+  });
+
   it("keeps drivers and vehicles reachable after the Runs area went", () => {
     // They were tabs under Runs and are not run management. Losing them with it
     // would have been the silent casualty of removing the area.
     const fleet = navigationFor("dispatcher").find((item) => item.label === "Fleet");
-    expect(fleet?.href).toBe("/drivers");
-    expect(fleet?.children?.map((child) => child.href)).toEqual(["/drivers", "/vehicles"]);
+    expect(fleet?.children?.map((child) => child.href))
+      .toEqual(["/boards", "/drivers", "/vehicles"]);
+  });
+
+  it("leads Fleet with Boards, because that is what work is assigned to", () => {
+    const fleet = navigationFor("dispatcher").find((item) => item.label === "Fleet");
+    expect(fleet?.href).toBe("/boards");
   });
 
   it("orders the rail the way the day runs", () => {
     expect(navigationFor("super_admin").map((item) => item.label)).toEqual([
-      "Today", "My Runs", "Fleet", "Stops", "Jobs", "Customers",
+      "Today", "My Runs", "Runs", "Fleet", "Stops", "Jobs", "Customers",
       "Money", "Linen", "Reports", "Settings", "Help",
     ]);
   });

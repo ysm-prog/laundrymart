@@ -19,6 +19,8 @@ export interface RoleProfile {
   formerly?: string;
   /** Needs a `drivers` row, or `current_driver_id()` is null. */
   driver?: boolean;
+  /** Needs a `boards` row, or `current_board_id()` is null. */
+  board?: boolean;
   /** Not a membership: a row in `platform_admins`, reaching every laundry. */
   platform?: boolean;
 }

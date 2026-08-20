@@ -17,7 +17,7 @@ import {
   PageHeader, SkeletonRows, SkeletonStats, Stat, StatusBadge, cx,
 } from "@/components/ui";
 import { Pagination, pageFrom, rangeFor } from "@/components/list-controls";
-import { listActiveDrivers } from "@/lib/runs/my-runs";
+import { listActiveBoards } from "@/lib/runs/my-runs";
 
 export const metadata = { title: "Jobs" };
 export const dynamic = "force-dynamic";
@@ -31,8 +31,8 @@ type Search = {
   date?: string;
   /** Assignment state: "unassigned", "assigned", or "ready-unassigned". */
   run?: string;
-  /** A specific assigned driver. */
-  driver?: string;
+  /** A specific assigned board. */
+  board?: string;
   /** A specific assigned delivery date. */
   assigned?: string;
   page?: string;
@@ -42,7 +42,7 @@ type Search = {
 function isFiltered(params: Search): boolean {
   return Boolean(
     params.q || params.status || params.priority || params.customer
-    || params.when || params.date || params.run || params.driver || params.assigned,
+    || params.when || params.date || params.run || params.board || params.assigned,
   );
 }
 
@@ -60,11 +60,11 @@ type Row = {
    * Who is delivering this job and when — read straight off the job, because
    * since 0016 that is where the assignment lives. No embed, no join through the
    * routing module, and therefore nothing that can disagree with what My Runs
-   * shows the driver.
+   * shows the board.
    */
-  assigned_driver_id: string | null;
+  assigned_board_id: string | null;
   assigned_delivery_date: string | null;
-  drivers: { id: string; full_name: string } | null;
+  boards: { id: string; name: string } | null;
   customers: { id: string; business_name: string; trading_name: string | null } | null;
   laundry_order_items: Array<{
     item_type: string;
@@ -177,8 +177,8 @@ const WHEN_OPTIONS = [
 const RUN_OPTIONS = [
   { value: "", label: "Any assignment" },
   { value: "ready-unassigned", label: "Ready for delivery — unassigned" },
-  { value: "unassigned", label: "No driver" },
-  { value: "assigned", label: "Has a driver" },
+  { value: "unassigned", label: "No board" },
+  { value: "assigned", label: "Has a board" },
 ];
 
 /**
@@ -193,7 +193,7 @@ const RUN_OPTIONS = [
 async function Filters({ params }: { params: Search }) {
   const session = await requireSession();
   const supabase = await createClient();
-  const [{ data: customers }, drivers] = await Promise.all([
+  const [{ data: customers }, boards] = await Promise.all([
     supabase
       .from("customers")
       .select("id, business_name")
@@ -202,7 +202,7 @@ async function Filters({ params }: { params: Search }) {
       .order("business_name")
       .limit(200)
       .returns<{ id: string; business_name: string }[]>(),
-    listActiveDrivers(supabase, session.tenantId),
+    listActiveBoards(supabase, session.tenantId),
   ]);
 
   return (
@@ -267,12 +267,12 @@ async function Filters({ params }: { params: Search }) {
       </div>
 
       <div>
-        <label htmlFor="driver" className="sr-only">Assigned driver</label>
-        <select id="driver" name="driver" defaultValue={params.driver ?? ""}
+        <label htmlFor="board" className="sr-only">Assigned board</label>
+        <select id="board" name="board" defaultValue={params.board ?? ""}
                 className={cx(CONTROL, "w-auto max-w-[12rem]")}>
-          <option value="">Any driver</option>
-          {drivers.map((driver) => (
-            <option key={driver.id} value={driver.id}>{driver.full_name}</option>
+          <option value="">Any board</option>
+          {boards.map((board) => (
+            <option key={board.id} value={board.id}>{board.name}</option>
           ))}
         </select>
       </div>
@@ -317,14 +317,14 @@ async function JobList({ params, canCreate }: { params: Search; canCreate: boole
     .from("laundry_orders")
     .select(
       "id, order_number, status, priority, received_at, due_date, expected_delivery_date, " +
-      "delivery_required, assigned_to, assigned_driver_id, assigned_delivery_date, " +
+      "delivery_required, assigned_to, assigned_board_id, assigned_delivery_date, " +
       "customers(id, business_name, trading_name), " +
       // Disambiguated by constraint name on purpose. Since 0016 `laundry_orders`
-      // has *two* foreign keys to `drivers` — the driver who collected it and
-      // the driver delivering it — and an ambiguous embed is rejected by
+      // has two foreign keys to `drivers` and one to `boards`, so every embed
+      // on it is named. An ambiguous one is rejected by
       // PostgREST at request time: compile-clean, test-clean and dead in
       // production (see the 2026-08-05 changelog).
-      "drivers!laundry_orders_assigned_driver_id_fkey(id, full_name), " +
+      "boards!laundry_orders_assigned_board_id_fkey(id, name), " +
       "laundry_order_items(item_type, custom_description, quantity_type, exact_quantity, " +
       "bag_count, estimated_quantity)",
       { count: "exact" },
@@ -358,14 +358,14 @@ async function JobList({ params, canCreate }: { params: Search; canCreate: boole
   // Assignment state. "Ready for delivery, unassigned" is one option rather than
   // two filters the user has to know to combine, because it is *the* question
   // the office asks every morning: what is ready to go out and given to nobody?
-  if (params.run === "unassigned") query = query.is("assigned_driver_id", null);
-  else if (params.run === "assigned") query = query.not("assigned_driver_id", "is", null);
+  if (params.run === "unassigned") query = query.is("assigned_board_id", null);
+  else if (params.run === "assigned") query = query.not("assigned_board_id", "is", null);
   else if (params.run === "ready-unassigned") {
-    query = query.is("assigned_driver_id", null)
+    query = query.is("assigned_board_id", null)
       .eq("delivery_required", true)
       .eq("status", "ready_for_delivery");
   }
-  if (params.driver) query = query.eq("assigned_driver_id", params.driver);
+  if (params.board) query = query.eq("assigned_board_id", params.board);
   if (params.assigned && /^\d{4}-\d{2}-\d{2}$/.test(params.assigned)) {
     query = query.eq("assigned_delivery_date", params.assigned);
   }
@@ -394,7 +394,7 @@ async function JobList({ params, canCreate }: { params: Search; canCreate: boole
 
   const { data, count, error } = await query.returns<Row[]>();
   if (error) {
-    // Never the driver's SQL: the operator gets a sentence, the log gets the rest.
+    // Never the raw SQL: the operator gets a sentence, the log gets the rest.
     console.error("job list query failed", error.message);
     return (
       <Notice tone="danger" title="That list could not be loaded">
@@ -482,11 +482,11 @@ async function JobList({ params, canCreate }: { params: Search; canCreate: boole
 
 function AssignmentCell({ row }: { row: Row }) {
   if (!row.delivery_required) return <span className="text-muted-foreground">Pickup</span>;
-  if (!row.assigned_driver_id) return <Badge>Unassigned</Badge>;
+  if (!row.assigned_board_id) return <Badge>Unassigned</Badge>;
 
   return (
     <span className="flex flex-col">
-      <span>{row.drivers?.full_name ?? "Assigned"}</span>
+      <span>{row.boards?.name ?? "Assigned"}</span>
       <span className="text-sm text-muted-foreground">
         {formatAdelaideDate(row.assigned_delivery_date, "short")}
       </span>
