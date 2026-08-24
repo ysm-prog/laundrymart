@@ -3,6 +3,7 @@ import { CircleCheck, Route, Shirt, Truck } from "lucide-react";
 import { Field, Input, SubmitButton } from "@/components/form";
 import { Notice } from "@/components/ui";
 import { sendMagicLink, signInWithPassword } from "./actions";
+import { ReadingComfort } from "@/components/reading-comfort";
 
 export const metadata = { title: "Sign in" };
 
@@ -126,6 +127,14 @@ export default async function LoginPage({
               </SubmitButton>
             </form>
           </div>
+
+          {/*
+            The reading control belongs on the *first* screen, not only inside
+            the app. Somebody who cannot read this page cannot sign in to reach
+            the one in the header, and the preference is stored per browser, so
+            setting it here carries through to every screen afterwards.
+          */}
+          <ReadingComfort />
         </div>
       </section>
     </main>

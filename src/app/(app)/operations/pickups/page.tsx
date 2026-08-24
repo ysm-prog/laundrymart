@@ -35,7 +35,7 @@ export default async function PickupsPage({
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Collections" eyebrow="Pickups"
+      <PageHeader title="Collections"
                   description="Linen picked up at a stop, counted at the door, with anything damaged or missing." />
 
       <form method="get" action="/operations/pickups" className="flex flex-wrap items-end gap-2">

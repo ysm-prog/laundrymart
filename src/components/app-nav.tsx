@@ -9,6 +9,10 @@ import {
 } from "lucide-react";
 import { cx } from "./ui";
 import { isActive, sectionFor, type NavCountKey, type NavIcon, type NavItem } from "@/lib/nav";
+import {
+  DEFAULT_TEXT_SIZE, TEXT_SIZE_ATTRIBUTE, TEXT_SIZE_STORAGE_KEY, nextTextSize,
+  parseTextSize, textSizeActionLabel, type TextSize,
+} from "@/lib/display";
 
 export type NavCounts = Partial<Record<NavCountKey, number>>;
 
@@ -218,6 +222,82 @@ export function ThemeToggle() {
     >
       {dark ? <Sun className="size-[1.15rem]" aria-hidden /> : <Moon className="size-[1.15rem]" aria-hidden />}
       <span className="sr-only">{dark ? "Switch to light mode" : "Switch to dark mode"}</span>
+    </button>
+  );
+}
+
+/* ------------------------------------------------------- reading comfort --- */
+
+/**
+ * Watches the root element's text-size attribute, the same way
+ * `subscribeToTheme` watches its class — so both controls in the header stay
+ * truthful if the value is changed from anywhere else (the guided home screen
+ * carries the same preference in a fuller form).
+ */
+function subscribeToTextSize(onChange: () => void) {
+  const observer = new MutationObserver(onChange);
+  observer.observe(document.documentElement, {
+    attributes: true, attributeFilter: [TEXT_SIZE_ATTRIBUTE],
+  });
+  return () => observer.disconnect();
+}
+
+function readTextSize(): TextSize {
+  return parseTextSize(document.documentElement.getAttribute(TEXT_SIZE_ATTRIBUTE));
+}
+
+/** Apply and remember. Shared by this button and the picker on the home screen. */
+export function applyTextSize(size: TextSize) {
+  if (size === DEFAULT_TEXT_SIZE) {
+    document.documentElement.removeAttribute(TEXT_SIZE_ATTRIBUTE);
+  } else {
+    document.documentElement.setAttribute(TEXT_SIZE_ATTRIBUTE, size);
+  }
+  try {
+    localStorage.setItem(TEXT_SIZE_STORAGE_KEY, size);
+  } catch {
+    // Private browsing with storage disabled — it still holds for this session.
+  }
+}
+
+/**
+ * Make the text bigger, from the header.
+ *
+ * A cycle rather than a menu, because it sits beside the theme toggle in a
+ * header that has no room for a third popover, and because the effect is
+ * visible the instant it is pressed — you do not need to read a list to find
+ * out what a size looks like, you press again.
+ *
+ * The letters in the button are drawn at the size they select, so the control
+ * shows what it does rather than describing it. `title` and the accessible name
+ * still say it in words, and name the size it will move *to* — the same promise
+ * `ThemeToggle` makes.
+ */
+export function TextSizeControl() {
+  const size = useSyncExternalStore(
+    subscribeToTextSize,
+    readTextSize,
+    () => DEFAULT_TEXT_SIZE, // Server render: the bootstrap script has not run yet.
+  );
+  const label = textSizeActionLabel(size);
+
+  return (
+    <button
+      type="button"
+      onClick={() => applyTextSize(nextTextSize(size))}
+      className="flex size-11 shrink-0 items-center justify-center rounded-lg text-muted-foreground
+                 transition hover:bg-surface-muted hover:text-foreground"
+      title={label}
+    >
+      <span aria-hidden className="font-semibold leading-none">
+        <span className="text-[0.8em]">A</span>
+        <span className={cx(
+          size === "normal" && "text-[1em]",
+          size === "large" && "text-[1.2em]",
+          size === "xlarge" && "text-[1.45em]",
+        )}>A</span>
+      </span>
+      <span className="sr-only">{label}</span>
     </button>
   );
 }

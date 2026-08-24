@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { money } from "@/lib/format";
+import { counted, money } from "@/lib/format";
 import { formatMoney } from "@/lib/domain/pricing";
 import { Badge, Button } from "@/components/ui";
 import { SubmitButton } from "@/components/form";
@@ -119,12 +119,14 @@ export function BillingQueue({
                     </label>
                   </td>
                   <td className="py-2 pr-3">
-                    <Link href={`/orders/${row.id}`} className="font-medium text-primary hover:underline">
+                    <Link href={`/orders/${row.id}`}
+                          className="inline-flex min-h-11 items-center font-medium text-primary hover:underline">
                       {row.orderNumber}
                     </Link>
                   </td>
                   <td className="py-2 pr-3">
-                    <Link href={`/customers/${row.customerId}`} className="hover:underline">
+                    <Link href={`/customers/${row.customerId}`}
+                          className="inline-flex min-h-11 items-center hover:underline">
                       {row.customerName}
                     </Link>
                   </td>
@@ -133,7 +135,7 @@ export function BillingQueue({
                   </td>
                   <td className="hidden py-2 pr-3 sm:table-cell">
                     {priced ? (
-                      <span className="text-muted-foreground">{row.chargeCount} line(s)</span>
+                      <span className="text-muted-foreground">{counted(row.chargeCount, "line")}</span>
                     ) : (
                       <Badge tone="warning">
                         {row.hasRateCard ? "Not priced" : "No rate card"}

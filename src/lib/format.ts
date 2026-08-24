@@ -49,3 +49,24 @@ export function relativeDays(from: string, to: string): number {
   const b = new Date(`${to.slice(0, 10)}T00:00:00.000Z`).getTime();
   return Math.round((b - a) / 86_400_000);
 }
+
+/**
+ * "1 invoice", "2 invoices" — rather than "1 invoice(s)".
+ *
+ * The parenthetical plural is how a program writes when nobody has decided what
+ * it should say, and it reads that way: it is one of the clearest signals to
+ * somebody unsure of themselves that they are looking at a machine's output
+ * rather than at a sentence addressed to them. It also gets *both* readings
+ * slightly wrong, since "1 invoice(s)" is never right.
+ *
+ * `many` is only needed where English does not simply add an "s" — pass it for
+ * "person"/"people", leave it out for "invoice".
+ */
+export function plural(count: number, one: string, many?: string): string {
+  return count === 1 ? one : (many ?? `${one}s`);
+}
+
+/** The count and its noun together: `count(3, "invoice")` → "3 invoices". */
+export function counted(count: number, one: string, many?: string): string {
+  return `${number(count)} ${plural(count, one, many)}`;
+}

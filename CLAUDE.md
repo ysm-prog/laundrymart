@@ -390,11 +390,14 @@ together to the first screen the role can open — so a row never links somewher
 gate would bounce. `sectionFor()` (longest match wins) decides which rail row highlights
 and which tabs show, so detail routes stay inside their area. `capability` is optional:
 omitted means every signed-in member, which is what `/dashboard` and `/help` need since no
-single capability is held by all eleven roles. **"Jobs" (`/orders`) and "Stops" (`/jobs`) are two different things and both keep their rail
-row**: a stop is a visit on a driver's run, a job is a customer's laundry from counter to
-hand-back. The route path is `/orders` because 0004 already took `/jobs` — the same
-label-is-not-the-route arrangement as Contracts (`/agreements`) and Linen (`/inventory`), and
-`/help` defines both words. **Invoices is now "Money", with both sides of the ledger**: the register and `/invoices/prices`
+single capability is held by all eleven roles. **`/orders` and `/jobs` are two different things and both keep their rail row**: `/jobs` is a
+visit on a driver's run, `/orders` is a customer's laundry from counter to hand-back. They were
+labelled "Jobs" and "Stops", which is the arrangement the 2026-08-24 review found to be the
+single largest vocabulary blocker — both read as "a job somebody has to do", and telling them
+apart needed the glossary. They are **"Customer laundry"** and **"Driver visits"** now. The
+decision §6 records is unchanged: both rows stay, and the route path is still `/orders` because
+0004 already took `/jobs` — the same label-is-not-the-route arrangement as Contracts
+(`/agreements`) and Linen (`/inventory`). `/help` defines both words. **Invoices is now "Money", with both sides of the ledger**: the register and `/invoices/prices`
 as before, plus `/bills`, `/suppliers` and `/accounts` from the MYOB import, gated on the
 separate `purchases.read` — a dispatcher holds `invoices.read` so they can see whether a
 customer is on stop, which is no reason to show them what the business pays its suppliers.
@@ -690,6 +693,19 @@ miss). Integer percentages drift by 1–2 per channel; if you add a token, carry
   this is a counter tablet and a driver's phone. YSM reasons the same way — it re-declares its
   whole type scale under `@media (pointer: coarse)` to get a legible touch floor — so holding
   the comfortable sizing follows its intent rather than departing from it.
+
+- **Reading comfort is a root font size, and it is the whole of the lever.** `html[data-text-size]`
+  in `globals.css` moves the root between 100%, 115% and 130%. Everything in the app is `rem` —
+  Tailwind 4's `--spacing` is `0.25rem`, its type scale is rem, `body` is rem — so text, padding,
+  gaps, control heights and the rail's own width all scale together: a real zoom, in three lines,
+  with no call site touched. **`normal` sets nothing at all**, so a browser-level preference is
+  respected rather than overruled. Media-query `rem` resolves against the browser's initial size,
+  so breakpoints hold and the layout keeps its shape while the content inside it grows. The
+  preference lives in `localStorage` and is applied by the root layout's pre-paint script beside
+  the theme — it *must* be on `<html>`, because `rem` resolves against the root element and
+  nothing else, so the cookie-in-the-layout pattern the rail's collapsed state uses would have
+  scaled nothing. `lib/display.ts` holds the rule; the header carries a cycling button and the
+  home screen a labelled three-way picker, both of which are the same preference.
 
 Instrument Sans + Instrument Serif + JetBrains Mono via `next/font` (self-hosted). This is the
 one thing YSM Hub does that could not be copied as-is: it pulls all three from
@@ -1196,6 +1212,124 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-08-24 · Usable by somebody who has been shown it once
+The owner's brief: a ten-year-old and a seventy-year-old who only knows how to turn on a laptop
+must both be able to use this. Four specialist reviews first (UX, accessibility, business
+analysis, frontend architecture) against `.claude/skills/`, then the work the evidence pointed
+at. **No migration; no schema, RLS, capability, policy or workflow change** — every screen still
+exists, every route still resolves, and no role gained or lost anything.
+
+- **One rule makes the whole application bigger.** Every size in this app is `rem` — Tailwind 4's
+  spacing scale is `calc(var(--spacing) * n)` with `--spacing: 0.25rem`, its type scale is rem,
+  and `body` is rem — so moving the *root* font size scales text, padding, gaps, control heights
+  and the rail's width together. `html[data-text-size]` in `globals.css` is three lines and it is
+  a genuine zoom, not text growing out of the buttons around it. Measured: root 16 → 18.4 →
+  20.8px, body 15 → 17.3 → 19.5px, and the smallest control in the new card 44 → 51 → 57px. The
+  alternative lever — overriding `--spacing` and `--text-*` — was rejected because `--text-2xs`
+  and `--text-3xs` are inlined by `@theme inline` and would not have moved, nor would the 18
+  arbitrary `text-[13px]`-style sizes.
+  **`normal` deliberately sets nothing**: somebody who has already raised their browser's default
+  has said what they want, and pinning `16px` would overrule them. `rem` in a media query resolves
+  against the browser's initial size, so breakpoints do not shift and a phone cannot flip to the
+  desktop layout because the text grew.
+- **The control is in three places, because the person who needs it will not find one.** A cycling
+  button beside `ThemeToggle` in the header (the letters drawn at the size they select), a
+  three-option labelled picker on the home screen, and the same picker **on the sign-in page** —
+  which matters most of the three: somebody who cannot read the login screen cannot sign in to
+  reach the one in the header, and the preference is stored per browser, so setting it there
+  carries through to everything afterwards. All three share `lib/display.ts`; the preference
+  rides `localStorage` and the root layout's pre-paint script beside the theme, because it has to
+  be on `<html>` — `rem` resolves against the root element and nothing else, so a cookie read in
+  `(app)/layout.tsx` and applied to a wrapper would have scaled nothing.
+- **"What do you want to do?" is the way in.** The dashboard is a control tower: it answers "how
+  is the day going" for somebody who already knows what the day is, and none of it is a way to
+  *start* a piece of work. `lib/quick-actions.ts` is seven jobs stated as verbs, capability-
+  filtered, first on the page. **This is not the simple mode §19 records as built and rejected**,
+  and deliberately so: there is no mode flag, nothing is hidden, no rail row moves, and the
+  standing objection — that a second hand-maintained list drifts from `nav.ts` — is answered by a
+  test asserting every card's href is a real destination inside `NAVIGATION`.
+- **The most-read sentence in the app was addressed to whoever wrote the schema.** `firstIssue`
+  rendered the Zod path, so a rejected job form said `expected_delivery_date: Invalid input` —
+  112 call sites. It now names the box as it is labelled on screen. `describeDbError`'s default
+  case returned `error.message` verbatim, which is Postgres naming its own tables and columns to
+  a counter; unrecognised codes now say that nothing was changed, and the detail goes to the
+  server log. Both rules live in `lib/messages.ts`, not in `lib/actions.ts`, because that file
+  imports `next/headers` and is unreachable from a unit test — the trap `plan.ts` and
+  `order-items.ts` both record.
+- **A test that asserted the defect was rewritten to the decision, not satisfied.**
+  `actions.test.ts` pinned `"email: bad email"` — the developer-facing format, exactly. That
+  assertion is why the format survived. The same move `laundry_pricing.test.sql` needed on
+  2026-08-20.
+- **Nothing dismisses itself any more.** A success toast disappeared after five seconds, and it
+  is the *only* record that anything happened — the form has already been redirected away.
+  Somebody who looks up to an empty screen assumes it did not save and does it again. Both tones
+  now wait to be closed (WCAG 2.2.1), and the close button went 32 → 44px. This reverses a
+  documented decision ("good news can pass by") and does so on purpose: it held for a fast reader.
+- **Every input in the app had its focus ring switched off.** `CONTROL` carried
+  `focus:outline-none focus:ring-2 focus:ring-primary/25`, which replaced the global 2px ring with
+  a 25%-opacity halo measuring about 1.5:1 — under the 3:1 WCAG asks — on every input, select and
+  textarea. The `outline-none` is gone and the ring is 3px. `:focus-visible` also set
+  `border-radius: 2px`, which does not shape the outline (that already follows the element) but
+  reshapes the *element*, so every button and card visibly squared off on focus.
+- **Field errors are now part of the field.** `aria-describedby`, `aria-invalid` and
+  `aria-errormessage` appeared nowhere in `src/`; `Field` wires the hint and the error to the
+  control through context, so the ~200 call sites and the four control components need not pass
+  it. Hints and errors went 12px → 14px, labels and typed values 14px → 16px — the last of which
+  also stops iOS zooming the page on focus.
+- **Plain words, where the word was the blocker.** "Jobs" (`/orders`) and "Stops" (`/jobs`) both
+  read as "a job somebody has to do"; they are now **Customer laundry** and **Driver visits**.
+  §6's decision is intact — both rows are still there, and `nav.test.ts` still asserts no rail
+  href starts with `/routes/`. Eleven pages carried the trade term as an eyebrow directly above
+  the plain-English title ("Sites" over "Depots"), re-teaching exactly the word the title was
+  chosen to avoid; those are gone. "Danger zone" — over an action that is reversible — is now
+  "Hide this customer" with `ConfirmSubmit` and the eyebrow "This can be undone".
+- **`counted()` in `format.ts` retires `invoice(s)`.** The parenthetical plural is how a program
+  writes when nobody has decided what it should say, and it is never right for either reading.
+- **The help page taught the vocabulary boards replaced.** It defined "Assigned driver" and had
+  no entry for a board at all, five days after the cutover made the round the unit work is given
+  to. Rewritten around the delivery round.
+- **Copy that was factually wrong is fixed.** The customer billing card said "This app does not
+  connect to Xero" and "Nothing in this app talks to Xero" — untrue since 0026/0027, and a person
+  who believed it would key every invoice twice.
+- **The counter's own form is shorter.** Instructions and Job management are entirely optional and
+  were expanded for every job; both are now disclosures. Neither contains a `required` field,
+  which is the thing that would make this unsafe — a required control inside a closed `<details>`
+  fails native validation with nothing to focus.
+- **Three destructive controls were 16×50px of unpadded 12px text** ("Remove" on an invoice line,
+  a contract line and a public holiday), and the run-sequencer arrows were 26×28 — where the
+  2026-08-20 entry claims 36×36, which the shipped code never carried. All now ≥44px, and a
+  `dangerGhost` button variant exists so a destructive control in a list row is not teal.
+- 666 unit tests (was 621), `verify` green. `/design-preview` gained the card for two roles;
+  asserted light and dark at 320/390/768/1440 **across all three text sizes** — 24 combinations,
+  **zero console errors, zero overflow inside the card, and zero interactive targets under 36px
+  anywhere on the page** (the only things left under it are the 18px checkbox *boxes*, which sit
+  inside the 44px padded labels §10b describes). The sub-36px count across the gallery went 79 →
+  0. Four defects were found by measuring rather than by looking: a grid item's `min-width: auto`
+  pushing the row 6px wide, a `min-w` floor in `rem` that scaled with the text and so defeated
+  itself, a label breaking mid-word ("deliverie/s") because Chromium has no hyphenation dictionary
+  here, and five more `focus:outline-none` sites — three of them on `/my-runs`, the board's whole
+  workspace — each killing the ring the same way `CONTROL` did.
+- **Document-level overflow at the largest text on the narrowest phone is real and is recorded
+  rather than hidden.** `/design-preview` overflows 7px at 320px today (pre-existing, the
+  dispatch-planner fixture the 2026-08-16 entry already measured); at Large that becomes 55px and
+  at Biggest 104px, and 34px at 390px. It is the same fixture scaling up, it is outside the new
+  card (which measures 0 at every combination), and it is the honest cost of a real zoom on a
+  320px screen. `/routes/planner` is unlinked from every rail, so nobody reaches it — but its
+  controls were enlarged with the rest anyway rather than excused.
+
+**Not verified against a live project.** This container has no Supabase credentials, so no
+authenticated screen was opened with real rows in it. **Before trusting it: sign in as
+`owner@roles.example.com`, press each card on the home screen, and set the text to Biggest on a
+phone.**
+
+**Deliberately not done, because it is the owner's call and needs a migration** (§26): the
+business analysis found that `orders.write` is held by two roles, and `customer_service` — the
+role named for the counter — is not one of them, so the untrained person taking laundry in must
+be made `operations_manager` and given 31 screens. Restoring it would cut that to about 11, but
+it reverses the 2026-08-16 decision **and** needs `0025`'s restrictive write policies widened, or
+the counter opens the form and writes zero rows with no error — the exact silent failure boards
+hit in 0031.
+
 ### 2026-08-20 · The cutover, and a price list every member could read
 The database was ready and the data was not: no board existed, no item said what kind of laundry
 it was, and **the project held zero prices and zero rate cards**, so the Price button was inert
@@ -3083,6 +3217,30 @@ bag, under the code the business already uses (0032). Staff type TOW001.
   on MYOB, moving to Xero, or running both are three different builds of the sync half — and
   none of them changes the item master, the codes on job items, or the search, which is why
   those were built first.
+
+## 26. Open: the counter's role, and who may take laundry in
+Raised by the 2026-08-24 business analysis and **left for the owner to decide**, because it
+reverses a decision they made and cannot be done safely in `roles.ts` alone.
+
+`orders.write` is held by `super_admin` and `operations_manager` and by nobody else (0025, and
+§3). `customer_service` — the role literally named for the counter — was stripped of it. So a
+laundry that wants a counter hand taking jobs in has to make that person **Office manager**,
+which hands the least-trained person in the building the largest surface in the app: 12 rail
+areas and 31 screens, including the whole ledger, the plant and the activity log. Restoring
+`orders.read/write/status` to `customer_service` would take them to roughly 7 rows and 11
+screens — a two-thirds cut for exactly the person the accessibility work is for, using the
+mechanism the repo already blesses.
+
+**The trap, if it is ever done:** `0025_main_flow_owner_office` hard-codes `super_admin` and
+`operations_manager` into **restrictive** write policies on nine tables, carved out only for a
+driver and (since 0031) a board. A `roles.ts`-only change would let the counter open the form,
+press Save, and write **zero rows with no error at all** — the exact silent failure 0031 records
+for boards, where `lives_ok` passed throughout. It needs `roles.ts` **plus** a migration widening
+0025, **plus** a pgTAP assertion that the write *landed* rather than merely did not raise.
+
+Until then the workaround is what it is today: give the counter the Office role, and accept the
+surface. The 2026-08-24 work reduces what that surface *costs* a beginner — the home screen names
+the four or five things they actually do — but it does not reduce the surface itself.
 
 ## 21. Customer pricing and job billing
 **Two lifecycles on one job, and they meet at exactly one point.** The operational status says

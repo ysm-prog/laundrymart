@@ -6,9 +6,9 @@ import {
   Badge, ButtonLink, CONTROL, Eyebrow, FormSection, Notice, cx, humanise,
 } from "@/components/ui";
 import {
-  Building2, CalendarClock, Check, ClipboardList, MessageSquareText, Plus, Search, Shirt, Truck,
+  Building2, CalendarClock, Check, Plus, Search, Shirt, Truck,
 } from "lucide-react";
-import { CustomerEssentials } from "@/app/(app)/customers/customer-form";
+import { CustomerEssentials, FormDisclosure } from "@/app/(app)/customers/customer-form";
 import {
   DELIVERY_WINDOWS, DELIVERY_WINDOW_LABELS, ITEM_TYPES, ITEM_TYPE_LABELS,
   ORDER_PRIORITIES, PRIORITY_LABELS, QUANTITY_TYPES, QUANTITY_TYPE_LABELS,
@@ -587,16 +587,22 @@ export function JobForm({
             how to wash it, the other is what came in the bag. Same
             `special_instructions` column it has always written to, and its own
             section now because it is the one free-text answer on the form. */}
-        <FormSection title="Instructions"
-                     description="Anything the plant needs to know before it goes in."
-                     icon={<MessageSquareText className="size-[1.15rem]" />}>
+        {/* Folded away rather than removed. Every field in here and in "Job
+            management" below is optional, and the ordinary counter job needs
+            none of them — but they were on screen for every job, which made the
+            form twice as long as the work it was recording. Neither disclosure
+            contains a `required` field, which is the thing that would make this
+            unsafe: a required control inside a closed <details> fails native
+            validation with nothing for the browser to focus. */}
+        <FormDisclosure summary="Washing instructions"
+                        hint="Only if the plant needs to know something special">
           <Field label="Machine instructions" name="special_instructions"
                  hint="Directions to the door go under Delivery instructions instead.">
             <Textarea name="special_instructions" rows={3}
                       defaultValue={order?.special_instructions}
                       placeholder="Separate the whites; no fabric softener." />
           </Field>
-        </FormSection>
+        </FormDisclosure>
 
         {/* ------------------------------------------------------- delivery --- */}
         <FormSection title="Delivery"
@@ -693,8 +699,8 @@ export function JobForm({
         </FormSection>
 
         {/* ------------------------------------------ priority + assignment --- */}
-        <FormSection title="Job management" description="Priority, and who is looking after it."
-                     icon={<ClipboardList className="size-[1.15rem]" />}>
+        <FormDisclosure summary="Priority, and who is looking after it"
+                        hint="Leave both alone unless this one is urgent">
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Priority" name="priority">
               <Select name="priority" defaultValue={order?.priority ?? "normal"}
@@ -710,12 +716,12 @@ export function JobForm({
             </Field>
           </div>
           {editing ? null : (
-            <p className="mt-3 text-xs text-muted-foreground">
+            <p className="mt-3 text-sm text-muted-foreground">
               New jobs always start as <Badge>New</Badge> and are given their job number
               automatically. There is nothing else to set.
             </p>
           )}
-        </FormSection>
+        </FormDisclosure>
 
         <FormActions>
           <SubmitButton pendingLabel={editing ? "Saving…" : "Creating…"}>

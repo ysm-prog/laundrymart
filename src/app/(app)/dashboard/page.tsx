@@ -3,18 +3,19 @@ import Link from "next/link";
 import { requireSession, type Session } from "@/lib/auth/context";
 import { createClient } from "@/lib/supabase/server";
 import { can } from "@/lib/roles";
-import { date as formatDate, money, number, relativeDays, today } from "@/lib/format";
+import { counted, date as formatDate, money, number, relativeDays, today } from "@/lib/format";
 import {
   ButtonLink, Card, DataTable, EmptyState, Eyebrow, FlashMessages, PageHeader, SkeletonRows,
   SkeletonStats, Stage, Stat, StatusBadge, cx, humanise,
 } from "@/components/ui";
+import { QuickActions } from "@/components/quick-actions";
 import { parseExceptionNotes } from "@/lib/exceptions";
 import { addDays, businessToday, toInstant } from "@/lib/domain/timezone";
 import {
   PLANT_STAGES, SEVERITY_RULE, SEVERITY_TEXT, sortDecisions, type Decision,
 } from "./decisions";
 
-export const metadata = { title: "Dashboard" };
+export const metadata = { title: "Today" };
 export const dynamic = "force-dynamic";
 
 const FORBIDDEN = "You do not have access to that area.";
@@ -58,6 +59,12 @@ export default async function DashboardPage({
           description="Five steps from an empty account to a planned day."
         />
         <GettingStarted steps={setup.steps} />
+        {/* Below the checklist here, not above it: on a brand-new account the
+            five setup steps genuinely are the thing to do first, and offering
+            "Take in laundry" before a customer exists leads straight to a dead
+            end. Reading comfort still has to be reachable, though, and this is
+            the only screen that exists yet. */}
+        <QuickActions role={session.role} />
       </div>
     );
   }
@@ -67,9 +74,23 @@ export default async function DashboardPage({
       <FlashMessages error={params.error === "forbidden" ? FORBIDDEN : undefined} />
       <PageHeader
         eyebrow={`${session.tenantName} · ${formatDate(date)}`}
-        title="Dashboard"
-        description="What needs a decision today."
+        title="Today"
+        description="What needs doing, and what needs a decision."
       />
+
+      {/*
+        First on the page, above the numbers.
+
+        The dashboard below is a control tower: it answers "how is the day
+        going?" for somebody who already knows what the day is. It is the wrong
+        first thing for somebody who has been shown this app once and has a bag
+        of towels in front of them, because none of it is a way *in* — the KPI
+        row, the decisions table and the plant strip are all readings, and the
+        only way to start a piece of work from here is to find the right word in
+        a rail of twelve. This card is the way in, and it is deliberately the
+        first thing the eye lands on.
+      */}
+      <QuickActions role={session.role} />
 
       {setup && !setup.complete ? <GettingStarted steps={setup.steps} /> : null}
 
@@ -253,7 +274,7 @@ async function Kpis({ date, seesMoney }: { date: string; seesMoney: boolean }) {
         <Stat
           label="Overdue"
           value={money(overdueTotal)}
-          hint={`${overdueRows.length} invoice(s) past terms`}
+          hint={`${counted(overdueRows.length, "invoice")} past terms`}
           tone={overdueTotal > 0 ? "warning" : "success"}
         />
       ) : null}
@@ -350,7 +371,7 @@ async function NeedsDecision({ seesMoney }: { seesMoney: boolean }) {
         reference: invoice.invoice_number,
         severity: daysOver > 60 ? "late" : "warning",
         customer: invoice.customers?.business_name ?? "Unknown customer",
-        summary: `${daysOver} day(s) past terms`,
+        summary: `${counted(daysOver, "day")} past terms`,
         state: "Overdue",
         measure: money(invoice.balance),
         when: invoice.due_date ?? date,
@@ -567,8 +588,10 @@ async function MyRun({ session, date }: { session: Session; date: string }) {
     return (
       <Card title="Today's run">
         <EmptyState
-          title="No driver profile linked to your account"
-          description="A dispatcher needs to link your login to a driver record."
+          title="Your login is not linked to a driver yet"
+          description={"Your deliveries will show here once it is. Whoever looks after the app " +
+                       "can link it under Fleet \u203a Drivers."}
+          action={<ButtonLink href="/drivers" variant="primary">Go to Drivers</ButtonLink>}
         />
       </Card>
     );

@@ -141,16 +141,16 @@ export const NAVIGATION: NavItem[] = [
     ],
   },
   {
-    label: "Stops",
+    label: "Driver visits",
     href: "/jobs",
     icon: "stops",
     capability: "routes.read",
     count: "exceptions",
-    blurb: "Every visit to a customer: what was collected, what was dropped off.",
+    blurb: "Every time a driver called on a customer: what was collected, what was dropped off.",
     children: [
       {
-        label: "All stops", href: "/jobs", capability: "routes.read",
-        blurb: "Every stop, filtered by day, run or customer.",
+        label: "All visits", href: "/jobs", capability: "routes.read",
+        blurb: "Every visit, filtered by day, delivery round or customer.",
       },
       {
         label: "Problems", href: "/operations/exceptions", capability: "operations.read",
@@ -175,7 +175,7 @@ export const NAVIGATION: NavItem[] = [
     // `/jobs` because the routing module took that path in 0004 — the same
     // label-is-not-the-route arrangement as Contracts (`/agreements`) and Linen
     // (`/inventory`), and /help defines both words.
-    label: "Jobs",
+    label: "Customer laundry",
     href: "/orders",
     icon: "jobs",
     capability: "orders.read",

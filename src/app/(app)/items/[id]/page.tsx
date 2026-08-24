@@ -1,3 +1,4 @@
+import { ConfirmSubmit } from "@/components/confirm-submit";
 import { notFound } from "next/navigation";
 import { requireCapability } from "@/lib/auth/context";
 import { createClient } from "@/lib/supabase/server";
@@ -5,7 +6,7 @@ import { can } from "@/lib/roles";
 import { number } from "@/lib/format";
 import type { InventoryPool, Item } from "@/lib/db/types";
 import {
-  Button, ButtonLink, Card, DataTable, EmptyState, PageHeader, humanise,
+  ButtonLink, Card, DataTable, EmptyState, PageHeader, humanise,
 } from "@/components/ui";
 import { Field, FormActions, Input, Select, SubmitButton } from "@/components/form";
 import { ITEM_CATEGORIES } from "../categories";
@@ -152,11 +153,18 @@ export default async function ItemDetailPage({
             </Card>
           </form>
 
-          <Card title="Danger zone"
-                description="Archiving is refused while the item is priced on an active service agreement.">
+          <Card title="Hide this item"
+                description={"Use this when you no longer stock an item. It comes off your lists " +
+                             "and nothing is deleted. If it is priced on a contract that is still " +
+                             "running, the app will refuse and tell you which one."}>
             <form action={archiveItem}>
               <input type="hidden" name="id" value={item.id} />
-              <Button variant="danger">Archive item</Button>
+              <ConfirmSubmit
+                label="Hide this item"
+                eyebrow="This can be undone"
+                consequence={"It will stop appearing when you take laundry in or count stock. " +
+                             "Nothing is deleted, and an administrator can put it back."}
+              />
             </form>
           </Card>
         </>

@@ -195,24 +195,24 @@ describe("navigationFor", () => {
 
   it("orders the rail the way the day runs", () => {
     expect(navigationFor("super_admin").map((item) => item.label)).toEqual([
-      "Today", "My Runs", "Runs", "Fleet", "Stops", "Jobs", "Customers",
+      "Today", "My Runs", "Runs", "Fleet", "Driver visits", "Customer laundry", "Customers",
       "Money", "Linen", "Reports", "Settings", "Help",
     ]);
   });
 
-  it("shows Jobs to the Owner and the Office manager and to nobody else", () => {
+  it("shows Customer laundry to the Owner and the Office manager and to nobody else", () => {
     // The owner's decision, 2026-08-16: the job→invoice flow is theirs alone.
     // The rail follows the capability, so the row simply is not there for the
     // counter, the floor, a dispatcher or a driver — none of whom can open a
     // job any more.
     for (const role of ["super_admin", "operations_manager", "platform_admin"] as const) {
-      expect(navigationFor(role).map((item) => item.label), role).toContain("Jobs");
+      expect(navigationFor(role).map((item) => item.label), role).toContain("Customer laundry");
     }
     for (const role of [
       "customer_service", "warehouse_operator", "dispatcher", "driver",
       "finance", "auditor", "branch_manager", "regional_manager", "sales",
     ] as const) {
-      expect(navigationFor(role).map((item) => item.label), role).not.toContain("Jobs");
+      expect(navigationFor(role).map((item) => item.label), role).not.toContain("Customer laundry");
     }
   });
 
@@ -319,7 +319,7 @@ describe("sectionFor", () => {
 
   it("resolves a child that is not under the area's own path", () => {
     expect(label("/agreements")).toBe("Customers");
-    expect(label("/operations/exceptions")).toBe("Stops");
+    expect(label("/operations/exceptions")).toBe("Driver visits");
     expect(label("/warehouse/batch-1")).toBe("Linen");
     expect(label("/vehicles")).toBe("Fleet");
     expect(label("/bills")).toBe("Money");
@@ -332,10 +332,10 @@ describe("sectionFor", () => {
   });
 
   it("prefers the longest matching destination", () => {
-    // /orders (the Jobs area) and /operations/* (tabs under Stops) both exist;
-    // the tab strip must not flip areas on the deeper path.
-    expect(label("/orders/abc-123/edit")).toBe("Jobs");
-    expect(label("/operations/pickups")).toBe("Stops");
+    // /orders (Customer laundry) and /operations/* (tabs under Driver visits)
+    // both exist; the tab strip must not flip areas on the deeper path.
+    expect(label("/orders/abc-123/edit")).toBe("Customer laundry");
+    expect(label("/operations/pickups")).toBe("Driver visits");
   });
 
   it("puts every My Runs path in the one area, and leaves /routes off the map", () => {

@@ -303,7 +303,7 @@ export function ExceptionCapture({
     return (
       <div className="border-t pt-4">
         <button type="button" onClick={() => { setOpen(true); setStatus(null); }}
-                className="rounded-lg border border-danger/40 px-3 py-1.5 text-sm font-medium text-danger hover:bg-danger/5">
+                className="inline-flex min-h-11 items-center rounded-lg border border-danger/40 px-4 text-sm font-medium text-danger transition hover:bg-danger/5">
           Something&rsquo;s wrong at this stop
         </button>
         {status ? <p className="mt-2 text-xs text-muted-foreground">{status}</p> : null}

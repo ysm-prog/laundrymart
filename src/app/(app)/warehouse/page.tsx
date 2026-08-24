@@ -35,7 +35,7 @@ export default async function WarehousePage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="In the plant" eyebrow="Production batches"
+        title="In the plant"
         description="Count the vans in, then wash, dry, fold and pack. Each stage moves real stock."
       />
 

@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import { requireCapability } from "@/lib/auth/context";
 import { createClient } from "@/lib/supabase/server";
-import { date, dateTime } from "@/lib/format";
+import { counted, date, dateTime } from "@/lib/format";
 import {
   ButtonLink, Card, EmptyState, FlashMessages, Notice, PageHeader,
 } from "@/components/ui";
@@ -93,7 +93,7 @@ export default async function CountReturnPage({
 
           <Card
             title="What came back"
-            description={`The driver booked ${expectedTotal} item(s) on this run. Change only the lines that do not match the trolley.`}
+            description={`The driver booked ${counted(expectedTotal, "item")} on this run. Change only the lines that do not match the trolley.`}
           >
             <div className="-mx-4 -mb-4 border-t border-border">
               {expected.map((item) => (

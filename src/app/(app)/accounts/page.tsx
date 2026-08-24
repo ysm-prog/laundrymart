@@ -18,7 +18,7 @@ export default async function AccountsPage({ searchParams }: { searchParams: Pro
   return (
     <div>
       <PageHeader
-        title="Accounts" eyebrow="Chart of accounts"
+        title="Accounts"
         description="Every account the books are kept in. Invoices, bills and payments are each coded to one of these."
       />
       <ListControls

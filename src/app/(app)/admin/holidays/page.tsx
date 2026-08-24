@@ -5,7 +5,7 @@ import { can } from "@/lib/roles";
 import { date, today } from "@/lib/format";
 import type { PublicHoliday } from "@/lib/db/types";
 import {
-  Card, DataTable, EmptyState, Notice, PageHeader, SkeletonRows,
+  Button, Card, DataTable, EmptyState, Notice, PageHeader, SkeletonRows,
 } from "@/components/ui";
 import { Field, Input, Select, SubmitButton } from "@/components/form";
 import { addHoliday, removeHoliday } from "../actions";
@@ -82,7 +82,7 @@ async function HolidayList({ writable }: { writable: boolean }) {
           cell: (row) => (writable ? (
             <form action={removeHoliday}>
               <input type="hidden" name="id" value={row.id} />
-              <button type="submit" className="text-xs text-danger hover:underline">Remove</button>
+              <Button variant="dangerGhost">Remove</Button>
             </form>
           ) : null),
         },

@@ -130,7 +130,7 @@ export async function BillingAndPricing({
           <Field
             label="Xero customer"
             name="xero_contact_name"
-            hint="Recorded by hand for reconciliation. This app does not connect to Xero."
+            hint="Filled in automatically the first time one of their bills reaches Xero. You only need to type it if you are matching up a customer who is already there."
           >
             <Input name="xero_contact_name" defaultValue={customer.xero_contact_name}
                    placeholder="Contact name as it reads in Xero" />
@@ -231,8 +231,9 @@ export async function BillingAndPricing({
       {customer.xero_contact_id || customer.xero_contact_name ? (
         <div className="mt-5">
           <Notice tone="info">
-            Xero details are recorded here for reconciliation only. Nothing in this app talks to
-            Xero — invoices are generated and sent from this system.
+            This is how this customer is matched up in Xero. Bills raised here are sent across
+            on their own once your laundry is connected to Xero, so in most cases there is
+            nothing to fill in.
           </Notice>
         </div>
       ) : null}

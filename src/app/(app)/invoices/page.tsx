@@ -3,7 +3,7 @@ import Link from "next/link";
 import { requireCapability } from "@/lib/auth/context";
 import { createClient } from "@/lib/supabase/server";
 import { can } from "@/lib/roles";
-import { date, money, relativeDays, today } from "@/lib/format";
+import { counted, date, money, relativeDays, today } from "@/lib/format";
 import { previousMonth } from "@/lib/domain/dates";
 import { CHARGE_TYPE_LABELS, type ChargeType } from "@/lib/domain/pricing";
 import {
@@ -237,7 +237,7 @@ async function Register({ params }: { params: Search }) {
 
   return (
     <>
-      <Card title="Register" description={`${count ?? rows.length} invoice(s)`} className="[&>div]:p-0">
+      <Card title="Register" description={counted(count ?? rows.length, "invoice")} className="[&>div]:p-0">
         <ul>
           {rows.map((row) => {
             const selected = params.selected === row.id;
@@ -279,7 +279,7 @@ async function Register({ params }: { params: Search }) {
                       chasing ? "text-warning" : "text-muted-foreground",
                     )}>
                       {row.due_date
-                        ? chasing ? `${overdueDays} day(s) past terms` : `due ${date(row.due_date)}`
+                        ? chasing ? `${counted(overdueDays, "day")} past terms` : `due ${date(row.due_date)}`
                         : `issued ${date(row.issue_date)}`}
                     </span>
                   </div>
@@ -395,7 +395,7 @@ async function InvoicePane({ params, writable }: { params: Search; writable: boo
           </Notice>
         ) : chasing ? (
           <Notice tone="warning">
-            {overdueDays} day(s) past terms · {money(invoice.balance)} outstanding.
+            {counted(overdueDays, "day")} past terms · {money(invoice.balance)} outstanding.
           </Notice>
         ) : null}
 
@@ -723,7 +723,7 @@ async function SendTool({ params, tenantId }: { params: Search; tenantId: string
           />
           {blocked > 0 ? (
             <p className="mt-4 border-t pt-3 text-sm text-muted-foreground">
-              {blocked} issued invoice(s) have no billing email and are not listed. Add one on the
+              {counted(blocked, "issued invoice")} {blocked === 1 ? "has" : "have"} no billing email and {blocked === 1 ? "is" : "are"} not listed. Add one on the
               customer to send them.
             </p>
           ) : null}

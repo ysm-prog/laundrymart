@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { requireCapability } from "@/lib/auth/context";
 import { createClient } from "@/lib/supabase/server";
 import { can } from "@/lib/roles";
-import { date, dateTime, number } from "@/lib/format";
+import { counted, date, dateTime, number } from "@/lib/format";
 import type { Delivery, Item, Job, Pickup } from "@/lib/db/types";
 import {
   Button, ButtonLink, Card, DataTable, EmptyState, Notice,
@@ -204,7 +204,7 @@ async function PickupSection({
           {pickups.map((pickup) => (
             <div key={pickup.id} className="rounded-md border p-3">
               <p className="text-sm font-medium">
-                {dateTime(pickup.completed_at)} · {pickup.bag_count} bag(s)
+                {dateTime(pickup.completed_at)} · {counted(pickup.bag_count ?? 0, "bag")}
                 {pickup.total_weight_kg ? ` · ${number(pickup.total_weight_kg)} kg` : ""}
                 {pickup.signed_by ? ` · signed by ${pickup.signed_by}` : ""}
               </p>

@@ -6,6 +6,7 @@ import { Badge, Button, cx } from "@/components/ui";
 import { SubmitButton } from "@/components/form";
 import { isMovable, isReordered, lockReason, moveStop, moveStopTo } from "./sequence";
 import { reorderRunStops } from "./actions";
+import { counted } from "@/lib/format";
 
 /**
  * The order of a board's day, dragged or keyed.
@@ -124,11 +125,11 @@ export function SequenceBoard({
                       <Link
                         href={`/orders/${job.id}`}
                         className="inline-flex min-h-9 items-center rounded-lg px-1 font-medium
-                                   hover:underline focus:outline-none focus:ring-2 focus:ring-primary/25"
+                                   hover:underline focus:ring-2 focus:ring-primary/25"
                       >
                         {job.orderNumber}
                       </Link>
-                      <span>· {job.itemCount} item(s)</span>
+                      <span>· {counted(job.itemCount, "item")}</span>
                     </li>
                   ))}
                   {stop.jobs.length === 0 ? <li>No laundry on this stop</li> : null}

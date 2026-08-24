@@ -1,8 +1,9 @@
+import { ConfirmSubmit } from "@/components/confirm-submit";
 import { notFound } from "next/navigation";
 import { requireCapability } from "@/lib/auth/context";
 import { createClient } from "@/lib/supabase/server";
 import type { Customer } from "@/lib/db/types";
-import { Button, Card, PageHeader } from "@/components/ui";
+import { Card, PageHeader } from "@/components/ui";
 import { CustomerForm } from "../../customer-form";
 import { archiveCustomer, updateCustomer } from "../../actions";
 
@@ -44,11 +45,18 @@ export default async function EditCustomerPage({
         submitLabel="Save changes"
       />
 
-      <Card title="Danger zone"
-            description="Archiving hides the customer from lists. History, jobs and invoices are kept.">
+      <Card title="Hide this customer"
+            description={"Use this when you no longer deal with a customer. They come off your " +
+                         "lists, and nothing is deleted \u2014 their laundry, their bills and their " +
+                         "history are all kept, and an administrator can put them back."}>
         <form action={archiveCustomer}>
           <input type="hidden" name="id" value={id} />
-          <Button variant="danger">Archive customer</Button>
+          <ConfirmSubmit
+            label="Hide this customer"
+            eyebrow="This can be undone"
+            consequence={"They will stop appearing anywhere in the app, including when you " +
+                         "search. Nothing is deleted. Settings \u203a Your records puts them back."}
+          />
         </form>
       </Card>
     </div>

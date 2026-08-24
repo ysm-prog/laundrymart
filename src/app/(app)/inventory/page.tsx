@@ -21,7 +21,7 @@ export default async function InventoryPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Stock" eyebrow="Inventory"
+        title="Stock"
         description="How much of each item you have, where it is, and every movement that put it there."
       />
 

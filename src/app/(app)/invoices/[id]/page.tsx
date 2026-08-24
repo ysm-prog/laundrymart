@@ -301,7 +301,7 @@ async function Lines({ invoiceId, editable }: { invoiceId: string; editable: boo
               <form action={removeInvoiceLine}>
                 <input type="hidden" name="id" value={row.id} />
                 <input type="hidden" name="invoice_id" value={invoiceId} />
-                <button type="submit" className="text-xs text-danger hover:underline">Remove</button>
+                <Button variant="dangerGhost">Remove</Button>
               </form>
             ) : null),
           },

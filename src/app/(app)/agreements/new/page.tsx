@@ -35,7 +35,7 @@ export default async function NewAgreementPage({
   return (
     <div className="max-w-5xl space-y-4">
       <PageHeader
-        eyebrow="Contracts (service agreements)"
+        eyebrow="Contracts"
         title="New contract"
         description="Three steps: who and when, service days, what and price. One save at the end."
       />

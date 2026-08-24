@@ -4,7 +4,7 @@ import { navigationFor } from "@/lib/nav";
 import { ROLE_LABELS } from "@/lib/roles";
 import { createClient } from "@/lib/supabase/server";
 import { today } from "@/lib/format";
-import { SectionNav, ThemeToggle, type NavCounts } from "@/components/app-nav";
+import { SectionNav, TextSizeControl, ThemeToggle, type NavCounts } from "@/components/app-nav";
 import { AppShell } from "@/components/app-shell";
 import { GlobalSearch } from "@/components/global-search";
 import { UserMenu } from "@/components/user-menu";
@@ -102,6 +102,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           <div className="flex items-center gap-1">
             <span className="mr-1 hidden text-sm text-muted-foreground lg:inline">{today()}</span>
             <NotificationBell count={unread} />
+            {/* Beside the theme toggle: the two questions are the same question
+                — "can I read this comfortably?" — and somebody who cannot is
+                looking in one place, not two. */}
+            <TextSizeControl />
             <ThemeToggle />
             <UserMenu
               email={session.email ?? "Signed in"}

@@ -28,7 +28,7 @@ export default async function AuditPage({ searchParams }: { searchParams: Promis
   return (
     <div>
       <PageHeader
-        title="Activity log" eyebrow="Audit log"
+        title="Activity log"
         description="Every change anyone has made. Nothing is ever removed from this list."
       />
       <ListControls

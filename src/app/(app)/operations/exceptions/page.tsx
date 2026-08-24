@@ -28,7 +28,7 @@ export default async function ExceptionsPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Problems" eyebrow="Exceptions"
+        title="Problems"
         description="Stops that could not be completed. Clearing one puts the job back in the queue."
       />
       <Suspense fallback={<SkeletonRows rows={6} />}>
@@ -72,7 +72,7 @@ async function ExceptionList({ writable }: { writable: boolean }) {
           cell: (row) => (writable ? (
             <form action={resolveException}>
               <input type="hidden" name="id" value={row.id} />
-              <button type="submit" className="text-xs font-medium text-primary hover:underline">
+              <button type="submit" className="inline-flex min-h-11 items-center rounded-lg px-2 text-sm font-medium text-primary transition hover:bg-primary/8 hover:underline">
                 Clear
               </button>
             </form>

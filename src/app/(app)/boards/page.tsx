@@ -9,6 +9,7 @@ import {
 import { Field, Input, Select, SubmitButton, Textarea } from "@/components/form";
 import { listMembers, staffMembers, type Member } from "@/lib/directory";
 import { createBoard, linkBoardLogin } from "./actions";
+import { counted } from "@/lib/format";
 
 export const metadata = { title: "Boards" };
 export const dynamic = "force-dynamic";
@@ -71,7 +72,7 @@ async function BoardList({ canWrite }: { canWrite: boolean }) {
   return (
     <div className="space-y-3">
       {unlinked > 0 ? (
-        <Notice tone="warning" title={`${unlinked} active board(s) have no login`}>
+        <Notice tone="warning" title={`${counted(unlinked, "delivery round")} ${unlinked === 1 ? "has" : "have"} no login yet`}>
           Nobody can work a round without one: the account would sign in and see nothing.
           {linkable.length === 0
             ? " Invite somebody on the People screen first, then link them here."

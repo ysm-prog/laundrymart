@@ -47,7 +47,7 @@ export function DateNav({
   const step =
     "inline-flex min-h-11 min-w-11 items-center justify-center gap-1 rounded-lg border " +
     "border-strong bg-surface px-3 text-sm font-medium shadow-xs transition " +
-    "hover:bg-surface-muted focus:outline-none focus:ring-2 focus:ring-primary/25";
+    "hover:bg-surface-muted focus:ring-2 focus:ring-primary/25";
 
   /** Submit the enclosing GET form as soon as the control changes. */
   const submitOnChange = (event: { currentTarget: HTMLElement & { form: HTMLFormElement | null } }) => {

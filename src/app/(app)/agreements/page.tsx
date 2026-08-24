@@ -35,7 +35,7 @@ export default async function AgreementsPage({ searchParams }: { searchParams: P
   return (
     <div>
       <PageHeader
-        title="Contracts" eyebrow="Service agreements"
+        title="Contracts"
         description="The contract that decides when a customer is serviced and what they are charged."
         actions={can(session.role, "agreements.write")
           ? <ButtonLink href="/agreements/new" variant="primary">New agreement</ButtonLink>

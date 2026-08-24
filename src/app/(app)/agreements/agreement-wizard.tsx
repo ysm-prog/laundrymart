@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { Field, Input, Select, SubmitButton, Textarea } from "@/components/form";
-import { ButtonLink, Card, Notice, Stage, cx } from "@/components/ui";
+import { ButtonLink, CONTROL, Card, Notice, SELECT_CHEVRON, Stage, cx } from "@/components/ui";
 import { CustomerEssentials, FormDisclosure } from "@/app/(app)/customers/customer-form";
 import { HOLIDAY_RULE_LABELS, HOLIDAY_RULES } from "@/lib/domain/service-calendar";
 import { money, today } from "@/lib/format";
@@ -157,7 +157,7 @@ export function AgreementWizard({
                         <select
                           id="customer_id" name="customer_id" value={customerId}
                           onChange={(event) => { setCustomerId(event.target.value); setLocationId(""); }}
-                          className="rounded-lg w-full border border-strong bg-surface-muted px-2.5 py-1.5 text-sm"
+                          className={cx(CONTROL, SELECT_CHEVRON)}
                         >
                           <option value="">Choose a customer</option>
                           {customers.map((customer) => (
@@ -167,7 +167,7 @@ export function AgreementWizard({
                           ))}
                         </select>
                         <button type="button" onClick={() => setQuickCreate((open) => !open)}
-                                className="text-xs font-medium text-primary hover:underline">
+                                className="inline-flex min-h-11 items-center rounded-lg px-2 text-sm font-medium text-primary transition hover:bg-primary/8 hover:underline">
                           {quickCreate ? "Never mind — pick an existing customer" : "+ New customer"}
                         </button>
                       </div>
@@ -182,7 +182,7 @@ export function AgreementWizard({
                       <select
                         id="location_id" name="location_id" value={effectiveLocationId}
                         onChange={(event) => setLocationId(event.target.value)}
-                        className="rounded-lg w-full border border-strong bg-surface-muted px-2.5 py-1.5 text-sm"
+                        className={cx(CONTROL, SELECT_CHEVRON)}
                       >
                         <option value="">All sites</option>
                         {customerLocations.map((location) => (
@@ -197,7 +197,7 @@ export function AgreementWizard({
                       <p className="text-sm font-medium">New customer — four fields is all it takes.</p>
                       <CustomerEssentials formId={QUICK_CREATE_FORM} />
                       <button type="submit" form={QUICK_CREATE_FORM}
-                              className="rounded-lg bg-action px-3 py-1.5 text-sm font-medium text-action-foreground hover:brightness-110">
+                              className="inline-flex min-h-11 items-center rounded-lg bg-action px-4 text-sm font-medium text-action-foreground transition hover:brightness-110">
                         Create customer
                       </button>
                       <p className="text-xs text-muted-foreground">
@@ -378,9 +378,9 @@ export function AgreementWizard({
                                 <td className="px-2.5 py-1.5 text-right">
                                   <button type="button"
                                           onClick={() => setLines((current) => current.filter((l) => l.key !== line.key))}
-                                          className="text-xs text-danger hover:underline">
+                                          className="inline-flex min-h-11 items-center rounded-lg px-3 text-sm font-medium text-danger transition hover:bg-danger/8">
                                     Remove
-                                  </button>
+                                    </button>
                                 </td>
                               </tr>
                             ))}
@@ -402,7 +402,7 @@ export function AgreementWizard({
                           + Add an item
                         </button>
                         <button type="button" onClick={() => setAdvanced((open) => !open)}
-                                className="text-xs font-medium text-primary hover:underline">
+                                className="inline-flex min-h-11 items-center rounded-lg px-2 text-sm font-medium text-primary transition hover:bg-primary/8 hover:underline">
                           {advanced ? "Hide advanced pricing" : "Advanced pricing (per-kg, included allowances)"}
                         </button>
                       </div>
@@ -440,7 +440,7 @@ export function AgreementWizard({
               ) : null}
               {step < 3 ? (
                 <button type="button" onClick={() => toStep(step + 1)}
-                        className="rounded-lg bg-action px-3 py-1.5 text-sm font-medium text-action-foreground hover:brightness-110">
+                        className="inline-flex min-h-11 items-center rounded-lg bg-action px-4 text-sm font-medium text-action-foreground transition hover:brightness-110">
                   Next
                 </button>
               ) : (

@@ -30,7 +30,7 @@ export function GlobalSearch() {
         placeholder="Search customers, jobs, invoices, stops…"
         className="min-h-10 w-full rounded-lg border border-strong bg-surface-muted py-2 pl-9 pr-3
                    text-sm transition placeholder:text-muted-foreground
-                   focus:border-primary focus:bg-surface focus:outline-none
+                   focus:border-primary focus:bg-surface
                    focus:ring-2 focus:ring-primary/25"
       />
     </div>

@@ -141,7 +141,7 @@ export function JobCard({
               rel="noreferrer"
               className="mt-1.5 inline-flex min-h-11 items-start gap-1.5 rounded-lg py-1 pr-2
                          text-sm font-medium text-primary hover:underline
-                         focus:outline-none focus:ring-2 focus:ring-primary/25"
+                         focus:ring-2 focus:ring-primary/25"
             >
               <MapPin className="mt-0.5 size-4 shrink-0" aria-hidden />
               <span className="min-w-0">{address}</span>

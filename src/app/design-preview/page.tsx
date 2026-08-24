@@ -57,6 +57,7 @@ import { MoveToBoard } from "@/app/(app)/runs/move-to-board";
 import { consolidateChargeLines } from "@/lib/domain/invoice-consolidation";
 import { PeriodFilter } from "@/app/(app)/billing/period-filter";
 import { money } from "@/lib/format";
+import { QuickActions } from "@/components/quick-actions";
 
 export const metadata = { title: "Design preview" };
 
@@ -1134,6 +1135,28 @@ export default function DesignPreviewPage() {
               jobs={PREVIEW_RUN_STOPS.flatMap((stop) =>
                 stop.jobs.map((job) => ({ ...job, customerName: stop.customerName })))}
             />
+          </section>
+
+          {/*
+            The guided home card and the reading-comfort control.
+
+            Both are new in the 2026-08-24 accessibility pass and both are the
+            kind of thing that can only be checked by looking: the card is a
+            responsive grid that has to stay one column on a phone, and the
+            reading control changes the size of the entire page — including
+            itself — which is exactly the interaction a unit test cannot see.
+
+            Rendered for two roles on purpose. `super_admin` gets every card;
+            `board` gets three, and the point of showing it is that a narrow
+            role must not be left with an empty card or a lonely single tile.
+          */}
+          <section id="quick-actions-preview" className="space-y-4 border-t pt-8">
+            <PageHeader
+              title="What do you want to do?"
+              description="The way in to the app for somebody who has been shown it once."
+            />
+            <QuickActions role="super_admin" />
+            <QuickActions role="board" />
           </section>
         </main>
       </div>

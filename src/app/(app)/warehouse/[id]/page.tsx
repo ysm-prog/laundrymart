@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import { requireCapability } from "@/lib/auth/context";
 import { createClient } from "@/lib/supabase/server";
 import { can } from "@/lib/roles";
-import { dateTime } from "@/lib/format";
+import { counted as countOf, dateTime } from "@/lib/format";
 import type { Item } from "@/lib/db/types";
 import {
   Button, ButtonLink, Card, DataTable, EmptyState, Notice,
@@ -97,7 +97,7 @@ export default async function BatchDetailPage({
           batch.daily_routes ? `Counted off run ${batch.daily_routes.code}` : null,
           batch.depots?.name ?? "No depot",
           batch.machine,
-          `${processing} item(s) in the batch`,
+          `${countOf(processing, "item")} in the batch`,
         ].filter(Boolean).join(" · ")}
         actions={
           <>
@@ -180,7 +180,7 @@ export default async function BatchDetailPage({
       <Card
         title="What's in this batch"
         description={[
-          `${processing} item(s) going through`,
+          `${countOf(processing, "item")} going through`,
           rejected > 0 ? `${rejected} set aside` : null,
           counted.length > 0 && variance !== 0
             ? `${Math.abs(variance)} ${variance < 0 ? "short of" : "more than"} the driver's count`

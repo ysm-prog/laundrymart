@@ -27,7 +27,7 @@ export default async function DepotsPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Sites" eyebrow="Depots"
+        title="Sites"
         description="Each place you operate from. Runs, trucks, drivers and stock all belong to one site — most laundries only ever need one."
       />
 
@@ -100,7 +100,7 @@ async function DepotList({ writable }: { writable: boolean }) {
             <form action={updateDepotStatus}>
               <input type="hidden" name="id" value={row.id} />
               <input type="hidden" name="status" value={row.status === "active" ? "inactive" : "active"} />
-              <button type="submit" className="text-xs font-medium text-primary hover:underline">
+              <button type="submit" className="inline-flex min-h-11 items-center rounded-lg px-2 text-sm font-medium text-primary transition hover:bg-primary/8 hover:underline">
                 {row.status === "active" ? "Deactivate" : "Activate"}
               </button>
             </form>

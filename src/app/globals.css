@@ -145,6 +145,31 @@
     border-color: hsl(var(--border));
   }
 
+  /*
+   * Reading comfort — one rule that makes the whole application bigger.
+   *
+   * Every size in this app is expressed in `rem`: Tailwind v4's spacing scale is
+   * `calc(var(--spacing) * n)` with `--spacing: 0.25rem`, its type scale is rem,
+   * and the body rule below is rem. So moving the *root* font size scales text,
+   * padding, gaps, control heights and the rail's own width together — it is a
+   * genuine zoom, not text that grows out of the buttons around it. That is why
+   * this is three lines rather than a sweep of ~490 call sites, and why a new
+   * screen inherits it without knowing it exists.
+   *
+   * `normal` deliberately sets **nothing**. A person who has already raised the
+   * default font size in their browser has told us what they want; pinning
+   * `16px` here would silently overrule them, which is the opposite of the point.
+   * The two larger steps are percentages of that same default, so they stack
+   * with a browser preference rather than replacing it.
+   *
+   * Breakpoints are unaffected: `rem` inside a media query resolves against the
+   * browser's initial font size, never this one. The layout keeps its shape and
+   * the content inside it grows, which is what we want — the alternative would
+   * flip a phone to the desktop layout the moment somebody enlarged the text.
+   */
+  html[data-text-size="large"] { font-size: 115%; }
+  html[data-text-size="xlarge"] { font-size: 130%; }
+
   body {
     @apply antialiased;
     background-color: hsl(var(--background));
@@ -202,11 +227,18 @@
   input[type="checkbox"] { border-radius: var(--radius-xs); }
   input[type="radio"] { border-radius: 9999px; }
 
-  /* Visible focus everywhere — keyboard accessibility is a requirement here. */
+  /* Visible focus everywhere — keyboard accessibility is a requirement here.
+     Thick enough to find without hunting: 3px, which is what the difference
+     between "I can see where I am" and "I have lost my place" costs somebody
+     tabbing through a long form.
+
+     No `border-radius` here. It used to set 2px, which does not shape the
+     outline — `outline` already follows the element's own corners — it reshapes
+     the *element*, so every 6px button and 12px card visibly squared off the
+     moment it took focus. */
   :focus-visible {
-    outline: 2px solid hsl(var(--ring));
+    outline: 3px solid hsl(var(--ring));
     outline-offset: 2px;
-    border-radius: 2px;
   }
 
   /* Numbers in tables and totals line up without needing a monospace face. */
@@ -260,9 +292,15 @@
 
   /* These two used to be 9px and 10px, and were sprinkled over labels
      throughout the app. They are kept so those call sites keep working, but
-     raised to sizes a person can actually read at arm's length on a tablet. */
-  --text-3xs: 0.6875rem;  /* 11px — the smallest thing we will render */
-  --text-2xs: 0.75rem;    /*  12px — supporting labels, counts        */
+     raised to sizes a person can actually read at arm's length on a tablet.
+
+     Raised again (11→12, 12→13) for the people this app is now built for. These
+     two carry the count badges on the rail and — through `Eyebrow` — the row
+     label on every `DataTable` card on a phone, which is to say the label on
+     every field of every list a phone user reads. 11px was never a size to show
+     somebody a number they are meant to act on. 30 call sites, two lines. */
+  --text-3xs: 0.75rem;    /* 12px — the smallest thing we will render */
+  --text-2xs: 0.8125rem;  /* 13px — supporting labels, counts        */
 
   /*
    * YSM Hub's geometry, which is crisper than what this app carried: it works

@@ -4,7 +4,7 @@ import { notFound } from "next/navigation";
 import { requireCapability } from "@/lib/auth/context";
 import { createClient } from "@/lib/supabase/server";
 import { can } from "@/lib/roles";
-import { date, money, today } from "@/lib/format";
+import { counted, date, money, today } from "@/lib/format";
 import { addDays } from "@/lib/domain/dates";
 import {
   HOLIDAY_RULE_LABELS, describePattern, generateServiceDates, parsePattern,
@@ -135,7 +135,7 @@ async function CalendarPreview({ agreement }: { agreement: ServiceAgreement }) {
       title={`Service calendar — next ${PREVIEW_DAYS} days`}
       description={
         holidays.length
-          ? `${holidays.length} public holiday(s) in this window for ${agreement.holiday_region}.`
+          ? `${counted(holidays.length, "public holiday")} in this window for ${agreement.holiday_region}.`
           : `No public holidays loaded for ${agreement.holiday_region} in this window.`
       }
       actions={<Link href="/admin/holidays" className="text-sm text-primary hover:underline">Manage holidays</Link>}
@@ -156,7 +156,7 @@ function DateList({
 }) {
   return (
     <div>
-      <h3 className="mb-2 text-sm font-medium">{title} · {dates.length} visit(s)</h3>
+      <h3 className="mb-2 text-sm font-medium">{title} · {counted(dates.length, "visit")}</h3>
       {dates.length === 0 ? (
         <EmptyState title="No visits in this window"
                     description="Check the pattern and the agreement's start date." />
@@ -215,7 +215,7 @@ async function PricedLines({ agreementId, writable }: { agreementId: string; wri
               <form action={removeAgreementLine}>
                 <input type="hidden" name="id" value={row.id} />
                 <input type="hidden" name="agreement_id" value={agreementId} />
-                <button type="submit" className="text-xs text-danger hover:underline">Remove</button>
+                <Button variant="dangerGhost">Remove</Button>
               </form>
             ) : null),
             align: "right",

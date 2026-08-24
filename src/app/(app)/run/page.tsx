@@ -5,7 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { date, dateTime, today } from "@/lib/format";
 import type { DailyRoute, Item } from "@/lib/db/types";
 import {
-  Card, EmptyState, Notice, PageHeader, SkeletonRows,
+  ButtonLink, Card, EmptyState, Notice, PageHeader, SkeletonRows,
   Stage, StatusBadge, humanise,
 } from "@/components/ui";
 import { Field, Input, SubmitButton } from "@/components/form";
@@ -45,9 +45,12 @@ export default async function RunPage({
     return (
       <div className="space-y-4">
         <PageHeader title="My run" />
-        <Notice tone="warning" title="No driver profile linked to your login">
-          A dispatcher needs to link your account to a driver record before your run appears here.
+        <Notice tone="warning" title="Your login is not linked to a driver yet">
+          Nothing will show here until it is. Whoever looks after the app can do it in a
+          moment: Fleet &rsaquo; Drivers, find your name, and pick your login in the Login
+          column. If that is you, the link is on this page.
         </Notice>
+        <ButtonLink href="/drivers" variant="primary">Go to Drivers</ButtonLink>
       </div>
     );
   }

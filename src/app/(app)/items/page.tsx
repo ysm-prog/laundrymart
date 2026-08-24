@@ -26,7 +26,7 @@ export default async function ItemsPage({ searchParams }: { searchParams: Promis
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Items" eyebrow="Item master"
+        title="Items"
         description="Every item you handle, under the code your books already use. Prices here apply unless a customer’s contract sets its own."
       />
       <ListControls

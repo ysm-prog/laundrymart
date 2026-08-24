@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { z } from "zod";
+import { databaseMessage, validationMessage } from "@/lib/messages";
 
 /**
  * Shared plumbing for server actions.
@@ -63,12 +64,19 @@ export function returnTo(formData: FormData, fallback: string): string {
   return value;
 }
 
-/** First validation message, or a generic fallback. */
+/**
+ * The first validation failure, in the words on the label.
+ *
+ * This used to render the Zod path, so the toast read
+ * `expected_delivery_date: Invalid input` — a message addressed to whoever
+ * wrote the schema, shown to somebody who filled in a box marked "Delivery
+ * date". With 112 call sites it was the most-read sentence in the app.
+ *
+ * The rule itself is in `lib/messages.ts`: this module imports `next/headers`,
+ * so anything written here is unreachable from a unit test.
+ */
 export function firstIssue(error: z.ZodError): string {
-  const issue = error.issues[0];
-  if (!issue) return "Please check the form and try again.";
-  const field = issue.path.join(".");
-  return field ? `${field}: ${issue.message}` : issue.message;
+  return validationMessage(error.issues);
 }
 
 /* ------------------------------------------------------------- zod helpers */
@@ -150,19 +158,20 @@ export function toObject(formData: FormData): Record<string, FormDataEntryValue>
   return Object.fromEntries(formData.entries());
 }
 
-/** Human message from a Postgres error, without leaking internals. */
+/**
+ * Human message from a Postgres error, without leaking internals.
+ *
+ * The unrecognised case is the one that changed: it returned `error.message`
+ * verbatim, which is Postgres talking to whoever wrote the migration. The
+ * detail still goes to the server log, where it is useful — it just no longer
+ * goes to a counter.
+ */
 export function describeDbError(error: { code?: string; message: string }): string {
-  switch (error.code) {
-    case "23505":
-      return "That value is already in use — pick another.";
-    case "23503":
-      return "That record is still referenced by something else and cannot be removed.";
-    case "42501":
-      return "You do not have permission to do that.";
-    case "P0001":
-      // Our own business-rule triggers raise this with a human-readable message.
-      return error.message.replace(/^ERROR:\s*/, "");
-    default:
-      return error.message;
+  if (error.code && !KNOWN_DB_CODES.has(error.code)) {
+    console.error("[db] unhandled error", { code: error.code, message: error.message });
   }
+  return databaseMessage(error);
 }
+
+/** The codes `databaseMessage` says something specific about. */
+const KNOWN_DB_CODES = new Set(["23505", "23503", "42501", "P0001"]);

@@ -1,7 +1,7 @@
 "use client";
 
 import { useFormStatus } from "react-dom";
-import type { ReactNode } from "react";
+import { createContext, useContext, type ReactNode } from "react";
 import { CONTROL, SELECT_CHEVRON, cx } from "./ui";
 
 /**
@@ -20,19 +20,51 @@ export function Field({
   label: string; name: string; hint?: string; error?: string;
   required?: boolean; children: ReactNode; className?: string;
 }) {
+  /*
+   * The hint and the error are tied to the control by id, so a screen reader
+   * announces them as part of the field rather than leaving them as loose text
+   * nearby — and so `aria-invalid` marks which box is actually wrong. Neither
+   * was wired up before: `aria-describedby` and `aria-invalid` appeared nowhere
+   * in the app, and a refusal was only ever a toast in the corner.
+   */
+  const hintId = hint && !error ? `${name}-hint` : undefined;
+  const errorId = error ? `${name}-error` : undefined;
+
   return (
     <div className={cx("space-y-1.5", className)}>
-      <label htmlFor={name} className="block text-sm font-medium text-foreground">
+      <label htmlFor={name} className="block text-base font-medium text-foreground">
         {label}
         {/* Decorative — `required` on the control itself is what assistive
             technology announces. */}
         {required ? <span className="ml-1 text-danger" aria-hidden>*</span> : null}
       </label>
-      {children}
-      {hint && !error ? <p className="text-xs text-muted-foreground">{hint}</p> : null}
-      {error ? <p className="text-xs font-medium text-danger">{error}</p> : null}
+      {/* The control is handed the ids rather than each call site repeating
+          them; there are ~200 of these and they would not stay in step. */}
+      <FieldControlContext value={{ describedBy: errorId ?? hintId, invalid: Boolean(error) }}>
+        {children}
+      </FieldControlContext>
+      {/* `text-sm` here, not `text-xs`. A hint nobody can read is decoration,
+          and an error nobody can read is worse — it is the sentence that says
+          why the work did not save. */}
+      {hint && !error ? <p id={hintId} className="text-sm text-muted-foreground">{hint}</p> : null}
+      {error ? (
+        <p id={errorId} className="text-sm font-medium text-danger">{error}</p>
+      ) : null}
     </div>
   );
+}
+
+/**
+ * Carries the describedby/invalid wiring from `Field` down to whichever control
+ * it wraps, so neither the ~200 call sites nor the four control components have
+ * to pass it by hand.
+ */
+const FieldControlContext = createContext<{ describedBy?: string; invalid: boolean }>({
+  invalid: false,
+});
+
+function useFieldControl() {
+  return useContext(FieldControlContext);
 }
 
 export function Input({
@@ -53,11 +85,13 @@ export function Input({
    */
   id?: string;
 }) {
+  const field = useFieldControl();
   return (
     <input
       id={id ?? name} name={name} type={type} required={required} step={step}
       min={min} max={max} readOnly={readOnly} placeholder={placeholder}
       inputMode={inputMode} form={formId} autoComplete={autoComplete}
+      aria-describedby={field.describedBy} aria-invalid={field.invalid || undefined}
       defaultValue={defaultValue ?? undefined} className={CONTROL}
     />
   );
@@ -66,9 +100,11 @@ export function Input({
 export function Textarea({
   name, defaultValue, rows = 3, placeholder,
 }: { name: string; defaultValue?: string | null; rows?: number; placeholder?: string }) {
+  const field = useFieldControl();
   return (
     <textarea id={name} name={name} rows={rows} placeholder={placeholder}
               defaultValue={defaultValue ?? undefined}
+              aria-describedby={field.describedBy} aria-invalid={field.invalid || undefined}
               className={cx(CONTROL, "min-h-[5.5rem] resize-y py-2.5 leading-relaxed")} />
   );
 }
@@ -88,8 +124,10 @@ export function Select({
   groups?: ReadonlyArray<{ label: string; options: ReadonlyArray<SelectOption> }>;
   defaultValue?: string | null; required?: boolean; placeholder?: string;
 }) {
+  const field = useFieldControl();
   return (
     <select id={name} name={name} required={required}
+            aria-describedby={field.describedBy} aria-invalid={field.invalid || undefined}
             defaultValue={defaultValue ?? ""} className={cx(CONTROL, SELECT_CHEVRON)}>
       {placeholder ? <option value="">{placeholder}</option> : null}
       {(options ?? []).map((option) => (

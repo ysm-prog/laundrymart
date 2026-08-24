@@ -46,10 +46,26 @@ describe("form coercion helpers", () => {
     expect(requiredDate.parse("2026-03-02")).toBe("2026-03-02");
     expect(() => requiredDate.parse("2/3/26")).toThrow();
   });
-  it("firstIssue names the field", () => {
+  // Rewritten 2026-08-24. This asserted `"email: bad email"` — the raw Zod path
+  // joined to the raw Zod message, which is what the toast used to show a person
+  // at a counter. The assertion was not wrong about the code; it was wrong about
+  // what the code should do, and it is the reason the format survived 112 call
+  // sites. It now pins the decision: name the box on the screen, not the key in
+  // the schema.
+  it("firstIssue names the field as it is labelled on screen", () => {
     const r = z.object({ email: z.string().email("bad email") }).safeParse({ email: "x" });
     expect(r.success).toBe(false);
-    if (!r.success) expect(firstIssue(r.error)).toBe("email: bad email");
+    if (!r.success) expect(firstIssue(r.error)).toBe('Please check "Email" — Bad email.');
+  });
+
+  it("firstIssue never shows a raw schema key", () => {
+    const r = z.object({ expected_delivery_date: z.string() }).safeParse({});
+    expect(r.success).toBe(false);
+    if (!r.success) {
+      const message = firstIssue(r.error);
+      expect(message).not.toContain("expected_delivery_date");
+      expect(message).toBe('Please check "Delivery date" — it needs to be filled in.');
+    }
   });
   it("sorts weekday checkboxes and drops junk values", () => {
     const fd = new FormData();

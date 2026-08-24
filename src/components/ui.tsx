@@ -321,6 +321,11 @@ const BUTTON_VARIANTS = {
   secondary: "border border-strong bg-surface text-foreground shadow-xs hover:bg-surface-muted",
   danger: "bg-danger text-on-status shadow-xs hover:brightness-110 active:brightness-95",
   ghost: "text-primary hover:bg-primary/8",
+  /* A destructive action that sits in a list row, where a solid red block would
+     shout down the row it belongs to. `ghost` is teal — the colour this app
+     uses for "this is the action to take" — so a Remove button wearing it read
+     as the safe thing to press. */
+  dangerGhost: "text-danger hover:bg-danger/8",
   subtle: "bg-surface-muted text-foreground hover:bg-surface-sunken",
 } as const;
 
@@ -347,10 +352,24 @@ export type ButtonSize = keyof typeof BUTTON_SIZES;
  * the client form controls cannot drift apart — they did, and the filter bar
  * spent three releases in a different size and border than every other input.
  */
+/*
+ * `text-base` rather than `text-sm`: this is the text somebody is typing and
+ * then re-reading to check, and on iOS a font size under 16px makes the browser
+ * zoom the page on focus — which throws a phone user out of the layout they
+ * were working in.
+ *
+ * The focus ring is the outline, not a shadow. This used to carry
+ * `focus:outline-none focus:ring-2 focus:ring-primary/25`, which turned off the
+ * global 2px ring from `globals.css` and replaced it with a 25%-opacity halo
+ * measuring about 1.5:1 against the page — under the 3:1 WCAG asks of a focus
+ * indicator, on *every* input, select and textarea in the app. Dropping the
+ * `outline-none` lets the real ring through; the tinted ring stays on top of it
+ * as the soft edge the design language wants.
+ */
 export const CONTROL =
-  "min-h-11 w-full rounded-lg border border-strong bg-surface px-3 py-2 text-sm text-foreground " +
+  "min-h-11 w-full rounded-lg border border-strong bg-surface px-3 py-2 text-base text-foreground " +
   "shadow-xs transition placeholder:text-muted-foreground " +
-  "focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/25 " +
+  "focus:border-primary focus:ring-2 focus:ring-primary/25 " +
   "disabled:cursor-not-allowed disabled:bg-surface-muted disabled:opacity-70";
 
 /**
