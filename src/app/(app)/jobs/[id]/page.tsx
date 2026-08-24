@@ -204,7 +204,8 @@ async function PickupSection({
           {pickups.map((pickup) => (
             <div key={pickup.id} className="rounded-md border p-3">
               <p className="text-sm font-medium">
-                {dateTime(pickup.completed_at)} · {counted(pickup.bag_count ?? 0, "bag")}
+                {dateTime(pickup.completed_at)}
+                {pickup.bag_count == null ? "" : ` · ${counted(pickup.bag_count, "bag")}`}
                 {pickup.total_weight_kg ? ` · ${number(pickup.total_weight_kg)} kg` : ""}
                 {pickup.signed_by ? ` · signed by ${pickup.signed_by}` : ""}
               </p>
