@@ -694,6 +694,13 @@ miss). Integer percentages drift by 1–2 per channel; if you add a token, carry
   whole type scale under `@media (pointer: coarse)` to get a legible touch floor — so holding
   the comfortable sizing follows its intent rather than departing from it.
 
+- **`--control-border` is the edge of a box you type in, and is not `--strong`.** An input is
+  `bg-surface` on a card that is also `bg-surface`, so its border is the only thing identifying
+  it — and at `--strong` that measured 1.42:1 light / 1.22:1 dark against 1.4.11's 3:1. The new
+  token carries 3:1 and is used by `CONTROL` and the checkbox alone. `--strong` stays exactly
+  where YSM put it, because its other 60 call sites are card edges and table rules: decorative
+  separators, outside 1.4.11, and strengthening them would trade the paper language for nothing.
+  Same hue and saturation, lightness only — the rule the dark palette already follows.
 - **Reading comfort is a root font size, and it is the whole of the lever.** `html[data-text-size]`
   in `globals.css` moves the root between 100%, 115% and 130%. Everything in the app is `rem` —
   Tailwind 4's `--spacing` is `0.25rem`, its type scale is rem, `body` is rem — so text, padding,
@@ -1299,7 +1306,7 @@ exists, every route still resolves, and no role gained or lost anything.
   a contract line and a public holiday), and the run-sequencer arrows were 26×28 — where the
   2026-08-20 entry claims 36×36, which the shipped code never carried. All now ≥44px, and a
   `dangerGhost` button variant exists so a destructive control in a list row is not teal.
-- 666 unit tests (was 621), `verify` green. `/design-preview` gained the card for two roles;
+- 691 unit tests (was 621), `verify` green. `/design-preview` gained the card for two roles;
   asserted light and dark at 320/390/768/1440 **across all three text sizes** — 24 combinations,
   **zero console errors, zero overflow inside the card, and zero interactive targets under 36px
   anywhere on the page** (the only things left under it are the 18px checkbox *boxes*, which sit
@@ -1309,6 +1316,40 @@ exists, every route still resolves, and no role gained or lost anything.
   itself, a label breaking mid-word ("deliverie/s") because Chromium has no hyphenation dictionary
   here, and five more `focus:outline-none` sites — three of them on `/my-runs`, the board's whole
   workspace — each killing the ring the same way `CONTROL` did.
+- **A code review caught two things the tests did not, and both are worth reading.**
+  - `validationMessage` was written as a **denylist** — it recognised Zod's known default
+    wordings and passed anything else straight through. That is the wrong shape, and it was
+    incomplete: `z.enum()` produces `Invalid option: expected one of "van"|"truck"|"ute"` and a
+    bare `.min()` produces `Too small: expected number to be >=1950`, neither of which matched,
+    so both went to a counter verbatim — the exact defect the module exists to prevent. It now
+    builds its sentence from the issue's **structured fields** (`code`, `origin`, `format`,
+    `minimum`), and lets a message through only when it survives a machine-text guard, so an
+    unknown issue kind falls to a plain sentence rather than to Zod's. Safe by construction, the
+    same shape `databaseMessage` already had. The tests missed it because they exercised neither
+    kind; there is now a table of every validator family this app actually uses.
+  - **The rail rename never reached the pages it points at.** `/orders` was still titled "Jobs"
+    and `/jobs` still "Stops", so pressing the renamed row landed you on a heading carrying the
+    exact word the rename existed to remove. Nothing caught it because every other navigation
+    test asserts `nav.ts` against itself; the new one reads the page sources, which is the only
+    way to compare the two halves — a `page.tsx` reaches Supabase at module scope and cannot be
+    imported into a unit test.
+- **Three contrast failures, computed rather than eyeballed, and fixed at the token layer.**
+  - **A field did not look like a field.** `--strong` on the fill it outlines measures **1.42:1**
+    light and **1.22:1** dark, where WCAG 1.4.11 asks 3:1 of anything identifying a control — and
+    an input here is `bg-surface` on a card that is also `bg-surface`, so its border is the whole
+    of what says "type here". A new `--control-border` token carries 3:1 and is used by `CONTROL`
+    and the checkbox and nothing else. Deliberately *not* a change to `--strong`, which is 60
+    call sites of card edges and table rules: those are decorative separators, explicitly outside
+    1.4.11, and dragging them to 3:1 would turn YSM's paper into a wireframe. Verified as
+    rendered: 69 controls at **3.21:1** light and **3.01:1** dark.
+  - **`--muted-foreground` failed AA in dark where it lands most often** — 4.45:1 on a sunken
+    panel, 4.76:1 on a card. It carries every hint, every table header, every description, and
+    through `Eyebrow` the row label on every `DataTable` card on a phone. Both themes now clear
+    **AAA** on page, card and sunken panel alike (7.0–8.7:1).
+  - **The dark danger badge was 4.45:1**, just under AA, on the words "Overdue", "Cancelled" and
+    "Void". Half a percent of lightness clears it.
+  All three keep YSM's hue and saturation exactly and move only lightness — the precedent §10b
+  already set when the dark palette was built.
 - **Document-level overflow at the largest text on the narrowest phone is real and is recorded
   rather than hidden.** `/design-preview` overflows 7px at 320px today (pre-existing, the
   dispatch-planner fixture the 2026-08-16 entry already measured); at Large that becomes 55px and

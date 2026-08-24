@@ -38,8 +38,23 @@ longer self-destruct after 5s. `CONTROL` and five other sites stopped killing th
 "Hide this customer" with a confirm. `counted()` retired `invoice(s)`. Help page rewritten around
 the delivery round. Stale "this app does not connect to Xero" copy fixed.
 
-666 unit tests (was 621), `verify` green. Gallery asserted light+dark × 3 text sizes ×
-320/390/768/1440 — **zero console errors, zero card overflow, sub-36px targets 79 → 0**.
+**A code review then caught two things the tests did not.** `validationMessage` was a *denylist*
+of Zod's known wordings, so `z.enum()` and a bare `.min()` still reached a counter as
+`Invalid option: expected one of "van"|"truck"` and `Too small: expected number to be >=1950`. It
+now builds from the issue's structured fields and lets a message through only past a machine-text
+guard — safe by construction, like `databaseMessage`. And the rail rename never reached the pages:
+`/orders` was still titled "Jobs". Both now have tests; the nav one reads the page sources, since
+a `page.tsx` cannot be imported into a unit test.
+
+**Three contrast failures were computed and fixed at the token layer.** `--control-border` is new
+(an input's border was 1.42:1 against its own fill, where 1.4.11 asks 3:1) and is used by
+`CONTROL` and the checkbox only — `--strong` is untouched because its other 60 call sites are
+decorative rules. `--muted-foreground` failed AA in dark on a sunken panel (4.45:1) and now clears
+AAA in both themes. The dark danger badge was 4.45:1 on the word "Overdue".
+
+691 unit tests (was 621), `verify` green. Gallery asserted light+dark × 3 text sizes ×
+320/390/768/1440 — **zero console errors, zero card overflow, sub-36px targets 79 → 0**, and 69
+controls measured at 3.21:1 (light) / 3.01:1 (dark) as rendered.
 
 ## Do these next
 - **Open it with real rows in it.** This container has no Supabase credentials, so no

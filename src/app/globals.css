@@ -45,9 +45,34 @@
     --surface-muted: 40 27.3% 91.4%;     /* #efebe3 — YSM --paper-2               */
     --surface-sunken: 41 24% 87%;    /* #e6e1d6 — YSM --paper-3               */
     --foreground: 172.5 18.2% 8.6%;        /* #121a19 — YSM --ink                   */
-    --muted-foreground: 120 2.6% 38.2%;  /* #5f645f — YSM --ink-3, 5.4:1 on paper */
+    /* Lifted from YSM's #5f645f (5.4:1 on paper, 4.6:1 on a sunken panel — AA,
+       and no more). This is not decoration: it is every hint under a field,
+       every table header, every page description, and through `Eyebrow` it is
+       the row label on every `DataTable` card on a phone. At AAA it reads at
+       arm's length on a counter tablet. Hue and saturation are YSM's; only
+       lightness moves. */
+    --muted-foreground: 120 2.6% 27.9%;  /* #454945 — 8.7:1 card, 8.1:1 page, 7.0:1 sunken */
     --border: 42 24% 86%;            /* #e4dfd3 — YSM --rule-soft             */
     --strong: 41.1 20% 81.4%;            /* #d9d3c6 — YSM --rule                  */
+
+    /*
+     * The edge of a control you type in — and *only* that.
+     *
+     * An input in this app is `bg-surface` sitting on a card that is also
+     * `bg-surface`, so its border is the one thing that says "this is a box you
+     * fill in". At `--strong` that border measures **1.42:1** against the fill
+     * it outlines, where WCAG 1.4.11 asks 3:1 of anything identifying a
+     * control — and a field that does not look like a field is where somebody
+     * who is unsure of themselves stops.
+     *
+     * Deliberately a separate token rather than darkening `--strong`, which is
+     * 60 call sites of card edges, table rules and hairlines. Those are
+     * *decorative* separators, explicitly outside 1.4.11, and dragging them to
+     * 3:1 would turn YSM's paper into a wireframe to fix a problem they do not
+     * have. Same hue and saturation as `--strong`; only lightness moves, which
+     * is the precedent the dark palette below already set.
+     */
+    --control-border: 41.1 20% 50.4%;    /* #9a8a67 — 3.21:1 on a card, 3.00:1 on the page */
 
     /* The brand. YSM's teal, used for the primary action, the active nav row
        and focus — intent and place, not status. 5.7:1 on paper, 6.1:1 on a
@@ -97,13 +122,14 @@
     --surface-muted: 60 6% 10%;      /* #1b1b18 — YSM dark --paper-2          */
     --surface-sunken: 60 4.5% 13.1%;     /* #232320 — YSM dark --paper-3          */
     --foreground: 37.5 21.1% 92.5%;        /* #f0ede8 — YSM dark --ink              */
-    /* YSM's dark --ink-3 is #84817a, which it verified at 4.7:1 against the
-       page — but it measures 4.34:1 against a *card*, and most muted text in
-       this app sits on a card. Lifted one step to #8b8880: 5.2:1 on the page,
-       4.8:1 on a card, so it clears AA on both. */
-    --muted-foreground: 43.6 4.5% 52.4%;   /* #8b8880                               */
+    /* The dark value actually *failed* AA where it lands most often: 4.45:1 on
+       `--surface-sunken` and 4.76:1 on a card, against the 4.5 floor. Lifted to
+       clear AAA on the page, on a card and on a sunken panel alike. */
+    --muted-foreground: 43.6 4.5% 67%;     /* #afada7 — 7.5:1 card, 8.2:1 page, 7.0:1 sunken */
     --border: 48 6.3% 15.5%;             /* #2a2925 — YSM dark --rule-soft        */
     --strong: 50 7% 17%;             /* #2e2d28 — YSM dark --rule             */
+    /* Same reasoning as light: 1.22:1 is not an edge anybody can see. */
+    --control-border: 50 7% 38.8%;       /* #6a685c — 3.01:1 on a card, 3.29:1 on the page */
 
     /* Lifted so the brand still clears AA against a dark surface, and so a
        solid fill can carry dark text. YSM's own dark accent (#00898f) is the
@@ -123,7 +149,11 @@
        under dark text. */
     --success: 122 34% 55%;          /* #65b368 — 7.2:1 page                  */
     --warning: 16 72% 60%;           /* #e27750 — 6.1:1 page                  */
-    --danger: 0 68% 64%;             /* #e26565 — 5.5:1 page                  */
+    /* 64% → 64.5%: as a *badge* — the label colour on a 10% tint of itself —
+       this measured 4.45:1, just under AA, and the words it carries are
+       "Overdue", "Cancelled" and "Void". Half a percent of lightness clears it
+       without moving the colour anybody perceives. */
+    --danger: 0 68% 64.5%;           /* #e26767 — 5.6:1 page, 4.5:1 as a badge */
     --info: 216 66% 64%;             /* #6797e0 — 6.2:1 page                  */
     --on-status: 60 5.3% 7.5%;
     --ring: 183 52% 52%;
@@ -258,6 +288,9 @@
   /* Named `strong`, not `border-strong`: a colour called `border-strong` would
      spell the utility `border-border-strong`. This keeps it `border-strong`. */
   --color-strong: hsl(var(--strong));
+  /* The control edge, distinct from the decorative rule above — see the note
+     beside `--control-border`. Used by `CONTROL` and nothing else. */
+  --color-control-border: hsl(var(--control-border));
   --color-primary: hsl(var(--primary));
   --color-primary-foreground: hsl(var(--primary-foreground));
   --color-action: hsl(var(--action));

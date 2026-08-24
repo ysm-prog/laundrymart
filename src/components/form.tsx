@@ -153,7 +153,7 @@ export function Checkbox({
     <label className="flex min-h-11 cursor-pointer items-center gap-3 rounded-lg py-1.5 text-sm
                       transition hover:bg-surface-muted/60">
       <input id={name} name={name} type="checkbox" value={value} defaultChecked={defaultChecked}
-             className="size-[1.15rem] shrink-0 rounded border-strong accent-primary" />
+             className="size-[1.15rem] shrink-0 rounded border-control-border accent-primary" />
       {label}
     </label>
   );

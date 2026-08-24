@@ -128,39 +128,110 @@ export function fieldLabel(path: ReadonlyArray<PropertyKey>): string {
 }
 
 /**
+ * Everything Zod hands back about one failure. Only `message` and `path` are
+ * guaranteed; the rest arrive per issue kind and are what let this build a
+ * sentence of its own rather than relaying Zod's.
+ */
+type Issue = {
+  path: ReadonlyArray<PropertyKey>;
+  message: string;
+  code?: string;
+  /** `string` | `number` | `array` … on a too_small / too_big. */
+  origin?: string;
+  /** `email` | `uuid` | `url` | `regex` … on an invalid_format. */
+  format?: string;
+  minimum?: number | bigint;
+  maximum?: number | bigint;
+};
+
+/**
+ * How Zod's own messages start. Anything matching is machine text.
+ *
+ * Checked against every issue kind Zod 4 actually produces for the validators
+ * this app uses, and against every custom message written in `src/` — none of
+ * ours begins with one of these, which is what makes the test safe in both
+ * directions.
+ */
+const ZOD_PREFIXES = ["invalid ", "too small", "too big", "unrecognized ", "expected "];
+
+/**
+ * Fragments that only ever appear in generated text: a quoted list of enum
+ * values, a pipe between them, a comparison operator, a regular expression.
+ *
+ * The second half of the guard, and the reason this is safe by construction
+ * rather than by enumeration — a future Zod release can word its defaults
+ * however it likes, and a message carrying `"van"|"truck"` or `>=1950` still
+ * never reaches a person.
+ */
+const MACHINE_MARKERS = ['"', "|", ">=", "<=", "received ", "must match pattern", "/^"];
+
+function isMachineText(message: string): boolean {
+  const normalised = message.trim().toLowerCase();
+  if (ZOD_PREFIXES.some((prefix) => normalised.startsWith(prefix))) return true;
+  return MACHINE_MARKERS.some((marker) => normalised.includes(marker));
+}
+
+/**
+ * Our own sentence for a failure, built from the *structured* fields Zod
+ * supplies rather than from its prose.
+ *
+ * This is the half that makes the module safe by construction. The first
+ * version of this file tested Zod's message against a list of its known
+ * defaults and passed anything unrecognised straight through — a denylist, and
+ * an incomplete one: `z.enum()` produced
+ * `Invalid option: expected one of "van"|"truck"|"ute"` and a bare `.min()`
+ * produced `Too small: expected number to be >=1950`, both of which went to a
+ * counter verbatim. An unknown issue kind now falls to a plain sentence instead
+ * of to Zod's, which is the same shape `databaseMessage` already had.
+ */
+function ourReason(issue: Issue): string {
+  const missing = /received (undefined|null)/i.test(issue.message);
+  switch (issue.code) {
+    case "invalid_type":
+      return missing ? "it needs to be filled in." : "it does not look right.";
+    // An enum or a literal: the value was not one of the offered choices.
+    case "invalid_value":
+      return "please pick one of the choices offered.";
+    case "too_small":
+      if (issue.origin === "array") return "please add at least one.";
+      if (issue.origin === "string" && issue.minimum !== undefined) {
+        return `it needs to be at least ${issue.minimum} characters long.`;
+      }
+      if (issue.minimum !== undefined) return `it cannot be less than ${issue.minimum}.`;
+      return "it is too small.";
+    case "too_big":
+      if (issue.origin === "string" && issue.maximum !== undefined) {
+        return `it cannot be longer than ${issue.maximum} characters.`;
+      }
+      if (issue.maximum !== undefined) return `it cannot be more than ${issue.maximum}.`;
+      return "it is too long.";
+    case "invalid_format":
+      if (issue.format === "email") return "that is not an email address.";
+      if (issue.format === "url") return "that is not a web address.";
+      // `uuid` is an id posted by a picker, never typed — so the useful thing
+      // to say is that the choice did not come through, not what a UUID is.
+      if (issue.format === "uuid") return "that choice did not come through. Please pick it again.";
+      return "it does not look right.";
+    default:
+      return missing ? "it needs to be filled in." : "it does not look right.";
+  }
+}
+
+/**
  * The half-sentence that follows the field name, as a complete clause.
  *
- * Zod's own defaults ("Required", "Invalid input", "Expected string, received
- * null") are accurate and tell nobody what to do, so they are replaced. A
- * message somebody wrote on purpose in the schema — "Use the date picker",
- * "Cannot be negative" — already says the useful thing and is passed through.
- *
- * The two cases are phrased differently on purpose. A replacement reads as a
- * statement about the box ("it needs to be filled in"); ours reads as an
- * instruction ("use the date picker"), and prefixing that with "it" would
- * produce "it use the date picker".
+ * A message written on purpose in the schema — "Use the date picker", "Cannot
+ * be negative" — already says the useful thing and is passed through. Zod's own
+ * is replaced. The two are phrased differently on purpose: a replacement reads
+ * as a statement about the box ("it needs to be filled in"); ours reads as an
+ * instruction, and prefixing that with "it" would give "it use the date picker".
  */
-function readableReason(message: string): string {
-  const normalised = message.trim().toLowerCase();
-  const isZodDefault =
-    normalised === "required" ||
-    normalised === "invalid input" ||
-    normalised.startsWith("invalid input:") ||
-    normalised.startsWith("expected ") ||
-    normalised.includes("received undefined") ||
-    normalised.includes("received null");
-
-  if (isZodDefault) {
-    return normalised === "required" || normalised.includes("received undefined")
-      ? "it needs to be filled in."
-      : "it does not look right.";
-  }
-  const trimmed = message.trim();
+function readableReason(issue: Issue): string {
+  const trimmed = issue.message?.trim() ?? "";
+  if (!trimmed || isMachineText(trimmed)) return ourReason(issue);
   const sentence = trimmed.charAt(0).toUpperCase() + trimmed.slice(1);
   return /[.!?]$/.test(sentence) ? sentence : `${sentence}.`;
 }
-
-type Issue = { path: ReadonlyArray<PropertyKey>; message: string };
 
 /**
  * The first validation failure, said as a sentence about a labelled box.
@@ -172,7 +243,7 @@ type Issue = { path: ReadonlyArray<PropertyKey>; message: string };
 export function validationMessage(issues: ReadonlyArray<Issue>): string {
   const issue = issues[0];
   if (!issue) return "Something on that form was not right. Please check it and try again.";
-  const reason = readableReason(issue.message);
+  const reason = readableReason(issue);
   const label = fieldLabel(issue.path);
   // A top-level refinement has no path — there is no one box to point at, so
   // the reason has to carry the message on its own.
@@ -189,6 +260,15 @@ export function validationMessage(issues: ReadonlyArray<Issue>): string {
  * act on. Anything unrecognised now gets a sentence that says the two things
  * that actually matter — nothing was saved, and here is what to do next.
  */
+/**
+ * The Postgres codes this module says something specific about.
+ *
+ * Exported so `describeDbError` can decide whether an error is worth logging
+ * without keeping its own copy of the list — two hand-maintained sets of the
+ * same four strings stay in step exactly until one of them does not.
+ */
+export const HANDLED_DB_CODES = new Set(["23505", "23503", "42501", "P0001"]);
+
 export function databaseMessage(error: { code?: string; message: string }): string {
   switch (error.code) {
     case "23505":

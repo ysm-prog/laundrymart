@@ -19,7 +19,7 @@ import {
 import { Pagination, pageFrom, rangeFor } from "@/components/list-controls";
 import { listActiveBoards } from "@/lib/runs/my-runs";
 
-export const metadata = { title: "Jobs" };
+export const metadata = { title: "Customer laundry" };
 export const dynamic = "force-dynamic";
 
 type Search = {
@@ -83,10 +83,10 @@ export default async function JobsPage({ searchParams }: { searchParams: Promise
   return (
     <div>
       <PageHeader
-        title="Jobs"
-        description="Laundry taken in at the counter, from drop-off through to delivery or collection."
+        title="Customer laundry"
+        description="Laundry people have left with us, from the counter through to getting it back to them."
         actions={can(session.role, "orders.write")
-          ? <ButtonLink href="/orders/new" variant="primary">Create new job</ButtonLink>
+          ? <ButtonLink href="/orders/new" variant="primary">Take in laundry</ButtonLink>
           : null}
       />
 

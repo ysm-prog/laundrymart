@@ -8,7 +8,7 @@ import {
 } from "@/components/ui";
 import { ListControls, Pagination, pageFrom, rangeFor } from "@/components/list-controls";
 
-export const metadata = { title: "Stops" };
+export const metadata = { title: "Driver visits" };
 export const dynamic = "force-dynamic";
 
 type Search = { q?: string; status?: string; date?: string; page?: string; error?: string; ok?: string };
@@ -33,8 +33,8 @@ export default async function JobsPage({ searchParams }: { searchParams: Promise
   return (
     <div>
       <PageHeader
-        title="Stops"
-        description="Every stop on a run: what was collected, what was delivered, and anything that went wrong."
+        title="Driver visits"
+        description="Every time a driver called on a customer: what was collected, what was dropped off, and anything that went wrong."
       />
       <ListControls
         action="/jobs"

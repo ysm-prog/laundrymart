@@ -1,7 +1,7 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { z } from "zod";
-import { databaseMessage, validationMessage } from "@/lib/messages";
+import { HANDLED_DB_CODES, databaseMessage, validationMessage } from "@/lib/messages";
 
 /**
  * Shared plumbing for server actions.
@@ -167,11 +167,8 @@ export function toObject(formData: FormData): Record<string, FormDataEntryValue>
  * goes to a counter.
  */
 export function describeDbError(error: { code?: string; message: string }): string {
-  if (error.code && !KNOWN_DB_CODES.has(error.code)) {
+  if (error.code && !HANDLED_DB_CODES.has(error.code)) {
     console.error("[db] unhandled error", { code: error.code, message: error.message });
   }
   return databaseMessage(error);
 }
-
-/** The codes `databaseMessage` says something specific about. */
-const KNOWN_DB_CODES = new Set(["23505", "23503", "42501", "P0001"]);

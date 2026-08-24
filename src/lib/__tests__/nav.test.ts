@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { NAVIGATION, isActive, navigationFor, sectionFor } from "@/lib/nav";
 import { MEMBERSHIP_ROLES, ROLES, can, type Role } from "@/lib/roles";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 describe("navigationFor", () => {
   it("gives every role a way to reach the screen they are redirected to", () => {
@@ -389,6 +391,44 @@ describe("the map itself", () => {
         if (!entry.capability) continue;
         expect(holders(entry.capability).length, entry.href).toBeGreaterThan(0);
       }
+    }
+  });
+});
+
+/**
+ * The rail's label and the page it opens have to say the same thing.
+ *
+ * "Jobs" → "Customer laundry" and "Stops" → "Driver visits" were renamed in
+ * `nav.ts` on 2026-08-24 because both old words read as "a job somebody has to
+ * do" and telling them apart needed the glossary. The destination pages kept
+ * their own titles, so pressing the renamed row landed you on a heading using
+ * exactly the word the rename existed to get away from — and nothing here
+ * noticed, because every other test in this file asserts `nav.ts` against
+ * itself.
+ *
+ * This reads the page sources instead. It is the only place the two halves can
+ * be compared: a `page.tsx` cannot be imported into a unit test, since it
+ * reaches Supabase at module scope.
+ */
+describe("the rail and the page it opens agree", () => {
+  const APP = join(process.cwd(), "src/app/(app)");
+
+  it.each([
+    ["orders/page.tsx", "Customer laundry"],
+    ["jobs/page.tsx", "Driver visits"],
+  ])("%s is titled %s", (file, label) => {
+    const source = readFileSync(join(APP, file), "utf8");
+    expect(source).toContain(`export const metadata = { title: "${label}" };`);
+    expect(source).toContain(`title="${label}"`);
+  });
+
+  it("no longer titles either page with the word the rename retired", () => {
+    for (const file of ["orders/page.tsx", "jobs/page.tsx"]) {
+      const source = readFileSync(join(APP, file), "utf8");
+      expect(source).not.toContain('export const metadata = { title: "Jobs" }');
+      expect(source).not.toContain('export const metadata = { title: "Stops" }');
+      expect(source).not.toContain('title="Jobs"');
+      expect(source).not.toContain('title="Stops"');
     }
   });
 });

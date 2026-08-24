@@ -367,7 +367,7 @@ export type ButtonSize = keyof typeof BUTTON_SIZES;
  * as the soft edge the design language wants.
  */
 export const CONTROL =
-  "min-h-11 w-full rounded-lg border border-strong bg-surface px-3 py-2 text-base text-foreground " +
+  "min-h-11 w-full rounded-lg border border-control-border bg-surface px-3 py-2 text-base text-foreground " +
   "shadow-xs transition placeholder:text-muted-foreground " +
   "focus:border-primary focus:ring-2 focus:ring-primary/25 " +
   "disabled:cursor-not-allowed disabled:bg-surface-muted disabled:opacity-70";
