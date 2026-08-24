@@ -110,6 +110,49 @@ CLAUDE.md §3, §7, §11, §22, §24, §26 and the newest changelog entry have i
 700 unit tests (was 698), **368 pgTAP assertions (was 348)**, `verify` green, all 35 migrations
 against a fresh Postgres 16. Both new proofs were confirmed to **fail without their migration**.
 
+## Then: auth emails moved onto Resend, so no SMTP is needed
+The owner's instruction, and it closes the longest-standing open item in the file. CLAUDE.md §10,
+§10c, §24 and the newest changelog entry have it. **No migration; no schema, RLS, capability,
+policy or workflow change** — one sender replaces another.
+
+**The project had never sent a single auth email and had been saying otherwise.** Invitations used
+`inviteUserByEmail`, sign-in links used `signInWithOtp`; both ask **Supabase's built-in mailer**,
+which needs custom SMTP nobody configured. Baseline read off the live database first: **0
+`auth.one_time_tokens`, 0 `auth.flow_state`, `confirmation_sent_at`/`recovery_sent_at`/`invited_at`
+NULL on all 18 logins, 15 of 18 never signed in.** Meanwhile invoices and customer mail have gone
+through **Resend** the whole time — a working sender and a broken one, with the auth mail on the
+broken one.
+
+- **`generateLink()` is the seam.** It mints a link and **sends nothing**; the app then posts the
+  email through `sendEmail()`. That is `ysm-hub`'s arrangement — everything it sends goes through
+  `resend.emails.send()` and Supabase delivers none of it.
+- **The link points at this app** (`<origin>/auth/invite?token_hash=…`), not at Supabase's
+  `/auth/v1/verify`. That removes the §10c deployment step: the project no longer has to list this
+  origin under its allowed redirect URLs, so a preview deployment works with zero configuration.
+- **A sign-in link is a `recovery` link.** It is the one type that signs a person in *and* lets
+  them set a password — what "No password, or forgotten it?" already promised — and it cannot
+  create an account, so a typo still cannot mint an orphan login.
+- **A refused send deletes the login it just made.** Minting an invite link *creates* the user, and
+  leaving a half-made one would make the retry answer "they already have a login" — the one thing
+  that stops the admin sending the mail that never went. Provider is checked *before* the mint too.
+- **"Email sign-in link" is new on every People row** — the missing rung between changing a role
+  and removing access. It is how the four board logins stop sharing one bootstrap password.
+- **The anti-enumeration rule is unchanged**, only its vocabulary moved. `classifyLinkError`
+  **defaults to "about this address"**, so an unrecognised refusal is hidden rather than becoming
+  an oracle; `inviteFailureMessage` is the admin-facing half that is allowed to say more.
+- `INVOICE_FROM_EMAIL` is the sender for auth mail too and was deliberately **not** renamed —
+  a rename takes a live deployment's mail down on redeploy, for tidiness.
+
+733 unit tests (was 700), `verify` green. `/auth/invite` and `/login` are outside the auth gate so
+they could actually be rendered: **72 combinations** (2 themes × 3 text sizes × 4 widths × 3 pages)
+with **0 overflow and 0 sub-36px targets**, headings confirmed as "You have been invited" and
+"Choose a new password". The 48 console errors are all `ERR_TUNNEL_CONNECTION_FAILED` from the
+invite screen calling the *placeholder* Supabase URL the local build uses — `/login` has none.
+
+**Nothing has been sent yet.** No Resend key and no service key here. **Before trusting it: invite
+one real address on `ats.coreit.com.au`, follow the link, then check the counters moved** —
+`auth.one_time_tokens` should stop being 0.
+
 ## Verified against the live project (2026-08-24)
 The accessibility and tidy-up work added **no migration**; the four fixes above added two, both
 now applied (§11). Checked at the first pass: advisors **18** (unchanged — no function added), **0** `anon` table grants, **0**
@@ -138,8 +181,11 @@ fast-forwards, and Dev absorbed the 18-commit backlog the changelog kept recordi
   authenticated screen was rendered. Sign in as `owner@roles.example.com`, press each card on the
   home screen, and set the text to Biggest on a phone.
 - **Change the board password.** `board1@`…`board4@ats.example.com` share one bootstrap password
-  (in no committed file — it was reported in chat). Once custom SMTP is configured, invite each
-  board through `/admin/users` so the round sets its own.
+  (in no committed file — it was reported in chat). **You can now do this**: press *Email sign-in
+  link* beside each board on `/admin/users` and let each round set its own.
+- **Set `RESEND_API_KEY` and `INVOICE_FROM_EMAIL` on the deployment if they are not already.**
+  Every auth email now depends on them; without them each action says so by name rather than
+  claiming a success that did not happen.
 - **Sign in as the counter and take a job in.** `customer_service` got `orders.*` back and 0034
   widened the policy; the write was proved to land against live rows, but no *screen* has been
   opened as that role.
@@ -156,8 +202,10 @@ fast-forwards, and Dev absorbed the 18-commit backlog the changelog kept recordi
 - **§23 sweep:** ~345 of 451 `.from(...)` reads still rely on RLS alone; correct for eleven of
   twelve roles, but a platform admin's session spans two laundries.
 - **Nothing has talked to Xero yet** (`XERO_CLIENT_ID`/`SECRET` unset by the owner's decision).
-- **This deployment cannot send any auth email** — custom SMTP still unconfigured. The board
-  logins were written by SQL to work around it; a real invitation still cannot be sent.
+- **Auth email now goes through Resend, not Supabase** (2026-08-24), so no SMTP is needed — but
+  **it has not been exercised against the provider yet**, and it needs `RESEND_API_KEY` +
+  `INVOICE_FROM_EMAIL` on the deployment. Until one real invitation has been followed end to end,
+  treat this as built rather than proven.
 - Database: **0001–0035 applied to `laundrymart-syd`.** Nothing pending.
 
 ## Environment readiness

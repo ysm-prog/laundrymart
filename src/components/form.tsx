@@ -198,7 +198,7 @@ export function SubmitButton({
   className, formAction,
 }: {
   children?: ReactNode;
-  variant?: "primary" | "danger" | "secondary";
+  variant?: "primary" | "danger" | "secondary" | "ghost";
   pendingLabel?: string;
   size?: "md" | "lg";
   formId?: string;
@@ -221,6 +221,9 @@ export function SubmitButton({
     primary: "bg-action text-action-foreground shadow-xs hover:brightness-110",
     danger: "bg-danger text-on-status shadow-xs hover:brightness-110",
     secondary: "border border-strong bg-surface shadow-xs hover:bg-surface-muted",
+    // For a third verb in a row that already has two: present, and not
+    // competing with them. Mirrors `ghost` in BUTTON_VARIANTS.
+    ghost: "text-primary hover:bg-primary/8",
   } as const;
   const sizes = { md: "min-h-10 px-4", lg: "min-h-11 px-5" } as const;
   return (

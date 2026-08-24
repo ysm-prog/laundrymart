@@ -466,6 +466,10 @@ export default function DesignPreviewPage() {
                     <Button variant="ghost">Ghost link</Button>
                     <ButtonLink href="/design-preview">Button link</ButtonLink>
                     <SubmitButton>Save</SubmitButton>
+                    {/* The third verb in a row that already has two — the
+                        People screen's "Email sign-in link" beside Save and
+                        Remove. Present without competing with them. */}
+                    <SubmitButton variant="ghost">Ghost submit</SubmitButton>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
                     <StatusBadge status="active" /><StatusBadge status="in_progress" />

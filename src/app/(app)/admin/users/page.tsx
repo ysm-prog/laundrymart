@@ -13,7 +13,9 @@ import {
 } from "@/components/ui";
 import { ConfirmSubmit } from "@/components/confirm-submit";
 import { Field, Input, Select, SubmitButton } from "@/components/form";
-import { inviteMember, removeMember, updateMembership } from "../actions";
+import {
+  inviteMember, removeMember, sendMemberSignInLink, updateMembership,
+} from "../actions";
 
 export const metadata = { title: "People" };
 export const dynamic = "force-dynamic";
@@ -118,8 +120,12 @@ const activeDepots = cache(async (): Promise<Pick<Depot, "id" | "name">[]> => {
  *
  * The screen used to say accounts were "set up by your system administrator" —
  * true, and useless to an owner who needs to add their own counter staff and
- * their own driver. Supabase sends the mail, so nothing here depends on the
- * Resend configuration the invoice emails use.
+ * their own driver.
+ *
+ * The invitation goes out through **this app's own mail provider**, the one the
+ * invoices already use. It used to be Supabase's built-in sender, which needs
+ * custom SMTP nobody had configured — so every invitation this screen has ever
+ * reported as sent was a form saying so and sending nothing.
  */
 async function InviteCard() {
   const depots = await activeDepots();
@@ -228,6 +234,19 @@ async function MembershipList({
                   <Select name="depot_id" placeholder="Every site" defaultValue={row.depotId}
                           options={depots.map((depot) => ({ value: depot.id, label: depot.name }))} />
                   <SubmitButton variant="secondary" pendingLabel="Saving…">Save</SubmitButton>
+                </form>
+                {/* The missing rung between "change their role" and "take
+                    their access away": an invitation only goes out once, so
+                    somebody who never opened theirs — or who has lost their
+                    password — had no way back in that an owner could offer.
+                    It is here now because it needs no SMTP (see
+                    `lib/auth/auth-links.ts`), and it is how a shared bootstrap
+                    password gets replaced one person at a time. */}
+                <form action={sendMemberSignInLink}>
+                  <input type="hidden" name="user_id" value={row.id} />
+                  <SubmitButton variant="ghost" pendingLabel="Sending…">
+                    Email sign-in link
+                  </SubmitButton>
                 </form>
                 <form action={removeMember}>
                   <input type="hidden" name="user_id" value={row.id} />

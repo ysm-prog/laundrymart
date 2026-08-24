@@ -671,7 +671,11 @@ segment, since the storage policies check only the tenant segment.
 ## 10. Environment
 See `.env.example`; validated fail-fast in `src/lib/env.ts`. Email delivery
 (`RESEND_API_KEY`, `INVOICE_FROM_EMAIL`) is optional — without it the app runs and the send
-action says so rather than the deployment refusing to boot. `CRON_SECRET` is optional on the
+action says so rather than the deployment refusing to boot. **Since 2026-08-24 those two are the
+sender for the auth mail as well** — invitations and sign-in links, which used to go through
+Supabase's own mailer and so needed custom SMTP nobody had configured. One provider posts
+everything the app sends. The names still say `INVOICE_` because renaming them would take a live
+deployment's mail down at the moment it redeployed. `CRON_SECRET` is optional on the
 same principle, with one difference that matters: `/api/notifications/sweep` refuses **every**
 request while it is unset, so an unconfigured deployment loses the swept notifications rather
 than exposing an endpoint that enumerates every tenant's overdue invoices. The Vercel cron
@@ -831,11 +835,33 @@ inside a horizontally scrolling board stretched the document ~230px on a phone; 
 column carries `relative` for exactly that reason.
 
 ## 10c. Invitations
-`/admin/users` invites by email. `inviteUserByEmail()` on the service-role client creates the
-login (Supabase sends the mail, so this needs no Resend configuration); the **membership** row
-goes in through the caller's own RLS-bound client, so which tenant somebody joins is still the
-database's decision. An address that already has a login is resolved with
-`generateLink({type:"magiclink"})`, which returns the user without sending anything.
+`/admin/users` invites by email. **The app mints the link and sends it through Resend** —
+`generateLink()` on the service-role client creates the login and hands back the link *without
+sending it*, and `lib/auth/send-link.ts` then posts the email through the same transport the
+invoices use. It used to be `inviteUserByEmail()`, which asks Supabase's built-in mailer to
+deliver; that needs custom SMTP this deployment has never had, so **every invitation the screen
+has ever reported as sent went nowhere** (§18, 2026-08-24 — 0 `auth.one_time_tokens` on the live
+project, and `invited_at` NULL on all 18 logins). The **membership** row still goes in through the
+caller's own RLS-bound client, so which tenant somebody joins is the database's decision. An
+address that already has a login is resolved with `generateLink()` too and gets no mail — they
+have a password already, and issuing one would only invalidate a link they may still hold.
+
+**A refused send un-does the invitation.** Minting the link *creates* the login, so a provider
+that refuses afterwards would leave an `auth.users` row nobody can reach — and the retry would
+answer "they already have a login", which is the one thing that stops the administrator sending
+the mail that never went. The login this call just made is deleted, so a retry starts clean; the
+provider is also checked *before* the mint, so the ordinary unconfigured case creates nothing.
+
+**"Email sign-in link" sits on every row of the People screen**, because an invitation only goes
+out once. Somebody who never opened theirs, or who has lost their password, previously had no way
+back in that an owner could offer. The address is resolved from `listMembers()` rather than from
+the posted id, so an id from another laundry resolves to nothing rather than mailing a stranger.
+
+**A sign-in link is a `recovery` link**, both from that button and from the login page. It is the
+one type that signs a person in *and* lets them set a password — which is what "No password, or
+forgotten it?" promises — and it cannot create an account, so a mistyped address still cannot mint
+an orphan login. `lib/auth/auth-links.ts` holds the reasoning and the link builder; both are pure
+and tested, because the fetch beside them reaches `lib/env` and no unit test can import it.
 
 **The invite lands on `/auth/invite`, not `/auth/callback`.** Supabase bounces an accepted
 invitation back with the session in the URL **fragment**, which never reaches the server, and
@@ -847,9 +873,13 @@ validates the service-role key and must not enter the client bundle). It handles
 shapes a link can arrive in — fragment, `?token_hash=`, `?code=` — and strips the tokens out of
 the address bar once the session is stored.
 
-**Deployment note:** the Supabase project must list `<origin>/auth/invite` under its allowed
-redirect URLs, or invitations fall back to the project's Site URL. The origin is read off the
-request, so a preview deployment invites into itself.
+**No deployment note any more, and that is the point.** This used to read: *the Supabase project
+must list `<origin>/auth/invite` under its allowed redirect URLs, or invitations fall back to the
+project's Site URL.* Because the link is now built on **this** origin around a `token_hash`,
+Supabase never does the redirecting and has nothing to allow — so a preview deployment invites
+into itself with no configuration at all. What the deployment does need is `RESEND_API_KEY` and
+`INVOICE_FROM_EMAIL`; without them every one of these actions says so by name rather than
+reporting a success that did not happen.
 
 Removing access deletes the membership and nothing else: the login survives (it may be their
 access to another tenant), and every row they wrote still points at them. Both removal and a
@@ -1320,6 +1350,84 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-08-24 · Auth emails go through Resend, so no SMTP is needed
+The owner's instruction, and it closes the longest-standing open item in this file. **No
+migration; no schema, RLS, capability, policy or workflow change** — one sender replaces another.
+
+**The project had never sent a single auth email, and it had been saying otherwise.** Invitations
+went through `inviteUserByEmail` and sign-in links through `signInWithOtp`, both of which ask
+**Supabase's built-in mailer** to deliver — and that mailer only reaches members of the Supabase
+organisation and is capped at a couple of messages an hour until the project is pointed at custom
+SMTP. This one never was. Read off the live database before anything changed: **0
+`auth.one_time_tokens`, 0 `auth.flow_state`, and `confirmation_sent_at` / `recovery_sent_at` /
+`invited_at` NULL on all 18 logins.** Not "few" — none, ever. It is why the four board logins and
+the eleven role profiles had to be written by SQL (§3a, §24), why Adelaide still has no real
+member, and why §24 said the shared board password "wants changing once SMTP is configured".
+
+Meanwhile invoices, delivery confirmations and overdue chases have been going out through
+**Resend** the whole time. So there was a working sender and a broken one, and the auth mail was
+on the broken one.
+
+- **`generateLink()` is the seam.** On the service-role client it mints an invitation or a
+  recovery link and **returns it without sending anything** — that is what it is for. The app then
+  builds the email and hands it to `sendEmail()`, the same Resend transport the invoices use. This
+  is `ysm-prog/ysm-hub`'s arrangement: every message that product sends goes out through
+  `resend.emails.send()` and it asks Supabase to deliver nothing.
+- **The link points at this app, not at Supabase, and that removes a deployment step.**
+  `generateLink` hands back both an `action_link` (a Supabase `/auth/v1/verify?…&redirect_to=`
+  URL) and the `hashed_token` behind it. Building `<origin>/auth/invite?token_hash=…` ourselves
+  skips the redirect hop *and* the requirement §10c used to record — the project no longer has to
+  list this origin under its allowed redirect URLs, because Supabase is never the one redirecting.
+  A preview deployment now works with **no configuration at all**.
+- **A sign-in link is a `recovery` link, deliberately.** The login page offers it under "No
+  password, or forgotten it?", so the person pressing it either has none or has lost it — and
+  `recovery` is the one type that both signs them in *and* lets them set one, which is the promise
+  the button was already making. It also cannot create an account, so it keeps the property
+  `shouldCreateUser: false` was there for: a mistyped address still cannot mint an orphan login.
+- **Both kinds land on `/auth/invite`**, which has read `?token_hash=&type=` since it was built and
+  already branched on `invite` versus `recovery`. One screen, two sets of words — an invitation is
+  news, a sign-in link is something asked for a minute ago, and a dead link has a different remedy
+  in each case (ask whoever invited you, versus ask for another yourself).
+- **A failed send now un-does the half-made invitation.** Minting an invite link *creates the
+  login*, so a mail provider that refuses afterwards would leave a real `auth.users` row nobody
+  can reach — and the retry would come back "they already have a login", which is the one answer
+  that stops an administrator sending the email that never went. The login this call just made is
+  deleted, so a retry behaves like the first attempt. The provider check also runs **before** the
+  mint, so the ordinary "no key configured" case never creates anything at all.
+- **"Email sign-in link" is new on the People screen**, per row, and it is the rung that was
+  missing: an invitation goes out once, so somebody who never opened theirs — or who has lost their
+  password — had no way back in that an owner could offer. The screen could change their role and
+  take their access away and nothing in between. It exists now because it *can*, and it is how the
+  four board logins stop sharing one bootstrap password: send each round its own link and let it
+  set one. The address is resolved from `listMembers()` rather than from the posted id, so an id
+  from another laundry resolves to nothing instead of mailing a stranger a way in.
+- **The anti-enumeration rule survived the transport change unchanged**, which is the part worth
+  checking rather than assuming. *A failure true of every address is named; a failure true of this
+  address is hidden behind the same answer as success.* `magic-link.ts` still holds it — what moved
+  is the vocabulary, from Supabase's mailer codes to this app's provider. `classifyLinkError`
+  **defaults to "about this address"**, so an unrecognised refusal is hidden: guessing the other
+  way would turn every future Supabase error code into an account-enumeration oracle. The cost is
+  that an administrator sees a duller message, which `inviteFailureMessage` fixes by being allowed
+  to say more — they typed the address themselves, so there is nothing there they could learn.
+- **`INVOICE_FROM_EMAIL` is now the sender for auth mail too, and was deliberately not renamed.**
+  A rename would take a live deployment's mail down at the moment it redeployed, for tidiness.
+  `.env.example` says so instead.
+- 733 unit tests (was 700), `verify` green. `/auth/invite` and `/login` are outside the auth gate,
+  so unlike most of this app they could actually be rendered: asserted in both themes at
+  320/390/768/1440 across all three text sizes — **72 combinations, 0 document overflow and 0
+  interactive targets under 36px**, with the heading confirmed as "You have been invited" and
+  "Choose a new password" in the two modes. The 48 console errors are all one line,
+  `ERR_TUNNEL_CONNECTION_FAILED`, from the invite screen calling the *placeholder* Supabase URL the
+  build uses here — exactly 2 pages × 2 themes × 3 sizes × 4 widths, and `/login` contributes none.
+
+**Nothing here has been sent yet, and the baseline above is what makes the first send checkable.**
+This container has no Resend key and no service key, so no link has been minted and no email
+posted. **Before trusting it: invite one real address on `ats.coreit.com.au`, follow the link, and
+then confirm the counters moved** — `auth.one_time_tokens` should no longer be 0, and that login's
+`recovery_sent_at`/`confirmation_sent_at` should stop being NULL. If `RESEND_API_KEY` and
+`INVOICE_FROM_EMAIL` are not set on the deployment, every one of these actions now says so by name
+rather than reporting success; that is the same contract the invoice send has had since it shipped.
+
 ### 2026-08-24 · Four questions the owner answered, and the two migrations behind them
 Asked rather than assumed, because each was theirs to decide and three of the four could not be
 done safely in `src/` alone. Two migrations (`0034`, `0035`), no new table, no new column, no new
@@ -1395,8 +1503,9 @@ deployment still cannot send an invitation. Verified column by column against th
 password, exactly one email identity, `board` membership in Adelaide and nowhere else, and **not** a
 platform admin. Boards linked went **1 of 5 → 5 of 5**, and `LJ00003`/`LJ00004` are no longer
 assigned to rounds nobody can sign in as. **The shared password is a bootstrap, not a credential
-policy** — it is deliberately in no committed file, and it wants changing once SMTP is configured
-and a real invitation can be sent.
+policy** — it is deliberately in no committed file, and it wants changing once a real invitation
+can be sent. **That is now possible**: the entry above this one moved auth mail onto Resend, so
+each board can be sent its own sign-in link from the People screen and set its own password.
 
 **The month-end run was rehearsed read-only, and the rehearsal is the finding.** Read-only because
 generating writes drafts against 508 real customers, and the question was whether it would work,
@@ -1864,11 +1973,13 @@ before the merge — so the address existed before the code that documents it sh
 safe order. `Dev` is still the stale branch the 2026-08-16 entry recorded; this went the same
 route the last six features took.
 
-**Still true and not fixed here: this deployment cannot send any auth email.** The magic link now
-*says* so instead of pretending, but saying so is not sending. Configure custom SMTP on the
-Supabase project — Supabase's built-in sender only delivers to members of the `ysm-prog`
-organisation and is capped at a couple of messages an hour — before relying on the link, an
-invitation (§10c) or a password reset.
+**Was still true then and is fixed now.** This entry closed with: *this deployment cannot send any
+auth email — the magic link now says so instead of pretending, but saying so is not sending.* The
+remedy it named was custom SMTP on the Supabase project. The 2026-08-24 entry took the other road
+and moved auth mail onto **Resend**, the sender the invoices already used, so no SMTP is needed at
+all. The reasoning here is untouched and still load-bearing: the anti-enumeration rule, the
+refusal to create a login from the sign-in box, and the fact that a form which always claims
+success teaches nobody anything.
 
 ### 2026-08-20 · Month end is a month-end button, and every customer can be priced
 A review of "job completed → invoice pool → one press at month end" against the code. The
@@ -3488,8 +3599,9 @@ every open job at a different employee each time is administration the work does
 
 **Cutover status, 2026-08-20.** Boards exist. `Adelaide Towel Service` carries **Board 1–4** at
 the Adelaide depot with **no login on any of them** — none exists, and this deployment cannot send
-an invitation (custom SMTP is still unconfigured), so `/boards` will show all four as unlinked and
-their My Runs is empty by design until a login is made and linked. `Harbour Commercial Laundry`
+an invitation *at the time* (auth mail moved onto Resend on 2026-08-24 — until then no invitation
+could be sent at all), so `/boards` showed all four as unlinked and their My Runs was empty by
+design until a login was made and linked. `Harbour Commercial Laundry`
 carries **Board 1**, linked to the `board@roles.example.com` test profile, with `RUN00002` as its
 run and LJ00004/LJ00005 on it.
 
@@ -3512,8 +3624,9 @@ nowhere else. Boards linked went **1 of 5 → 5 of 5**, so `LJ00003` and `LJ0000
   gives for `@roles.example.com`. These are not test profiles, though: they are the real laundry's
   operational logins, and `npm run seed:roles -- --remove` does not touch them.
 - **The shared password is a bootstrap and wants replacing.** It is deliberately in no committed
-  file. Once custom SMTP is configured, the right shape is one invitation per board through
-  `/admin/users` (§10c) so each round sets its own.
+  file. **The way to do it now exists**: auth mail goes through Resend as of 2026-08-24, so press
+  *Email sign-in link* beside each board on `/admin/users` (§10c) and let each round set its own.
+  No SMTP, and no second invitation flow to build.
 
 **What is left of the cutover is the real laundry's, not the code's**: invite one person who is
 not a platform admin into Adelaide (its only two members are, and are filtered out of every picker
