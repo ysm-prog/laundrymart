@@ -95,6 +95,34 @@ export function authLinkUrl(
 }
 
 /**
+ * This app's own web address, worked out from the request.
+ *
+ * Kept here, pure, so the derivation is testable — the `headers()` read that
+ * feeds it is a three-line wrapper in `request-origin.ts`, which cannot be
+ * imported by a unit test.
+ *
+ * **`Host` rather than `Origin`, deliberately.** The sign-in form used to read
+ * the `Origin` header, which a browser sends on a form post but which a proxy
+ * may strip and which nothing guarantees — and an absent origin here does not
+ * fail loudly, it tells the person "this deployment could not work out its own
+ * web address", which is a confusing thing to meet on your first attempt to
+ * sign in. `Host` is always present, and on Vercel `x-forwarded-host` is set by
+ * the platform from the domain it routed on, so it is the same string the
+ * person is already looking at.
+ *
+ * The scheme is assumed to be https unless the host is plainly local, because
+ * `x-forwarded-proto` is absent under a bare `next start` and a link built as
+ * `https://localhost:3000` would not open.
+ */
+export function originFromRequest(
+  host: string | null | undefined, proto: string | null | undefined,
+): string {
+  if (!host) return "";
+  const local = /^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i.test(host);
+  return `${proto ?? (local ? "http" : "https")}://${host}`;
+}
+
+/**
  * Why a link could not be sent.
  *
  * Split by **who it is true of**, not by which call failed, because that is the

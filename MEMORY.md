@@ -143,7 +143,9 @@ broken one.
 - `INVOICE_FROM_EMAIL` is the sender for auth mail too and was deliberately **not** renamed —
   a rename takes a live deployment's mail down on redeploy, for tidiness.
 
-733 unit tests (was 700), `verify` green. `/auth/invite` and `/login` are outside the auth gate so
+739 unit tests (was 700), `verify` green. Both callers derive the origin from `Host` via one
+tested rule — the sign-in form used to read the optional `Origin` header, which would have failed
+confusingly the first time somebody asked for a link. `/auth/invite` and `/login` are outside the auth gate so
 they could actually be rendered: **72 combinations** (2 themes × 3 text sizes × 4 widths × 3 pages)
 with **0 overflow and 0 sub-36px targets**, headings confirmed as "You have been invited" and
 "Choose a new password". The 48 console errors are all `ERR_TUNNEL_CONNECTION_FAILED` from the

@@ -1412,13 +1412,23 @@ on the broken one.
 - **`INVOICE_FROM_EMAIL` is now the sender for auth mail too, and was deliberately not renamed.**
   A rename would take a live deployment's mail down at the moment it redeployed, for tidiness.
   `.env.example` says so instead.
-- 733 unit tests (was 700), `verify` green. `/auth/invite` and `/login` are outside the auth gate,
+- 739 unit tests (was 700), `verify` green. `/auth/invite` and `/login` are outside the auth gate,
   so unlike most of this app they could actually be rendered: asserted in both themes at
   320/390/768/1440 across all three text sizes — **72 combinations, 0 document overflow and 0
   interactive targets under 36px**, with the heading confirmed as "You have been invited" and
   "Choose a new password" in the two modes. The 48 console errors are all one line,
   `ERR_TUNNEL_CONNECTION_FAILED`, from the invite screen calling the *placeholder* Supabase URL the
   build uses here — exactly 2 pages × 2 themes × 3 sizes × 4 widths, and `/login` contributes none.
+
+**One inconsistency was found by re-reading the path rather than by a test, and it would have
+shown up on somebody's first attempt to sign in.** The invite action worked its origin out from
+`x-forwarded-host`/`host`; the sign-in form read the **`Origin` header**, which a browser sends on
+a form post but which nothing guarantees and a proxy may strip. An absent origin does not fail
+loudly — it answers "this deployment could not work out its own web address", which is a poor
+thing to meet the first time you ask for a link. Both now go through `originFromRequest()`, which
+is pure and tested, assumes https unless the host is plainly local (so a bare `next start` still
+produces an openable link), and is asserted to hand `authLinkUrl()` something it accepts — the two
+halves disagreeing would be a link that silently never gets built.
 
 **Every login on the project can be sent one today, which was checked rather than assumed.** All
 **18** are `email_confirmed_at` non-null, none banned, none soft-deleted, none SSO and every one

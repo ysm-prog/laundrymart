@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  AUTH_LINK_PATH, GENERATE_TYPE, VERIFY_TYPE, authLinkUrl,
+  AUTH_LINK_PATH, GENERATE_TYPE, VERIFY_TYPE, authLinkUrl, originFromRequest,
 } from "@/lib/auth/auth-links";
 
 const TOKEN = "pkce_2f8c1b9a";
@@ -77,5 +77,51 @@ describe("the two type tables", () => {
     for (const type of Object.values(VERIFY_TYPE)) {
       expect(["invite", "recovery"]).toContain(type);
     }
+  });
+});
+
+/**
+ * The sign-in form used to read the `Origin` header and the invite action read
+ * `Host` — two answers to "where is this app?", and the first one is optional.
+ * An absent origin does not fail loudly: it tells the person "this deployment
+ * could not work out its own web address", which is a poor thing to meet on
+ * your first attempt to sign in.
+ */
+describe("working out this app's own address", () => {
+  it("uses the host the platform routed on", () => {
+    expect(originFromRequest("ats.coreit.com.au", "https"))
+      .toBe("https://ats.coreit.com.au");
+  });
+
+  it("assumes https when the proxy did not say", () => {
+    // `x-forwarded-proto` is absent under a bare `next start`.
+    expect(originFromRequest("ats.coreit.com.au", null))
+      .toBe("https://ats.coreit.com.au");
+  });
+
+  it("assumes http for a plainly local host, so a dev link opens", () => {
+    for (const host of ["localhost:3000", "127.0.0.1:3000", "localhost"]) {
+      expect(originFromRequest(host, null)).toBe(`http://${host}`);
+    }
+  });
+
+  it("still honours an explicit proto on localhost", () => {
+    expect(originFromRequest("localhost:3000", "https")).toBe("https://localhost:3000");
+  });
+
+  it("is empty with no host at all, which the caller reports as its own fault", () => {
+    for (const host of [null, undefined, ""]) {
+      expect(originFromRequest(host, "https")).toBe("");
+    }
+  });
+
+  it("hands `authLinkUrl` something it accepts, or nothing", () => {
+    // The two halves have to agree: a derived origin that `authLinkUrl` then
+    // refuses would be a link that silently never gets built.
+    for (const host of ["ats.coreit.com.au", "localhost:3000", "preview-x.vercel.app"]) {
+      const origin = originFromRequest(host, null);
+      expect(authLinkUrl(origin, "invite", "tok")).not.toBeNull();
+    }
+    expect(authLinkUrl(originFromRequest("", null), "invite", "tok")).toBeNull();
   });
 });

@@ -1,12 +1,12 @@
 "use server";
 
 import { redirect } from "next/navigation";
-import { headers } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { magicLinkOutcome } from "@/lib/auth/magic-link";
 import { sendSignInLink } from "@/lib/auth/send-link";
+import { requestOrigin } from "@/lib/auth/request-origin";
 
 const credentials = z.object({
   email: z.string().email("Enter a valid email address"),
@@ -60,8 +60,10 @@ export async function sendMagicLink(formData: FormData): Promise<void> {
   // that exists, receives mail, and dead-ends on "not linked to a laundry yet".
   // Access is granted by an administrator inviting somebody (§10c), never by
   // turning up at the login screen.
-  const origin = (await headers()).get("origin") ?? "";
-  const result = await sendSignInLink({ email: parsed.data.email, origin });
+  const result = await sendSignInLink({
+    email: parsed.data.email,
+    origin: await requestOrigin(),
+  });
 
   if (!result.ok) {
     // Never the address, and never which half of it was wrong.

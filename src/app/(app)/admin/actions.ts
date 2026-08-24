@@ -1,13 +1,13 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { headers } from "next/headers";
 import { z } from "zod";
 import { assertCapability } from "@/lib/auth/context";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { recordAudit } from "@/lib/audit";
 import { sendInvite, sendSignInLink } from "@/lib/auth/send-link";
+import { requestOrigin } from "@/lib/auth/request-origin";
 import { listMembers } from "@/lib/directory";
 import { inviteFailureMessage } from "@/lib/auth/magic-link";
 import { MEMBERSHIP_ROLES, membershipRolesWith, type MembershipRole } from "@/lib/roles";
@@ -204,26 +204,6 @@ const inviteSchema = z.object({
   role: z.enum(MEMBERSHIP_ROLES),
   depot_id: optionalUuid,
 });
-
-/**
- * The web address this deployment is being reached on.
- *
- * Read off the request rather than out of an environment variable, so a preview
- * deployment invites into itself instead of mailing a link to production — and
- * so nothing new has to be configured for the feature to work at all.
- *
- * Since the invitation link is now built on *this* origin and carries a
- * `token_hash` (see `lib/auth/auth-links.ts`), Supabase is never the one doing
- * the redirecting — so the deployment step §10c used to require, listing this
- * URL under the project's allowed redirect URLs, is gone with it.
- */
-async function requestOrigin(): Promise<string> {
-  const requestHeaders = await headers();
-  const host = requestHeaders.get("x-forwarded-host") ?? requestHeaders.get("host") ?? "";
-  if (!host) return "";
-  const protocol = requestHeaders.get("x-forwarded-proto") ?? "https";
-  return `${protocol}://${host}`;
-}
 
 /**
  * Set what a person is called.
