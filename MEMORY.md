@@ -74,9 +74,45 @@ The side panel wanted collapsing section by section and the whole app read as ov
 - 698 unit tests (was 691), `verify` green, re-measured clean at all sizes; control border still
   3.21:1 / 3.01:1.
 
-## Verified against the live project (2026-08-24) — nothing to apply
-This branch adds **no migration**; the ledger's last entry is still `0033_laundry_prices_read`.
-Checked anyway: advisors **18** (unchanged — no function added), **0** `anon` table grants, **0**
+## Then four questions the owner answered, same day
+Asked rather than assumed — each was theirs, and three could not be done safely in `src/` alone.
+CLAUDE.md §3, §7, §11, §22, §24, §26 and the newest changelog entry have it. **Two migrations
+(`0034`, `0035`)**, no new table/column/function/capability, no row changed by either.
+
+- **The counter takes laundry in again** (§26, now closed). `customer_service` holds
+  `orders.read/write/status` again — the alternative was making a counter hand an **Office
+  manager**: 31 screens to do the one job their role is named for. Now ~11.
+  **`roles.ts` alone would have been a silent bug**: 0025's *restrictive* write policies are the
+  real boundary, so the capability without the policy is Save writing **zero rows with no error**
+  — the failure 0025 hit for the driver and 0031 for the board, `lives_ok` passing both times.
+  `0034` widens three tables (`laundry_orders` + items + activity) and **only** those three;
+  billing and the price list are untouched and the migration asserts that by name. No
+  `orders.manage`, and no DELETE on the job — only on its items, which
+  `save_laundry_order_items()` (SECURITY INVOKER) needs to replace the child set.
+  `main_flow_scope.test.sql` 18 → 29 assertions, each checking the write **landed**.
+- **The activity log narrowed** (`0035`). `audit_logs` was 0001's `for all … using is_member`, so
+  a driver, a board and the counter read the whole tenant's trail. SELECT → the four `admin.read`
+  roles (auditor among them — that is why it is a role list, not `admin.write`). **INSERT stays
+  open to every member**: `recordAudit()` runs on the caller's own client, so narrowing it would
+  stop the log recording the people it exists to record; `actor_id` is pinned to `auth.uid()`.
+  **No UPDATE/DELETE policy at all** → append-only. The `for all` is *dropped*, not supplemented,
+  because its USING half grants SELECT (the 0033 trap). New `audit_log_scope.test.sql`, 11
+  assertions, all by outcome.
+- **§22 said something the database does not do.** It claimed the agreement header is readable
+  "to `agreements.read`"; `service_agreements` is `for all … using is_member`, so any member reads
+  every header. The decision is sound (a header carries no price) — the **wording** was corrected,
+  the policy deliberately not narrowed.
+- **Adelaide's four boards have logins.** `board1@`…`board4@ats.example.com`, written by SQL in
+  GoTrue's shape (§3a) because this deployment still cannot send an invitation. Boards linked
+  **1 of 5 → 5 of 5**, so `LJ00003`/`LJ00004` are no longer on rounds nobody can sign in as.
+  Password is a bootstrap, in **no committed file**, and wants replacing once SMTP works.
+
+700 unit tests (was 698), **368 pgTAP assertions (was 348)**, `verify` green, all 35 migrations
+against a fresh Postgres 16. Both new proofs were confirmed to **fail without their migration**.
+
+## Verified against the live project (2026-08-24)
+The accessibility and tidy-up work added **no migration**; the four fixes above added two, both
+now applied (§11). Checked at the first pass: advisors **18** (unchanged — no function added), **0** `anon` table grants, **0**
 tables without RLS, and 647 invoices / 508 archived customers / 16 memberships / 5 boards / 9
 prices exactly as recorded. `FIELD_LABELS`' 79 keys were checked against `information_schema`:
 76 are real columns, and the three that are not (`default_gst_rate`, `received_date`,
@@ -88,35 +124,41 @@ fast-forwards, and Dev absorbed the 18-commit backlog the changelog kept recordi
   completed, **priced and approved** (the first frozen charge snapshot on the project). But
   `invoice_source_jobs` is 0 and no invoice exists since 20 August — so it is sitting in the
   billing queue and **the month-end roll-up is still the one money step never run end to end**.
-- **Adelaide's four boards are linked to no login (0 of 4)** and it still has no member who is not
-  a platform admin — yet `LJ00003`/`LJ00004` are assigned to those boards. Real jobs are now
-  behind the §24 cutover step. Its price list is still empty, so `LJ00002` was priced by hand.
+- **The month-end run was rehearsed read-only, and that is the finding.** It works — and pressing
+  "last month's invoices" *today* answers **nothing to invoice**, because the default period is the
+  previous month (1–31 July) and `LJ00002` completed on **20 August**. That reads as *everything is
+  billed*, not as *wrong month*. **Set the period to August, or run it in September.** The default
+  is right for the ordinary case; the trap is that the first real run is mid-month against a job
+  from the current one.
+- **Adelaide's four boards now have logins** (fixed, §24) — but it still has **no member who is not
+  a platform admin**, and its price list is still empty, so `LJ00002` was priced by hand.
 
 ## Do these next
 - **Open it with real rows in it.** This container has no Supabase credentials, so no
   authenticated screen was rendered. Sign in as `owner@roles.example.com`, press each card on the
   home screen, and set the text to Biggest on a phone.
-- **§26 is the owner's decision, not mine.** `orders.write` is held by two roles and
-  `customer_service` — the role named for the counter — is not one, so an untrained counter hand
-  must be made `operations_manager` (31 screens). Restoring it would cut that to ~11 but reverses
-  the 2026-08-16 decision **and** needs `0025`'s restrictive write policies widened, or the
-  counter writes zero rows with no error (the exact silent failure boards hit in 0031).
-- Still from the previous session: take one job through complete → Price → Approve → run the
-  month (use Harbour, it has prices); invite a real person into Adelaide and link them to a board;
-  enter Adelaide's own prices.
+- **Change the board password.** `board1@`…`board4@ats.example.com` share one bootstrap password
+  (in no committed file — it was reported in chat). Once custom SMTP is configured, invite each
+  board through `/admin/users` so the round sets its own.
+- **Sign in as the counter and take a job in.** `customer_service` got `orders.*` back and 0034
+  widened the policy; the write was proved to land against live rows, but no *screen* has been
+  opened as that role.
+- Still from the previous session: run the month for Adelaide (**period = August**); invite a real
+  person into Adelaide; enter Adelaide's own prices.
 
 ## Still open (unchanged from the previous session)
 - **`LJ00001`** — Adelaide job, Harbour customer, still `ready_for_delivery`. Remedy is
   cancellation, which is terminal; the owner's call.
-- **`service_agreements` and `audit_logs` are `for all … using is_member(tenant_id)`**, so any
-  operational login reads every contract header and the whole activity log. Neither exposes a
-  price or an amount. Wants a decision, not a quiet narrowing.
+- **`service_agreements` is `for all … using is_member(tenant_id)`**, so any operational login
+  reads every contract header. Decided 2026-08-24: **left as it is** — a header carries no price,
+  and only §22's wording was wrong. `audit_logs` was the other half of that finding and **was**
+  narrowed (0035).
 - **§23 sweep:** ~345 of 451 `.from(...)` reads still rely on RLS alone; correct for eleven of
   twelve roles, but a platform admin's session spans two laundries.
 - **Nothing has talked to Xero yet** (`XERO_CLIENT_ID`/`SECRET` unset by the owner's decision).
-- **This deployment cannot send any auth email** — custom SMTP still unconfigured, which is what
-  blocks linking a login to Adelaide's boards.
-- Database: **0001–0033 applied to `laundrymart-syd`.** Nothing pending, and this branch adds none.
+- **This deployment cannot send any auth email** — custom SMTP still unconfigured. The board
+  logins were written by SQL to work around it; a real invitation still cannot be sent.
+- Database: **0001–0035 applied to `laundrymart-syd`.** Nothing pending.
 
 ## Environment readiness
 - node v22.22.2, deps installed (`npm install`)

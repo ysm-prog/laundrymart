@@ -5,7 +5,7 @@
 -- layer underneath: a warehouse operator holding a real login and talking
 -- straight to PostgREST still cannot move a job or touch an invoice.
 begin;
-select plan(18);
+select plan(29);
 
 insert into auth.users (id, email) values
   ('66666666-6666-6666-6666-666666666666','driver@example.com'),
@@ -115,18 +115,99 @@ select lives_ok(
   'the floor still runs its own screens');
 
 -- ---------------------------------------------------------- the counter -----
+-- **Reversed on 2026-08-24** (0034). This asserted that the counter could not
+-- take a job in, which was true and was the problem: a laundry wanting counter
+-- staff to book jobs had to make them Office manager — 31 screens, the whole
+-- ledger, the plant and the activity log — to do the one job the role is named
+-- for.
+--
+-- Every assertion below checks the **outcome**, not that the statement failed
+-- to raise. A restrictive policy refusing an UPDATE does not throw: it matches
+-- zero rows and returns quietly, so `lives_ok` alone passes just as happily
+-- against a counter who can change nothing. That is precisely the bug 0025
+-- shipped for the driver and 0031 shipped again for the board, and it is why
+-- `roles.ts` alone would have been worse than useless here.
 set local "request.jwt.claim.sub" = '44444444-4444-4444-4444-444444444444';
-select throws_ok(
+
+select lives_ok(
   $$ insert into public.laundry_orders
        (tenant_id, customer_id, order_number, received_at)
      values ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
              'c0000000-0000-0000-0000-00000000000a','LJ09998', now()) $$,
-  '42501', null, 'the counter cannot take a job in either');
+  'the counter can take a job in');
+
+select is(
+  (select count(*)::int from public.laundry_orders where order_number = 'LJ09998'),
+  1, 'and the job is really there — the insert was not silently refused');
+
+select lives_ok(
+  $$ insert into public.laundry_order_items (tenant_id, order_id, item_type, exact_quantity)
+     select tenant_id, id, 'towels', 12 from public.laundry_orders
+      where order_number = 'LJ09998' $$,
+  'the counter can itemise it');
+
+select is(
+  (select count(*)::int from public.laundry_order_items i
+     join public.laundry_orders o on o.id = i.order_id
+    where o.order_number = 'LJ09998'),
+  1, 'and the laundry is really on it');
+
+-- The verb that fails silently, asserted by outcome.
+update public.laundry_orders set special_instructions = 'No starch'
+ where order_number = 'LJ09998';
+select is(
+  (select special_instructions from public.laundry_orders where order_number = 'LJ09998'),
+  'No starch', 'and an edit lands rather than touching zero rows');
 
 select lives_ok(
   $$ update public.customers set trading_name = 'Cafe A Pty'
       where id = 'c0000000-0000-0000-0000-00000000000a' $$,
   'the counter still keeps the customer record');
+
+-- Money did not travel with it. 0034 widens three tables and leaves 0025's
+-- other six alone, so the counter can take laundry in and cannot raise, alter
+-- or even re-price a bill for it.
+update public.invoices set purchase_order_number = 'PO-COUNTER'
+ where id = 'e0000000-0000-0000-0000-00000000000a';
+
+select is(
+  (select count(*)::int from public.invoices), 0,
+  'the counter cannot even read an invoice');
+
+-- Read back as the owner, not as the counter. Asserting the value from inside
+-- the counter's own session would compare NULL against 'PO-2' — the row is
+-- invisible to them — and pass or fail for the wrong reason. This is the check
+-- that the UPDATE above touched nothing.
+set local "request.jwt.claim.sub" = '11111111-1111-1111-1111-111111111111';
+select is(
+  (select purchase_order_number from public.invoices
+    where id = 'e0000000-0000-0000-0000-00000000000a'), 'PO-2',
+  'and the update it attempted changed nothing');
+
+-- The counter cannot delete a job — only its items, which is what the atomic
+-- child-set replace needs. Asserted by outcome, since a refused DELETE is as
+-- quiet as a refused UPDATE.
+set local "request.jwt.claim.sub" = '44444444-4444-4444-4444-444444444444';
+delete from public.laundry_orders where order_number = 'LJ09998';
+select is(
+  (select count(*)::int from public.laundry_orders where order_number = 'LJ09998'),
+  1, 'the counter cannot delete a job, only take one in and correct it');
+
+select lives_ok(
+  $$ delete from public.laundry_order_items i
+      using public.laundry_orders o
+      where o.id = i.order_id and o.order_number = 'LJ09998' $$,
+  'but it can replace the laundry on one');
+select is(
+  (select count(*)::int from public.laundry_order_items i
+     join public.laundry_orders o on o.id = i.order_id
+    where o.order_number = 'LJ09998'),
+  0, 'and that delete really lands — save_laundry_order_items needs it');
+
+-- Put the fixture back, as the owner, so every assertion after this section
+-- counts what it counted before the counter was let in here.
+set local "request.jwt.claim.sub" = '11111111-1111-1111-1111-111111111111';
+delete from public.laundry_orders where order_number = 'LJ09998';
 
 -- ------------------------------------------------------------- finance ------
 -- Loses the receivable side and keeps the payable one. `laundry_prices` counts

@@ -218,38 +218,62 @@ describe("the payable side (purchases.*)", () => {
   });
 });
 
-describe("job → invoice is the Owner's and the Office manager's alone", () => {
-  const CHAIN = [
-    "orders.read", "orders.write", "orders.status", "orders.manage",
-    "invoices.read", "invoices.write",
-  ] as const;
+describe("job → invoice, and who the counter is", () => {
+  /*
+   * Billing stays where 2026-08-16 put it. Taking laundry *in* does not.
+   *
+   * That decision made job→invoice one flow answering to two people, which is
+   * coherent — but its effect was that a laundry wanting counter staff to book
+   * jobs had to make them Office manager: 31 screens, the whole ledger, the
+   * plant and the activity log, handed to the least-trained person in the
+   * building to do the one job their role is named for. The owner reversed the
+   * `orders.*` half on 2026-08-24. The test below said "a future edit that
+   * hands one of them back should have to change this test and say why", which
+   * is exactly what happened, and this is the why.
+   */
+  const BILLING = ["invoices.read", "invoices.write"] as const;
+  const COUNTER = ["orders.read", "orders.write", "orders.status"] as const;
 
-  it("is held by exactly super_admin and operations_manager", () => {
-    // The owner's decision, 2026-08-16: taking a job in, moving it through the
-    // plant and billing it is one flow and it answers to two people.
-    // `platform_admin` holds it the way it holds everything.
-    for (const capability of CHAIN) {
+  it("keeps billing with the Owner and the Office manager alone", () => {
+    for (const capability of BILLING) {
       expect(rolesWith(capability), capability).toEqual([
         "platform_admin", "super_admin", "operations_manager",
       ]);
     }
   });
 
-  it("is closed to every other role, read included", () => {
+  it("lets the counter take laundry in, and nobody else new", () => {
+    for (const capability of COUNTER) {
+      expect(rolesWith(capability), capability).toEqual([
+        "platform_admin", "super_admin", "operations_manager", "customer_service",
+      ]);
+    }
+  });
+
+  // The supervisor's set — cancel a job, backdate a receipt, edit a completed
+  // one — is not part of taking laundry in and did not move.
+  it("keeps orders.manage away from the counter", () => {
+    expect(rolesWith("orders.manage")).toEqual([
+      "platform_admin", "super_admin", "operations_manager",
+    ]);
+    expect(can("customer_service", "orders.manage")).toBe(false);
+  });
+
+  it("closes billing to every other role, read included", () => {
     const allowed = new Set(["platform_admin", "super_admin", "operations_manager"]);
     for (const role of ROLES.filter((r) => !allowed.has(r))) {
-      for (const capability of CHAIN) {
+      for (const capability of BILLING) {
         expect(can(role, capability), `${role} → ${capability}`).toBe(false);
       }
     }
   });
 
-  it("names the roles that lost it, so the change is not silent", () => {
-    // Each of these held part of the chain before and no longer does. Listed
-    // by name because a future edit that hands one of them back should have to
-    // change this test and say why.
+  it("names the roles still outside it, so a change is never silent", () => {
+    // Listed by name because a future edit handing one of them back should have
+    // to change this test and say why — which is how the counter's own line
+    // came off this list on 2026-08-24.
     expect(can("warehouse_operator", "orders.status")).toBe(false); // the plant floor
-    expect(can("customer_service", "orders.write")).toBe(false);    // the counter
+    expect(can("customer_service", "invoices.read")).toBe(false);   // the counter sees no money
     expect(can("dispatcher", "invoices.write")).toBe(false);
     expect(can("finance", "invoices.write")).toBe(false);
     expect(can("auditor", "invoices.read")).toBe(false);

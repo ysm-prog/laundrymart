@@ -251,13 +251,32 @@ export const ROLE_CAPABILITIES: Record<Role, readonly Capability[]> = {
     "warehouse.read", "warehouse.write",
     "items.read", "operations.read",
   ],
-  // Customers and the day's stops. Taking laundry in over the counter was this
-  // role's whole point and is now the Owner's and the Office manager's — so a
-  // laundry that wants counter staff to book jobs gives them the Office role
-  // rather than this one.
+  /*
+   * The counter: customers, the day's visits, and taking laundry in.
+   *
+   * `orders.*` came back on 2026-08-24, reversing the 2026-08-16 decision that
+   * had moved it to the Owner and the Office manager alone. That decision was
+   * coherent — job→invoice is one flow and it answers to two people — but its
+   * effect was that a laundry wanting counter staff to book jobs had to make
+   * them **Office manager**, which is 31 screens including the whole ledger,
+   * the plant and the activity log. The least-trained person in the building
+   * was being handed the largest surface in the application to do the one job
+   * this role is named for.
+   *
+   * `orders.manage` is deliberately **not** among them. Cancelling a job,
+   * backdating a receipt and editing one already completed are the supervisor's
+   * set (§3), and none of them is part of taking laundry in.
+   *
+   * The half that matters is not here: `0025` narrowed every *write* on the job
+   * tables to two roles in RLS, so this list alone would let the counter open
+   * the form, press Save and write **zero rows with no error**. `0034` widens
+   * that restrictive layer to match, and `main_flow_scope.test.sql` asserts the
+   * write actually lands rather than merely not raising.
+   */
   customer_service: [
     "customers.read", "customers.write", "agreements.read", "operations.read",
     "routes.read", "routes.status",
+    "orders.read", "orders.write", "orders.status",
   ],
   sales: ["customers.read", "customers.write", "agreements.read", "agreements.write", "items.read", "reports.read"],
   branch_manager: outsideMainFlow(TENANT_ALL.filter((c) => !c.startsWith("admin."))),

@@ -205,16 +205,17 @@ describe("navigationFor", () => {
     ]);
   });
 
-  it("shows Customer laundry to the Owner and the Office manager and to nobody else", () => {
-    // The owner's decision, 2026-08-16: the job→invoice flow is theirs alone.
-    // The rail follows the capability, so the row simply is not there for the
-    // counter, the floor, a dispatcher or a driver — none of whom can open a
-    // job any more.
-    for (const role of ["super_admin", "operations_manager", "platform_admin"] as const) {
+  it("shows Customer laundry to the Owner, the Office manager and the counter", () => {
+    // The rail follows the capability. `orders.*` returned to `customer_service`
+    // on 2026-08-24 — the counter's whole job — so the row is theirs again;
+    // billing did not move, and the rest still cannot open one.
+    for (const role of [
+      "super_admin", "operations_manager", "platform_admin", "customer_service",
+    ] as const) {
       expect(navigationFor(role).map((item) => item.label), role).toContain("Customer laundry");
     }
     for (const role of [
-      "customer_service", "warehouse_operator", "dispatcher", "driver",
+      "warehouse_operator", "dispatcher", "driver",
       "finance", "auditor", "branch_manager", "regional_manager", "sales",
     ] as const) {
       expect(navigationFor(role).map((item) => item.label), role).not.toContain("Customer laundry");

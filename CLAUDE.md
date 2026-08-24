@@ -175,6 +175,15 @@ Resource-scoped beyond tenancy:
 - `notifications`: RLS scopes them to the tenant, as everywhere. The `audience` capability on
   each row narrows them further to the people who can act on it — but that is a UI filter
   applied in `src/lib/notifications/query.ts`, layered on top of RLS and never instead of it.
+- `audit_logs` is **read by four roles and written by everybody** (0035). SELECT needs
+  `super_admin`/`operations_manager`/`regional_manager`/`auditor` — the four that hold
+  `admin.read`, the auditor being why it is a role list and not `admin.write`. INSERT stays open
+  to any member, deliberately: `recordAudit()` runs on the *caller's* RLS-bound client at the
+  moment they cause an event, so narrowing it would stop the log recording the very people it
+  exists to record; `actor_id` is pinned to `auth.uid()` so nobody signs an entry as somebody
+  else. There is **no UPDATE and no DELETE policy at all**, which with RLS on is what makes the
+  trail append-only — 0001's `for all` had handed both to any member, so the log could be edited
+  by the person it incriminates. Nothing in `src/` does either verb.
 
 **A platform admin's session reads *every* laundry, so RLS is not the tenant filter for
 them.** `is_member()` is true of every tenant for that role (0019) while every *write* in the app
@@ -214,10 +223,18 @@ the laundry pays its suppliers. Worth stating because most holders arrive by der
 `TENANT_ALL` rather than by being named, which is how a capability added to `roles.ts` quietly
 reaches six roles; `roles.test.ts` pins the two sets against each other so a change to either
 fails a test rather than handing somebody the chart of accounts. `orders.*` follows the same split as routes: `write` creates and edits a
-laundry job, `status` walks it through the workflow (the plant floor advances work it does not
-plan, so `warehouse_operator` holds `status` without `write`), and `manage` is the supervisor's
-set — cancel a job, backdate a receipt, edit one already completed. `driver` holds none of
-them: counter jobs are not stops on a run. `routes.write` (plan and assign) is separate from `routes.status` (advance
+laundry job, `status` walks it through the workflow, and `manage` is the supervisor's
+set — cancel a job, backdate a receipt, edit one already completed. **`super_admin`,
+`operations_manager` and — since 2026-08-24 — `customer_service` hold the first three;
+`manage` is the first two alone.** The counter's `orders.*` had been taken away by 0025 and was
+given back because the alternative was making a counter hand an Office manager, which is 31
+screens to do the one job their role is named for (§26, now closed). `orders.manage` stayed
+where it was: cancelling a job and backdating a receipt are not part of taking laundry in.
+`driver` and `board` hold none of them — counter jobs are not stops on a run — and
+`warehouse_operator` holds none either, having lost `orders.status` in 0025; the floor runs
+every warehouse stage and no longer walks the customer's job along behind it. **Restoring the
+counter needed `0034` as well as `roles.ts`**, because 0025's restrictive write policies are the
+actual boundary and a capability without a policy writes zero rows in silence. `routes.write` (plan and assign) is separate from `routes.status` (advance
 a run that is already out): the latter also goes to `driver` — RLS confines them to their own
 run — and to `customer_service`, so a stuck run is not waiting on a dispatcher.
 
@@ -527,6 +544,24 @@ renders no tab strip. Tested in `src/lib/__tests__/nav.test.ts`.
   already ANDs `super_admin`/`operations_manager` on top. Not in
   `archivable_tables()`, so there is no `archived_at` clause to preserve — the
   0028 trap does not apply.
+- `0034_counter_takes_jobs` — **the half of the counter's role that lives in the
+  database.** Widens `0025`'s restrictive write layer on `laundry_orders`,
+  `laundry_order_items` and `laundry_order_activity` to admit `customer_service`,
+  restating 0025's driver carve-out and 0031's board carve-out verbatim because a
+  restrictive policy has no existing clause to wrap. Leaves the other six of 0025's
+  nine untouched — billing did not move. DELETE is granted on the item rows only
+  (`save_laundry_order_items()` is SECURITY INVOKER and replaces the child set) and
+  withheld on the job, which nothing in the app deletes. Four self-assertions,
+  including that the counter did **not** reach billing and that both carve-outs
+  survived the rewrite. Adds no table, no column, no function; changes no row.
+- `0035_audit_log_read` — **the activity log is for the people who answer for it.**
+  Drops 0001's `audit_logs_member` (`for all … using is_member`) and replaces it with
+  `audit_logs_read` (SELECT to the four `admin.read` roles, auditor among them) and
+  `audit_logs_write` (INSERT to any member, `actor_id` pinned to `auth.uid()`).
+  **No UPDATE and no DELETE policy at all** — with RLS on, the absence is the refusal,
+  so the trail is append-only. The `for all` is dropped rather than supplemented,
+  because its USING half grants SELECT too (the 0033 trap, one table later). Five
+  self-assertions. Adds no table, no column, no function; changes no row.
 - `0013_notifications` — `tenants.settings jsonb` (AD-3) and the `notifications` table
   (AD-4). Beware the numbering drift: the unmerged branch
   `claude/warehouse-inventory-flow-psooyq` carries its own `0012_return_count.sql`, which
@@ -580,8 +615,8 @@ Proofs in `supabase/tests/`: `rls_isolation`, `rls_coverage`, `driver_scope`,
 `business_rules`, `media_scope`, `warehouse_rules`, `notifications_scope`, `laundry_orders`,
 `run_assignment`, `archive_records`, `laundry_pricing`, `platform_admin`, `main_flow_scope`,
 `job_billing`, `purchases_scope`, `supplier_payments_scope`, `import_helpers`,
-`import_activation`, `member_directory`, `boards_scope`, `item_master`
-(**348 assertions**). Demo data in `supabase/seed.sql` — not
+`import_activation`, `member_directory`, `boards_scope`, `item_master`,
+`audit_log_scope` (**368 assertions**). Demo data in `supabase/seed.sql` — not
 applied by migrations.
 
 **Do not re-add `grant execute on all functions in schema public to anon`.** That
@@ -826,14 +861,49 @@ demote the other and lock the tenant out of its own People screen.
 Deployed on Vercel at `ats.coreit.com.au`. All migrations through `0030_member_directory`
 applied (0014 on 2026-08-13, 0015 and 0016 on 2026-08-14, 0017, 0018, 0019 and 0025 on
 2026-08-16, 0026 and 0027 on 2026-08-17, 0030 on 2026-08-18), each verified by rolled-back probe
-rather than trusted. The ledger's last four entries are `0027_xero_payments`,
-`0028_archive_billing_policies`, `0029_revoke_anon_table_grants` and `0030_member_directory`. 0020–0024 are the renumbered branch migrations, already live under their original
+rather than trusted. **Every migration through `0035_audit_log_read` is applied**, and the
+ledger's last four entries are `0032_item_master`, `0033_laundry_prices_read`,
+`0034_counter_takes_jobs` and `0035_audit_log_read`. 0020–0024 are the renumbered branch migrations, already live under their original
 names (§7).
 
 **`0031_boards` and `0032_item_master` were applied on 2026-08-20**, in that order, each
-verified before the next. **`0033_laundry_prices_read` followed the same day** and is now the
-ledger's last entry, so the last three are `0031_boards`, `0032_item_master` and
-`0033_laundry_prices_read`.
+verified before the next. **`0033_laundry_prices_read` followed the same day.**
+
+**`0034_counter_takes_jobs` and `0035_audit_log_read` were applied on 2026-08-24**, in that order,
+and are now the ledger's last two entries. Both are self-asserting, and `apply_migration` is
+atomic, so a failed assertion rolls the whole thing back — which is what makes it safe to apply
+one directly. Both returned clean.
+
+- **After 0034**, read back as **real sessions** in a transaction that was then aborted: the
+  counter's job insert **landed** (1 row), its item insert **landed** (1 row), and an edit of an
+  existing job returned **true** — the assertion that matters, because the failure this migration
+  exists to prevent is a statement that succeeds and touches nothing. 0 probe rows survived the
+  rollback. Billing did not move with it: the counter still reads **0** invoices and **0** prices.
+- **After 0035**, the same sweep by role: `board`, `driver` and `customer_service` read **0** audit
+  rows where `auditor` and the owner read **47**. `audit_logs` carries exactly two policies —
+  `audit_logs_read`/SELECT and `audit_logs_write`/INSERT — and no `ALL`, no UPDATE and no DELETE,
+  so the trail is append-only by the absence of a policy rather than by a check somebody can
+  forget.
+- **Advisors stayed at 18** (the 17 documented SECURITY DEFINER helpers and the auth
+  leaked-password toggle): neither migration adds a function. **0** `anon` table grants and **0**
+  tables without RLS, so 0029 and the tenancy spine are holding. 647 invoices, 508 archived
+  customers, 8 laundry jobs, 20 memberships and 5 boards, all as recorded.
+
+**Adelaide's four board logins went on the same day** (§24): `board1@`…`board4@ats.example.com`,
+written by SQL for the reason §3a records, each with a `board` membership in Adelaide and nowhere
+else, each linked to one of Board 1–4. Rehearsed in a transaction first and the rollback confirmed
+to leave **0** rows before anything was committed; verified afterwards column by column against the
+`board@roles.example.com` profile, and by reading back as Board 1, which now sees `LJ00003` and
+`LJ00004` and **0** invoices. Boards linked: **5 of 5**, up from 1.
+
+**The month-end run was rehearsed read-only and there is a finding.** Read-only because generating
+writes drafts against 508 real customers and the question was whether it works, not whether to
+bill. It does — and pressing "last month's invoices" *today* would answer **nothing to invoice**,
+because the default period is the previous month (1–31 July, the 2026-08-20 fix) and Adelaide's one
+approved job `LJ00002` completed on **20 August**. "Nothing to invoice" reads as *everything is
+billed*, not as *wrong month*. The default is right for the ordinary case; the trap is that the
+first real run happens mid-month against a job from the current one. **Set the period to August, or
+run it in September.**
 
 **0033 was found by probing, not by review, and only because the cutover put data in the table.**
 Every table in `public` was counted as a real `board` session — the sweep the boards work made
@@ -934,17 +1004,16 @@ on rather than the code's:
   been created since 20 August, so `LJ00002` is sitting approved in the billing queue waiting for
   the month-end run. The roll-up is still the one step of the money path never exercised end to
   end.
-- **Adelaide's four boards are still linked to no login (0 of 4), and it still has no member who
-  is not a platform administrator.** So `LJ00003` and `LJ00004` are assigned to rounds nobody can
-  sign in as, and My Runs is empty for them — real jobs now sitting behind the §24 cutover step
-  that has not been done. The pricing was also entered by hand: Adelaide still holds **0**
-  `laundry_prices`, so the price list is not what answered.
+- **Adelaide's four boards were linked to no login (0 of 4)**, so `LJ00003` and `LJ00004` were
+  assigned to rounds nobody could sign in as and My Runs was empty for them. **Fixed the same day**
+  — see §24 and the 0034/0035 paragraph above: four logins written by SQL, boards linked 5 of 5.
+  Still true: Adelaide **has no member who is not a platform administrator**, and it holds **0**
+  `laundry_prices`, so `LJ00002` was priced by hand rather than by a price list.
 
-**Still to do in the app, not the database:** create the real boards and link a login to each
-(§24), and set `laundry_category` on the items that are laundry a customer hands in (§25) —
-without it a coded job item keeps whatever kind the counter chose, which is correct but means the
-item is not yet deciding. **No board exists yet, so nothing is assigned to one and My Runs is
-empty for every board account until one is made.**
+**Still to do in the app, not the database:** invite one person into Adelaide who is not a platform
+administrator, enter its price list, and set `laundry_category` on the items that are laundry a
+customer hands in (§25) — Adelaide holds no `items` rows at all, so that one waits on the item
+master arriving. Creating and linking the boards is **done**.
 
 For **0030** that was: pre-flight (function absent, **0** `anon`-executable functions so the
 migration's own assertion would pass, 0 `anon` table grants, 15 memberships, 2 platform admins);
@@ -1251,6 +1320,108 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-08-24 · Four questions the owner answered, and the two migrations behind them
+Asked rather than assumed, because each was theirs to decide and three of the four could not be
+done safely in `src/` alone. Two migrations (`0034`, `0035`), no new table, no new column, no new
+function, no new capability, and no row changed by either.
+
+**1. The counter may take laundry in again** (`0034` + `roles.ts`). §26 recorded this as open and
+it is now closed: `customer_service` holds `orders.read/write/status` again, reversing the
+`orders.*` half of 2026-08-16. That decision was coherent — job→invoice is one flow and it answers
+to the Owner and the Office manager — but its effect was that a laundry wanting counter staff to
+book jobs had to make them **Office manager**: 12 rail areas and 31 screens, including the whole
+ledger, the plant and the activity log, handed to the least-trained person in the building to do
+the one job their role is named for. It is roughly 7 rows and 11 screens now.
+- **The migration is not optional and is most of the work.** `roles.ts` drives the nav and the page
+  guards; it is not the boundary. 0025 put *restrictive* write policies on the nine job→invoice
+  tables, and a restrictive policy ANDs with the permissive one — so the capability without the
+  policy is a counter hand opening the form, pressing Save, and writing **zero rows with no error
+  at all**. Not a refusal: a silence. That exact failure has shipped here twice (0025's own comment
+  for the driver, 0031 for the board, `lives_ok` passing throughout both times).
+- **Three tables, not nine.** `laundry_orders`, `laundry_order_items` and `laundry_order_activity`.
+  `invoices`, `invoice_lines`, `payments`, `credit_notes`, `credit_note_lines` and
+  `laundry_prices` are left exactly as they were — the counter takes laundry in and cannot see,
+  raise or alter a bill for it, which assertion 4 of the migration checks by name.
+- **DELETE on the job itself is withheld.** Nothing in the app deletes a `laundry_orders` row —
+  cancelling is a terminal status and hiding is `set_records_archived` — so granting a verb nobody
+  uses is how a role quietly grows past its job. `laundry_order_items` is the one exception and
+  genuinely needs it: `save_laundry_order_items()` is SECURITY INVOKER and replaces the child set
+  by deleting and re-inserting, so without it the counter could take a job in and never correct
+  what is on it.
+- **`orders.manage` is not granted either**, in `roles.ts` or in the policy: cancelling, backdating
+  a receipt and editing a completed job are the supervisor's set.
+- **The proof asserts the write *landed*.** `main_flow_scope.test.sql` goes 18 → 29 assertions and
+  counts the row afterwards rather than trusting `lives_ok` — the invoice is read back **as the
+  owner**, because the counter cannot read `invoices` and a subquery returning NULL would have
+  passed a broken policy. A stray fixture row from that insert then made a later assertion read 3
+  where it expected 2, which is its own small lesson: a probe that writes must clean up after
+  itself or it silently re-scopes everything below it.
+
+**2. The activity log is for the people who answer for it** (`0035`). `audit_logs` carried 0001's
+`for all … using is_member(tenant_id)` and nothing more, so a driver, a board, the counter and the
+plant floor could all read the whole tenant's trail — who did what, to which record, when — off
+PostgREST. It carries no price and no amount, which is why it outlived the billing narrowing.
+- **SELECT** goes to the four roles holding `admin.read`: owner, office manager, regional manager
+  and **auditor** — the last is why this is a role list and not `admin.write`; a read-only role
+  whose whole purpose is to look at what happened would be absurd to shut out.
+- **INSERT stays open to every member, and that is not an oversight.** `recordAudit()` runs on the
+  *caller's* RLS-bound client at the moment they cause an event, so a driver completing a delivery
+  writes their own row. Narrowing it would not tighten anything; it would silently stop the log
+  recording the very people it exists to record. `actor_id` is pinned to `auth.uid()`, so nobody
+  signs an entry in somebody else's name.
+- **UPDATE and DELETE go to nobody.** The old `for all` handed both to any member, so a trail could
+  be edited or erased by the person it incriminates. Nothing in `src/` does either — the only verbs
+  anywhere are `insert` and `select` — so append-only costs the application nothing.
+- **The `for all` policy is dropped, not supplemented.** Its USING half grants SELECT too, so
+  narrowing the read beside it would have left the whole log readable through it. The same trap
+  0033 found one table earlier and §22 records for 0017 before that.
+- `audit_log_scope.test.sql` is new: 11 assertions, each by **outcome**. A refused SELECT is an
+  empty result and a refused UPDATE is a silence, so both are counted afterwards from a session
+  that can see the rows; only the `with check` half is asserted by raising.
+
+**3. §22 said something the database does not do.** It claimed the agreement header is "readable to
+`agreements.read`". `service_agreements` carries 0003's `for all … using is_member(tenant_id)`, so
+**any member reads every contract header**. The decision behind the sentence is sound and is
+unchanged — when a customer is served is operational information, and only the priced lines moved
+behind `can_read_pricing()` — so the owner's call was to correct the wording rather than narrow the
+policy. Recorded as a correction, because a file that describes a boundary the database does not
+enforce is worse than one that says nothing.
+
+**4. Adelaide's four boards have logins** (live data, no code). See §11 and §24. `board1@`…
+`board4@ats.example.com`, written by SQL in GoTrue's own shape for the reason §3a records — this
+deployment still cannot send an invitation. Verified column by column against the `board@` profile:
+`aud`/`role`, confirmed, all eight token columns `''` rather than NULL (the 2026-08-18 trap),
+`email_change_confirm_status` 0, `app_meta`, a bcrypt `$2a$` hash that verifies against the shared
+password, exactly one email identity, `board` membership in Adelaide and nowhere else, and **not** a
+platform admin. Boards linked went **1 of 5 → 5 of 5**, and `LJ00003`/`LJ00004` are no longer
+assigned to rounds nobody can sign in as. **The shared password is a bootstrap, not a credential
+policy** — it is deliberately in no committed file, and it wants changing once SMTP is configured
+and a real invitation can be sent.
+
+**The month-end run was rehearsed read-only, and the rehearsal is the finding.** Read-only because
+generating writes drafts against 508 real customers, and the question was whether it would work,
+not whether to bill. It would — and pressing it today would report **nothing to invoice**, which
+reads as *everything is billed* rather than as *wrong month*. The default period is the previous
+month (1–31 July, the 2026-08-20 fix), and Adelaide's one approved job `LJ00002` was completed on
+**20 August**. So the operator has to set the period to August, or wait until September. The
+default is right — the ordinary case is running last month's work — and the trap is that the first
+real run happens mid-month against a job from the current one. Nothing in the code is wrong; this
+is written down so the first run is not read as a failure.
+
+- 700 unit tests (was 698) and **368 pgTAP assertions (was 348)**. `verify` green; all thirty-five
+  migrations applied to a fresh Postgres 16 with the whole pgTAP suite and the seed on top.
+- **Both new proofs were confirmed to fail without their migration** rather than assumed to be
+  doing something: the counter block against unwidened 0025, and the audit block against the
+  `for all` policy.
+
+**Applied to `laundrymart-syd` on 2026-08-24** — §11 has the read-backs. Both migrations'
+self-assertions passed, so neither could half-apply. Verified afterwards as **real sessions**:
+board, driver and counter read **0** audit rows where auditor and owner read 47; the counter's
+insert, item insert and edit all **landed** (1, 1, true) in a transaction that was then aborted,
+leaving 0 probe rows. Advisors stayed at **18** — neither migration adds a function. 647 invoices,
+508 archived customers, 8 laundry jobs, 20 memberships, 5 boards, 0 `anon` table grants and 0
+tables without RLS, all as recorded.
+
 ### 2026-08-24 · Tidied: the rail collapses, and the type scale goes back down
 The owner's response to the accessibility work, the same day: the side panel wanted collapsing
 section by section, and the whole application read as oversized. Both fair. **No migration; no
@@ -3326,9 +3497,28 @@ run and LJ00004/LJ00005 on it.
 returns 1 board, 1 run, 2 stops, 3 jobs and 4 customers — and **0 invoices**, so the billing gate
 holds for the twelfth role too.
 
-**What is left of the cutover is the real laundry's, not the code's**: invite one person into
-Adelaide (its only two members are platform admins and are filtered out of every picker by
-design), link them to a board, and move its open jobs across.
+**Cutover completed, 2026-08-24: all five boards have logins.** Adelaide's four rounds are linked
+to `board1@`…`board4@ats.example.com`, one login per board, `board` membership in Adelaide and
+nowhere else. Boards linked went **1 of 5 → 5 of 5**, so `LJ00003` and `LJ00004` — assigned since
+20 August — are no longer sitting on rounds nobody can sign in as, and My Runs answers for them.
+- **Written by SQL, in GoTrue's own shape**, for the reason §3a records: this deployment still
+  cannot send an invitation, so `inviteUserByEmail` is not available and the accounts were made
+  directly. Checked column by column against the `board@roles.example.com` profile — `aud`/`role`,
+  confirmed, all eight token columns `''` rather than NULL (the 2026-08-18 trap that made eleven
+  logins unresolvable), `email_change_confirm_status` 0, `app_meta`, a bcrypt `$2a$` hash that
+  verifies against the shared password, exactly one email identity, and **not** a platform admin.
+- **`@ats.example.com`, not a real domain.** RFC 2606 reserves it, so a stray notification or
+  overdue chase aimed at a board account can never leave the building — the same reasoning §3a
+  gives for `@roles.example.com`. These are not test profiles, though: they are the real laundry's
+  operational logins, and `npm run seed:roles -- --remove` does not touch them.
+- **The shared password is a bootstrap and wants replacing.** It is deliberately in no committed
+  file. Once custom SMTP is configured, the right shape is one invitation per board through
+  `/admin/users` (§10c) so each round sets its own.
+
+**What is left of the cutover is the real laundry's, not the code's**: invite one person who is
+not a platform admin into Adelaide (its only two members are, and are filtered out of every picker
+by design), and enter Adelaide's own laundry prices — it still holds none, so `LJ00002` was priced
+by hand.
 
 ## 25. The item master, and MYOB
 `items` is the one item vocabulary: what the laundry rents out *and* what arrives in a customer's
@@ -3362,29 +3552,37 @@ bag, under the code the business already uses (0032). Staff type TOW001.
   none of them changes the item master, the codes on job items, or the search, which is why
   those were built first.
 
-## 26. Open: the counter's role, and who may take laundry in
-Raised by the 2026-08-24 business analysis and **left for the owner to decide**, because it
-reverses a decision they made and cannot be done safely in `roles.ts` alone.
+## 26. Closed: the counter takes laundry in again
+Raised by the 2026-08-24 business analysis, put to the owner, and **decided the same day**:
+`customer_service` holds `orders.read/write/status` again. `0034` is the half of it that lives in
+the database. Kept as a section rather than deleted, because the reasoning is what stops it being
+undone by accident and the trap in it applies to the next role change too.
 
-`orders.write` is held by `super_admin` and `operations_manager` and by nobody else (0025, and
-§3). `customer_service` — the role literally named for the counter — was stripped of it. So a
-laundry that wants a counter hand taking jobs in has to make that person **Office manager**,
-which hands the least-trained person in the building the largest surface in the app: 12 rail
-areas and 31 screens, including the whole ledger, the plant and the activity log. Restoring
-`orders.read/write/status` to `customer_service` would take them to roughly 7 rows and 11
-screens — a two-thirds cut for exactly the person the accessibility work is for, using the
-mechanism the repo already blesses.
+**The problem.** 0025 made job→invoice one flow answering to the Owner and the Office manager, and
+`customer_service` — the role literally named for the counter — lost `orders.*` with everybody
+else. So a laundry that wanted a counter hand taking jobs in had to make that person **Office
+manager**: 12 rail areas and 31 screens, including the whole ledger, the plant and the activity
+log, handed to the least-trained person in the building to do the one job their role is named for.
+It is roughly 7 rail rows and 11 screens now — a two-thirds cut for exactly the person the
+accessibility work is for, using the mechanism the repo already blesses.
 
-**The trap, if it is ever done:** `0025_main_flow_owner_office` hard-codes `super_admin` and
+**The trap, which is the part worth keeping.** `roles.ts` drives the nav and the page guards and
+is **not** the boundary. `0025_main_flow_owner_office` hard-codes `super_admin` and
 `operations_manager` into **restrictive** write policies on nine tables, carved out only for a
-driver and (since 0031) a board. A `roles.ts`-only change would let the counter open the form,
-press Save, and write **zero rows with no error at all** — the exact silent failure 0031 records
-for boards, where `lives_ok` passed throughout. It needs `roles.ts` **plus** a migration widening
-0025, **plus** a pgTAP assertion that the write *landed* rather than merely did not raise.
+driver and (since 0031) a board — and a restrictive policy ANDs with the permissive one. A
+`roles.ts`-only change would have let the counter open the form, press Save, and write **zero rows
+with no error at all**: the exact silent failure 0031 records for boards, where `lives_ok` passed
+throughout. It took `roles.ts` **plus** 0034 **plus** a pgTAP assertion that the write *landed*
+rather than merely did not raise. Anyone widening a role on these tables again needs all three.
 
-Until then the workaround is what it is today: give the counter the Office role, and accept the
-surface. The 2026-08-24 work reduces what that surface *costs* a beginner — the home screen names
-the four or five things they actually do — but it does not reduce the surface itself.
+**What deliberately did not move.** Only three of 0025's nine tables were widened —
+`laundry_orders` and its items and activity. `invoices`, `invoice_lines`, `payments`,
+`credit_notes`, `credit_note_lines` and `laundry_prices` are untouched, and 0034 asserts by name
+that the counter did not reach them. `orders.manage` was not granted: cancelling a job, backdating
+a receipt and editing a completed one are the supervisor's set. DELETE on `laundry_orders` was not
+granted either — nothing in the app deletes one — while DELETE on `laundry_order_items` was,
+because `save_laundry_order_items()` is SECURITY INVOKER and replaces the child set by deleting
+and re-inserting, so without it the counter could take a job in and never correct what is on it.
 
 ## 21. Customer pricing and job billing
 **Two lifecycles on one job, and they meet at exactly one point.** The operational status says
@@ -3471,7 +3669,16 @@ writes new ones for `job_charge_snapshots` and `invoice_source_jobs`, all throug
   proves the fix by *reading as a driver and as a dispatcher* and counting zero, rather than by
   inspecting policy text.
 
-The agreement **header** stays readable to `agreements.read` — when a customer is served and on what
-pattern is operational information. Only the priced lines moved behind `can_read_pricing()`.
+The agreement **header** stays readable, and this file used to say "to `agreements.read`" — which is
+not what the policy does. `service_agreements` carries 0003's `for all … using is_member(tenant_id)`
+and nothing more, so **any member of the laundry reads every contract header**, capability or not.
+The decision behind it is sound and unchanged — when a customer is served and on what pattern is
+operational information, and only the priced lines moved behind `can_read_pricing()` — so the
+wording is what was wrong, not the database. Corrected here on 2026-08-24 rather than narrowed,
+which was the owner's call: a header carries no price and no amount. **`audit_logs` was the other
+half of that finding and did *not* survive it** — see 0035. It was tenant-wide on the same shape
+since 0001, and an activity log's entire job is to say who did what, so "everybody" was the wrong
+audience for it.
+
 Consequence worth remembering: the money **reports** are filtered out of `/reports` for a role
 without `billing.read`, because a revenue report rendering "$0" is a wrong answer that looks right.
