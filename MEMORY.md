@@ -149,9 +149,14 @@ with **0 overflow and 0 sub-36px targets**, headings confirmed as "You have been
 "Choose a new password". The 48 console errors are all `ERR_TUNNEL_CONNECTION_FAILED` from the
 invite screen calling the *placeholder* Supabase URL the local build uses — `/login` has none.
 
+**Every live login can be sent one today** — checked, not assumed: all 18 are confirmed, unbanned,
+not soft-deleted, non-SSO and have a real address, so `generateLink({type:"recovery"})` has a user
+to work with for all of them (the four boards included).
+
 **Nothing has been sent yet.** No Resend key and no service key here. **Before trusting it: invite
 one real address on `ats.coreit.com.au`, follow the link, then check the counters moved** —
-`auth.one_time_tokens` should stop being 0.
+`auth.one_time_tokens` should stop being 0. **Merged to `Dev` and `Prod` (`abbeafa`), CI green on
+all three jobs for both.**
 
 ## Verified against the live project (2026-08-24)
 The accessibility and tidy-up work added **no migration**; the four fixes above added two, both

@@ -1420,6 +1420,12 @@ on the broken one.
   `ERR_TUNNEL_CONNECTION_FAILED`, from the invite screen calling the *placeholder* Supabase URL the
   build uses here — exactly 2 pages × 2 themes × 3 sizes × 4 widths, and `/login` contributes none.
 
+**Every login on the project can be sent one today, which was checked rather than assumed.** All
+**18** are `email_confirmed_at` non-null, none banned, none soft-deleted, none SSO and every one
+carries a real address — so `generateLink({type:"recovery"})` has a user to work with in all 18
+cases, including the four board logins and the eleven role profiles. That is the fact the advice
+in §24 rests on: press *Email sign-in link* beside each board and it will mint.
+
 **Nothing here has been sent yet, and the baseline above is what makes the first send checkable.**
 This container has no Resend key and no service key, so no link has been minted and no email
 posted. **Before trusting it: invite one real address on `ats.coreit.com.au`, follow the link, and
@@ -1427,6 +1433,11 @@ then confirm the counters moved** — `auth.one_time_tokens` should no longer be
 `recovery_sent_at`/`confirmation_sent_at` should stop being NULL. If `RESEND_API_KEY` and
 `INVOICE_FROM_EMAIL` are not set on the deployment, every one of these actions now says so by name
 rather than reporting success; that is the same contract the invoice send has had since it shipped.
+
+**Merged to `Dev` and `Prod` on 2026-08-24** (`abbeafa`), both clean fast-forwards, CI green on all
+three jobs for each — verify, gitleaks, and the DB job against a fresh Postgres 16 with the whole
+pgTAP suite and the seed. **No migration went with it**: the ledger's last entry is still
+`0035_audit_log_read`, and `git diff --name-only` over `supabase/` is empty.
 
 ### 2026-08-24 · Four questions the owner answered, and the two migrations behind them
 Asked rather than assumed, because each was theirs to decide and three of the four could not be
