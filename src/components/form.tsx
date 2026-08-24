@@ -32,7 +32,7 @@ export function Field({
 
   return (
     <div className={cx("space-y-1.5", className)}>
-      <label htmlFor={name} className="block text-base font-medium text-foreground">
+      <label htmlFor={name} className="block text-sm font-medium text-foreground">
         {label}
         {/* Decorative — `required` on the control itself is what assistive
             technology announces. */}
@@ -43,12 +43,13 @@ export function Field({
       <FieldControlContext value={{ describedBy: errorId ?? hintId, invalid: Boolean(error) }}>
         {children}
       </FieldControlContext>
-      {/* `text-sm` here, not `text-xs`. A hint nobody can read is decoration,
-          and an error nobody can read is worse — it is the sentence that says
-          why the work did not save. */}
-      {hint && !error ? <p id={hintId} className="text-sm text-muted-foreground">{hint}</p> : null}
+      {/* A hint is supporting text and goes back to 12px with everything else.
+          The *error* does not: it is the one sentence saying why the work did
+          not save, there is at most one on screen, and it is the last thing
+          that should be hard to read. 13px, medium, in the danger colour. */}
+      {hint && !error ? <p id={hintId} className="text-2xs text-muted-foreground">{hint}</p> : null}
       {error ? (
-        <p id={errorId} className="text-sm font-medium text-danger">{error}</p>
+        <p id={errorId} className="text-[0.8125rem] font-medium text-danger">{error}</p>
       ) : null}
     </div>
   );

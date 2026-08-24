@@ -383,6 +383,15 @@ them. Gated on `routes.read` so a manager can open it for a board.
 service worker and the unload inventory sweep, and is the one screen that must work with no
 signal.
 
+**The rail is three collapsible groups** (2026-08-24): "Day to day" open, "Customers & money"
+and "Set-up & reports" shut, Help pinned outside them — 12 flat rows down to 6 visible for an
+owner. This softens the "one flat list, no headings" rule below and does not undo it: the
+*screens* inside an area are still tabs, never rail rows. `navigationFor()` still returns one
+flat list and `groupNavigation()` arranges it for the rail alone, so `sectionFor` and the tab
+strip are untouched. An area in no group falls through to the ungrouped rows rather than
+vanishing; the group a person is currently inside always draws open; the shut groups ride an
+`es_nav` cookie read in the layout.
+
 **Navigation is data** (`src/lib/nav.ts`): eleven areas, each with optional `children`
 rendered as a tab strip (`SectionNav` in the layout, not per page). An area is visible
 when any screen inside it is, and `navigationFor()` resolves its href *and capability*
@@ -694,6 +703,12 @@ miss). Integer percentages drift by 1–2 per channel; if you add a token, carry
   whole type scale under `@media (pointer: coarse)` to get a legible touch floor — so holding
   the comfortable sizing follows its intent rather than departing from it.
 
+- **The default type scale is the tidy one; the reading control is the accessibility path.**
+  Labels 14px, hints 12px, `--text-2xs`/`--text-3xs` 12/11px. Two deliberate exceptions: a field
+  *error* is 13px medium in the danger colour (one on screen at a time, and it is the sentence
+  saying why the work did not save), and `CONTROL` is `text-base sm:text-sm` — 16px on a phone,
+  because under 16px iOS zooms the page on focus, and 14px from `sm` up, because a 16px input
+  sitting larger than the 15px body around it is what makes an application read as oversized.
 - **`--control-border` is the edge of a box you type in, and is not `--strong`.** An input is
   `bg-surface` on a card that is also `bg-surface`, so its border is the only thing identifying
   it — and at `--strong` that measured 1.42:1 light / 1.22:1 dark against 1.4.11's 3:1. The new
@@ -1236,6 +1251,56 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-08-24 · Tidied: the rail collapses, and the type scale goes back down
+The owner's response to the accessibility work, the same day: the side panel wanted collapsing
+section by section, and the whole application read as oversized. Both fair. **No migration; no
+schema, RLS, capability or workflow change**, and no destination moved.
+
+- **The default type scale is back where it was, and the reason it can be is the control.** The
+  accessibility pass raised labels to 16px, inputs to 16px, hints to 14px and the two small
+  tokens to 12/13px, and the result was an application that looked shouted. The honest answer is
+  that making every screen bigger for everybody is the *wrong* fix once a person who needs bigger
+  can press one button and get 130% of everything. So `--text-2xs`/`--text-3xs` are 12/11px again,
+  field labels are 14px, hints are 12px, and the toast is 14px.
+- **Two exceptions, kept deliberately.** A field *error* stays at 13px, medium, in the danger
+  colour: there is at most one on screen and it is the sentence saying why the work did not save.
+  And `CONTROL` is **`text-base sm:text-sm`** — 16px on a phone, 14px from `sm` up. The two
+  widths genuinely want different things: under 16px iOS zooms the page the moment an input takes
+  focus, which throws a driver out of the layout they were working in, while on a desktop 16px
+  inputs sit *larger* than the 15px body around them, which is most of what made the app read as
+  oversized. One breakpoint buys both.
+- **The rail is three collapsible groups** — "Day to day" open, "Customers & money" and "Set-up &
+  reports" shut, with Help pinned outside them. An owner's rail goes from **12 flat rows to 6
+  visible**, and every destination is still exactly one click from where it was.
+- **This softens §6's "one flat list of areas — no headings, no nesting", and says so rather than
+  doing it quietly.** That decision replaced a 22-row inventory of database tables under headings
+  named after internal concepts, and none of that comes back: the *screens* inside an area are
+  still tabs, never rail rows, so the rail still never becomes a table of contents for the schema.
+  What changed is the count — the flat list was eleven rows when the decision was made, and Runs
+  coming back on 2026-08-20 plus Platform before it made it thirteen.
+- **Grouping is a way of drawing the rail, not a change to what the rail is.** `navigationFor()`
+  still returns one flat list, so `sectionFor`, the tab strip and every existing test are
+  untouched; `groupNavigation()` arranges that list for the rail alone. Groups are keyed on area
+  hrefs in **one list in one place** rather than a flag per nav entry — the drift §19 records as
+  a standing objection to the rejected simple mode — and an area named in no group **falls
+  through to the ungrouped rows** rather than vanishing, which is the failure that would matter.
+  `nav.test.ts` asserts every role's areas appear exactly once, that an invented area is drawn,
+  and that Help never lands in a drawer.
+- **A group holding the area you are in always draws open**, whatever the cookie says: a shut
+  drawer with the active row inside it would leave the rail showing nowhere as "here". The open
+  state rides an `es_nav` cookie read in the layout — the `es_rail` pattern, so the rail paints at
+  the right height on the first frame instead of snapping after hydration — and stores the
+  **shut** groups, so a release that adds a group gets that group's own default rather than a
+  missing name reading as "closed". Collapsed (icon-only) the rail stays flat: there is nothing to
+  shorten when every row is one glyph.
+- **The headings are sentence case, not uppercase.** They went out uppercase first and that is
+  precisely the treatment the 2026-08-13 redesign swept out of 28 files for reading as a developer
+  console; §10b names `Eyebrow`'s 12px sentence case as the supporting-label voice, and a rail
+  heading is the last place to reintroduce the other one.
+- 698 unit tests (was 691), `verify` green. Re-measured light and dark at 320/390/768/1440 across
+  all three text sizes: no console errors, no overflow, nothing under 36px, and the control border
+  still 3.21:1 light / 3.01:1 dark.
+
 ### 2026-08-24 · Usable by somebody who has been shown it once
 The owner's brief: a ten-year-old and a seventy-year-old who only knows how to turn on a laptop
 must both be able to use this. Four specialist reviews first (UX, accessibility, business

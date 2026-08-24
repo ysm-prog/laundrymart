@@ -353,10 +353,14 @@ export type ButtonSize = keyof typeof BUTTON_SIZES;
  * spent three releases in a different size and border than every other input.
  */
 /*
- * `text-base` rather than `text-sm`: this is the text somebody is typing and
- * then re-reading to check, and on iOS a font size under 16px makes the browser
- * zoom the page on focus — which throws a phone user out of the layout they
- * were working in.
+ * `text-base sm:text-sm` — 16px on a phone, 14px from `sm` up.
+ *
+ * The two widths want different things and it is worth spending a breakpoint on
+ * it. On iOS a font size under 16px makes Safari zoom the page the moment an
+ * input takes focus, which throws a driver or a counter hand out of the layout
+ * they were working in. On a desktop that constraint does not exist, and 16px
+ * inputs sit *larger* than the 15px body around them, which is what made the
+ * whole application read as oversized.
  *
  * The focus ring is the outline, not a shadow. This used to carry
  * `focus:outline-none focus:ring-2 focus:ring-primary/25`, which turned off the
@@ -367,7 +371,7 @@ export type ButtonSize = keyof typeof BUTTON_SIZES;
  * as the soft edge the design language wants.
  */
 export const CONTROL =
-  "min-h-11 w-full rounded-lg border border-control-border bg-surface px-3 py-2 text-base text-foreground " +
+  "min-h-11 w-full rounded-lg border border-control-border bg-surface px-3 py-2 text-base sm:text-sm text-foreground " +
   "shadow-xs transition placeholder:text-muted-foreground " +
   "focus:border-primary focus:ring-2 focus:ring-primary/25 " +
   "disabled:cursor-not-allowed disabled:bg-surface-muted disabled:opacity-70";

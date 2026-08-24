@@ -56,6 +56,24 @@ AAA in both themes. The dark danger badge was 4.45:1 on the word "Overdue".
 320/390/768/1440 — **zero console errors, zero card overflow, sub-36px targets 79 → 0**, and 69
 controls measured at 3.21:1 (light) / 3.01:1 (dark) as rendered.
 
+## Then tidied, same day, on the owner's feedback
+The side panel wanted collapsing section by section and the whole app read as oversized.
+- **Rail is three collapsible groups** — "Day to day" open, "Customers & money" and "Set-up &
+  reports" shut, Help pinned outside. 12 flat rows → 6 visible. Softens §6's "no headings" and
+  says so; screens inside an area are still tabs, never rail rows. `navigationFor()` stays flat
+  and `groupNavigation()` only *draws* it, so `sectionFor` and every existing test are untouched.
+  An unnamed area falls through rather than vanishing; the group you are in always draws open;
+  shut groups ride an `es_nav` cookie read in the layout (the `es_rail` pattern).
+- **Type scale back down.** Labels 14px, hints 12px, tokens 12/11px, toast 14px. Two exceptions:
+  a field error stays 13px medium/danger, and `CONTROL` is `text-base sm:text-sm` — 16px on a
+  phone (under 16px iOS zooms on focus), 14px on desktop (16px inputs read larger than the 15px
+  body, which was most of the "too big"). The argument for a tidy default is that the
+  reading-comfort control now exists.
+- Headings are **sentence case**: uppercase tracked labels are what the 2026-08-13 redesign swept
+  out of 28 files, and §10b names `Eyebrow`'s 12px sentence case as the supporting-label voice.
+- 698 unit tests (was 691), `verify` green, re-measured clean at all sizes; control border still
+  3.21:1 / 3.01:1.
+
 ## Verified against the live project (2026-08-24) — nothing to apply
 This branch adds **no migration**; the ledger's last entry is still `0033_laundry_prices_read`.
 Checked anyway: advisors **18** (unchanged — no function added), **0** `anon` table grants, **0**

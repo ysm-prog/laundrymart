@@ -1,6 +1,6 @@
 import { cookies } from "next/headers";
 import { requireSession, switchableTenants, type Session } from "@/lib/auth/context";
-import { navigationFor } from "@/lib/nav";
+import { NAV_GROUP_LABELS, navigationFor } from "@/lib/nav";
 import { ROLE_LABELS } from "@/lib/roles";
 import { createClient } from "@/lib/supabase/server";
 import { today } from "@/lib/format";
@@ -87,12 +87,24 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   // on the very first frame instead of snapping after hydration.
   const collapsed = cookieStore.get("es_rail")?.value === "collapsed";
 
+  // Which rail groups the person has shut, same reasoning and same lifetime.
+  // Stored as the *shut* ones so the default — everything the group data says —
+  // survives a release that adds a group, rather than a missing name reading as
+  // "closed".
+  const shut = new Set(
+    (cookieStore.get("es_nav")?.value ?? "").split("|").map(decodeURIComponent).filter(Boolean),
+  );
+  const openGroups = Object.fromEntries(
+    NAV_GROUP_LABELS.map((label) => [label, !shut.has(label)]),
+  );
+
   return (
     <AppShell
       items={items}
       counts={counts}
       tenantName={session.tenantName}
       defaultCollapsed={collapsed}
+      openGroups={openGroups}
       sectionSlot={<SectionNav items={items} />}
       headerSlot={
         <>

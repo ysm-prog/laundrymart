@@ -422,6 +422,105 @@ export function navigationFor(role: Role): NavItem[] {
     }));
 }
 
+/* ------------------------------------------------------- rail grouping --- */
+
+/**
+ * The rail, in three collapsible groups.
+ *
+ * **This softens a decision §6 records, and it is worth saying so rather than
+ * doing it quietly.** The rail was deliberately "one flat list of areas — no
+ * headings, no nesting", because what it replaced was a 22-row inventory of
+ * database tables under headings named after internal concepts. That objection
+ * still stands, and nothing here brings it back: the *screens* inside an area
+ * are still tabs, never rail rows, so the rail never becomes a table of
+ * contents for the schema.
+ *
+ * What changed is the count. The flat list was eleven rows when that decision
+ * was made; Runs came back on 2026-08-20 and Platform before it, so an owner
+ * now opens a column of thirteen with no shape to it — which is what the owner
+ * asked to be tidied on 2026-08-24. Three headings in the operator's own words
+ * turn thirteen rows into a short list plus two closed drawers, and every
+ * destination is still exactly one click from where it was.
+ *
+ * A group is keyed on the area hrefs it holds rather than on a flag per item,
+ * for the reason §19 gives about the rejected simple mode: a second list of
+ * "which rows are advanced" hanging off each nav entry is a thing to keep in
+ * step, and it drifts. This is one list in one place, and `nav.test.ts` asserts
+ * every area lands in exactly one group.
+ */
+export type NavGroup = { label: string; items: NavItem[] };
+
+const GROUPS: Array<{ label: string; hrefs: string[]; openByDefault: boolean }> = [
+  {
+    // The work of a day, for every role that has one. Open, because this is
+    // what somebody signed in to do.
+    label: "Day to day",
+    hrefs: ["/dashboard", "/my-runs", "/runs", "/orders", "/jobs"],
+    openByDefault: true,
+  },
+  {
+    label: "Customers & money",
+    hrefs: ["/customers", "/invoices"],
+    openByDefault: false,
+  },
+  {
+    // Things you set up once and come back to occasionally.
+    label: "Set-up & reports",
+    hrefs: ["/boards", "/inventory", "/reports", "/admin/depots", "/platform"],
+    openByDefault: false,
+  },
+];
+
+/**
+ * Help sits outside the groups, pinned last.
+ *
+ * It is the one row somebody reaches for precisely when they are lost, and
+ * putting it inside a drawer that might be shut is the exact moment it stops
+ * working. It carries no capability either, so it is the only row guaranteed to
+ * be there for all twelve roles.
+ */
+const UNGROUPED = ["/help"];
+
+export const NAV_GROUP_LABELS = GROUPS.map((group) => group.label);
+
+export function groupIsOpenByDefault(label: string): boolean {
+  return GROUPS.find((group) => group.label === label)?.openByDefault ?? true;
+}
+
+/**
+ * Arrange a role's areas into groups for the rail.
+ *
+ * Takes the output of `navigationFor()` rather than replacing it: every other
+ * caller — `sectionFor`, the tab strip, the tests — still sees one flat list,
+ * so this adds a way to *draw* the rail without changing what the rail is.
+ *
+ * An area a role cannot see is already absent, so a group can come back empty;
+ * an empty group renders no heading at all. Anything not named in a group falls
+ * through to `rest`, which means a rail row added tomorrow shows up rather than
+ * silently disappearing — the failure mode that matters.
+ */
+export function groupNavigation(items: NavItem[]): { groups: NavGroup[]; rest: NavItem[] } {
+  const byHref = new Map(items.map((item) => [item.href, item]));
+  const claimed = new Set<string>();
+
+  const groups = GROUPS.map((group) => {
+    const found = group.hrefs
+      .map((href) => byHref.get(href))
+      .filter((item): item is NavItem => item !== undefined);
+    found.forEach((item) => claimed.add(item.href));
+    return { label: group.label, items: found };
+  }).filter((group) => group.items.length > 0);
+
+  // `UNGROUPED` first so Help keeps its place at the foot of the rail, then
+  // anything a future release adds without touching this file.
+  const rest = [
+    ...items.filter((item) => UNGROUPED.includes(item.href)),
+    ...items.filter((item) => !claimed.has(item.href) && !UNGROUPED.includes(item.href)),
+  ];
+
+  return { groups, rest };
+}
+
 export function isActive(pathname: string, href: string): boolean {
   if (href === "/dashboard") return pathname === href;
   return pathname === href || pathname.startsWith(`${href}/`);

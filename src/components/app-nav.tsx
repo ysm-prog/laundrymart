@@ -2,13 +2,16 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useSyncExternalStore, type ComponentType } from "react";
+import { useState, useSyncExternalStore, type ComponentType } from "react";
 import {
-  ChartColumn, CircleQuestionMark, ClipboardList, LayoutDashboard, MapPin, Moon,
+  ChartColumn, ChevronRight, CircleQuestionMark, ClipboardList, LayoutDashboard, MapPin, Moon,
   Receipt, Route, Server, Settings, Shirt, Sun, Truck, Users,
 } from "lucide-react";
 import { cx } from "./ui";
-import { isActive, sectionFor, type NavCountKey, type NavIcon, type NavItem } from "@/lib/nav";
+import {
+  groupIsOpenByDefault, groupNavigation, isActive, sectionFor,
+  type NavCountKey, type NavIcon, type NavItem,
+} from "@/lib/nav";
 import {
   DEFAULT_TEXT_SIZE, TEXT_SIZE_ATTRIBUTE, TEXT_SIZE_STORAGE_KEY, nextTextSize,
   parseTextSize, textSizeActionLabel, type TextSize,
@@ -72,21 +75,37 @@ export function BrandMark({ className }: { className?: string }) {
  * showing "0" is noise, and the point of the badge is to pull attention.
  */
 export function AppNav({
-  items, counts, onNavigate, collapsed = false,
+  items, counts, onNavigate, collapsed = false, openGroups,
 }: {
   items: NavItem[];
   counts?: NavCounts;
   onNavigate?: () => void;
   /** Icon-only rail. The label becomes the tooltip and the accessible name. */
   collapsed?: boolean;
+  /**
+   * Which groups are open, read from a cookie in the layout so the rail paints
+   * at the right height on the first frame — the same reason `defaultCollapsed`
+   * travels that way rather than being discovered in an effect.
+   */
+  openGroups?: Record<string, boolean>;
 }) {
   const pathname = usePathname();
   const current = sectionFor(pathname, items);
+  const { groups, rest } = groupNavigation(items);
+  const [open, setOpen] = useState<Record<string, boolean>>(() =>
+    Object.fromEntries(groups.map((g) => [
+      g.label, openGroups?.[g.label] ?? groupIsOpenByDefault(g.label),
+    ])));
 
-  return (
-    <nav aria-label="Main" className="flex flex-col gap-0.5">
-      {items.map((item) => {
-        // The area owning the current path highlights, so a detail route still
+  function toggle(label: string) {
+    const next = { ...open, [label]: !open[label] };
+    setOpen(next);
+    rememberShutGroups(Object.entries(next).filter(([, v]) => !v).map(([k]) => k));
+  }
+
+  /** One row. Shared by the grouped rows and the ungrouped ones below them. */
+  function row(item: NavItem) {
+    // The area owning the current path highlights, so a detail route still
         // says where you are — `isActive` alone would unlight the whole rail on
         // `/customers/abc`.
         const active = current ? current.href === item.href : isActive(pathname, item.href);
@@ -135,8 +154,59 @@ export function AppNav({
               </span>
             ) : null}
           </Link>
+    );
+  }
+
+  /*
+   * Collapsed, the rail is a column of icons with no room for a heading, so it
+   * stays flat — the grouping is a way to shorten a *labelled* list, and there
+   * is nothing to shorten when every row is one glyph.
+   */
+  if (collapsed) {
+    return (
+      <nav aria-label="Main" className="flex flex-col gap-0.5">
+        {items.map(row)}
+      </nav>
+    );
+  }
+
+  return (
+    <nav aria-label="Main" className="flex flex-col gap-0.5">
+      {groups.map((group) => {
+        const isOpen = open[group.label] ?? true;
+        // A group holding the area you are currently in always draws open,
+        // whatever the cookie says: a shut drawer with the active row inside it
+        // would leave the rail showing nowhere as "here".
+        const holdsCurrent = current
+          ? group.items.some((item) => item.href === current.href)
+          : false;
+        const shown = isOpen || holdsCurrent;
+        const id = `nav-group-${group.label.replace(/[^a-z]+/gi, "-").toLowerCase()}`;
+
+        return (
+          <div key={group.label} className="mb-1">
+            <button
+              type="button"
+              onClick={() => toggle(group.label)}
+              aria-expanded={shown}
+              aria-controls={id}
+              className="flex min-h-9 w-full items-center gap-1.5 rounded-lg px-3 text-2xs
+                         font-semibold text-sidebar-muted transition
+                         hover:bg-sidebar-hover hover:text-sidebar-foreground"
+            >
+              <ChevronRight
+                aria-hidden
+                className={cx("size-3.5 shrink-0 transition-transform", shown && "rotate-90")}
+              />
+              <span className="truncate">{group.label}</span>
+            </button>
+            {shown ? (
+              <div id={id} className="mt-0.5 flex flex-col gap-0.5">{group.items.map(row)}</div>
+            ) : null}
+          </div>
         );
       })}
+      {rest.map(row)}
     </nav>
   );
 }
@@ -227,6 +297,23 @@ export function ThemeToggle() {
 }
 
 /* ------------------------------------------------------- reading comfort --- */
+
+/**
+ * Remember which rail groups are shut, for the layout to read back.
+ *
+ * A year, path-wide, lax: a layout preference, not a credential — the same
+ * shape and lifetime as `es_rail`. Written at module scope rather than inside
+ * the component because the React Compiler's immutability rule rightly objects
+ * to a DOM write sitting in a render body.
+ *
+ * The *shut* groups are stored rather than the open ones, so a release that
+ * adds a group gets that group's own default instead of a missing name reading
+ * as "closed".
+ */
+function rememberShutGroups(shut: string[]) {
+  document.cookie =
+    `es_nav=${encodeURIComponent(shut.join("|"))};path=/;max-age=31536000;samesite=lax`;
+}
 
 /**
  * Watches the root element's text-size attribute, the same way

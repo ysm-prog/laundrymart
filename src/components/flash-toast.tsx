@@ -55,7 +55,7 @@ export function FlashToast({ flash }: { flash: Flash | null }) {
         role={isError ? "alert" : "status"}
         className={cx(
           "pointer-events-auto flex max-w-[26rem] animate-slide-up items-start gap-3 rounded-xl",
-          "border bg-surface py-3 pl-4 pr-3 text-base shadow-lg",
+          "border bg-surface py-3 pl-4 pr-3 text-sm shadow-lg",
           isError ? "border-danger/30" : "border-success/30",
         )}
       >

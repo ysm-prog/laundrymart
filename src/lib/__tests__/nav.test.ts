@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { NAVIGATION, isActive, navigationFor, sectionFor } from "@/lib/nav";
+import {
+  NAVIGATION, NAV_GROUP_LABELS, groupIsOpenByDefault, groupNavigation, isActive,
+  navigationFor, sectionFor,
+} from "@/lib/nav";
 import { MEMBERSHIP_ROLES, ROLES, can, type Role } from "@/lib/roles";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -430,5 +433,73 @@ describe("the rail and the page it opens agree", () => {
       expect(source).not.toContain('title="Jobs"');
       expect(source).not.toContain('title="Stops"');
     }
+  });
+});
+
+/**
+ * The rail's three collapsible groups.
+ *
+ * This softens §6's "one flat list, no headings" — see the note over `GROUPS`
+ * in `nav.ts`. The property that has to hold is that grouping is only a way of
+ * *drawing* the rail: every area a role can reach must still appear exactly
+ * once, and none may go missing because nobody remembered to name it.
+ */
+describe("rail grouping", () => {
+  it("shows every area a role can reach, exactly once", () => {
+    for (const role of ROLES) {
+      const items = navigationFor(role);
+      const { groups, rest } = groupNavigation(items);
+      const drawn = [...groups.flatMap((g) => g.items), ...rest].map((i) => i.href);
+      expect(new Set(drawn).size, role).toBe(drawn.length);          // no duplicates
+      expect(drawn.sort()).toEqual(items.map((i) => i.href).sort()); // and none lost
+    }
+  });
+
+  // The failure that matters: an area added to NAVIGATION and not named in a
+  // group must still be drawn. Silently vanishing from the rail is far worse
+  // than landing in the wrong drawer.
+  it("falls an unnamed area through to the ungrouped rows rather than dropping it", () => {
+    const invented = { label: "Brand new", href: "/brand-new", icon: "today" } as const;
+    const { groups, rest } = groupNavigation([...navigationFor("super_admin"), invented]);
+    expect(groups.flatMap((g) => g.items).map((i) => i.href)).not.toContain("/brand-new");
+    expect(rest.map((i) => i.href)).toContain("/brand-new");
+  });
+
+  it("keeps Help out of every drawer, pinned last", () => {
+    for (const role of ROLES) {
+      const { groups, rest } = groupNavigation(navigationFor(role));
+      expect(groups.flatMap((g) => g.items).map((i) => i.href)).not.toContain("/help");
+      // It is the one row with no capability, so every role has it — and the
+      // moment somebody is lost is the wrong moment for it to be behind a
+      // closed drawer.
+      expect(rest[0]?.href, role).toBe("/help");
+    }
+  });
+
+  it("renders no heading for a group a role cannot see into", () => {
+    // A driver holds no billing or admin capability, so those groups are empty
+    // for them and must not draw an empty drawer.
+    const { groups } = groupNavigation(navigationFor("driver"));
+    for (const group of groups) expect(group.items.length).toBeGreaterThan(0);
+  });
+
+  it("opens the day-to-day group and leaves the others shut", () => {
+    expect(groupIsOpenByDefault("Day to day")).toBe(true);
+    expect(groupIsOpenByDefault("Customers & money")).toBe(false);
+    expect(groupIsOpenByDefault("Set-up & reports")).toBe(false);
+  });
+
+  it("names the groups in plain words, not in trade terms", () => {
+    const jargon = /\b(depot|board|agreement|levy|tenant|manifest|dispatch|plant|inventory)/i;
+    for (const label of NAV_GROUP_LABELS) expect(label).not.toMatch(jargon);
+  });
+
+  // The rail is the thing being tidied, so the shape it collapses to is the
+  // point: a short open list plus two closed drawers plus Help.
+  it("leaves an owner a short rail with both drawers shut", () => {
+    const { groups, rest } = groupNavigation(navigationFor("super_admin"));
+    const visible = groups.filter((g) => groupIsOpenByDefault(g.label))
+      .flatMap((g) => g.items).length + groups.length + rest.length;
+    expect(visible).toBeLessThanOrEqual(9); // was 12 flat rows
   });
 });
