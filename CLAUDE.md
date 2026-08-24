@@ -908,6 +908,23 @@ documented definer shape, internally scoped to `auth.uid()`, and the exact count
 `current_driver_id`/`is_driver_only` already on the list. `sync_laundry_item_type` is *not* on it,
 because its EXECUTE is revoked — the trigger-function trap 0019 recorded.
 
+**Read back on 2026-08-24, and the real laundry has been used since the cutover.**
+`Adelaide Towel Service` now holds four laundry jobs of its own, three of them raised after the
+20 August entry above: `LJ00002` was completed, **priced and approved** (1 frozen
+`job_charge_snapshots` row — the first time the billing lifecycle has run against real work), and
+`LJ00003`/`LJ00004` are `assigned` to boards. Two things follow, and both are the owner's to act
+on rather than the code's:
+
+- **No invoice has been generated from any of it.** `invoice_source_jobs` is 0 and no invoice has
+  been created since 20 August, so `LJ00002` is sitting approved in the billing queue waiting for
+  the month-end run. The roll-up is still the one step of the money path never exercised end to
+  end.
+- **Adelaide's four boards are still linked to no login (0 of 4), and it still has no member who
+  is not a platform administrator.** So `LJ00003` and `LJ00004` are assigned to rounds nobody can
+  sign in as, and My Runs is empty for them — real jobs now sitting behind the §24 cutover step
+  that has not been done. The pricing was also entered by hand: Adelaide still holds **0**
+  `laundry_prices`, so the price list is not what answered.
+
 **Still to do in the app, not the database:** create the real boards and link a login to each
 (§24), and set `laundry_category` on the items that are laundry a customer hands in (§25) —
 without it a coded job item keeps whatever kind the counter chose, which is correct but means the
@@ -1358,10 +1375,31 @@ exists, every route still resolves, and no role gained or lost anything.
   320px screen. `/routes/planner` is unlinked from every rail, so nobody reaches it — but its
   controls were enlarged with the rest anyway rather than excused.
 
-**Not verified against a live project.** This container has no Supabase credentials, so no
-authenticated screen was opened with real rows in it. **Before trusting it: sign in as
-`owner@roles.example.com`, press each card on the home screen, and set the text to Biggest on a
-phone.**
+**Verified against `laundrymart-syd` on 2026-08-24, and there was nothing to apply.** This
+branch adds **no migration**: the ledger's last entry is still `0033_laundry_prices_read`, and
+`git diff --name-only` over `supabase/` is empty. What was checked anyway, because a release is
+the moment to look: advisors still **18** (the 17 documented definer helpers and the auth
+leaked-password toggle — no function added, none expected); **0** `anon` table grants and **0**
+tables without RLS, so 0029 and the tenancy spine are holding; and 647 invoices, 508 archived
+customers, 16 memberships, 5 boards and 9 prices, all exactly as recorded above.
+
+**One check was specific to this branch and only the database could answer it.** `FIELD_LABELS`
+maps 79 schema field names to the words on the label, and a typo there would silently fall back
+to a derived name — right-looking and wrong. 76 are real columns in `public`; the other three
+(`default_gst_rate`, `received_date`, `return_board`) are real *form* fields with no column
+behind them, which is correct in each case — the middle one is the job form's date that
+`receivedInstant()` composes into `received_at`, exactly as the 2026-08-13 entry describes.
+
+**The authenticated screens themselves are still unopened.** This container has no Supabase
+credentials. **Before trusting it: sign in as `owner@roles.example.com`, press each card on the
+home screen, and set the text to Biggest on a phone.**
+
+**Merged to `Dev` and `Prod` on 2026-08-24** (`de7e265`), so it is live on `ats.coreit.com.au`.
+CI green on all three jobs for both branches — verify, gitleaks, and the DB job against a fresh
+Postgres 16 with the whole pgTAP suite and the seed. **Both merges were clean fast-forwards**, and
+`Dev` finally caught up: it had been 18 commits behind `Prod` since 2026-08-16, which the last
+five changelog entries each recorded and none fixed. **No migration went with this one** — there
+was none to apply, and the ledger's last entry is still `0033_laundry_prices_read`.
 
 **Deliberately not done, because it is the owner's call and needs a migration** (§26): the
 business analysis found that `orders.write` is held by two roles, and `customer_service` — the

@@ -56,6 +56,24 @@ AAA in both themes. The dark danger badge was 4.45:1 on the word "Overdue".
 320/390/768/1440 — **zero console errors, zero card overflow, sub-36px targets 79 → 0**, and 69
 controls measured at 3.21:1 (light) / 3.01:1 (dark) as rendered.
 
+## Verified against the live project (2026-08-24) — nothing to apply
+This branch adds **no migration**; the ledger's last entry is still `0033_laundry_prices_read`.
+Checked anyway: advisors **18** (unchanged — no function added), **0** `anon` table grants, **0**
+tables without RLS, and 647 invoices / 508 archived customers / 16 memberships / 5 boards / 9
+prices exactly as recorded. `FIELD_LABELS`' 79 keys were checked against `information_schema`:
+76 are real columns, and the three that are not (`default_gst_rate`, `received_date`,
+`return_board`) are real form-only fields. **Merged to `Dev` and `Prod`** — both were clean
+fast-forwards, and Dev absorbed the 18-commit backlog the changelog kept recording as stale.
+
+## What the live read-back turned up — the owner's to act on
+- **The real laundry has been used since the cutover.** Adelaide now has four jobs; `LJ00002` was
+  completed, **priced and approved** (the first frozen charge snapshot on the project). But
+  `invoice_source_jobs` is 0 and no invoice exists since 20 August — so it is sitting in the
+  billing queue and **the month-end roll-up is still the one money step never run end to end**.
+- **Adelaide's four boards are linked to no login (0 of 4)** and it still has no member who is not
+  a platform admin — yet `LJ00003`/`LJ00004` are assigned to those boards. Real jobs are now
+  behind the §24 cutover step. Its price list is still empty, so `LJ00002` was priced by hand.
+
 ## Do these next
 - **Open it with real rows in it.** This container has no Supabase credentials, so no
   authenticated screen was rendered. Sign in as `owner@roles.example.com`, press each card on the
