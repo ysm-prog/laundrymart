@@ -41,14 +41,19 @@ const itemSchema = z.object({
   cost_price: money,
   tax_code: optionalText,
   /*
-   * MYOB's "Income Account for Tracking Sales". `optionalUuid` because the
-   * select's placeholder posts "" and an item that is never sold has no account
-   * — refusing to save one until somebody picks would put the item master behind
-   * the chart of accounts. Cross-tenant safety is the FK plus RLS: an account id
-   * from another laundry is invisible to this session, so the insert fails on the
-   * foreign key rather than silently coding to somebody else's books.
+   * MYOB's "Income Account for Tracking Sales", and the item's code as it is in
+   * **Xero** (0036 + 0037). Both optional and both null by default: an item
+   * nobody has coded behaves exactly as it did before, which is what makes this
+   * safe to add to an item list already in use.
+   *
+   * `optionalUuid` because the select's placeholder posts `""`, and refusing to
+   * save until somebody picks would put the item master behind the chart of
+   * accounts. Cross-tenant safety is the FK plus RLS: an account id from another
+   * laundry is invisible to this session, so the insert fails on the foreign key
+   * rather than silently coding to somebody else's books.
    */
   income_account_id: optionalUuid,
+  xero_item_code: optionalText,
   myob_item_id: optionalText,
   ownership_type: z.enum(["laundry_owned", "customer_owned", "either"]),
   replacement_cost: money,

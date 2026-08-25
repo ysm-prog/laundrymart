@@ -105,8 +105,9 @@ export const NAVIGATION: NavItem[] = [
      * What this row is for is the one decision the office was left unable to
      * make — *in what order does the board drive?* — plus moving work between
      * boards. Gated on `routes.read` so a board can see the sequence it will
-     * drive; changing it needs `routes.write`, which a board deliberately does
-     * not hold.
+     * drive; changing it needs `routes.sequence` (0036), which a board, a
+     * driver and — deliberately — a dispatcher all lack. Moving work between
+     * boards is the separate, wider `routes.write`.
      */
     label: "Runs",
     href: "/runs",

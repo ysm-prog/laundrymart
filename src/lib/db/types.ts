@@ -104,8 +104,10 @@ export type Item = {
   /** The ledger's tax code (GST, FRE, …). Somebody else's vocabulary, so a string. */
   tax_code: string | null;
   /**
-   * MYOB's "Income Account for Tracking Sales" (0036). What makes picking this
-   * item on an invoice fill the account code in by itself.
+   * MYOB's "Income Account for Tracking Sales" (0036), which 0037 then carries
+   * through to Xero. What makes picking this item on an invoice fill the code
+   * in by itself. Two branches arrived at this same column independently — the
+   * shape §11 records for `invoice_lines.laundry_order_id` in 0018.
    */
   income_account_id: Uuid | null;
   replacement_cost: number;
@@ -118,6 +120,8 @@ export type Item = {
   /** When this row last agreed with the external ledger. Null until something syncs. */
   external_synced_at: string | null;
   status: string;
+  /** 0037 — this item's code in the laundry's Xero inventory, if it has one. */
+  xero_item_code: string | null;
 };
 
 export type Vehicle = {
@@ -632,6 +636,13 @@ export type GlAccount = {
   name: string;
   account_type: string;
   tax_code: string | null;
+  /**
+   * This account's code in the laundry's Xero chart (0037), when they have said
+   * what it is. Null means no invoice line is coded to it in Xero — deliberately
+   * not defaulted to `code`, because Xero refuses an invoice naming a code its
+   * own chart does not carry.
+   */
+  xero_account_code: string | null;
   is_linked: boolean;
   /** True for the six MYOB classification rows that carry no code of their own. */
   is_header: boolean;

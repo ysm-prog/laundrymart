@@ -1,7 +1,40 @@
 # MEMORY — working session handoff
 > Auto-loaded each session. Canonical state is CLAUDE.md; this is the live delta.
 
-## Latest: account codes on an invoice line
+## Latest: two branches reconciled, both merged
+2026-08-25. `claude/invoice-item-code-selection-vlwwb4` (account codes on an invoice) and
+`claude/code-review-requirements-ns6bav` (run sequencing + Xero codes) were built the same
+afternoon, both applied migrations to `laundrymart-syd`, and **both gated `gl_accounts`**.
+CLAUDE.md's newest changelog entry, §3, §7, §27 and §28 have the whole of it.
+
+**They could not both merge as they stood** — every migration on a fresh Postgres 16, in filename
+order, failed with `42710: policy "gl_accounts_read" already exists`. CI's DB job does exactly
+that. Resolved by keeping **0036's** gate (`can_read_purchases`/`can_write_purchases`, six payable
+tables) and dropping 0037's (`can_read_accounts`/`can_write_accounts`, `gl_accounts` alone,
+**identical role lists**). 0037 now asserts against 0036's gate rather than creating its own.
+
+**The Xero push takes theirs and generalises it.** Two charts, not one:
+`invoice_lines.account_code` is the MYOB code the bookkeeper reads; `gl_accounts.xero_account_code`
+is what Xero calls that account. Only the second travels — Xero refuses a code its chart lacks.
+Their path was `line → item → account`, which misses a line coded straight to an account; 0036's
+`invoice_lines.gl_account_id` is set either way, so it is read first with the item as fallback.
+
+**A live regression was found on the way**: `0036_run_sequence_control` was applied to the hosted
+project with its code unmerged, so the database refused a **dispatcher** reordering a stop while
+the deployed screen still offered it. Merging the branch is the fix.
+
+**Live ledger carries three of today's migrations**, two of them numbered 0036
+(`0036_invoice_account_codes`, `0036_run_sequence_control`, `0037_account_and_item_codes`) — the
+same situation §7 records for the two 0017s. Filename order matches apply order, so nothing needs
+renumbering.
+
+- 431 pgTAP assertions across 24 proofs; `verify` green; whole suite + seed on a fresh Postgres 16.
+- `run-db-tests.sh` now fails on `not ok` and on a plan mismatch — it used to trust psql's exit
+  code, which is 0 for a file full of failed assertions.
+
+---
+
+## Previous: account codes on an invoice line
 2026-08-25, branch `claude/invoice-item-code-selection-vlwwb4`. CLAUDE.md §3, §7, **§27** and the
 newest changelog entry have it. One migration (`0036_invoice_account_codes`) — **no new table, no
 new role, no new capability, nothing dropped, no row changed**.
@@ -80,6 +113,164 @@ Three follow-ups, and the middle one is the durable win:
 ---
 
 ## Previous: usable by somebody who has been shown it once
+
+---
+
+## Latest: 0036 and 0037 are live on `laundrymart-syd`
+2026-08-25. Both applied and verified by read-back. CLAUDE.md §11 has the full record.
+
+**The pre-flight turned up a collision, and it changed what 0037 could be.** A third `0036` —
+`0036_invoice_account_codes`, from a branch not in this repo — was applied to the project the
+same day and had already done most of our 0037's policy work: `can_read_purchases()` /
+`can_write_purchases()` with **the same two role lists** as our `can_*_accounts()`, the identical
+four-policy rewrite of `gl_accounts` (same policy names), and `items.income_account_id`. It also
+added `invoice_lines.gl_account_id` + `account_code` with a `sync_invoice_line_account` trigger.
+- So our 0037 went on **reconciled**: only the four Xero-code columns
+  (`gl_accounts.xero_account_code`, `items.xero_item_code`, `xero_connections.sales_account_code`
+  /`_name`) and the re-created `xero_connection_status()`. Re-running the policy half would have
+  failed 42710, and forcing it would have left `gl_accounts` gated differently from the five
+  sibling tables that branch gates the same way. **The repo file is unchanged and still right for
+  a fresh database**; the ledger entry records the difference. Same shape as the 0018 convergence.
+
+**⚠️ Open, and the owner's call: two answers to "what account is this invoice line coded to".**
+That branch snapshots `invoice_lines.account_code` at write time via a trigger. Our `push.ts`
+ignores that column and resolves the code at push time from
+`invoice_lines.item_id → items.income_account_id → gl_accounts.xero_account_code`. Both are now
+live. If a bookkeeper codes a line explicitly, our push would send the *item's* code instead —
+so this wants deciding before the first real Xero push, and it is a small fix either way
+(prefer `invoice_lines.account_code` when present, fall back to the item).
+
+**Verified live, as real sessions in rolled-back transactions:**
+- **0036** — board and dispatcher, both of which can *see* the run, refused 42501 with the
+  sentence; both refused the unlock. A driver was **lent a stop** inside the rolled-back
+  transaction (no ordinary driver login on this deployment can see one, so probing without that
+  proves RLS filtering, not the guard) and, seeing the row, was refused identically. Office
+  manager saved a real order, version 1 → 2. Moving a worked stop refused. Stale session got the
+  concurrency sentence. After: 11 runs locked at v1, both guards attached, **0 duplicate
+  positions**, all counts unchanged (16 stops / 8 jobs / 647 invoices / 20 memberships / 5 boards
+  / 508 archived customers).
+- **0037** — **0** accounts and **0** items carry a Xero code, so every invoice pushes exactly
+  the payload it pushed before. `xero_connection_status()` returns 8 columns now; `authenticated`
+  still cannot read `xero_connections`. Owner and office manager can **add an account**; driver,
+  board and counter refused 42501.
+- **Advisors 18 → 22** (+2 ours, +2 that branch's). Our two trigger functions are correctly
+  **absent** — EXECUTE revoked, the 0019 trap avoided. 0 anon table grants, 0 anon functions,
+  0 tables without RLS.
+
+**Two data facts worth knowing before trying it:** the chart of accounts (268 rows) is
+**Adelaide's**, which has **no items**; the six items are **Harbour's**, which has **no
+accounts**. And all **647 invoices carry 0 invoice_lines** (import headers), so there is nothing
+yet for the line coding to act on.
+
+## Previously: the Owner keeps the codes, and the codes reach Xero
+2026-08-25, same branch. One migration (`0037`), **no new table, no dropped column, no row
+changed, no new capability**. CLAUDE.md §20 and §25 hold the design; §3, §7, §11 and the newest
+changelog entry the rest.
+
+Three asks, and each had a defect behind it.
+
+**1. The three plan-count mismatches are fixed — and the reason they hid is the real finding.**
+`boards_scope` 20→23, `item_master` 16→17, `main_flow_scope` 29→27. None was failing;
+`main_flow_scope` genuinely contains 27 and claimed 29, so nothing was skipped.
+- **`run-db-tests.sh` trusted `psql`'s exit code, and `psql` exits 0 for a pgTAP file that runs
+  to completion.** A failed assertion is a *result row* (`not ok 7 - …`), not an error — so **CI
+  would have gone green over a security proof that had started failing.** The runner now fails
+  on `not ok`, on "Looks like you failed" and on a plan mismatch. All three were proved to fail
+  the run by deliberately breaking a proof, not assumed.
+
+**2. Chart of accounts: the Owner can add to it, and before this everybody could rewrite it.**
+`/accounts` had been read-only since the MYOB import ("appears here once it is imported…"), with
+no create action anywhere in `src/`. Underneath, 0021's `apply_tenant_policy` left one permissive
+`for all` policy, so **every member could read and rewrite the chart off PostgREST** — proved on a
+0001–0036 database: a driver read the balances, renamed an account, zeroed it and inserted one.
+`current_balance` is on that table.
+- `for all` **dropped and replaced** by four explicit policies (its USING half grants SELECT —
+  the 0033 trap, third table).
+- **No new capability**: `purchases.read`/`purchases.write`, which `/accounts` was already gated
+  on. Auditor reads and does not write, hence two helper functions.
+- New: `/accounts` create form, `/accounts/[id]` edit page, `accounts_scope.test.sql` (19).
+
+**3. Xero: nothing this app knew had ever reached it as a code.**
+`buildInvoicePayload` mapped `line.account_code` → `AccountCode` since 0026 and **nothing ever
+populated it** — `push.ts` selected four columns and stopped. Every pushed line landed uncoded;
+no `ItemCode` either.
+- Codes now travel `invoice_lines.item_id → items.income_account_id → gl_accounts.xero_account_code`
+  (+ `items.xero_item_code`), with `xero_connections.sales_account_code` as the fallback for the
+  many lines carrying **no item** (fuel levy, contract minimum, consolidated laundry charge).
+- **The Xero codes are separate fields from ours, deliberately.** Xero refuses an invoice naming
+  a code its chart/inventory lacks, so defaulting to `items.item_code` would turn one mismatch
+  into *every* invoice failing. Blank omits the key → a laundry that fills none of this in
+  pushes exactly yesterday's payload. That is the first assertion in the payload tests.
+- Resolved at **push time**, not snapshotted: a code is a classification, not money, so a
+  corrected code should be sent on Retry. The amount is what `job_charge_snapshots` freezes.
+
+**Verified:** 766 unit tests (was 755), **417 pgTAP assertions (was 398)**, `verify` green, all
+37 migrations against a fresh Postgres 16 with the seed on top, every pre-existing proof
+unchanged. Both new PostgREST embeds checked for ambiguity — exactly one FK per hop.
+
+**NOT applied to `laundrymart-syd`** — no credentials here. **0037 first**: until it lands, the
+new Accounts screen offers an Owner a create form whose refusals are not enforced underneath, and
+the chart stays readable and writable by every member.
+
+## Previously: the run is locked, and only the office may change its order
+2026-08-25, branch `claude/code-review-requirements-ns6bav`. The client's controlled-sequencing
+requirement. CLAUDE.md **§27** holds the design; §3, §4, §7, §11 and the newest changelog entry
+have the rest. **One migration (`0036`), no new table, nothing dropped, no existing row
+invalidated** — every column's default describes what was already true.
+
+**The headline: the security boundary did not exist.** The reorder was gated on `routes.write`,
+while `jobs` sits on `/rest/v1/jobs` under a single permissive `for all` policy — so **a driver
+could PATCH `jobs.sequence` on the run they were standing in**. Reproduced against a 0001–0035
+database rather than reasoned about: `UPDATE 1`, a real row changed.
+
+**What changed, in five pieces:**
+- `routes.sequence` — a new capability, `super_admin` + `operations_manager` only. `routes.write`
+  was the wrong authority (dispatcher, branch_manager, regional_manager hold it). Named in a
+  `RUN_SEQUENCE` block and **subtracted** from the `TENANT_ALL`-derived roles — the leak trap
+  this repo has now recorded three times.
+- `guard_job_sequence` — a trigger, not a restrictive policy. The rule is about *one column*
+  (a driver must still write `progress_status`), and a restrictive policy writes **zero rows in
+  silence** where a trigger raises 42501. UPDATE-only, so assignment (an INSERT appended at the
+  end) still works for the roles that assign but do not order.
+- `guard_run_sequence_control` — found by probing: a board/driver may update their **own** run
+  row, so without this they could set `sequence_locked = false` and walk past the first guard.
+- `apply_run_sequence()` — Save & Lock in one transaction. Re-resolves the run from
+  (tenant, board, date) rather than trusting a posted id, compare-and-swaps `sequence_version`,
+  writes 1..n in one statement. SECURITY **INVOKER**, so RLS + both guards still apply.
+- `compact_run_sequence()` — closes the gap `retireStopIfEmpty` used to leave (a run that lost
+  its second call read 1, 3, 4). SECURITY DEFINER, safe **by construction**: it takes no order
+  from its caller, so it can only close a gap, never undo a management decision.
+
+**Two design calls worth not re-litigating:**
+- **Editing is never persisted.** §6 of the requirement says Cancel writes nothing, which settles
+  it — entering edit mode cannot write either, or Cancel would have to write it back.
+  `sequence_locked` is the standing statement that the order is management's, read by the guard;
+  it is not a mutex and nothing flips it.
+- **Concurrency is `sequence_version`, not `updated_at`** — that column moves for status changes
+  and load confirmation, which would refuse saves over edits that never touched the order. The
+  day's token is the **highest** version across the board+date's runs, swapped on `<= expected`,
+  so a run opened after the last save joins the token instead of deadlocking.
+
+`applyDispatchPlan` moved to the same capability: the unlinked planner writes `jobs.sequence` too
+and would have been a live bypass of the screen next door.
+
+**Verified:** 755 unit tests (was 739), **398 pgTAP assertions (was 368)**, `verify` green, all
+36 migrations against a fresh Postgres 16 with the seed on top, and **every pre-existing proof
+passes unchanged** — the check that mattered, since the new trigger sits on a table five of them
+own. The lock→edit→cancel cycle was driven in a real browser: 26 interaction assertions at
+390/768/1440, light and dark, 0 console errors, 0 overflow.
+
+**Recorded, not fixed (pre-existing, identical without 0036):** three proofs declare a `plan(N)`
+that disagrees with what they run — `boards_scope` 20/23, `item_master` 16/17, **`main_flow_scope`
+29/27**. Nothing fails, but that last one means two assertions in a security proof are not what
+somebody thought. `run-db-tests.sh` does not fail on a plan mismatch, which is why it hid.
+
+**NOT applied to `laundrymart-syd`.** No credentials here. 0036 is the one migration in §7 the
+hosted project does not carry, and until it is applied the *screens* are narrowed while the
+database still lets a driver rewrite `jobs.sequence`. Apply it, then sign in as
+`driver@roles.example.com` (cannot reorder) and `owner@roles.example.com` (can).
+
+## Previously: usable by somebody who has been shown it once
 2026-08-24, branch `claude/app-accessibility-all-ages-e7sh41`. CLAUDE.md §6, §10b, §26 and the
 newest changelog entry have it. **No migration. No schema, RLS, capability, policy or workflow
 change** — every screen still exists, every route still resolves, no role gained or lost anything.
@@ -262,6 +453,16 @@ fast-forwards, and Dev absorbed the 18-commit backlog the changelog kept recordi
   a platform admin**, and its price list is still empty, so `LJ00002` was priced by hand.
 
 ## Do these next
+- **Decide the invoice-line coding overlap** (see the warning above). Two designs are live for
+  "what account is this line coded to"; our push path reads the item, that branch's trigger
+  snapshots the line. Decide before the first real Xero push.
+- **Reconcile the two `0036`s when that branch merges.** The repo will then hold two migrations
+  numbered 0036 and a duplicate helper pair (`can_*_accounts` vs `can_*_purchases`) with
+  identical role lists. Renumber and collapse to one pair — the same job §7 records for the two
+  0017s and the two 0015s.
+- **Open the screens with real rows.** Both migrations are verified at the database level; no
+  authenticated page has been rendered against them. Sign in as `owner@roles.example.com`:
+  Adjust Run → Save & Lock Run on a real board, and add one account at `/accounts`.
 - **Open it with real rows in it.** This container has no Supabase credentials, so no
   authenticated screen was rendered. Sign in as `owner@roles.example.com`, press each card on the
   home screen, and set the text to Biggest on a phone.

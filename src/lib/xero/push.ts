@@ -3,6 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { XERO_API } from "./config";
 import { summariseXeroError } from "./errors";
 import { getXeroTokens } from "./tokens";
+import { createAdminClient } from "@/lib/supabase/admin";
 import {
   buildInvoicePayload, canPushToXero,
   type PayloadCustomer, type PayloadInvoice, type PayloadLine,
@@ -41,6 +42,78 @@ type InvoiceRow = PayloadInvoice & {
  * that has never connected Xero should not have every invoice wearing a red
  * failure it cannot act on.
  */
+/**
+ * A line as it comes back, with the embedded item and its account.
+ *
+ * PostgREST returns a to-one embed as an object, but the generated types and
+ * some versions hand back a single-element array — both are read here rather
+ * than one being assumed, which is the shape `requireSession()` already handles
+ * for `tenants(name)`.
+ */
+type Embedded<T> = T | T[] | null;
+type LineRow = PayloadLine & {
+  items?: Embedded<{
+    xero_item_code: string | null;
+    gl_accounts?: Embedded<{ xero_account_code: string | null }>;
+  }>;
+  /**
+   * The account 0036 stamps on the line itself. Read **in preference to** the
+   * one reached through the item, because it is set in both cases the invoice
+   * composer produces: picking an item copies that item's income account here,
+   * and picking a bare account code sets it with no item at all. A line coded
+   * the second way has no `items` row to travel through, so resolving only
+   * through the item would silently drop its code.
+   */
+  gl_accounts?: Embedded<{ xero_account_code: string | null }>;
+};
+
+const one = <T,>(value: Embedded<T> | undefined): T | null =>
+  (Array.isArray(value) ? value[0] ?? null : value ?? null);
+
+function toPayloadLine(row: LineRow): PayloadLine {
+  const item = one(row.items);
+  return {
+    description: row.description,
+    quantity: row.quantity,
+    unit_price: row.unit_price,
+    taxable: row.taxable,
+    item_code: item?.xero_item_code ?? null,
+    /*
+     * **The Xero code, never the one printed on the invoice.** Two charts are in
+     * play and they are not the same: `invoice_lines.account_code` is the MYOB
+     * code the bookkeeper reads (`4-1100`), and `gl_accounts.xero_account_code`
+     * is what that account is called in Xero. Sending the first would make Xero
+     * refuse an invoice naming a code its own chart does not carry — so the MYOB
+     * code stays on the screen and in the PDF, and only this one travels.
+     *
+     * The line's own account first, the item's second: the composer sets the
+     * direct link for a line coded straight to an account, where there is no
+     * item to reach through.
+     */
+    account_code: one(row.gl_accounts)?.xero_account_code
+      ?? one(item?.gl_accounts)?.xero_account_code
+      ?? null,
+  };
+}
+
+/**
+ * The laundry's default sales account, for every line no item codes.
+ *
+ * Through the **service-role** client and filtered by tenant by hand, because
+ * `authenticated` may not read `xero_connections` at all (0026): the table
+ * holds a refresh token, so the grants are revoked rather than merely policied.
+ * The same route `push-payment.ts` takes for the bank account, and §2's rule
+ * for the admin client applies — the tenant is named here.
+ */
+async function salesAccountCode(tenantId: string): Promise<string | null> {
+  const admin = createAdminClient();
+  const { data } = await admin
+    .from("xero_connections").select("sales_account_code")
+    .eq("tenant_id", tenantId)
+    .maybeSingle<{ sales_account_code: string | null }>();
+  return data?.sales_account_code ?? null;
+}
+
 export async function pushInvoiceToXero(
   supabase: SupabaseClient,
   invoiceId: string,
@@ -73,11 +146,25 @@ export async function pushInvoiceToXero(
               "billing_postcode")
       .eq("id", invoice.customer_id).eq("tenant_id", tenantId)
       .maybeSingle<PayloadCustomer>(),
+    // The codes travel through the item: `invoice_lines.item_id → items →
+    // gl_accounts`. Read at push time rather than snapshotted onto the line,
+    // deliberately — a code is a *classification*, not money, so a laundry that
+    // fills its codes in later, or corrects a wrong one and presses Retry,
+    // should have the corrected code sent. What is frozen is the amount, which
+    // `job_charge_snapshots` already holds.
+    //
+    // Both embeds are unambiguous — `invoice_lines` has one FK to `items` and
+    // `items` one to `gl_accounts` — which matters here: this repo has shipped
+    // an ambiguous embed that was compile-clean and dead in production (PGRST201).
     supabase.from("invoice_lines")
-      .select("description, quantity, unit_price, taxable, account_code")
+      .select("description, quantity, unit_price, taxable, " +
+              "items(xero_item_code, gl_accounts(xero_account_code)), " +
+              // 0036's direct link. Unambiguous: `invoice_lines` has exactly one
+              // FK to `gl_accounts`, so this embed needs no constraint name.
+              "gl_accounts(xero_account_code)")
       .eq("invoice_id", invoice.id).eq("tenant_id", tenantId)
       .order("sequence")
-      .returns<PayloadLine[]>(),
+      .returns<LineRow[]>(),
   ]);
 
   if (!customer) {
@@ -89,7 +176,12 @@ export async function pushInvoiceToXero(
       { ok: false, reason: "That invoice has no lines, so there is nothing to send." });
   }
 
-  const payload = buildInvoicePayload({ invoice, lines, customer });
+  const payload = buildInvoicePayload({
+    invoice,
+    lines: lines.map(toPayloadLine),
+    customer,
+    defaultAccountCode: await salesAccountCode(tenantId),
+  });
   // Re-pushing carries the Xero id, which turns the create into an update —
   // this is what stops a retry from producing a second invoice in the books.
   if (invoice.xero_invoice_id) payload.InvoiceID = invoice.xero_invoice_id;

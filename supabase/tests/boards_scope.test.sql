@@ -21,7 +21,7 @@
 -- that carve-out a board completing its own delivery is refused with zero rows
 -- and no error, and the job sits at `out_for_delivery` for ever.
 begin;
-select plan(20);
+select plan(23);
 
 insert into auth.users (id, email) values
   ('b1000000-0000-0000-0000-000000000001','board1@example.com'),

@@ -2,30 +2,40 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { Badge, Button, cx } from "@/components/ui";
+import { Badge, Button, Notice, cx } from "@/components/ui";
 import { SubmitButton } from "@/components/form";
 import { isMovable, isReordered, lockReason, moveStop, moveStopTo } from "./sequence";
 import { reorderRunStops } from "./actions";
 import { counted } from "@/lib/format";
 
 /**
- * The order of a board's day, dragged or keyed.
+ * The order of a board's day: locked by default, edited deliberately, saved once.
  *
- * **Compose locally, commit once.** Nothing is saved until Save order, because
- * ordering a day is a sequence of trial moves and a board that wrote each drag
- * would leave the run sheet transiently wrong after every one — the same
- * argument the dispatch planner makes for Apply plan. The whole order goes in
- * one hidden JSON field, whose contract is `sequence.ts` (a plain module, with
- * tests written against what this component really emits).
+ * **Locked is the resting state, and opening the screen never leaves it.** The
+ * client's rule is that management determines the order and drivers execute it,
+ * and the failure that rule is written against is not malice — it is a manager
+ * opening a run to *look* at it on a phone and nudging a row with their thumb.
+ * So there is no drag, no handle and no arrow on screen until somebody presses
+ * Adjust Run, and pressing it is the only way in.
  *
- * **Drag is the nice path, not the only one.** Move up and Move down are always
- * visible and always work: a drag-only control is unusable with a keyboard and
- * awkward on a phone, which is where a manager reorders a run while standing on
- * the floor. Both routes call the same tested `moveStop` / `moveStopTo`.
+ * **Editing is a screen state and is deliberately never persisted.** Entering it
+ * writes nothing, so Cancel Changes has nothing to undo and a manager who walks
+ * away from an open tab leaves no run "checked out" behind them. The lock the
+ * database carries (`daily_routes.sequence_locked`) is the standing statement
+ * that this order is management's to set; it is not a mutex.
  *
- * A stop the round has already worked cannot move, and says which it is rather
- * than silently refusing — moving anything past it would rewrite where work that
- * already happened happened.
+ * **Compose locally, commit once.** Nothing is written until Save & Lock Run,
+ * because ordering a day is a sequence of trial moves and a board that wrote
+ * each drag would leave the run sheet transiently wrong after every one. The
+ * whole order goes in one hidden JSON field whose contract is `sequence.ts` — a
+ * plain module, with tests written against what this component really emits,
+ * because this repository has shipped two such payloads broken behind a green
+ * `verify`.
+ *
+ * **Drag is the nice path, not the only one.** Move up and Move down are real
+ * buttons at 44px: a drag-only control is unusable with a keyboard and awkward
+ * on the phone a manager is actually holding on the floor. Both routes call the
+ * same tested `moveStop` / `moveStopTo`.
  */
 
 export type SequenceStop = {
@@ -38,26 +48,41 @@ export type SequenceStop = {
 };
 
 export function SequenceBoard({
-  boardId, boardName, date, stops, canWrite,
+  boardId, boardName, date, stops, version, canSequence,
 }: {
   boardId: string;
   boardName: string;
   date: string;
   stops: SequenceStop[];
-  canWrite: boolean;
+  /** The order's version when this page was rendered — the concurrency token. */
+  version: number;
+  /** Whether this person may order a run at all. Drivers and boards may not. */
+  canSequence: boolean;
 }) {
   const original = stops.map((stop) => stop.id);
+  const signature = `${version}:${original.join(",")}`;
+
+  const [saved, setSaved] = useState(signature);
   const [order, setOrder] = useState<string[]>(original);
+  const [editing, setEditing] = useState(false);
   const [dragging, setDragging] = useState<string | null>(null);
+
+  // The server now holds a different order from the one this component was
+  // mounted with — a save of our own, or somebody else's landing on a
+  // navigation. Adopting it during render is what makes "Save & Lock" return to
+  // locked with the new order rather than leaving the old one on screen; the
+  // job form adopts a changed customer the same way and for the same reason.
+  if (saved !== signature) {
+    setSaved(signature);
+    setOrder(original);
+    setEditing(false);
+    setDragging(null);
+  }
 
   const byId = new Map(stops.map((stop) => [stop.id, stop]));
   const dirty = isReordered(order, original);
-
   const rows = order.map((id) => byId.get(id)).filter(Boolean) as SequenceStop[];
-
-  const asOrderable = (stop: SequenceStop) => ({
-    id: stop.id, status: stop.status, progress_status: stop.progressStatus,
-  });
+  const frozen = rows.filter((stop) => !isMovable(asOrderable(stop)));
 
   const move = (id: string, direction: "up" | "down") =>
     setOrder((current) => moveStop(current, id, direction));
@@ -68,32 +93,55 @@ export function SequenceBoard({
     setDragging(null);
   };
 
+  const cancel = () => {
+    setOrder(original);
+    setEditing(false);
+    setDragging(null);
+  };
+
   return (
     <form action={reorderRunStops} className="space-y-3">
-      {/* One field, composed here and committed once. */}
+      {/* One field, composed here and committed once. The version travels with
+          it so a stale editing session cannot overwrite a newer sequence. */}
       <input
         type="hidden"
         name="plan"
-        value={JSON.stringify({ board_id: boardId, date, stops: order })}
+        value={JSON.stringify({
+          board_id: boardId, date, stops: order, expected_version: version,
+        })}
       />
+
+      <StateBanner
+        editing={editing} boardName={boardName} stopCount={rows.length}
+        canSequence={canSequence}
+      />
+
+      {editing && frozen.length > 0 ? (
+        <Notice tone="info" title={`${counted(frozen.length, "stop")} cannot be moved`}>
+          {frozen.map((stop) => stop.customerName).join(", ")} — the round has already
+          been there. Moving a worked stop would rewrite where work that has already
+          happened happened, so its place stays put and the rest order around it.
+        </Notice>
+      ) : null}
 
       <ol className="space-y-2">
         {rows.map((stop, index) => {
           const locked = !isMovable(asOrderable(stop));
           const reason = lockReason(asOrderable(stop));
+          const draggable = editing && !locked;
           return (
             <li
               key={stop.id}
-              draggable={canWrite && !locked}
-              onDragStart={() => setDragging(stop.id)}
+              draggable={draggable}
+              onDragStart={() => draggable && setDragging(stop.id)}
               onDragEnd={() => setDragging(null)}
-              onDragOver={(event) => { if (dragging) event.preventDefault(); }}
-              onDrop={(event) => { event.preventDefault(); drop(stop.id); }}
+              onDragOver={(event) => { if (editing && dragging) event.preventDefault(); }}
+              onDrop={(event) => { event.preventDefault(); if (editing) drop(stop.id); }}
               className={cx(
                 "flex items-start gap-3 rounded-lg border bg-surface p-3",
                 dragging === stop.id && "opacity-50",
-                locked ? "border-border" : "border-strong",
-                canWrite && !locked && "cursor-grab active:cursor-grabbing",
+                editing && !locked ? "border-strong" : "border-border",
+                draggable && "cursor-grab active:cursor-grabbing",
               )}
             >
               {/* The position, which is the whole point of the screen. */}
@@ -120,8 +168,8 @@ export function SequenceBoard({
                   {stop.jobs.map((job) => (
                     <li key={job.id} className="flex items-center gap-1">
                       {/* A padded hit area, not a bare line of text: this row is
-                          reordered from a phone, and an 18px-tall link beside a
-                          drag handle is a mis-tap waiting to happen. */}
+                          read from a phone, and an 18px-tall link beside a drag
+                          handle is a mis-tap waiting to happen. */}
                       <Link
                         href={`/orders/${job.id}`}
                         className="inline-flex min-h-9 items-center rounded-lg px-1 font-medium
@@ -136,16 +184,17 @@ export function SequenceBoard({
                 </ul>
               </div>
 
-              {canWrite ? (
+              {/* Only in editing mode: a locked run shows no control at all,
+                  rather than a disabled one that invites a press. */}
+              {editing ? (
                 <div className="flex shrink-0 flex-col gap-1">
                   {/* The accessible name is the text, not an aria-label: the
-                      arrow alone would announce as "up" with no object. */}
-                  {/* `min-w-9` because `size="sm"` sizes on the *content*, and a
-                      single arrow measured 34px wide — under the 36px floor,
-                      found by measuring the gallery rather than by looking at
-                      it. Height was already 36. */}
+                      arrow alone would announce as "up" with no object.
+                      `min-w-11`/`min-h-11` because these are now the primary
+                      way a run is reordered — a 36px arrow is a mis-tap on the
+                      phone this is actually used from. */}
                   <Button
-                    type="button" variant="ghost" size="sm" className="min-w-9"
+                    type="button" variant="ghost" size="sm" className="min-h-11 min-w-11"
                     onClick={() => move(stop.id, "up")}
                     disabled={locked || index === 0}
                   >
@@ -153,7 +202,7 @@ export function SequenceBoard({
                     <span className="sr-only">Move {stop.customerName} up</span>
                   </Button>
                   <Button
-                    type="button" variant="ghost" size="sm" className="min-w-9"
+                    type="button" variant="ghost" size="sm" className="min-h-11 min-w-11"
                     onClick={() => move(stop.id, "down")}
                     disabled={locked || index === rows.length - 1}
                   >
@@ -167,27 +216,71 @@ export function SequenceBoard({
         })}
       </ol>
 
-      {canWrite ? (
+      {/* The controls. A person who may not order a run sees none of this — not
+          a disabled button, and not an explanation of a thing they cannot do. */}
+      {canSequence ? (
         <div className="flex flex-wrap items-center gap-3">
-          <SubmitButton pendingLabel="Saving the order…">
-            Save order for {boardName}
-          </SubmitButton>
-          {dirty ? (
+          {editing ? (
             <>
-              <Button type="button" variant="ghost" onClick={() => setOrder(original)}>
-                Undo changes
+              <SubmitButton pendingLabel="Saving the order…">Save &amp; Lock Run</SubmitButton>
+              <Button type="button" variant="ghost" className="min-h-11" onClick={cancel}>
+                Cancel Changes
               </Button>
               <span className="text-sm text-muted-foreground">
-                Not saved yet — the round still sees the old order.
+                {dirty
+                  ? "Not saved yet — the round still sees the old order."
+                  : "Drag a stop, or use the arrows."}
               </span>
             </>
           ) : (
-            <span className="text-sm text-muted-foreground">
-              This is the order {boardName} will drive.
-            </span>
+            <>
+              <Button type="button" className="min-h-11" onClick={() => setEditing(true)}>
+                Adjust Run
+              </Button>
+              <span className="text-sm text-muted-foreground">
+                This is the order {boardName} will drive.
+              </span>
+            </>
           )}
         </div>
       ) : null}
     </form>
   );
 }
+
+/**
+ * Which state the run is in, said in one line at the top of the list.
+ *
+ * `aria-live` because the change is announced by a button press elsewhere on
+ * the page: a sighted person sees the arrows appear, and without this a screen
+ * reader user gets no confirmation that Adjust Run did anything.
+ */
+function StateBanner({
+  editing, boardName, stopCount, canSequence,
+}: { editing: boolean; boardName: string; stopCount: number; canSequence: boolean }) {
+  return (
+    <div
+      aria-live="polite"
+      className={cx(
+        "flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border px-3 py-2",
+        editing ? "border-strong bg-surface-sunken" : "border-border bg-surface",
+      )}
+    >
+      <span className="font-medium">
+        <span aria-hidden>{editing ? "🔓" : "🔒"}</span>{" "}
+        {editing ? "Editing run" : "Run locked"}
+      </span>
+      <span className="text-sm text-muted-foreground">
+        {editing
+          ? `Drag stops to change the order ${boardName} drives in. Nothing is saved until you press Save & Lock Run.`
+          : canSequence
+            ? `${counted(stopCount, "stop")} — press Adjust Run to change the order.`
+            : `${counted(stopCount, "stop")}, in the order the office set.`}
+      </span>
+    </div>
+  );
+}
+
+const asOrderable = (stop: SequenceStop) => ({
+  id: stop.id, status: stop.status, progress_status: stop.progressStatus,
+});

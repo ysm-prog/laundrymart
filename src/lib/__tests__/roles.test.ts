@@ -293,3 +293,122 @@ describe("job → invoice, and who the counter is", () => {
     expect(can("driver", "run.execute")).toBe(true);
   });
 });
+
+describe("ordering a run (routes.sequence)", () => {
+  /*
+   * The client's rule: management determines the order of the run, drivers
+   * execute it. That is a narrower statement than `routes.write`, which is why
+   * this capability exists at all — and these assertions are the reason it
+   * cannot quietly widen again.
+   *
+   * `can_write_run_sequence()` (0036) is the same sentence in the database, and
+   * `run_sequence.test.sql` proves the two agree by refusing a dispatcher's
+   * UPDATE. Neither half is the boundary on its own: `roles.ts` drives the nav
+   * and the page guards, and `jobs` is published on `/rest/v1/jobs`.
+   */
+  const OWNER_AND_OFFICE: Role[] = ["platform_admin", "super_admin", "operations_manager"];
+
+  it("is held by the Owner and the Office manager, and by nobody else", () => {
+    expect(rolesWith("routes.sequence").sort()).toEqual([...OWNER_AND_OFFICE].sort());
+  });
+
+  it("is narrower than routes.write, which is the entire point", () => {
+    // If these two sets were ever equal the capability would be dead weight and
+    // somebody would quite reasonably delete it — so the gap is asserted rather
+    // than assumed, and the roles in it are named.
+    const planners = rolesWith("routes.write");
+    const orderers = rolesWith("routes.sequence");
+    expect(planners.length).toBeGreaterThan(orderers.length);
+    expect(planners.filter((role) => !orderers.includes(role)).sort())
+      .toEqual(["branch_manager", "dispatcher", "regional_manager"]);
+  });
+
+  it("keeps the dispatcher planning the day without setting the order", () => {
+    expect(can("dispatcher", "routes.write")).toBe(true);
+    expect(can("dispatcher", "routes.status")).toBe(true);
+    expect(can("dispatcher", "routes.sequence")).toBe(false);
+  });
+
+  it("does not leak into the roles derived from TENANT_ALL", () => {
+    // The trap this file has recorded twice already: `branch_manager` and
+    // `regional_manager` are built by *subtracting* from TENANT_ALL, so a
+    // capability that is merely not mentioned is a capability they hold. Both
+    // keep `routes.write`, so this is a real narrowing rather than an accident
+    // of them holding nothing.
+    for (const role of ["branch_manager", "regional_manager"] as const) {
+      expect(can(role, "routes.write")).toBe(true);
+      expect(can(role, "routes.sequence")).toBe(false);
+    }
+    expect(can("auditor", "routes.sequence")).toBe(false);
+  });
+
+  it("gives the van and the round no way to reorder their own work", () => {
+    // The requirement names these two explicitly, and both can read the run and
+    // advance it — which is exactly why "they simply hold nothing" would be the
+    // wrong proof.
+    for (const role of ["driver", "board"] as const) {
+      expect(can(role, "routes.read")).toBe(true);
+      expect(can(role, "routes.status")).toBe(true);
+      expect(can(role, "routes.sequence")).toBe(false);
+      expect(can(role, "routes.write")).toBe(false);
+    }
+  });
+
+  it("keeps the counter and the floor out of it too", () => {
+    for (const role of ["customer_service", "warehouse_operator", "sales", "finance"] as const) {
+      expect(can(role, "routes.sequence")).toBe(false);
+    }
+  });
+
+  it("lets everybody who may order a run also open the screen", () => {
+    // A capability to change something you cannot see is a page guard away from
+    // being unusable: `/runs` is gated on `routes.read`.
+    for (const role of rolesWith("routes.sequence")) {
+      expect(can(role, "routes.read")).toBe(true);
+    }
+  });
+});
+
+describe("the chart of accounts (0037)", () => {
+  /*
+   * `/accounts` is gated on `purchases.read` and its new create/edit actions on
+   * `purchases.write`. `can_read_purchases()` and `can_write_purchases()` are the
+   * database's copies of those two sets, and `accounts_scope.test.sql` proves
+   * them by reading and writing as each role — so if either list moves here,
+   * one of the two will disagree and a screen will offer something the policy
+   * refuses in silence.
+   */
+  it("keeps reading the chart to the roles the screen already allowed", () => {
+    expect(rolesWith("purchases.read").sort()).toEqual([
+      "auditor", "branch_manager", "finance", "operations_manager",
+      "platform_admin", "regional_manager", "super_admin",
+    ]);
+  });
+
+  it("lets the auditor look at the chart and not change it", () => {
+    expect(can("auditor", "purchases.read")).toBe(true);
+    expect(can("auditor", "purchases.write")).toBe(false);
+  });
+
+  it("keeps the chart away from the van, the round, the counter and the floor", () => {
+    // Not cosmetic: `gl_accounts.current_balance` is on this table, so an open
+    // read is every account balance in the business. Before 0037 the table
+    // carried `apply_tenant_policy`'s single permissive `for all` policy, so
+    // all four of these could read *and rewrite* the chart off PostgREST.
+    for (const role of ["driver", "board", "customer_service", "warehouse_operator"] as const) {
+      expect(can(role, "purchases.read")).toBe(false);
+      expect(can(role, "purchases.write")).toBe(false);
+    }
+    expect(can("dispatcher", "purchases.read")).toBe(false);
+  });
+
+  it("lets everybody who can code an item also see the accounts to code it to", () => {
+    // The item form offers a picker of `gl_accounts`. A role that may edit an
+    // item but may not read the chart would get an empty picker with no
+    // explanation, which reads as a broken screen — the unlinked-driver failure
+    // this project has already shipped once.
+    for (const role of rolesWith("items.write")) {
+      expect(can(role, "purchases.read")).toBe(true);
+    }
+  });
+});

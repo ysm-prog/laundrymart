@@ -78,6 +78,17 @@ export const CAPABILITIES = [
   // (which plans and assigns) because moving a run that is already out on the
   // road is a floor decision, not a planning one — see ROLE_CAPABILITIES.
   "routes.status",
+  // The order a board drives its day in. Deliberately **not** `routes.write`:
+  // the client's rule is that management determines the order and drivers
+  // execute it, and `routes.write` is held by the dispatcher, the branch
+  // manager and the regional manager as well as by the two roles that rule
+  // names. Planning a day and deciding the sequence of calls turned out to be
+  // two decisions, so they are two capabilities.
+  //
+  // `can_write_run_sequence()` (0036) is the same sentence in the database, and
+  // it is the boundary — `jobs` is published on `/rest/v1/jobs`, so before that
+  // migration a driver could PATCH the order of the run they were standing in.
+  "routes.sequence",
   "operations.read",
   "operations.write",
   "run.execute",
@@ -187,9 +198,25 @@ const JOB_TO_INVOICE: Capability[] = ALL.filter(
       || c.startsWith("pricing.") || c.startsWith("billing."),
 );
 
-/** Everything a role may hold that is neither platform work nor the main flow. */
+/**
+ * Ordering a board's day.
+ *
+ * Held by the Owner and the Office manager alone, like the main flow — but a
+ * separate block because it is a separate decision and the two could reasonably
+ * move apart. It is named here rather than left out role by role for exactly
+ * the reason `JOB_TO_INVOICE` is: six of the roles below derive their
+ * capabilities from `TENANT_ALL`, so a capability that is merely *not mentioned*
+ * is a capability six roles quietly hold. `branch_manager` and
+ * `regional_manager` are the two this actually catches.
+ */
+const RUN_SEQUENCE: Capability[] = ["routes.sequence"];
+
+/**
+ * Everything a role may hold that is neither platform work, nor the main flow,
+ * nor the run order.
+ */
 const outsideMainFlow = (caps: Capability[]): Capability[] =>
-  caps.filter((c) => !JOB_TO_INVOICE.includes(c));
+  caps.filter((c) => !JOB_TO_INVOICE.includes(c) && !RUN_SEQUENCE.includes(c));
 
 /**
  * Everything a role bounded by one laundry may hold — that is, all of it except
@@ -366,7 +393,7 @@ export const ROLE_SUMMARY: Record<Role, string> = {
   platform_admin: "Every laundry on this system, and the system itself",
   super_admin: "Everything, including settings and who can sign in",
   operations_manager: "Everything day to day, but not the settings",
-  dispatcher: "Customers, stops, drivers and trucks — no jobs, invoices or prices",
+  dispatcher: "Customers, stops, drivers and trucks — not the run order, jobs, invoices or prices",
   driver: "Their own run, on their phone, and nothing else",
   finance: "Supplier bills, what you owe, and reports",
   warehouse_operator: "The plant floor and stock — not the customer's job",

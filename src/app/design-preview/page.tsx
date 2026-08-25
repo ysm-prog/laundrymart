@@ -1151,22 +1151,26 @@ export default function DesignPreviewPage() {
               description="What each board is delivering on a day, and the order it drives in."
             />
 
+            {/* Locked is the resting state, and it is the one a manager meets
+                first. Worth having in the gallery in its own right: the thing to
+                look at is that there is no arrow, no handle and no Save on
+                screen at all — a disabled control would still invite a press. */}
             <Card title="Board 1 — Friday, 21 August 2026"
-                  description="Drag a stop, or use the arrows. Nothing is saved until Save order.">
+                  description="The run is locked. Press Adjust Run to change the order, then Save & Lock Run.">
               <SequenceBoard boardId="b1" boardName="Board 1" date="2026-08-21"
-                             stops={PREVIEW_RUN_STOPS} canWrite />
+                             stops={PREVIEW_RUN_STOPS} version={1} canSequence />
             </Card>
 
             <Card title="Part of the run has been driven"
                   description="A stop the round has already worked stays where it is, and says so — moving anything past it would rewrite where work that has already happened happened.">
               <SequenceBoard boardId="b1" boardName="Board 1" date="2026-08-21"
-                             stops={PREVIEW_RUN_STOPS_WORKED} canWrite />
+                             stops={PREVIEW_RUN_STOPS_WORKED} version={4} canSequence />
             </Card>
 
             <Card title="What a board sees"
-                  description="The final sequence, read-only. A board holds routes.read and not routes.write, so the arrows and Save are simply not there.">
+                  description="The final sequence, read-only. A board holds routes.read and not routes.sequence, so Adjust Run is simply not there.">
               <SequenceBoard boardId="b1" boardName="Board 1" date="2026-08-21"
-                             stops={PREVIEW_RUN_STOPS} canWrite={false} />
+                             stops={PREVIEW_RUN_STOPS} version={1} canSequence={false} />
             </Card>
 
             <MoveToBoard

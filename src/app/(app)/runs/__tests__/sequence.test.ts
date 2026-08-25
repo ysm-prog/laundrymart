@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  checkSequence, isMovable, isReordered, lockReason, moveStop, moveStopTo,
+  SEQUENCE_CONFLICT, SEQUENCE_SAVED,
+  checkSequence, isMovable, isReordered, lockReason, movedCount, moveStop, moveStopTo,
   parseSequencePlan, type OrderableStop,
 } from "../sequence";
 
@@ -18,15 +19,20 @@ describe("parseSequencePlan", () => {
     // The producer sends one hidden field holding JSON, so the string form is
     // the shape that matters — the planner shipped broken for its whole life
     // because nothing tested the payload its board really emitted.
-    const posted = JSON.stringify({ board_id: BOARD, date: "2026-08-21", stops: [C, A, B] });
+    const posted = JSON.stringify({
+      board_id: BOARD, date: "2026-08-21", stops: [C, A, B], expected_version: 3,
+    });
     const result = parseSequencePlan(posted);
     expect(result.ok).toBe(true);
     expect(result.ok && result.plan.stops).toEqual([C, A, B]);
     expect(result.ok && result.plan.date).toBe("2026-08-21");
+    expect(result.ok && result.plan.expected_version).toBe(3);
   });
 
   it("accepts an already-parsed object too", () => {
-    expect(parseSequencePlan({ board_id: BOARD, date: "2026-08-21", stops: [A] }).ok).toBe(true);
+    expect(parseSequencePlan(
+      { board_id: BOARD, date: "2026-08-21", stops: [A], expected_version: 1 },
+    ).ok).toBe(true);
   });
 
   it("says the order could not be read rather than reporting an empty one", () => {
@@ -36,13 +42,15 @@ describe("parseSequencePlan", () => {
   });
 
   it("refuses a missing date, which is exactly how the planner was broken", () => {
-    const result = parseSequencePlan({ board_id: BOARD, stops: [A] });
+    const result = parseSequencePlan({ board_id: BOARD, stops: [A], expected_version: 1 });
     expect(result.ok).toBe(false);
     expect(result.ok === false && result.error).toMatch(/date/i);
   });
 
   it("refuses an empty order", () => {
-    expect(parseSequencePlan({ board_id: BOARD, date: "2026-08-21", stops: [] }).ok).toBe(false);
+    expect(parseSequencePlan(
+      { board_id: BOARD, date: "2026-08-21", stops: [], expected_version: 1 },
+    ).ok).toBe(false);
   });
 });
 
@@ -137,5 +145,79 @@ describe("isReordered", () => {
     expect(isReordered([A, B, C], [A, B, C])).toBe(false);
     expect(isReordered([A, C, B], [A, B, C])).toBe(true);
     expect(isReordered([A, B], [A, B, C])).toBe(true);
+  });
+});
+
+describe("the concurrency token (§14)", () => {
+  // The version is the whole of the protection against two managers editing the
+  // same day, so a payload that omits it must not parse. The alternative — a
+  // schema that defaults it to 1 — would mean every stale page silently claimed
+  // to be current, which is precisely the failure this exists to prevent.
+  it("refuses a plan with no version, so a save can never be unversioned", () => {
+    const result = parseSequencePlan({ board_id: BOARD, date: "2026-08-21", stops: [A] });
+    expect(result.ok).toBe(false);
+  });
+
+  it("refuses a version that is not a whole number at or above 1", () => {
+    const base = { board_id: BOARD, date: "2026-08-21", stops: [A] };
+    expect(parseSequencePlan({ ...base, expected_version: 0 }).ok).toBe(false);
+    expect(parseSequencePlan({ ...base, expected_version: 1.5 }).ok).toBe(false);
+    expect(parseSequencePlan({ ...base, expected_version: "2" }).ok).toBe(false);
+  });
+
+  it("names the run rather than the column when somebody else saved first", () => {
+    // Pinned because three places must agree on this sentence: the action's own
+    // pre-check, the sentence mapped from the database's refusal when two saves
+    // race past it, and the requirement that asked for it.
+    expect(SEQUENCE_CONFLICT).toMatch(/updated by another user/i);
+    expect(SEQUENCE_CONFLICT).toMatch(/reload/i);
+    expect(SEQUENCE_CONFLICT).not.toMatch(/sequence_version|daily_routes|constraint/);
+  });
+
+  it("says the run is locked again when a save lands", () => {
+    expect(SEQUENCE_SAVED).toBe("Run sequence updated successfully. The run has been locked.");
+  });
+});
+
+describe("movedCount", () => {
+  it("counts nothing when the order is unchanged", () => {
+    expect(movedCount([A, B, C], [A, B, C])).toBe(0);
+  });
+
+  it("counts every stop whose position actually changed, not the drags", () => {
+    // One drag — C to the front — but three stops end up somewhere new. Saying
+    // "1 stop moved" would be a wrong answer that looks right.
+    expect(movedCount([A, B, C], [C, A, B])).toBe(3);
+  });
+
+  it("counts only the two that swapped, leaving the rest alone", () => {
+    expect(movedCount([A, B, C], [B, A, C])).toBe(2);
+  });
+});
+
+describe("what the board actually posts", () => {
+  // The producer sends one hidden field holding JSON. This repository has
+  // shipped two such payloads broken behind a green `verify` — the job form's
+  // items and the dispatch planner's whole board, refused on every press for its
+  // entire shipped life — so the round trip is asserted against the exact string
+  // the component builds rather than against an object written by hand here.
+  const posted = (order: string[], version: number) =>
+    JSON.stringify({ board_id: BOARD, date: "2026-08-21", stops: order, expected_version: version });
+
+  it("round-trips the field the component emits", () => {
+    const result = parseSequencePlan(posted([C, A, B], 7));
+    expect(result.ok).toBe(true);
+    expect(result.ok && result.plan).toEqual({
+      board_id: BOARD, date: "2026-08-21", stops: [C, A, B], expected_version: 7,
+    });
+  });
+
+  it("survives a save and reparse of the order it just produced", () => {
+    const first = parseSequencePlan(posted([A, B, C], 1));
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    const again = parseSequencePlan(posted(moveStop(first.plan.stops, C, "up"), 2));
+    expect(again.ok && again.plan.stops).toEqual([A, C, B]);
+    expect(again.ok && again.plan.expected_version).toBe(2);
   });
 });

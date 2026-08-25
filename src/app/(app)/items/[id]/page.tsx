@@ -26,10 +26,15 @@ export default async function ItemDetailPage({
   const writable = can(session.role, "items.write");
 
   const supabase = await createClient();
+  // The account list is only ever used by the edit form below, so it is read
+  // alongside the item rather than in a second round trip. Empty for a role
+  // that cannot see the chart, which cannot happen here — every `items.write`
+  // holder also holds `purchases.read` (pinned in `roles.test.ts`).
   const [{ data: item }, { data: pools }] = await Promise.all([
     supabase.from("items")
       .select("id, sku, item_code, name, description, category, laundry_category, " +
               "ownership_type, is_sell, is_buy, sell_price, cost_price, tax_code, " +
+              "income_account_id, xero_item_code, " +
               "replacement_cost, rental_price, wash_only_price, weight_kg, reorder_level, " +
               "myob_item_id, myob_item_code, external_synced_at, income_account_id, status")
       .eq("id", id).maybeSingle<Item>(),
@@ -109,7 +114,9 @@ export default async function ItemDetailPage({
                 <Field label="Tax code" name="tax_code">
                   <Input name="tax_code" defaultValue={item.tax_code ?? ""} />
                 </Field>
-                <IncomeAccountField defaultValue={item.income_account_id} />
+                <IncomeAccountField tenantId={session.tenantId}
+                                    defaultValue={item.income_account_id}
+                                    defaultXeroItemCode={item.xero_item_code} />
                 <Field label="MYOB item ID" name="myob_item_id"
                        hint={item.external_synced_at
                          ? `Last synchronised ${item.external_synced_at.slice(0, 10)}.`

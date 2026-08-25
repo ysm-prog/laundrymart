@@ -43,7 +43,7 @@ export default async function ItemsPage({ searchParams }: { searchParams: Promis
         <ItemList params={params} />
       </Suspense>
 
-      {writable ? <NewItemForm /> : null}
+      {writable ? <NewItemForm tenantId={session.tenantId} /> : null}
     </div>
   );
 }
@@ -109,7 +109,11 @@ const LAUNDRY_CATEGORY_OPTIONS = ITEM_TYPES.map((value) => ({
   value, label: ITEM_TYPE_LABELS[value],
 }));
 
-async function NewItemForm() {
+/**
+ * Loads its own accounts rather than being handed them, so the page above stays
+ * one read for a role that cannot see this form at all.
+ */
+async function NewItemForm({ tenantId }: { tenantId: string }) {
   return (
     <Card
       title="Add an item"
@@ -151,7 +155,7 @@ async function NewItemForm() {
         <Field label="Tax code" name="tax_code" hint="As it is in your books — GST, FRE.">
           <Input name="tax_code" placeholder="GST" />
         </Field>
-        <IncomeAccountField />
+        <IncomeAccountField tenantId={tenantId} />
         <Field label="MYOB item ID" name="myob_item_id"
                hint="Optional. Filled in by an import; kept so the two systems can be reconciled.">
           <Input name="myob_item_id" />

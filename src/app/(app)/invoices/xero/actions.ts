@@ -72,3 +72,44 @@ export async function setXeroPaymentAccount(formData: FormData): Promise<void> {
     ? `Payments will be posted to ${name ?? code}.`
     : "Payments will not be sent to Xero until an account is chosen.");
 }
+
+/**
+ * Choose the Xero account a sale is coded to when nothing more specific says.
+ *
+ * The fallback for the many invoice lines that carry **no item at all** — a
+ * fuel levy, a contract minimum, a consolidated laundry charge. An item that
+ * names its own income account still wins; this is what stops the rest arriving
+ * in Xero uncoded, which is exactly the work a bookkeeper would otherwise redo
+ * by hand every month.
+ *
+ * Same shape as the payment account above, and for the same reasons: the
+ * service-role client because `xero_connections` grants `authenticated`
+ * nothing, the tenant filtered by hand, and both code and name stored so the
+ * screen can say "Sales" rather than "200" a year later.
+ */
+export async function setXeroSalesAccount(formData: FormData): Promise<void> {
+  const session = await assertCapability("invoices.write");
+  const parsed = z.object({ account: optionalText }).safeParse(toObject(formData));
+  if (!parsed.success) return fail(SCREEN, firstIssue(parsed.error));
+
+  const [code, ...rest] = (parsed.data.account ?? "").split("|");
+  const name = rest.join("|") || null;
+
+  const admin = createAdminClient();
+  const { error } = await admin.from("xero_connections")
+    .update({
+      sales_account_code: code || null,
+      sales_account_name: code ? name : null,
+    })
+    .eq("tenant_id", session.tenantId);
+  if (error) return fail(SCREEN, error.message);
+
+  await recordAudit(session, {
+    entity: "xero_connection", entityId: session.tenantId, action: "update",
+    summary: code ? `sales code to ${name ?? code}` : "sales account cleared",
+  });
+  revalidatePath(SCREEN);
+  return done(SCREEN, code
+    ? `Invoice lines will be coded to ${name ?? code} unless the item says otherwise.`
+    : "Invoice lines will be sent to Xero uncoded unless the item says otherwise.");
+}

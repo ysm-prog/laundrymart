@@ -5,7 +5,7 @@
 -- layer underneath: a warehouse operator holding a real login and talking
 -- straight to PostgREST still cannot move a job or touch an invoice.
 begin;
-select plan(29);
+select plan(27);
 
 insert into auth.users (id, email) values
   ('66666666-6666-6666-6666-666666666666','driver@example.com'),

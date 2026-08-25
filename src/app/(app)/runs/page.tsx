@@ -4,7 +4,9 @@ import { createClient } from "@/lib/supabase/server";
 import { can } from "@/lib/roles";
 import { getAdelaideToday, formatAdelaideDate, isCalendarDate } from "@/lib/domain/timezone";
 import { addDays } from "@/lib/domain/dates";
+import { counted } from "@/lib/format";
 import { listActiveBoards, type RunBoard } from "@/lib/runs/my-runs";
+import { loadRunDay } from "@/lib/runs/run-day";
 import {
   Badge, ButtonLink, Card, EmptyState, Notice, PageHeader, Stat, cx,
 } from "@/components/ui";
@@ -29,9 +31,16 @@ export const metadata = { title: "Runs" };
  * position: the van goes there once, and ordering the two jobs apart would mean
  * driving to the same address twice.
  *
- * Gated on `routes.read` to look and `routes.write` to change, which is what
- * makes the client's rule true: a board sees the final sequence on My Runs and
- * cannot alter it, because the board role holds `routes.read` and not `write`.
+ * **Two capabilities, because they are two decisions.** `routes.read` opens the
+ * screen; `routes.write` moves work between boards; and `routes.sequence`
+ * — the Owner's and the Office manager's alone — sets the order. That last
+ * split is what makes the client's rule true: management determines the order
+ * of the run and drivers execute it, so a board sees the final sequence on My
+ * Runs and cannot alter it, and neither can the dispatcher who planned the day.
+ *
+ * The screen is not the boundary. `jobs` is published on `/rest/v1/jobs`, so
+ * 0036 puts the same rule in the database — before it, a driver could PATCH the
+ * order of the run they were standing in.
  */
 
 type Search = { date?: string; board?: string };
@@ -58,7 +67,12 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
   // write filtered to the laundry the person is working in.
   const boards = await listActiveBoards(supabase, session.tenantId);
   const board = boards.find((entry) => entry.id === params.board) ?? boards[0] ?? null;
+  // Two different decisions, and since 0036 two different capabilities. Moving
+  // work between boards is planning (`routes.write`, which a dispatcher holds);
+  // deciding the order of the calls is management's (`routes.sequence`, which
+  // they do not).
   const canWrite = can(session.role, "routes.write");
+  const canSequence = can(session.role, "routes.sequence");
 
   return (
     <div className="space-y-4">
@@ -83,7 +97,7 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
           {board ? (
             <BoardDay
               tenantId={session.tenantId} board={board} date={date}
-              boards={boards} canWrite={canWrite}
+              boards={boards} canWrite={canWrite} canSequence={canSequence}
             />
           ) : null}
         </>
@@ -147,23 +161,18 @@ function BoardTabs({
 }
 
 async function BoardDay({
-  tenantId, board, date, boards, canWrite,
+  tenantId, board, date, boards, canWrite, canSequence,
 }: {
-  tenantId: string; board: RunBoard; date: string; boards: RunBoard[]; canWrite: boolean;
+  tenantId: string; board: RunBoard; date: string; boards: RunBoard[];
+  canWrite: boolean; canSequence: boolean;
 }) {
   const supabase = await createClient();
 
-  const { data: routes } = await supabase
-    .from("daily_routes")
-    .select("id, status")
-    .eq("tenant_id", tenantId)
-    .eq("board_id", board.id)
-    .eq("route_date", date)
-    .is("deleted_at", null)
-    .not("status", "in", "(cancelled)")
-    .returns<Array<{ id: string; status: string }>>();
-
-  const routeIds = (routes ?? []).map((route) => route.id);
+  // The same read the save action performs, so the version the page renders
+  // with is the version the save is checked against — two reads of "which runs
+  // are this board's day?" would be two answers waiting to disagree.
+  const day = await loadRunDay(supabase, tenantId, board.id, date);
+  const routeIds = day.routeIds;
 
   const { data: stopRows } = routeIds.length
     ? await supabase
@@ -250,15 +259,15 @@ async function BoardDay({
       ) : null}
 
       <Card
-        title={`${board.name} — ${formatAdelaideDate(date, "medium")}`}
-        description={canWrite
-          ? "Drag a stop, or use the arrows. Nothing is saved until you press Save order."
+        title={`${board.name} — ${formatAdelaideDate(date, "long")}`}
+        description={canSequence
+          ? "The run is locked. Press Adjust Run to change the order, then Save & Lock Run."
           : "The order this board drives in. Only an owner or manager can change it."}
-        actions={<Badge tone="neutral">{sequenceStops.length} stops</Badge>}
+        actions={<Badge tone="neutral">{counted(sequenceStops.length, "stop")}</Badge>}
       >
         <SequenceBoard
           boardId={board.id} boardName={board.name} date={date}
-          stops={sequenceStops} canWrite={canWrite}
+          stops={sequenceStops} version={day.version} canSequence={canSequence}
         />
       </Card>
 

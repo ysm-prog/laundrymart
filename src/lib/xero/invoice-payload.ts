@@ -35,8 +35,25 @@ export type PayloadLine = {
   quantity: number | string | null;
   unit_price: number | string | null;
   taxable: boolean | null;
-  /** The GL account this line is coded to, when the laundry has set one. */
+  /**
+   * The GL account this line is coded to, **as the code is in Xero**.
+   *
+   * Read through `invoice_lines.item_id → items.income_account_id →
+   * gl_accounts.xero_account_code`. Null falls back to the laundry's default
+   * sales account, and if there is none the line goes uncoded exactly as every
+   * line did before — which is the behaviour that must not change for a laundry
+   * that has not filled any of this in.
+   */
   account_code?: string | null;
+  /**
+   * This line's item code **as it is in Xero** (`items.xero_item_code`).
+   *
+   * Deliberately not `items.item_code`: that is the code staff type here, and
+   * Xero refuses an invoice naming an `ItemCode` its own inventory does not
+   * carry. Sending our code on the assumption the two match would turn one
+   * mismatched item into every invoice failing to push.
+   */
+  item_code?: string | null;
 };
 
 export type PayloadCustomer = {
@@ -53,6 +70,12 @@ export type PayloadCustomer = {
 };
 
 export type XeroInvoicePayload = Record<string, unknown>;
+
+/** A code that is present but blank is no code at all. */
+function clean(value: string | null | undefined): string | null {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : null;
+}
 
 /** `numeric` comes back from PostgREST as a string; treat both, reject neither. */
 function toNumber(value: number | string | null | undefined): number {
@@ -107,19 +130,37 @@ export function buildContact(customer: PayloadCustomer): Record<string, unknown>
  * dropping it would make the Xero total disagree with ours.
  */
 export function buildInvoicePayload({
-  invoice, lines, customer,
+  invoice, lines, customer, defaultAccountCode = null,
 }: {
   invoice: PayloadInvoice;
   lines: readonly PayloadLine[];
   customer: PayloadCustomer;
+  /**
+   * The laundry's default sales account, chosen once on the Xero settings
+   * screen beside the bank account payments post to.
+   *
+   * It exists because **most invoice lines carry no item at all** — a fuel
+   * levy, a contract minimum, a consolidated laundry charge — so item-level
+   * coding alone would leave uncoded precisely the lines a bookkeeper has to
+   * sort out by hand. A line's own account still wins.
+   */
+  defaultAccountCode?: string | null;
 }): XeroInvoicePayload {
-  const lineItems = lines.map((line) => ({
-    Description: line.description?.trim() || FALLBACK_DESCRIPTION,
-    Quantity: toNumber(line.quantity),
-    UnitAmount: toNumber(line.unit_price),
-    TaxType: line.taxable === false ? TAX_TYPE_EXEMPT : TAX_TYPE_TAXABLE,
-    ...(line.account_code ? { AccountCode: line.account_code } : {}),
-  }));
+  const lineItems = lines.map((line) => {
+    // Trimmed rather than trusted: a code that is present but blank is the same
+    // as no code, and sending `AccountCode: ""` is a rejection rather than a
+    // no-op.
+    const account = clean(line.account_code) ?? clean(defaultAccountCode);
+    const item = clean(line.item_code);
+    return {
+      Description: line.description?.trim() || FALLBACK_DESCRIPTION,
+      Quantity: toNumber(line.quantity),
+      UnitAmount: toNumber(line.unit_price),
+      TaxType: line.taxable === false ? TAX_TYPE_EXEMPT : TAX_TYPE_TAXABLE,
+      ...(account ? { AccountCode: account } : {}),
+      ...(item ? { ItemCode: item } : {}),
+    };
+  });
 
   const payload: XeroInvoicePayload = {
     Type: "ACCREC",
