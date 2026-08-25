@@ -36,15 +36,21 @@ export type PayloadLine = {
   unit_price: number | string | null;
   taxable: boolean | null;
   /**
-   * The GL account this line is coded to, **as the code is in Xero**.
+   * The account **this line was explicitly coded to**, as the code is in Xero.
    *
-   * Read through `invoice_lines.item_id → items.income_account_id →
-   * gl_accounts.xero_account_code`. Null falls back to the laundry's default
-   * sales account, and if there is none the line goes uncoded exactly as every
-   * line did before — which is the behaviour that must not change for a laundry
-   * that has not filled any of this in.
+   * Read through `invoice_lines.gl_account_id → gl_accounts.xero_account_code`.
+   * This is somebody's deliberate decision about one line, so it beats
+   * everything below it — see `resolveAccountCode`.
    */
   account_code?: string | null;
+  /**
+   * The account this line's **item** is coded to, as the code is in Xero.
+   *
+   * Read through `invoice_lines.item_id → items.income_account_id →
+   * gl_accounts.xero_account_code`. The standing answer for "where does money
+   * for this kind of work land", used when nobody has coded the line itself.
+   */
+  item_account_code?: string | null;
   /**
    * This line's item code **as it is in Xero** (`items.xero_item_code`).
    *
@@ -75,6 +81,37 @@ export type XeroInvoicePayload = Record<string, unknown>;
 function clean(value: string | null | undefined): string | null {
   const trimmed = value?.trim();
   return trimmed ? trimmed : null;
+}
+
+/**
+ * Which account a line is coded to in Xero — the whole ladder, in one place.
+ *
+ * Three tiers, most specific first:
+ *
+ *   1. **the line's own account**, when somebody coded this particular line;
+ *   2. **its item's income account**, the standing answer for that kind of work;
+ *   3. **the laundry's default sales account**, for the many lines that carry
+ *      no item at all — a fuel levy, a contract minimum, a consolidated laundry
+ *      charge.
+ *
+ * The first tier is why this function exists. `invoice_lines.gl_account_id` is
+ * a person's deliberate decision about one line; resolving the item's account
+ * ahead of it would quietly send a different code to Xero from the one they
+ * chose, and nobody would find out until a bookkeeper reconciled.
+ *
+ * Every tier resolves to a **Xero** code, never one of ours: each is read
+ * through `gl_accounts.xero_account_code`, which is null until somebody says
+ * what the matching Xero code is. `invoice_lines.account_code` — our own code,
+ * snapshotted when the line was written — is deliberately *not* a tier here.
+ * Sending it would be sending a code from our chart to somebody else's, and
+ * Xero refuses an invoice naming a code it does not carry.
+ */
+export function resolveAccountCode(sources: {
+  line?: string | null;
+  item?: string | null;
+  fallback?: string | null;
+}): string | null {
+  return clean(sources.line) ?? clean(sources.item) ?? clean(sources.fallback);
 }
 
 /** `numeric` comes back from PostgREST as a string; treat both, reject neither. */
@@ -142,7 +179,8 @@ export function buildInvoicePayload({
    * It exists because **most invoice lines carry no item at all** — a fuel
    * levy, a contract minimum, a consolidated laundry charge — so item-level
    * coding alone would leave uncoded precisely the lines a bookkeeper has to
-   * sort out by hand. A line's own account still wins.
+   * sort out by hand. It is the last tier: a line's own account wins, then its
+   * item's. See `resolveAccountCode`.
    */
   defaultAccountCode?: string | null;
 }): XeroInvoicePayload {
@@ -150,7 +188,11 @@ export function buildInvoicePayload({
     // Trimmed rather than trusted: a code that is present but blank is the same
     // as no code, and sending `AccountCode: ""` is a rejection rather than a
     // no-op.
-    const account = clean(line.account_code) ?? clean(defaultAccountCode);
+    const account = resolveAccountCode({
+      line: line.account_code,
+      item: line.item_account_code,
+      fallback: defaultAccountCode,
+    });
     const item = clean(line.item_code);
     return {
       Description: line.description?.trim() || FALLBACK_DESCRIPTION,

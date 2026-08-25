@@ -610,6 +610,18 @@ renders no tab strip. Tested in `src/lib/__tests__/nav.test.ts`.
   asserted rather than assumed. Seven self-assertions. **Applied to the hosted project in a
   reconciled form** — the policy half was already done there by an unmerged branch's
   `0036_invoice_account_codes`, with identical role lists; see §11.
+- `0038_invoice_line_account` — **a line may be coded to an account of its own.**
+  `invoice_lines.gl_account_id`, nullable, plus the index. Adds no table, no policy and no
+  function, and cannot change a row. It exists because `push.ts` reads that column and the
+  column is **already live** from an unmerged branch's `0036_invoice_account_codes` — without
+  it here, a database built from these migrations would not carry what the query names and the
+  push would die at request time on a schema this repo produced. The 0018 arrangement: converge
+  with the branch rather than race it. That branch's `invoice_lines.account_code` and its
+  trigger are deliberately **not** restated — nothing here reads them, and they hold *our*
+  chart's code, which is the one thing that must never be sent to Xero. Its load-bearing
+  assertion is that `invoice_lines` has **exactly one** foreign key to `gl_accounts`: the push
+  embeds through it, and a second would make that embed ambiguous and kill the push with
+  PGRST201 at request time.
 - `0013_notifications` — `tenants.settings jsonb` (AD-3) and the `notifications` table
   (AD-4). Beware the numbering drift: the unmerged branch
   `claude/warehouse-inventory-flow-psooyq` carries its own `0012_return_count.sql`, which
@@ -953,6 +965,13 @@ rather than trusted. **Every migration through `0035_audit_log_read` is applied*
 ledger's last four entries are `0032_item_master`, `0033_laundry_prices_read`,
 `0034_counter_takes_jobs` and `0035_audit_log_read`. 0020–0024 are the renumbered branch migrations, already live under their original
 names (§7).
+
+**`0038_invoice_line_account` was applied on 2026-08-25** and is a **no-op** there — the column
+came from that branch's `0036_invoice_account_codes`. It puts the column in this repo's ledger,
+which is what the code reading it ships from. Read back after: all three of the push's embed hops
+carry **exactly one** foreign key (`invoice_lines → gl_accounts`, `invoice_lines → items`,
+`items → gl_accounts`), so none of them can be ambiguous; 647 invoices, 0 invoice lines, 6 items,
+268 accounts, 0 `anon` table grants and 0 tables without RLS, all unchanged.
 
 **`0036_run_sequence_control` and `0037_account_and_item_codes` were applied on 2026-08-25**, in
 that order — and the pre-flight turned up a collision that changed what 0037 could be.
@@ -1459,6 +1478,16 @@ invoice goes, because this app has no counter-cash concept.
     a code its own chart or inventory does not carry, so sending `items.item_code` on the
     assumption the two match would turn one mismatched item into *every* invoice failing to
     push. Blank means the key is omitted, which is exactly the payload that shipped before.
+  - **Three tiers, and the first one is the fix that mattered** (`resolveAccountCode`, pure and
+    tested): the line's own account (`invoice_lines.gl_account_id`), then its item's
+    (`items.income_account_id`), then the laundry's default. Resolving the item's ahead of the
+    line's would quietly send a different code from the one somebody deliberately chose, and
+    nobody would find out until a bookkeeper reconciled. Every tier resolves through
+    `gl_accounts.xero_account_code`, so a tier that is filled in *here* but not mapped to Xero
+    contributes nothing rather than a code Xero would refuse.
+  - **`invoice_lines.account_code` is deliberately not a tier.** It is *our* chart's code,
+    snapshotted by an unmerged branch's trigger, and sending it would be sending a code from our
+    chart to somebody else's books.
   - **`xero_connections.sales_account_code` is the fallback**, chosen from the laundry's own Xero
     income accounts beside the bank account payments post to. It exists because **most invoice
     lines carry no item at all** — a fuel levy, a contract minimum, a consolidated laundry
@@ -1478,6 +1507,60 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-08-25 · A line's own account code is the one that reaches Xero
+Working the backlog the requirements document leaves open. One migration (`0038`), **no new
+table, no new policy, no new function, no new capability, and no row changed** — the column it
+adds is nullable with no default.
+
+**The defect: an explicitly coded line had its code ignored.** The hosted project carries
+`invoice_lines.gl_account_id` from an unmerged branch's `0036_invoice_account_codes`, so a
+bookkeeper can code one line deliberately. `push.ts` did not read that column — it resolved the
+code from the line's *item* — so the item's standing account was sent to Xero instead of the one
+somebody chose, and nothing would have surfaced it until a reconciliation.
+
+- **The whole ladder is now one pure rule.** `resolveAccountCode` takes three tiers — the line's
+  own account, its item's, the laundry's default — and returns the first that is really there.
+  It lives in the payload module beside the mapping, not split between the reader and the
+  builder, because a precedence spread over two files is a precedence nobody can test.
+- **`invoice_lines.account_code` is deliberately *not* a tier**, which is the part worth keeping.
+  That column holds **our** chart's code, snapshotted when the line was written. Xero refuses an
+  invoice naming a code its own chart does not carry, so sending it would turn one mismatched
+  account into every invoice failing to push. Every tier resolves through
+  `gl_accounts.xero_account_code` instead — null until somebody says what the Xero code is.
+- **A blank falls through rather than terminating the ladder.** A line whose account was cleared
+  drops to its item, not to nothing; otherwise clearing a code silently uncodes the line.
+- **`0038` exists so the repo can build what the code reads.** The column is already live, so
+  applying it there is a no-op — but without it here, a database built from these migrations
+  alone would not carry the column the query names and the push would die at request time on a
+  schema this repo produced. Its assertion is that `invoice_lines` has exactly **one** foreign
+  key to `gl_accounts`, because the push embeds through it and a second would be PGRST201 in
+  production, which no typecheck and no unit test can see.
+
+**`0037` is now order-independent, which is the other half of the same collision.** Its policy
+block would have failed with 42710 against any database already gated — as it did live, where it
+had to be skipped by hand. The rule is written down instead: **gate the chart if nobody has, and
+leave it alone if somebody has.** Proved in both directions rather than reasoned about — on a
+fresh database it creates the four policies and closes the chart; with the other branch's gate
+installed first it emits a notice, skips, and leaves that gate intact with **0** `for all`
+policies remaining. Its membership assertion was widened to accept either spelling, because the
+other gate reaches membership through `has_role()` inside its own helper rather than naming
+`is_member` beside it.
+
+- 773 unit tests (was 766) and **417 pgTAP assertions** (unchanged — this adds no policy).
+  `verify` green. All thirty-eight migrations applied to a fresh Postgres 16 with the whole
+  pgTAP suite and the seed on top.
+- **The new tests were confirmed to fail without the fix**: removing the item tier fails five of
+  them, which is the shape that proves they are testing the ladder rather than the fixture.
+
+**Applied to `laundrymart-syd` on 2026-08-25.** A no-op, as designed. All three of the push's
+embed hops read back as exactly one foreign key each, and 647 invoices / 0 invoice lines /
+6 items / 268 accounts / 0 `anon` table grants / 0 tables without RLS are unchanged.
+
+**Still open, and still the owner's:** nothing has been pushed to Xero yet — this deployment has
+no `XERO_CLIENT_ID`, 0 `xero_connections` rows, and all 647 invoices carry **0 lines** (they came
+in as import headers), so the coding ladder has had nothing real to act on. The first genuine
+test is one invoice with lines on it, against a connected organisation.
+
 ### 2026-08-25 · The Owner keeps the codes, the codes reach Xero, and the proofs count themselves
 Three things asked for together, and each turned out to have a defect behind it. One migration
 (`0037`), **no new table, no dropped column, no row changed and no new capability**. §20 and §25

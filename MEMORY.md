@@ -1,7 +1,40 @@
 # MEMORY — working session handoff
 > Auto-loaded each session. Canonical state is CLAUDE.md; this is the live delta.
 
-## Latest: 0036 and 0037 are live on `laundrymart-syd`
+## Latest: a line's own account code is the one that reaches Xero
+2026-08-25. Working the backlog. One migration (`0038`), **no new table, no new policy, no new
+function, no row changed**. CLAUDE.md §20 has the design, §7 and §11 the consequences.
+
+**The defect, now fixed.** The hosted project carries `invoice_lines.gl_account_id` from that
+unmerged branch, so a bookkeeper can code one line deliberately — and `push.ts` did not read it.
+It resolved from the line's *item* instead, so the item's standing account went to Xero rather
+than the one somebody chose. Nothing would have surfaced it until a reconciliation.
+- `resolveAccountCode` is the whole ladder in one pure, tested rule: **line's own account → its
+  item's → the laundry's default**, first one that is really there. Kept in the payload module
+  rather than split between reader and builder, because a precedence spread over two files is
+  one nobody can test.
+- **`invoice_lines.account_code` is deliberately not a tier.** It holds *our* chart's code. Xero
+  refuses an invoice naming a code its chart lacks, so sending it would turn one mismatched
+  account into every invoice failing. Every tier resolves through `gl_accounts.xero_account_code`.
+- A blank falls **through** to the next tier, not to nothing — otherwise clearing a code silently
+  uncodes the line.
+- `0038` adds `invoice_lines.gl_account_id` so the repo can build what the code reads (no-op
+  live). Its assertion is that `invoice_lines` has exactly **one** FK to `gl_accounts` — the push
+  embeds through it, and a second is PGRST201 in production, invisible to typecheck and tests.
+
+**`0037` is now order-independent** — the other half of the same collision. Its policy block
+would have failed 42710 against any already-gated database, as it did live where I skipped it by
+hand. The rule is encoded: **gate the chart if nobody has, leave it alone if somebody has.**
+Proved both ways: fresh → creates the four policies; other branch's gate first → notice, skip,
+that gate intact, **0** `for all` policies left.
+
+**Verified:** 773 unit tests (was 766), 417 pgTAP assertions (unchanged — no policy added),
+`verify` green, all 38 migrations against a fresh Postgres 16 with the seed. The new tests were
+confirmed to **fail without the fix** (removing the item tier fails five).
+
+**Applied live** — a no-op, as designed. All three embed hops read back as exactly one FK each.
+
+## Previously: 0036 and 0037 are live on `laundrymart-syd`
 2026-08-25. Both applied and verified by read-back. CLAUDE.md §11 has the full record.
 
 **The pre-flight turned up a collision, and it changed what 0037 could be.** A third `0036` —
@@ -338,13 +371,15 @@ fast-forwards, and Dev absorbed the 18-commit backlog the changelog kept recordi
   a platform admin**, and its price list is still empty, so `LJ00002` was priced by hand.
 
 ## Do these next
-- **Decide the invoice-line coding overlap** (see the warning above). Two designs are live for
-  "what account is this line coded to"; our push path reads the item, that branch's trigger
-  snapshots the line. Decide before the first real Xero push.
-- **Reconcile the two `0036`s when that branch merges.** The repo will then hold two migrations
-  numbered 0036 and a duplicate helper pair (`can_*_accounts` vs `can_*_purchases`) with
-  identical role lists. Renumber and collapse to one pair — the same job §7 records for the two
-  0017s and the two 0015s.
+- **Reconcile the two `0036`s when that branch merges.** Half done: `0037` is now
+  order-independent, so neither order breaks and the chart ends gated exactly once. What is left
+  is repo hygiene at merge time — two migrations numbered 0036, and a duplicate helper pair
+  (`can_*_accounts` vs `can_*_purchases`, identical role lists) to renumber and collapse. The
+  same job §7 records for the two 0017s and the two 0015s. **Nothing to do until that branch
+  lands** — the duplication does not exist yet in either place.
+- **Push one real invoice to Xero.** The coding ladder has never run against real data: this
+  deployment has no `XERO_CLIENT_ID`, 0 `xero_connections`, and all 647 invoices carry **0
+  lines** (import headers). Needs a connected organisation and one invoice with lines on it.
 - **Open the screens with real rows.** Both migrations are verified at the database level; no
   authenticated page has been rendered against them. Sign in as `owner@roles.example.com`:
   Adjust Run → Save & Lock Run on a real board, and add one account at `/accounts`.

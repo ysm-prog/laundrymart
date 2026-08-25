@@ -84,24 +84,55 @@ comment on function public.can_write_accounts(uuid) is
 
 -- Dropped rather than wrapped. A permissive `for all` policy''s USING half is a
 -- SELECT grant, so leaving it beside a narrower read would leave the read open.
-drop policy if exists gl_accounts_member on public.gl_accounts;
+--
+-- **Conditional, because another branch reaches this same table.** An unmerged
+-- branch's `0036_invoice_account_codes` gates `gl_accounts` with the identical
+-- four policy names and *the same two role lists*, under its own
+-- `can_read_purchases()` / `can_write_purchases()`. It reached the hosted
+-- project first, and this block had to be skipped by hand when 0037 was applied
+-- there — see §11.
+--
+-- So the rule is written down rather than left to whoever applies next: **gate
+-- the chart if nobody has gated it, and leave it alone if somebody has.**
+--
+--   * on a fresh database this repo built, the only policy is 0021's permissive
+--     `for all`, so the four below are created and the chart is closed;
+--   * where that branch ran first, its gate is already correct and equivalent,
+--     and replacing it would leave `gl_accounts` gated differently from the five
+--     sibling tables it gates the same way — worse than doing nothing.
+--
+-- Either way the chart ends gated exactly once, whichever order the two land
+-- in, and this migration can no longer fail with 42710.
+do $$
+begin
+  if not exists (
+    select 1 from pg_policy
+     where polrelid = 'public.gl_accounts'::regclass
+       and polcmd = '*' and polpermissive
+  ) then
+    raise notice '0037: gl_accounts is already gated; leaving its policies alone';
+    return;
+  end if;
 
-create policy gl_accounts_read on public.gl_accounts
-  for select to authenticated
-  using ((select public.is_member(tenant_id)) and (select public.can_read_accounts(tenant_id)));
+  drop policy if exists gl_accounts_member on public.gl_accounts;
 
-create policy gl_accounts_insert on public.gl_accounts
-  for insert to authenticated
-  with check ((select public.is_member(tenant_id)) and (select public.can_write_accounts(tenant_id)));
+  create policy gl_accounts_read on public.gl_accounts
+    for select to authenticated
+    using ((select public.is_member(tenant_id)) and (select public.can_read_accounts(tenant_id)));
 
-create policy gl_accounts_update on public.gl_accounts
-  for update to authenticated
-  using ((select public.is_member(tenant_id)) and (select public.can_write_accounts(tenant_id)))
-  with check ((select public.is_member(tenant_id)) and (select public.can_write_accounts(tenant_id)));
+  create policy gl_accounts_insert on public.gl_accounts
+    for insert to authenticated
+    with check ((select public.is_member(tenant_id)) and (select public.can_write_accounts(tenant_id)));
 
-create policy gl_accounts_delete on public.gl_accounts
-  for delete to authenticated
-  using ((select public.is_member(tenant_id)) and (select public.can_write_accounts(tenant_id)));
+  create policy gl_accounts_update on public.gl_accounts
+    for update to authenticated
+    using ((select public.is_member(tenant_id)) and (select public.can_write_accounts(tenant_id)))
+    with check ((select public.is_member(tenant_id)) and (select public.can_write_accounts(tenant_id)));
+
+  create policy gl_accounts_delete on public.gl_accounts
+    for delete to authenticated
+    using ((select public.is_member(tenant_id)) and (select public.can_write_accounts(tenant_id)));
+end $$;
 
 -- ------------------------------------------------ an item carries its codes --
 -- The income account a line for this item is coded to, and the item's code as
@@ -210,15 +241,21 @@ begin
     raise exception '0037: gl_accounts carries % policies, expected 4', v_count using errcode='P0001';
   end if;
 
-  -- 3. Every policy still names the tenancy predicate. Rewriting policies is
-  --    how a tenancy clause gets dropped by accident — 0028 exists because
-  --    exactly that happened one migration earlier.
+  -- 3. Every policy still carries a membership check. Rewriting policies is how
+  --    a tenancy clause gets dropped by accident — 0028 exists because exactly
+  --    that happened one migration earlier.
+  --
+  --    Matched on either spelling, because the other branch's gate reaches
+  --    membership through `has_role()` inside `can_*_purchases()` rather than
+  --    naming `is_member` beside it. Both are membership-scoped; asserting our
+  --    spelling alone would fail on a database that is correctly gated.
   select count(*) into v_count from pg_policy
    where polrelid='public.gl_accounts'::regclass
      and coalesce(pg_get_expr(polqual, polrelid), '')
-         || coalesce(pg_get_expr(polwithcheck, polrelid), '') like '%is_member%';
+         || coalesce(pg_get_expr(polwithcheck, polrelid), '')
+         ~ '(is_member|can_read_accounts|can_write_accounts|can_read_purchases|can_write_purchases)';
   if v_count <> 4 then
-    raise exception '0037: only % of 4 gl_accounts policies name is_member', v_count
+    raise exception '0037: only % of 4 gl_accounts policies carry a membership check', v_count
       using errcode='P0001';
   end if;
 
