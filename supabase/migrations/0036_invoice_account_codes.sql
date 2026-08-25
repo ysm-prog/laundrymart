@@ -218,7 +218,16 @@ begin
   return new;
 end $$;
 
-revoke all on function public.sync_invoice_line_account() from public, anon;
+-- **`authenticated` too, and that word is the whole of 0019's trigger-function
+-- trap.** Supabase's default privileges hand every new function a *direct*
+-- EXECUTE grant to `authenticated`, so revoking from `public, anon` alone leaves
+-- a SECURITY DEFINER trigger function published at `/rest/v1/rpc/…` for any
+-- signed-in user. It can only ever error when called outside a trigger context,
+-- which is precisely why it should not be on the surface at all —
+-- `guard_last_platform_admin` is revoked this way for the same reason. Postgres
+-- checks EXECUTE at `create trigger` time and not at fire time, so the trigger
+-- below is unaffected.
+revoke execute on function public.sync_invoice_line_account() from public, anon, authenticated;
 
 drop trigger if exists sync_invoice_line_account on public.invoice_lines;
 create trigger sync_invoice_line_account
@@ -285,5 +294,17 @@ begin
       and has_function_privilege('anon', p.oid, 'execute')
   ) then
     raise exception '0036: a new function is executable by anon';
+  end if;
+
+  -- 5. And the trigger function is not on the RPC surface for a signed-in user
+  --    either. **This assertion exists because its absence let the defect
+  --    through**: the first apply revoked from `public, anon` only, and
+  --    `sync_invoice_line_account` came straight back as a new security advisor.
+  --    The two helpers above are deliberately NOT checked this way — they answer
+  --    a question about the caller and `authenticated` is meant to hold them, the
+  --    same as `can_read_billing`.
+  if has_function_privilege('authenticated', 'public.sync_invoice_line_account()', 'execute') then
+    raise exception '0036: the trigger function is still executable by authenticated, '
+      'so it is published at /rest/v1/rpc — the trap 0019 recorded';
   end if;
 end $$;

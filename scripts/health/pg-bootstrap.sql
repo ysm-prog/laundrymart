@@ -71,3 +71,17 @@ grant execute on function storage.foldername(text) to anon, authenticated, servi
 -- vacuously, which is worse than not having them.
 alter default privileges in schema public grant all on tables to anon, authenticated;
 alter default privileges in schema public grant all on sequences to anon, authenticated;
+
+-- **Functions too, and the difference is not cosmetic.** Postgres already grants
+-- EXECUTE on a new function to PUBLIC, so locally `revoke ... from public` takes
+-- it away from everybody and any assertion about `authenticated` passes. A hosted
+-- project instead hands each new function a **direct** grant to `anon` and
+-- `authenticated`, which `revoke ... from public, anon` leaves standing — so a
+-- SECURITY DEFINER trigger function stays published at `/rest/v1/rpc/` for every
+-- signed-in user.
+--
+-- That is exactly how `sync_invoice_line_account` reached the live project's
+-- security advisors on 2026-08-25 while the local suite was green: the same shape
+-- as the table hole 0029 closes, one object class over, and hidden for the same
+-- reason. With this line here, 0036's own assertion has something real to catch.
+alter default privileges in schema public grant execute on functions to anon, authenticated;

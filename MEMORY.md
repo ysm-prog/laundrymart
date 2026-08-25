@@ -40,19 +40,39 @@ sweep read 0. **An empty table is not a proof.** Now `can_read_purchases()`/`can
   it, 0 targets under 36px. Document overflow byte-identical to the recorded baseline. 26
   interaction assertions drive every route.
 
-### Next, and it needs a real project
-1. **`0036` is NOT applied to `laundrymart-syd`** — the ledger's last entry is still
-   `0035_audit_log_read`. Apply it, then re-probe as `board1@ats.example.com`: the six counts above
-   should all become 0 and the rename should touch nothing.
-2. Set an income account on some items, add a line each way on a draft, read the PDF, push to Xero
-   and check `AccountCode` arrives.
-3. **Adelaide holds 268 accounts and zero items**, so the composer opens on the account code there.
-   The item master is still waiting on the MYOB import (§25).
+### Applied live on 2026-08-25, and merged
+**`0036` is the ledger's last entry** (`20260825114025`). Rehearsed in three aborted transactions,
+then read back as real sessions: `board1@ats.example.com` went **268 / 192 / 1,515 / 1 / 62 / 636 →
+0 of each**, its rename touched 0 rows, its own run and jobs untouched. Counter 0, driver 0. `jay@`
+still reads 268 and 1,515 and its importer-style insert **landed**. Every count unchanged.
 
-### Two traps this session re-learned
+**The apply found a defect in the migration and the advisors caught it.** 18 → **21**: two expected
+helpers plus `sync_invoice_line_account` on `/rest/v1/rpc/`. The revoke said `from public, anon` —
+**enough locally, not on Supabase**, which hands each new function a *direct* `authenticated` grant
+that revoking PUBLIC does not touch. Only matters for a SECURITY DEFINER trigger function, which is
+what 0019 recorded for `guard_last_platform_admin`. Fixed live within the hour; advisors → **20**.
+
+Three follow-ups, and the middle one is the durable win:
+- `0036` now revokes from `public, anon, **authenticated**` with a fifth self-assertion naming it.
+- **`pg-bootstrap.sql` mirrors Supabase's *function* default privileges**, so that assertion is
+  real rather than vacuous — proved by reverting the word and watching it fail. 0029's lesson one
+  object class over: *the local harness was reproducing a friendlier database than the real one.*
+- **CLAUDE.md's claim that `sync_laundry_item_type`'s EXECUTE is revoked was false** and is
+  corrected. It is not revoked; it is SECURITY INVOKER, which is what keeps it off the advisor
+  list. Right observation, wrong reason — and the wrong reason is what made 0036's revoke look fine.
+
+### Next, and it needs a browser
+1. Set an income account on a few items, add a line each way on a draft, read the PDF.
+2. Push one invoice to Xero and check `AccountCode` arrives — **first time that field is populated**.
+3. **Adelaide holds 268 accounts and zero items**, so the composer opens on the account code there.
+   The item master still waits on the MYOB import (§25).
+
+### Traps this session re-learned
 - A gallery measurement reported a **clean sweep vacuously**: `next start` failed with
   `EADDRINUSE`, the old build kept serving, `getElementById` returned null and the loop
-  `continue`d. Check the element exists before trusting a zero.
+  `continue`d. Check the element exists before trusting a zero. **The pgTAP assertion above failed
+  the same way for a different reason** — twice in one session, so treat a passing new assertion as
+  unproven until it has been seen to fail.
 - `searchAccounts` first ranked revenue *within* a tier, so `5-1000 Towel Purchases` (name starts
   with "towel") beat `4-1000 Sales of Towels` (merely contains it) — the wrong side of the books
   answering a sales question. Revenue is a whole tier ahead now; an exact code still wins outright.

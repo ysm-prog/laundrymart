@@ -650,6 +650,18 @@ boilerplate in 0002–0009 is what exposed every SECURITY DEFINER helper on
 `/rest/v1/rpc/…` without a login; 0011 revokes it and `rls_coverage` asserts it stays
 revoked.
 
+**A trigger function needs `authenticated` named in its revoke, not just `public, anon`.** Postgres
+grants EXECUTE on a new function to PUBLIC, so locally `revoke ... from public` takes it from
+everybody; a hosted project instead hands each new function a **direct** grant to `anon` and
+`authenticated`, which that revoke leaves standing. The consequence is only visible for a
+**SECURITY DEFINER** trigger function — it is then published at `/rest/v1/rpc/…` for any signed-in
+user, where it can only ever error, which is exactly why it should not be there. `0019` revokes
+`guard_last_platform_admin` from `public, anon, authenticated` and is the pattern to copy; `0036`
+did not, and the live security advisors caught it the hour it was applied. `pg-bootstrap.sql` now
+mirrors Supabase's **function** default privileges as well as its table ones, so the local suite
+reproduces the hosted posture and 0036's own assertion has something real to catch — without that
+mirror it passed vacuously, the same trap 0029 records one object class over.
+
 **The same applies to tables, and that half stayed open for months longer** (0029). Supabase's
 stock **default privileges** grant `anon` and `authenticated` on every table created in `public`,
 so each new table arrived reachable without a login — nothing in this repo asked for it and
@@ -659,6 +671,8 @@ held that too. 0029 revokes the grants *and* the default privileges behind them.
 `scripts/health/pg-bootstrap.sql` now **mirrors those default privileges** so a local run
 reproduces the hosted posture. Before that it did not, which is exactly why CI looked clean for
 months while the live database was not: without the mirror, 0029's proof passes vacuously.
+**Since 2026-08-25 it mirrors the *function* default ACLs too**, for the same reason and after the
+same kind of miss — see the trigger-function note above.
 
 `scripts/health/pg-bootstrap.sql` shims what Supabase provides outside our migrations: the
 `auth` schema, and the `storage` bucket/object tables plus `foldername()` that 0007 attaches
@@ -917,13 +931,50 @@ demote the other and lock the tenant out of its own People screen.
 Deployed on Vercel at `ats.coreit.com.au`. All migrations through `0030_member_directory`
 applied (0014 on 2026-08-13, 0015 and 0016 on 2026-08-14, 0017, 0018, 0019 and 0025 on
 2026-08-16, 0026 and 0027 on 2026-08-17, 0030 on 2026-08-18), each verified by rolled-back probe
-rather than trusted. **Every migration through `0035_audit_log_read` is applied**, and the
-ledger's last four entries are `0032_item_master`, `0033_laundry_prices_read`,
-`0034_counter_takes_jobs` and `0035_audit_log_read`. 0020–0024 are the renumbered branch migrations, already live under their original
+rather than trusted. **Every migration through `0036_invoice_account_codes` is applied**, and the
+ledger's last four entries are `0033_laundry_prices_read`, `0034_counter_takes_jobs`,
+`0035_audit_log_read` and `0036_invoice_account_codes`. 0020–0024 are the renumbered branch migrations, already live under their original
 names (§7).
 
 **`0031_boards` and `0032_item_master` were applied on 2026-08-20**, in that order, each
 verified before the next. **`0033_laundry_prices_read` followed the same day.**
+
+**`0036_invoice_account_codes` was applied on 2026-08-25**, and is the ledger's last entry
+(`20260825114025`). Rehearsed in three aborted transactions first, the way §11 requires.
+
+- **Pre-flight:** every object it creates absent (0 functions, 0 columns, 0 trigger); all six
+  `*_member` policies present and **the only** policies on those tables (6 of 6), so nothing else
+  was there to preserve; all six carrying `tenant_id`; 0 `anon`-executable functions and 0 `anon`
+  table grants, so its own assertions would pass. `invoice_lines` was **0 rows** — the 647 invoices
+  are imported headers — so the two new columns landed on an empty table.
+- **Rehearsed, then read back as real sessions after the apply.** `board1@ats.example.com` went from
+  **268 accounts / 192 suppliers / 1,515 bills / 1 order / 62 payments / 636 activation rows** to
+  **0 of each**, and its rename of `4-1600 Laundry` touched **0 rows** — the account is still called
+  *Laundry*. Its own work is untouched: 1 run, 2 jobs. The counter reads 0 and the driver reads 0.
+  `jay@ctnorwood.com.au` still reads 268 and 1,515, and — **the assertion that matters, because the
+  failure this class produces is a statement that succeeds and touches nothing** — an
+  importer-style insert **landed** (1 row). Finance and a plain `super_admin` each read their own
+  laundry's chart where the counter in the same tenant, over the same rows, read **0**: the role
+  gate, told apart from tenancy.
+- **The trigger, probed against real rows:** the code came back **derived** (`4-1100`) rather than
+  taken from the caller; a free-text line carried **null**; a heading was refused with *"that is a
+  heading, not an account you can code to"*; another laundry's account with *"that account belongs
+  to another business"*; and after deleting `4-1100` the line **still said `4-1100`** with its link
+  cleared — the snapshot outliving the link, which is the whole reason it is kept.
+- **Counts unchanged:** 647 invoices, 268 accounts, 192 suppliers, 1,515 bills, 62 supplier
+  payments, 636 activation rows, 508 archived customers, 8 jobs, 20 memberships, 5 boards, 6 items.
+  24 policies across the six tables (4 each), **0 permissive `for all` left**, 0 `anon` table
+  grants, 0 tables without RLS.
+- **Advisors went 18 → 21, and one of the three was a defect.** `can_read_purchases` and
+  `can_write_purchases` are the documented definer shape and expected. The third,
+  `sync_invoice_line_account`, was not: the migration as applied revoked it from `public, anon`
+  and **not** `authenticated`, so a SECURITY DEFINER trigger function sat on `/rest/v1/rpc/…` for
+  every signed-in user. Revoked live within the hour, the trigger confirmed to still derive the
+  code afterwards (Postgres checks EXECUTE at `create trigger` time, not at fire time), and
+  advisors settled at **20** — 19 definer helpers plus the auth leaked-password toggle. **The
+  repo's `0036` file carries the corrected revoke and a fifth self-assertion for it**, so a fresh
+  database cannot repeat it; the live ledger's stored statements for `20260825114025` predate that
+  one line, which is recorded here rather than glossed.
 
 **`0034_counter_takes_jobs` and `0035_audit_log_read` were applied on 2026-08-24**, in that order,
 and are now the ledger's last two entries. Both are self-asserting, and `apply_migration` is
@@ -1046,8 +1097,14 @@ job items, 0 categorised items.
 
 Advisors went **16 → 18**, the two additions being `current_board_id` and `is_board_only` — the
 documented definer shape, internally scoped to `auth.uid()`, and the exact counterparts of
-`current_driver_id`/`is_driver_only` already on the list. `sync_laundry_item_type` is *not* on it,
-because its EXECUTE is revoked — the trigger-function trap 0019 recorded.
+`current_driver_id`/`is_driver_only` already on the list. `sync_laundry_item_type` is *not* on it
+— **and the reason given here for two days was wrong.** This said "because its EXECUTE is revoked".
+It is not: 0032 revokes from `public, anon` only, and the live grant is
+`{postgres=X,authenticated=X,service_role=X}`, so `authenticated` can call it. It stays off the
+advisor list because it is **SECURITY INVOKER**, which is what the advisor screens on — called
+outside a trigger it runs as the caller and errors immediately. Right observation, wrong reason,
+and the wrong reason is what let `0036` ship a *definer* trigger function with the same revoke.
+Corrected 2026-08-25; see that changelog entry and the note under 0011 below.
 
 **Read back on 2026-08-24, and the real laundry has been used since the cutover.**
 `Adelaide Towel Service` now holds four laundry jobs of its own, three of them raised after the
@@ -1438,7 +1495,8 @@ argument for §10b's gallery rule and is why the composer landed there in three 
   with "towel" — beating `4-1000 Sales of Towels`, which merely contains it: the other side
   of the books answering a question asked on a sales invoice. Revenue is a whole tier ahead
   now, and an exact code still wins outright so the escape hatch stays open.
-- 765 unit tests (was 739) and **382 pgTAP assertions (was 368)**. `verify` green; all thirty-six migrations applied to a
+- 765 unit tests (was 739) and **382 pgTAP assertions (was 368)**, the last run against the
+  stricter `pg-bootstrap.sql` above. `verify` green; all thirty-six migrations applied to a
   fresh Postgres 16 with the whole pgTAP suite and the seed on top. **All fourteen new
   assertions were confirmed to fail without `0036`** rather than assumed to be doing
   something — including "the board's rename touched nothing", which is the write hole.
@@ -1449,12 +1507,41 @@ argument for §10b's gallery rule and is why the composer landed there in three 
   to the baseline the 2026-08-24 entry recorded**, so this adds none. Twenty-six interaction
   assertions drive every route and both empty states.
 
-**Not verified against a live project.** `0036` has **not** been applied to
-`laundrymart-syd` — the ledger's last entry is still `0035_audit_log_read`. The read-backs
-above are probes against the live database, not an apply. **Before trusting it: apply 0036,
-set an income account on a few items, add a line each way on a draft invoice, and read the
-PDF.** The account-code column reaching Xero is the one to watch — it is the first time that
-field has ever been populated.
+**Applied to `laundrymart-syd` on 2026-08-25** — §11 has the full record. Rehearsed in three
+aborted transactions first; after the apply the same probe that found the defect was re-run as real
+sessions and `board1@ats.example.com` went from **268 / 192 / 1,515 / 1 / 62 / 636** to **0 of
+each**, with its rename touching 0 rows and its own run and jobs untouched. The counter and the
+driver read 0; `jay@` still reads 268 and 1,515 and its importer-style insert **landed**. Every
+count unchanged, 24 policies across the six, **0 permissive `for all` left**.
+
+**The apply found a defect in this very migration, and the security advisors were what caught
+it.** They went 18 → **21**: two are the documented helpers, and the third was
+`sync_invoice_line_account` sitting on `/rest/v1/rpc/…` for every signed-in user. The revoke said
+`from public, anon` — and **that is enough locally and not on Supabase**. Postgres grants EXECUTE
+on a new function to PUBLIC, so revoking from PUBLIC takes it from everybody; a hosted project
+instead hands each new function a **direct** grant to `authenticated`, which that revoke leaves
+standing. It only matters for a **SECURITY DEFINER** trigger function, which is what this one is
+and what `guard_last_platform_admin` was when 0019 recorded the identical trap. Revoked live within
+the hour, the trigger proved to still derive the code afterwards, advisors settled at **20**.
+
+**Three things came out of that, and the second is worth more than the fix.**
+- The repo's `0036` carries `revoke execute … from public, anon, authenticated` and a **fifth
+  self-assertion** naming it, so a fresh database cannot repeat it.
+- **`pg-bootstrap.sql` now mirrors Supabase's *function* default privileges**, not just its table
+  ones. Without that the new assertion passed **vacuously** — proved by reverting the one word and
+  watching the migration apply cleanly on the old shim, then fail with the assertion's own message
+  on the new one. This is 0029's finding one object class over: *the local harness was reproducing
+  a friendlier database than the real one.* CI can now catch this whole class.
+- **CLAUDE.md said something false and it is corrected rather than quietly fixed.** §11 claimed
+  `sync_laundry_item_type` stays off the advisor list "because its EXECUTE is revoked". It is not
+  revoked — 0032 revokes from `public, anon` only and `authenticated` holds a direct grant today.
+  It is off the list because it is SECURITY **INVOKER**, which is what the advisor screens on.
+  Right observation, wrong reason — **and the wrong reason is what made 0036's revoke look
+  correct.** A note that explains a clean result by the wrong mechanism is worse than no note.
+
+**Still not verified end to end:** set an income account on a few items, add a line each way on a
+draft, read the PDF, and push one invoice to Xero. **The account code reaching Xero is the one to
+watch** — it is the first time that field has ever been populated.
 
 **Adelaide's own state, which shapes the first run:** 268 accounts and **zero items**, so
 until the item master lands the code is picked per line. That is why the composer opens on
