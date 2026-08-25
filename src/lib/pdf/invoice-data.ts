@@ -14,6 +14,12 @@ import { loadInvoiceBreakdown, type InvoiceBreakdown } from "@/lib/invoices/brea
 
 export type InvoicePdfLine = {
   description: string;
+  /**
+   * The GL account this line is coded to, as it stood when the line was written.
+   * Null on a free-text line, which prints as a blank rather than a dash: the
+   * customer reading this invoice is not the person who needs the code.
+   */
+  account_code?: string | null;
   charge_type: ChargeType;
   quantity: number;
   unit_price: number;
@@ -89,7 +95,7 @@ export async function loadInvoiceForPdf(
   const [{ data: lines }, { data: tenant }] = await Promise.all([
     supabase
       .from("invoice_lines")
-      .select("description, charge_type, quantity, unit_price, amount, taxable")
+      .select("description, charge_type, quantity, unit_price, amount, taxable, account_code")
       .eq("invoice_id", invoiceId)
       .order("sequence")
       .returns<InvoicePdfLine[]>(),

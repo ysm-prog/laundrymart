@@ -11,6 +11,7 @@ import {
 import { Field, FormActions, Input, Select, SubmitButton } from "@/components/form";
 import { ITEM_CATEGORIES } from "../categories";
 import { archiveItem, updateItem } from "../actions";
+import { IncomeAccountField } from "../income-account-field";
 import { ITEM_TYPES, ITEM_TYPE_LABELS } from "@/lib/domain/laundry-orders";
 
 export const dynamic = "force-dynamic";
@@ -30,7 +31,7 @@ export default async function ItemDetailPage({
       .select("id, sku, item_code, name, description, category, laundry_category, " +
               "ownership_type, is_sell, is_buy, sell_price, cost_price, tax_code, " +
               "replacement_cost, rental_price, wash_only_price, weight_kg, reorder_level, " +
-              "myob_item_id, myob_item_code, external_synced_at, status")
+              "myob_item_id, myob_item_code, external_synced_at, income_account_id, status")
       .eq("id", id).maybeSingle<Item>(),
     supabase.from("inventory_pools")
       .select("id, item_id, owner_type, state, customer_id, depot_id, vehicle_id, quantity, reorder_level")
@@ -108,6 +109,7 @@ export default async function ItemDetailPage({
                 <Field label="Tax code" name="tax_code">
                   <Input name="tax_code" defaultValue={item.tax_code ?? ""} />
                 </Field>
+                <IncomeAccountField defaultValue={item.income_account_id} />
                 <Field label="MYOB item ID" name="myob_item_id"
                        hint={item.external_synced_at
                          ? `Last synchronised ${item.external_synced_at.slice(0, 10)}.`

@@ -1,7 +1,65 @@
 # MEMORY — working session handoff
 > Auto-loaded each session. Canonical state is CLAUDE.md; this is the live delta.
 
-## Latest: usable by somebody who has been shown it once
+## Latest: account codes on an invoice line
+2026-08-25, branch `claude/invoice-item-code-selection-vlwwb4`. CLAUDE.md §3, §7, **§27** and the
+newest changelog entry have it. One migration (`0036_invoice_account_codes`) — **no new table, no
+new role, no new capability, nothing dropped, no row changed**.
+
+The client sent their MYOB chart of accounts (268 accounts, 24 income) and asked for an invoice
+line added **by item or by code**, with anything in neither list written as free text.
+
+**Three ways to fill one line, not three kinds of line.** Whichever route is taken the row is the
+same shape, so there is no `line_kind` column and a month-end line is indistinguishable from a
+typed one. `items.income_account_id` is the bridge (MYOB's "Income Account for Tracking Sales");
+`invoice_lines.gl_account_id` + `account_code` carry it — the link for joins, the text for history,
+kept coherent by `sync_invoice_line_account()`, which **derives the code and never accepts one**.
+An uncoded line is legal and **counted on the invoice**, never refused: the free-text line is what
+the client explicitly asked for.
+
+**Xero has been ready since 0026 and was never fed.** `buildInvoicePayload` has mapped
+`account_code` → `AccountCode` from the day it was written and nothing selected the column, so
+**every line this app has pushed landed in Xero's default sales account**. One word in one select.
+
+**The migration's first part is a security fix, and it is why it shipped with the feature.** All
+six payable tables (`gl_accounts`, `suppliers`, `supplier_bills`, `purchase_orders`,
+`supplier_payments`, `import_activation_state`) carried one permissive `for all … using
+is_member(tenant_id)` policy from `apply_tenant_policy`. Probed live as one of Adelaide's own
+**board** logins: **268 accounts** (owner's equity, drawings, every vehicle loan), **192 suppliers**,
+**1,515 bills** worth $65,724 — and an UPDATE renaming `4-1600 Laundry` **succeeded**. A delivery
+round could rewrite the chart of accounts. Same shape as 0006/`invoices`, 0018/`laundry_prices`:
+**the third time**, hidden because the demo tenant has none of this data so the 2026-08-20 board
+sweep read 0. **An empty table is not a proof.** Now `can_read_purchases()`/`can_write_purchases()`,
+`for all` **replaced** (its USING half grants SELECT — the 0033 trap).
+
+### Where it stands
+- 765 unit tests (was 739), **382 pgTAP assertions** (was 368), `verify` green, all 36 migrations
+  applied to a fresh Postgres 16 with the suite and the seed. All 14 new assertions **confirmed to
+  fail without 0036**, the write hole included.
+- Gallery: composer in three states, 24 combinations measured — 0 console errors, 0 overflow inside
+  it, 0 targets under 36px. Document overflow byte-identical to the recorded baseline. 26
+  interaction assertions drive every route.
+
+### Next, and it needs a real project
+1. **`0036` is NOT applied to `laundrymart-syd`** — the ledger's last entry is still
+   `0035_audit_log_read`. Apply it, then re-probe as `board1@ats.example.com`: the six counts above
+   should all become 0 and the rename should touch nothing.
+2. Set an income account on some items, add a line each way on a draft, read the PDF, push to Xero
+   and check `AccountCode` arrives.
+3. **Adelaide holds 268 accounts and zero items**, so the composer opens on the account code there.
+   The item master is still waiting on the MYOB import (§25).
+
+### Two traps this session re-learned
+- A gallery measurement reported a **clean sweep vacuously**: `next start` failed with
+  `EADDRINUSE`, the old build kept serving, `getElementById` returned null and the loop
+  `continue`d. Check the element exists before trusting a zero.
+- `searchAccounts` first ranked revenue *within* a tier, so `5-1000 Towel Purchases` (name starts
+  with "towel") beat `4-1000 Sales of Towels` (merely contains it) — the wrong side of the books
+  answering a sales question. Revenue is a whole tier ahead now; an exact code still wins outright.
+
+---
+
+## Previous: usable by somebody who has been shown it once
 2026-08-24, branch `claude/app-accessibility-all-ages-e7sh41`. CLAUDE.md §6, §10b, §26 and the
 newest changelog entry have it. **No migration. No schema, RLS, capability, policy or workflow
 change** — every screen still exists, every route still resolves, no role gained or lost anything.

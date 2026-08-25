@@ -175,6 +175,23 @@ Resource-scoped beyond tenancy:
 - `notifications`: RLS scopes them to the tenant, as everywhere. The `audience` capability on
   each row narrows them further to the people who can act on it — but that is a UI filter
   applied in `src/lib/notifications/query.ts`, layered on top of RLS and never instead of it.
+- **The payable side and the chart of accounts are `purchases.*`, since `0036`** —
+  `gl_accounts`, `suppliers`, `supplier_bills`, `purchase_orders`,
+  `supplier_payments`, `import_activation_state`. All six shipped on
+  `apply_tenant_policy`, so one permissive `for all … using is_member(tenant_id)`
+  policy governed them: **every member could read the whole thing and write it**.
+  Probed as one of Adelaide's own `board` logins on 2026-08-25 — 268 accounts
+  including the owner's equity and every loan balance, 192 suppliers, 1,515 bills
+  worth $65,724 outstanding — and an UPDATE renaming `4-1600 Laundry` **succeeded**,
+  because a `for all` policy's USING half grants the writes as well as SELECT.
+  This is the same shape 0006 put on `invoices`, 0017 replaced, 0018 repeated on
+  `laundry_prices` and 0033 replaced: **the third time**. It hid for the same
+  reason 0033's defect hid — the demo tenant has no accounts and no bills, so the
+  2026-08-20 board sweep read 0 from all six and they looked clean. **An empty
+  table is not a proof.** `can_read_purchases()` and `can_write_purchases()` name
+  the `roles.ts` holders and are deliberately *not* derived from
+  `can_read_billing()`: §3 keeps those two sets independent, a dispatcher holding
+  `invoices.read` and no `purchases.*` and finance the reverse.
 - `audit_logs` is **read by four roles and written by everybody** (0035). SELECT needs
   `super_admin`/`operations_manager`/`regional_manager`/`auditor` — the four that hold
   `admin.read`, the auditor being why it is a role list and not `admin.write`. INSERT stays open
@@ -562,6 +579,15 @@ renders no tab strip. Tested in `src/lib/__tests__/nav.test.ts`.
   so the trail is append-only. The `for all` is dropped rather than supplemented,
   because its USING half grants SELECT too (the 0033 trap, one table later). Five
   self-assertions. Adds no table, no column, no function; changes no row.
+- `0036_invoice_account_codes` — **an invoice line says where the money lands, and
+  the payable side stops being everybody's.** `can_read_purchases()` /
+  `can_write_purchases()`; the six payable tables' single permissive `for all`
+  policy replaced by explicit SELECT + INSERT/UPDATE/DELETE gated on them;
+  `items.income_account_id`; `invoice_lines.gl_account_id` + `account_code`; two
+  partial indexes; `sync_invoice_line_account()` and its trigger. **Adds no table,
+  drops nothing and changes no row.** None of the six is in `archivable_tables()`,
+  so there is no `archived_at` clause to preserve — the 0028 trap does not apply.
+  Six self-assertions.
 - `0013_notifications` — `tenants.settings jsonb` (AD-3) and the `notifications` table
   (AD-4). Beware the numbering drift: the unmerged branch
   `claude/warehouse-inventory-flow-psooyq` carries its own `0012_return_count.sql`, which
@@ -616,7 +642,7 @@ Proofs in `supabase/tests/`: `rls_isolation`, `rls_coverage`, `driver_scope`,
 `run_assignment`, `archive_records`, `laundry_pricing`, `platform_admin`, `main_flow_scope`,
 `job_billing`, `purchases_scope`, `supplier_payments_scope`, `import_helpers`,
 `import_activation`, `member_directory`, `boards_scope`, `item_master`,
-`audit_log_scope` (**368 assertions**). Demo data in `supabase/seed.sql` — not
+`audit_log_scope` (**382 assertions**). Demo data in `supabase/seed.sql` — not
 applied by migrations.
 
 **Do not re-add `grant execute on all functions in schema public to anon`.** That
@@ -1350,6 +1376,90 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-08-25 · An invoice line says where the money lands
+The client's chart of accounts, and the ask that came with it: an invoice line added
+**by selecting an item or by the code**, with anything in neither list written as
+free text. One migration (`0036`), no new table, no new role, no new capability,
+nothing dropped and no row changed. §27 holds the design.
+
+- **Three ways to fill one line, not three kinds of line.** Whichever route is taken
+  the row is the same shape, so there is no `line_kind` column and a line the
+  month-end run writes is indistinguishable from one typed at a desk. `items.income_account_id`
+  is the bridge that makes "pick an item" produce a code; `invoice_lines.gl_account_id`
+  + `account_code` carry it, the link for joins and the text for history.
+- **An uncoded line is legal and counted, never refused.** The free-text line is the
+  one the client explicitly asked for, so the app makes the gap visible rather than
+  blocking the work — the same call the pricer makes about laundry nobody has priced.
+- **Xero has been ready for this since 0026 and was never fed.** `buildInvoicePayload`
+  has mapped `account_code` → `AccountCode` from the day it was written and nothing
+  ever selected the column, so **every line this app has pushed has landed in Xero's
+  default sales account**. One word in one `select`.
+
+**The migration's first part is not the feature, and it is the reason it shipped with
+it.** Coding a line means reading `gl_accounts` from an invoice screen, and that table
+was wide open. All six payable tables (`gl_accounts`, `suppliers`, `supplier_bills`,
+`purchase_orders`, `supplier_payments`, `import_activation_state`) shipped on
+`apply_tenant_policy` — one permissive `for all … using is_member(tenant_id)` policy,
+the identical shape 0006 put on `invoices`, 0017 replaced, 0018 repeated on
+`laundry_prices` and 0033 replaced. **The third time.**
+
+- **Probed as one of Adelaide's own `board` logins before anything was written**, and
+  it read **268 accounts** — the owner's equity, the drawings, every vehicle loan —
+  **192 suppliers** and **1,515 supplier bills** worth $65,724 outstanding, while
+  correctly reading 0 invoices and 0 prices. Then an UPDATE renaming `4-1600 Laundry`
+  **succeeded**: a delivery round could rewrite the chart of accounts. The write half
+  was the worse of the two and is the half a read-only audit would have missed.
+- **It hid for exactly the reason 0033's defect hid.** The demo tenant has no accounts
+  and no bills, so the 2026-08-20 sweep that read every table as a board found 0 in all
+  six and they looked clean. **An empty table is not a proof** — the same lesson, now
+  three times over.
+- `can_read_purchases()` / `can_write_purchases()` name the `roles.ts` holders and are
+  deliberately **not** derived from `can_read_billing()`: §3 keeps those two sets
+  independent, a dispatcher holding `invoices.read` and no `purchases.*` and finance the
+  reverse. The `for all` policies are **replaced**, not supplemented, because their USING
+  half grants SELECT too — the trap 0033 records, one table set later.
+
+**Three defects found by driving the screen rather than by reading it**, which is the
+argument for §10b's gallery rule and is why the composer landed there in three states:
+- the first measurement run reported a clean sweep **vacuously**: `next start` had failed
+  with `EADDRINUSE`, the old build kept serving, and the element being measured did not
+  exist in it. `getElementById` returned null and the loop `continue`d. The same shape as
+  the 0029 note about a proof passing against a friendlier database than the real one;
+- picking `TT001`, switching to Account code and picking `4-2000` left the description
+  reading **"Tea Towel"** on a line coded to delivery fees. "Never overwrite what somebody
+  typed" and "a new pick should describe the new thing" contradict each other unless the
+  form knows which it is holding, so it tracks that now;
+- the no-chart card offered an "An account code" button whose only possible outcome was a
+  notice saying there is no chart. A greyed-out button with a sentence under it beats a
+  dead end dressed as a choice.
+
+- **`searchAccounts` was wrong on the first attempt and a test caught it.** Ranking revenue
+  above the rest *within* a match tier left `5-1000 Towel Purchases` — whose name starts
+  with "towel" — beating `4-1000 Sales of Towels`, which merely contains it: the other side
+  of the books answering a question asked on a sales invoice. Revenue is a whole tier ahead
+  now, and an exact code still wins outright so the escape hatch stays open.
+- 765 unit tests (was 739) and **382 pgTAP assertions (was 368)**. `verify` green; all thirty-six migrations applied to a
+  fresh Postgres 16 with the whole pgTAP suite and the seed on top. **All fourteen new
+  assertions were confirmed to fail without `0036`** rather than assumed to be doing
+  something — including "the board's rename touched nothing", which is the write hole.
+- The gallery gained the composer in three states (a full chart, no chart, no items) and was
+  measured light and dark at 320/390/768/1440 across all three text sizes: **24 combinations,
+  0 console errors, 0 overflow inside the composer and 0 interactive targets under 36px**.
+  Document overflow is 7px / 55px / 104px at 320 and 34px at 390 Biggest — **byte-identical
+  to the baseline the 2026-08-24 entry recorded**, so this adds none. Twenty-six interaction
+  assertions drive every route and both empty states.
+
+**Not verified against a live project.** `0036` has **not** been applied to
+`laundrymart-syd` — the ledger's last entry is still `0035_audit_log_read`. The read-backs
+above are probes against the live database, not an apply. **Before trusting it: apply 0036,
+set an income account on a few items, add a line each way on a draft invoice, and read the
+PDF.** The account-code column reaching Xero is the one to watch — it is the first time that
+field has ever been populated.
+
+**Adelaide's own state, which shapes the first run:** 268 accounts and **zero items**, so
+until the item master lands the code is picked per line. That is why the composer opens on
+the account code when a laundry has a chart and no item list.
+
 ### 2026-08-24 · Auth emails go through Resend, so no SMTP is needed
 The owner's instruction, and it closes the longest-standing open item in this file. **No
 migration; no schema, RLS, capability, policy or workflow change** — one sender replaces another.
@@ -3717,6 +3827,65 @@ a receipt and editing a completed one are the supervisor's set. DELETE on `laund
 granted either — nothing in the app deletes one — while DELETE on `laundry_order_items` was,
 because `save_laundry_order_items()` is SECURITY INVOKER and replaces the child set by deleting
 and re-inserting, so without it the counter could take a job in and never correct what is on it.
+
+## 27. Account codes on an invoice
+The business keeps its books against a chart of 268 accounts — 24 of them income
+accounts — and every sale has to be coded to one: towels to `4-1100 Towels - Black`,
+a delivery to `4-2000 Delivery Fees Collected`. The chart has been in `gl_accounts`
+since 0021 and no invoice has ever carried a code, so the bookkeeper re-codes every
+line by hand. `0036` closes that.
+
+- **Three ways to fill one line, not three kinds of line.** The client's ask was a
+  line added *by item or by code*, with anything in neither list written as free
+  text. Whichever route is taken the row that lands is the same — a description, a
+  quantity, a price, a GST flag — and may additionally name an item, an account, or
+  both. So there is no `line_kind` column and a line written by the month-end
+  roll-up is the same shape as one typed at a desk. The mode switch is an entry
+  affordance: with three pickers on screen at once the form asks four questions and
+  none of them says which to answer.
+- **`items.income_account_id` is the only bridge, and it is a decision.** MYOB keeps
+  the same fact under the same words ("Income Account for Tracking Sales"), so an
+  item carries its account and every line naming that item is coded by itself —
+  typed, generated by the per-job run, or rolled up by the month end.
+  `lib/invoices/account-coding.ts` is the one implementation both writers share.
+  **A per-charge-type map was considered and left out**: it would be a second place
+  a laundry has to keep in step with its own books, this app has no way to check its
+  answers, and the first wrong entry would mis-post every invoice after it.
+- **An uncoded line is legal, and counted.** A free-text line with no account is
+  precisely what the client asked to be able to write, so the app makes the gap
+  visible instead of refusing the work: `uncodedLineCount` drives a notice on the
+  invoice, on a sent one too — that is when somebody is reconciling it. The same
+  call the pricer makes about laundry nobody has priced.
+- **Two columns for one fact, and the trigger refuses every way they could
+  disagree.** `gl_account_id` is what a report joins on; `account_code` is the
+  snapshot that survives a chart being tidied, because an invoice is a record of
+  what a customer was told. `sync_invoice_line_account()` derives the text from the
+  id — the code is never posted from a browser — and refuses a heading and another
+  laundry's account. `on delete set null` clears the link and **leaves the code**,
+  which is the whole point of keeping it.
+- **The picker offers income accounts and does not insist on them.** A sale belongs
+  on one, and offering all 268 makes the right answer harder to find; but a
+  bookkeeper offsetting a recharge against an expense account is doing their job, so
+  "search every account" is one checkbox away and an exact code always wins the
+  ranking. The only hard rule is structural: nothing can be coded to one of the six
+  MYOB classification headings, which carry a synthetic code and no meaning.
+  `searchAccounts` puts revenue a whole tier ahead of the rest rather than nudging
+  it — this chart holds `5-1000 Towel Purchases`, whose name *starts with* "towel"
+  where `4-1000 Sales of Towels` merely contains it.
+- **Xero has been ready for this since 0026 and was never fed.** `buildInvoicePayload`
+  has mapped `account_code` to `AccountCode` from the day it was written and nothing
+  selected the column, so every pushed line has landed in Xero's default sales
+  account. One word in one `select`.
+- **The composer defaults to the mode that produces a coded line with the least
+  work**, which is not simply "item": `Adelaide Towel Service` holds 268 accounts and
+  **zero items** today, so falling to free text would make the default route the one
+  that produces uncoded lines, for the one laundry with a chart to code to.
+- **What is not built: an importer for this file.** The uploaded workbook is an
+  `.xlsx` whose headers are `Code | Name | Type | Tax code | Level | Current balance ($)`,
+  while `readAccounts` (0023) expects a **CSV** with `Tax Code`, `Linked` and
+  `Current Balance`. Guessing at the mapping is the discipline §25 records the bills
+  import learning the hard way, and it is moot today: all 268 rows are already live
+  and match the workbook exactly, so there is nothing to import.
 
 ## 21. Customer pricing and job billing
 **Two lifecycles on one job, and they meet at exactly one point.** The operational status says

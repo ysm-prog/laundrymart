@@ -103,6 +103,11 @@ export type Item = {
   cost_price: number;
   /** The ledger's tax code (GST, FRE, …). Somebody else's vocabulary, so a string. */
   tax_code: string | null;
+  /**
+   * MYOB's "Income Account for Tracking Sales" (0036). What makes picking this
+   * item on an invoice fill the account code in by itself.
+   */
+  income_account_id: Uuid | null;
   replacement_cost: number;
   rental_price: number;
   wash_only_price: number;
@@ -378,6 +383,15 @@ export type InvoiceLine = {
   amount: number;
   taxable: boolean;
   sequence: number;
+  /**
+   * The GL account this line is coded to (0036), and a snapshot of its code.
+   * Both, for the reason `item_id` and `description` are both here: the link is
+   * what a report joins on, and the text is what survives a chart being tidied.
+   * Null on a free-text line, which is a legal and visible state — the invoice
+   * screen counts them rather than refusing them.
+   */
+  gl_account_id: Uuid | null;
+  account_code: string | null;
 };
 
 export type Payment = {

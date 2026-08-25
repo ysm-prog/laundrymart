@@ -23,6 +23,7 @@ import { loadInvoiceForPdf } from "@/lib/pdf/invoice-data";
 import { pushInvoiceToXero } from "@/lib/xero/push";
 import { pushPaymentToXero } from "@/lib/xero/push-payment";
 import { pushVoidToXero } from "@/lib/xero/push-void";
+import { accountForLine, incomeAccountsForItems } from "@/lib/invoices/account-coding";
 import { generateInvoicesForJobs } from "@/lib/invoices/from-jobs";
 import { issueOneInvoice } from "@/lib/invoices/issue";
 import {
@@ -303,12 +304,20 @@ export async function generateInvoices(formData: FormData): Promise<void> {
       .single();
     if (error) return fail("/invoices", describeDbError(error));
 
+    // Same rule as the per-job generator, from the same module: a line that names
+    // an item is coded to that item's income account, and everything else is
+    // reported as uncoded on the invoice rather than guessed at.
+    const accountByItem = await incomeAccountsForItems(
+      supabase, session.tenantId, draft.map((entry) => entry.line.itemId),
+    );
+
     const { error: lineError } = await supabase.from("invoice_lines").insert(
       draft.map((entry, index) => ({
         tenant_id: session.tenantId,
         created_by: session.userId,
         invoice_id: invoice.id,
         item_id: entry.line.itemId ?? null,
+        gl_account_id: accountForLine(entry.line.itemId, accountByItem),
         agreement_id: entry.agreementId,
         location_id: entry.locationId,
         laundry_order_id: entry.orderId ?? null,
@@ -470,6 +479,15 @@ export async function addInvoiceLine(formData: FormData): Promise<void> {
   const parsed = z.object({
     invoice_id: z.string().uuid(),
     item_id: optionalUuid,
+    /*
+     * The account this line codes to. Optional on purpose and in both
+     * directions: a line that names neither an item nor an account is exactly
+     * the free-text line the client asked to be able to write, and refusing it
+     * would push that work back onto a spreadsheet. What the app does instead is
+     * *count* the uncoded lines on screen, so a gap is visible rather than
+     * silent — the same call the pricer makes about laundry nobody has priced.
+     */
+    gl_account_id: optionalUuid,
     description: z.string().trim().min(2, "Describe what is being charged"),
     charge_type: z.string().trim().min(2),
     quantity: money,
@@ -485,6 +503,13 @@ export async function addInvoiceLine(formData: FormData): Promise<void> {
     .from("invoice_lines").select("id", { count: "exact", head: true })
     .eq("invoice_id", parsed.data.invoice_id);
 
+  /*
+   * `account_code` is deliberately **not** posted and not trusted from the
+   * browser. `sync_invoice_line_account()` derives it from the account id
+   * inside the insert, so the two records of one fact cannot disagree and a
+   * hand-made request cannot stamp `4-1100` on a line pointing somewhere else.
+   * The same trigger refuses a heading and another laundry's account.
+   */
   const { error } = await supabase.from("invoice_lines").insert({
     ...parsed.data,
     tenant_id: session.tenantId,

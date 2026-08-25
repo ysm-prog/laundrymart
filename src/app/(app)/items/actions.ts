@@ -6,7 +6,7 @@ import { assertCapability } from "@/lib/auth/context";
 import { createClient } from "@/lib/supabase/server";
 import { recordAudit } from "@/lib/audit";
 import {
-  count, describeDbError, done, fail, firstIssue, money, optionalText, toObject,
+  count, describeDbError, done, fail, firstIssue, money, optionalText, optionalUuid, toObject,
 } from "@/lib/actions";
 import { ITEM_TYPES } from "@/lib/domain/laundry-orders";
 import { ITEM_CATEGORIES } from "./categories";
@@ -40,6 +40,15 @@ const itemSchema = z.object({
   sell_price: money,
   cost_price: money,
   tax_code: optionalText,
+  /*
+   * MYOB's "Income Account for Tracking Sales". `optionalUuid` because the
+   * select's placeholder posts "" and an item that is never sold has no account
+   * — refusing to save one until somebody picks would put the item master behind
+   * the chart of accounts. Cross-tenant safety is the FK plus RLS: an account id
+   * from another laundry is invisible to this session, so the insert fails on the
+   * foreign key rather than silently coding to somebody else's books.
+   */
+  income_account_id: optionalUuid,
   myob_item_id: optionalText,
   ownership_type: z.enum(["laundry_owned", "customer_owned", "either"]),
   replacement_cost: money,

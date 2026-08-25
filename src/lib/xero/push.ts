@@ -74,7 +74,7 @@ export async function pushInvoiceToXero(
       .eq("id", invoice.customer_id).eq("tenant_id", tenantId)
       .maybeSingle<PayloadCustomer>(),
     supabase.from("invoice_lines")
-      .select("description, quantity, unit_price, taxable")
+      .select("description, quantity, unit_price, taxable, account_code")
       .eq("invoice_id", invoice.id).eq("tenant_id", tenantId)
       .order("sequence")
       .returns<PayloadLine[]>(),

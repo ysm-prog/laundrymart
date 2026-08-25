@@ -9,6 +9,7 @@ import {
 } from "@/components/ui";
 import { Field, Input, Select, SubmitButton } from "@/components/form";
 import { ListControls } from "@/components/list-controls";
+import { IncomeAccountField } from "./income-account-field";
 import { ITEM_TYPES, ITEM_TYPE_LABELS } from "@/lib/domain/laundry-orders";
 import { ITEM_CATEGORIES } from "./categories";
 import { createItem } from "./actions";
@@ -54,7 +55,7 @@ async function ItemList({ params }: { params: Search }) {
     .select("id, sku, item_code, name, description, category, laundry_category, " +
             "ownership_type, is_sell, is_buy, sell_price, cost_price, tax_code, " +
             "replacement_cost, rental_price, wash_only_price, weight_kg, reorder_level, " +
-            "myob_item_id, myob_item_code, external_synced_at, status")
+            "myob_item_id, myob_item_code, external_synced_at, income_account_id, status")
     .is("deleted_at", null)
     // By code, because that is what the list is scanned by. Staff look for
     // TOW001 and read down; alphabetical by name puts the towels in three places.
@@ -108,7 +109,7 @@ const LAUNDRY_CATEGORY_OPTIONS = ITEM_TYPES.map((value) => ({
   value, label: ITEM_TYPE_LABELS[value],
 }));
 
-function NewItemForm() {
+async function NewItemForm() {
   return (
     <Card
       title="Add an item"
@@ -150,6 +151,7 @@ function NewItemForm() {
         <Field label="Tax code" name="tax_code" hint="As it is in your books — GST, FRE.">
           <Input name="tax_code" placeholder="GST" />
         </Field>
+        <IncomeAccountField />
         <Field label="MYOB item ID" name="myob_item_id"
                hint="Optional. Filled in by an import; kept so the two systems can be reconciled.">
           <Input name="myob_item_id" />
