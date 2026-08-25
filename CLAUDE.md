@@ -1118,6 +1118,16 @@ rename one pair and have 0037 replace the four policies idempotently. **0036 cov
 0037 covers `gl_accounts` alone**, so keeping 0036's is the option that leaves the payable side gated
 one way rather than two. Whoever merges second decides; nothing is broken until then.
 
+**A fourth entry, `0038_invoice_line_account` (12:26), went on after the merge and is a no-op.** It
+is that same session converging on `invoice_lines.gl_account_id`, which `0036_invoice_account_codes`
+had already added — the 0018 arrangement, and its own header says so. Its file is not in
+`supabase/migrations/` yet; nothing is missing, because a database built from this repo alone gets
+the column, the index and the single foreign key from 0036. **Checked rather than assumed:** the
+migration as applied was replayed against a fresh database built from these files and came back
+*column already exists, index already exists, 1 FK to gl_accounts* — so when that file does land it
+merges cleanly. Its reading of the column matches this repo's: the line's own account is preferred
+over the item's at push time, which is what `lib/xero/push.ts` does.
+
 **`0034_counter_takes_jobs` and `0035_audit_log_read` were applied on 2026-08-24**, in that order,
 and are now the ledger's last two entries. Both are self-asserting, and `apply_migration` is
 atomic, so a failed assertion rolls the whole thing back — which is what makes it safe to apply
