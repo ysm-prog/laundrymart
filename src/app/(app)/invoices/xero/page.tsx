@@ -2,11 +2,11 @@ import { requireCapability } from "@/lib/auth/context";
 import { createClient } from "@/lib/supabase/server";
 import { dateTime } from "@/lib/format";
 import { xeroConfig } from "@/lib/xero/config";
-import { listXeroBankAccounts } from "@/lib/xero/accounts";
+import { listXeroBankAccounts, listXeroSalesAccounts } from "@/lib/xero/accounts";
 import { Badge, ButtonLink, Card, Notice, PageHeader, Stat } from "@/components/ui";
 import { ConfirmSubmit } from "@/components/confirm-submit";
 import { Field, Select, SubmitButton } from "@/components/form";
-import { disconnectXero, setXeroPaymentAccount } from "./actions";
+import { disconnectXero, setXeroPaymentAccount, setXeroSalesAccount } from "./actions";
 
 export const metadata = { title: "Xero" };
 export const dynamic = "force-dynamic";
@@ -16,6 +16,8 @@ type Status = {
   connected_at: string;
   expires_at: string;
   payment_account_code: string | null;
+  sales_account_code: string | null;
+  sales_account_name: string | null;
   payment_account_name: string | null;
   connected: boolean;
 };
@@ -65,6 +67,7 @@ export default async function XeroPage() {
               to try again — the money record is this app&apos;s, and Xero is a copy of it.
             </p>
             <PaymentAccount status={status} tenantId={session.tenantId} />
+            <SalesAccount status={status} tenantId={session.tenantId} />
 
             <form action={disconnectXero}>
               <ConfirmSubmit
@@ -122,6 +125,44 @@ async function PaymentAccount({ status, tenantId }: { status: Status; tenantId: 
       <Field label="Post payments to" name="account"
              hint="The Xero bank account a customer's payment is recorded against.">
         <Select name="account" defaultValue={current} placeholder="Do not send payments"
+                options={accounts.map((account) => ({
+                  value: `${account.code}|${account.name}`,
+                  label: `${account.name} (${account.code})`,
+                }))} />
+      </Field>
+      <SubmitButton variant="secondary" pendingLabel="Saving…">Save</SubmitButton>
+    </form>
+  );
+}
+
+/**
+ * Where a sale lands in the books when the item does not say.
+ *
+ * Beside the payment account rather than on its own screen, because they are
+ * the same decision asked twice — which Xero account does money land in — and a
+ * laundry setting one up will set up both in the same sitting.
+ */
+async function SalesAccount({ status, tenantId }: { status: Status; tenantId: string }) {
+  const accounts = await listXeroSalesAccounts(tenantId);
+
+  if (accounts.length === 0) {
+    return (
+      <Notice tone="info" title="Invoice lines are not being coded">
+        No income accounts could be read from Xero, so there is nothing to choose. Invoices
+        are still sent — each line simply arrives uncoded, exactly as it did before.
+      </Notice>
+    );
+  }
+
+  const current = status.sales_account_code
+    ? `${status.sales_account_code}|${status.sales_account_name ?? ""}`
+    : "";
+
+  return (
+    <form action={setXeroSalesAccount} className="flex flex-wrap items-end gap-3">
+      <Field label="Code invoice lines to" name="account"
+             hint="Used for every line whose item does not name its own income account.">
+        <Select name="account" defaultValue={current} placeholder="Leave lines uncoded"
                 options={accounts.map((account) => ({
                   value: `${account.code}|${account.name}`,
                   label: `${account.name} (${account.code})`,

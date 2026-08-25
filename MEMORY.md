@@ -1,7 +1,57 @@
 # MEMORY — working session handoff
 > Auto-loaded each session. Canonical state is CLAUDE.md; this is the live delta.
 
-## Latest: the run is locked, and only the office may change its order
+## Latest: the Owner keeps the codes, and the codes reach Xero
+2026-08-25, same branch. One migration (`0037`), **no new table, no dropped column, no row
+changed, no new capability**. CLAUDE.md §20 and §25 hold the design; §3, §7, §11 and the newest
+changelog entry the rest.
+
+Three asks, and each had a defect behind it.
+
+**1. The three plan-count mismatches are fixed — and the reason they hid is the real finding.**
+`boards_scope` 20→23, `item_master` 16→17, `main_flow_scope` 29→27. None was failing;
+`main_flow_scope` genuinely contains 27 and claimed 29, so nothing was skipped.
+- **`run-db-tests.sh` trusted `psql`'s exit code, and `psql` exits 0 for a pgTAP file that runs
+  to completion.** A failed assertion is a *result row* (`not ok 7 - …`), not an error — so **CI
+  would have gone green over a security proof that had started failing.** The runner now fails
+  on `not ok`, on "Looks like you failed" and on a plan mismatch. All three were proved to fail
+  the run by deliberately breaking a proof, not assumed.
+
+**2. Chart of accounts: the Owner can add to it, and before this everybody could rewrite it.**
+`/accounts` had been read-only since the MYOB import ("appears here once it is imported…"), with
+no create action anywhere in `src/`. Underneath, 0021's `apply_tenant_policy` left one permissive
+`for all` policy, so **every member could read and rewrite the chart off PostgREST** — proved on a
+0001–0036 database: a driver read the balances, renamed an account, zeroed it and inserted one.
+`current_balance` is on that table.
+- `for all` **dropped and replaced** by four explicit policies (its USING half grants SELECT —
+  the 0033 trap, third table).
+- **No new capability**: `purchases.read`/`purchases.write`, which `/accounts` was already gated
+  on. Auditor reads and does not write, hence two helper functions.
+- New: `/accounts` create form, `/accounts/[id]` edit page, `accounts_scope.test.sql` (19).
+
+**3. Xero: nothing this app knew had ever reached it as a code.**
+`buildInvoicePayload` mapped `line.account_code` → `AccountCode` since 0026 and **nothing ever
+populated it** — `push.ts` selected four columns and stopped. Every pushed line landed uncoded;
+no `ItemCode` either.
+- Codes now travel `invoice_lines.item_id → items.income_account_id → gl_accounts.xero_account_code`
+  (+ `items.xero_item_code`), with `xero_connections.sales_account_code` as the fallback for the
+  many lines carrying **no item** (fuel levy, contract minimum, consolidated laundry charge).
+- **The Xero codes are separate fields from ours, deliberately.** Xero refuses an invoice naming
+  a code its chart/inventory lacks, so defaulting to `items.item_code` would turn one mismatch
+  into *every* invoice failing. Blank omits the key → a laundry that fills none of this in
+  pushes exactly yesterday's payload. That is the first assertion in the payload tests.
+- Resolved at **push time**, not snapshotted: a code is a classification, not money, so a
+  corrected code should be sent on Retry. The amount is what `job_charge_snapshots` freezes.
+
+**Verified:** 766 unit tests (was 755), **417 pgTAP assertions (was 398)**, `verify` green, all
+37 migrations against a fresh Postgres 16 with the seed on top, every pre-existing proof
+unchanged. Both new PostgREST embeds checked for ambiguity — exactly one FK per hop.
+
+**NOT applied to `laundrymart-syd`** — no credentials here. **0037 first**: until it lands, the
+new Accounts screen offers an Owner a create form whose refusals are not enforced underneath, and
+the chart stays readable and writable by every member.
+
+## Previously: the run is locked, and only the office may change its order
 2026-08-25, branch `claude/code-review-requirements-ns6bav`. The client's controlled-sequencing
 requirement. CLAUDE.md **§27** holds the design; §3, §4, §7, §11 and the newest changelog entry
 have the rest. **One migration (`0036`), no new table, nothing dropped, no existing row
@@ -242,6 +292,12 @@ fast-forwards, and Dev absorbed the 18-commit backlog the changelog kept recordi
   a platform admin**, and its price list is still empty, so `LJ00002` was priced by hand.
 
 ## Do these next
+- **Apply `0037_account_and_item_codes` to `laundrymart-syd`, then `0036`.** 0037 first because
+  the chart of accounts is currently readable *and writable* by every member — a driver included
+  — and the new Accounts screen assumes otherwise. Both are self-asserting and `apply_migration`
+  is atomic. Afterwards: sign in as `driver@roles.example.com` and confirm `/accounts` is not
+  reachable and the chart reads 0 rows, and as `owner@roles.example.com` add one account, code it
+  to Xero, point an item at it, and push one invoice.
 - **Apply `0036_run_sequence_control` to `laundrymart-syd`.** The most urgent item here, because
   until it lands the *screens* refuse a driver and the *database* does not — a driver's session
   can still PATCH `jobs.sequence` on their own run through PostgREST. Self-asserting and

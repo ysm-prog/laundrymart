@@ -13,12 +13,28 @@ import { getXeroTokens } from "./tokens";
 export type XeroBankAccount = { code: string; name: string };
 
 export async function listXeroBankAccounts(tenantId: string): Promise<XeroBankAccount[]> {
+  return listXeroAccounts(tenantId, 'Type=="BANK"');
+}
+
+/**
+ * The accounts a sale can be coded to.
+ *
+ * `REVENUE` and `SALES` are both real Xero classes for income accounts —
+ * `SALES` is the type on the default "Sales" account in a stock chart, and
+ * `REVENUE` is what most others carry — so asking for one would silently hide
+ * half of a laundry's income accounts, which reads as "Xero has no accounts".
+ */
+export async function listXeroSalesAccounts(tenantId: string): Promise<XeroBankAccount[]> {
+  return listXeroAccounts(tenantId, 'Type=="REVENUE"||Type=="SALES"');
+}
+
+async function listXeroAccounts(tenantId: string, where: string): Promise<XeroBankAccount[]> {
   const tokens = await getXeroTokens(tenantId);
   if (!tokens) return [];
 
   try {
     const response = await fetch(
-      `${XERO_API}/Accounts?where=${encodeURIComponent('Type=="BANK"')}`,
+      `${XERO_API}/Accounts?where=${encodeURIComponent(where)}`,
       {
         headers: {
           Authorization: `Bearer ${tokens.accessToken}`,

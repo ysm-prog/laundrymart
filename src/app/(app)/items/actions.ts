@@ -6,7 +6,7 @@ import { assertCapability } from "@/lib/auth/context";
 import { createClient } from "@/lib/supabase/server";
 import { recordAudit } from "@/lib/audit";
 import {
-  count, describeDbError, done, fail, firstIssue, money, optionalText, toObject,
+  count, describeDbError, done, fail, firstIssue, money, optionalText, optionalUuid, toObject,
 } from "@/lib/actions";
 import { ITEM_TYPES } from "@/lib/domain/laundry-orders";
 import { ITEM_CATEGORIES } from "./categories";
@@ -40,6 +40,12 @@ const itemSchema = z.object({
   sell_price: money,
   cost_price: money,
   tax_code: optionalText,
+  // The revenue account a line for this item is coded to, and the item's code
+  // as it is in **Xero** (0037). Both optional and both null by default: an
+  // item nobody has coded behaves exactly as it did before, which is what makes
+  // this safe to add to a chart that is already in use.
+  income_account_id: optionalUuid,
+  xero_item_code: optionalText,
   myob_item_id: optionalText,
   ownership_type: z.enum(["laundry_owned", "customer_owned", "either"]),
   replacement_cost: money,

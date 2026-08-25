@@ -368,3 +368,47 @@ describe("ordering a run (routes.sequence)", () => {
     }
   });
 });
+
+describe("the chart of accounts (0037)", () => {
+  /*
+   * `/accounts` is gated on `purchases.read` and its new create/edit actions on
+   * `purchases.write`. `can_read_accounts()` and `can_write_accounts()` are the
+   * database's copies of those two sets, and `accounts_scope.test.sql` proves
+   * them by reading and writing as each role — so if either list moves here,
+   * one of the two will disagree and a screen will offer something the policy
+   * refuses in silence.
+   */
+  it("keeps reading the chart to the roles the screen already allowed", () => {
+    expect(rolesWith("purchases.read").sort()).toEqual([
+      "auditor", "branch_manager", "finance", "operations_manager",
+      "platform_admin", "regional_manager", "super_admin",
+    ]);
+  });
+
+  it("lets the auditor look at the chart and not change it", () => {
+    expect(can("auditor", "purchases.read")).toBe(true);
+    expect(can("auditor", "purchases.write")).toBe(false);
+  });
+
+  it("keeps the chart away from the van, the round, the counter and the floor", () => {
+    // Not cosmetic: `gl_accounts.current_balance` is on this table, so an open
+    // read is every account balance in the business. Before 0037 the table
+    // carried `apply_tenant_policy`'s single permissive `for all` policy, so
+    // all four of these could read *and rewrite* the chart off PostgREST.
+    for (const role of ["driver", "board", "customer_service", "warehouse_operator"] as const) {
+      expect(can(role, "purchases.read")).toBe(false);
+      expect(can(role, "purchases.write")).toBe(false);
+    }
+    expect(can("dispatcher", "purchases.read")).toBe(false);
+  });
+
+  it("lets everybody who can code an item also see the accounts to code it to", () => {
+    // The item form offers a picker of `gl_accounts`. A role that may edit an
+    // item but may not read the chart would get an empty picker with no
+    // explanation, which reads as a broken screen — the unlinked-driver failure
+    // this project has already shipped once.
+    for (const role of rolesWith("items.write")) {
+      expect(can(role, "purchases.read")).toBe(true);
+    }
+  });
+});

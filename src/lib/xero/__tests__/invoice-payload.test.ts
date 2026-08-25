@@ -168,3 +168,70 @@ describe("canPushToXero", () => {
     }
   });
 });
+
+describe("coding a line to Xero (0037)", () => {
+  const line = (over: Record<string, unknown> = {}) => ({
+    description: "Bath towels", quantity: 10, unit_price: 2, taxable: true, ...over,
+  });
+  const build = (lines: ReturnType<typeof line>[], defaultAccountCode?: string | null) =>
+    buildInvoicePayload({
+      invoice: INVOICE, customer: CUSTOMER, lines, defaultAccountCode,
+    }).LineItems as Array<Record<string, unknown>>;
+
+  it("sends neither code when nothing has been coded", () => {
+    // The property that matters most: a laundry that has filled none of this in
+    // must push exactly the payload it pushed before. `AccountCode` was already
+    // in this mapping and had never once been populated, so "unchanged" is the
+    // only safe default.
+    const [item] = build([line()]);
+    expect(item).not.toHaveProperty("AccountCode");
+    expect(item).not.toHaveProperty("ItemCode");
+  });
+
+  it("sends the item's own account and item code", () => {
+    const [item] = build([line({ account_code: "200", item_code: "TOW001" })]);
+    expect(item!.AccountCode).toBe("200");
+    expect(item!.ItemCode).toBe("TOW001");
+  });
+
+  it("falls back to the laundry's default account for a line with no item", () => {
+    // A fuel levy or a contract minimum carries no item at all, and those are
+    // exactly the lines a bookkeeper would otherwise re-code by hand.
+    const [item] = build([line()], "200");
+    expect(item!.AccountCode).toBe("200");
+    expect(item).not.toHaveProperty("ItemCode");
+  });
+
+  it("lets the line's own account beat the default", () => {
+    const [item] = build([line({ account_code: "260" })], "200");
+    expect(item!.AccountCode).toBe("260");
+  });
+
+  it("treats a blank code as no code rather than sending an empty one", () => {
+    // Xero rejects `AccountCode: ""`, so a column that is present and empty
+    // must not become a payload key — otherwise one stray space in a form field
+    // fails every invoice for that item.
+    const [item] = build([line({ account_code: "   ", item_code: "" })], "  ");
+    expect(item).not.toHaveProperty("AccountCode");
+    expect(item).not.toHaveProperty("ItemCode");
+  });
+
+  it("codes each line on its own, not the invoice as a whole", () => {
+    const items = build([
+      line({ account_code: "200", item_code: "TOW001" }),
+      line({ description: "Fuel levy" }),
+    ], "260");
+    expect(items[0]!.AccountCode).toBe("200");
+    expect(items[0]!.ItemCode).toBe("TOW001");
+    expect(items[1]!.AccountCode).toBe("260");
+    expect(items[1]).not.toHaveProperty("ItemCode");
+  });
+
+  it("leaves everything else about the line exactly as it was", () => {
+    const [item] = build([line({ account_code: "200", item_code: "TOW001" })]);
+    expect(item!.Description).toBe("Bath towels");
+    expect(item!.Quantity).toBe(10);
+    expect(item!.UnitAmount).toBe(2);
+    expect(item!.TaxType).toBe(TAX_TYPE_TAXABLE);
+  });
+});

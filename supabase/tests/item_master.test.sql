@@ -15,7 +15,7 @@
 -- the item master has no `item_id`, and the assertions below check that such a
 -- row still inserts, still carries its own category, and is untouched.
 begin;
-select plan(16);
+select plan(17);
 
 insert into auth.users (id, email) values
   ('11111111-1111-1111-1111-111111111111','a@example.com'),

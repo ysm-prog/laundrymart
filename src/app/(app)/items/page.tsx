@@ -12,6 +12,7 @@ import { ListControls } from "@/components/list-controls";
 import { ITEM_TYPES, ITEM_TYPE_LABELS } from "@/lib/domain/laundry-orders";
 import { ITEM_CATEGORIES } from "./categories";
 import { createItem } from "./actions";
+import { accountOptionLabel, listIncomeAccounts } from "@/lib/accounts";
 
 export const metadata = { title: "Items" };
 export const dynamic = "force-dynamic";
@@ -42,7 +43,7 @@ export default async function ItemsPage({ searchParams }: { searchParams: Promis
         <ItemList params={params} />
       </Suspense>
 
-      {writable ? <NewItemForm /> : null}
+      {writable ? <NewItemForm tenantId={session.tenantId} /> : null}
     </div>
   );
 }
@@ -108,7 +109,12 @@ const LAUNDRY_CATEGORY_OPTIONS = ITEM_TYPES.map((value) => ({
   value, label: ITEM_TYPE_LABELS[value],
 }));
 
-function NewItemForm() {
+/**
+ * Loads its own accounts rather than being handed them, so the page above stays
+ * one read for a role that cannot see this form at all.
+ */
+async function NewItemForm({ tenantId }: { tenantId: string }) {
+  const accounts = await listIncomeAccounts(await createClient(), tenantId);
   return (
     <Card
       title="Add an item"
@@ -149,6 +155,15 @@ function NewItemForm() {
         </Field>
         <Field label="Tax code" name="tax_code" hint="As it is in your books — GST, FRE.">
           <Input name="tax_code" placeholder="GST" />
+        </Field>
+        <Field label="Income account" name="income_account_id"
+               hint="Where an invoice line for this item is coded. Used when the invoice goes to Xero.">
+          <Select name="income_account_id" placeholder="Not coded"
+                  options={accounts.map((a) => ({ value: a.id, label: accountOptionLabel(a) }))} />
+        </Field>
+        <Field label="Xero item code" name="xero_item_code"
+               hint="This item's code in Xero, if it has one. Blank means no ItemCode is sent.">
+          <Input name="xero_item_code" placeholder="TOW001" />
         </Field>
         <Field label="MYOB item ID" name="myob_item_id"
                hint="Optional. Filled in by an import; kept so the two systems can be reconciled.">

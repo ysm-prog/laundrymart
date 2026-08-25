@@ -175,6 +175,15 @@ Resource-scoped beyond tenancy:
 - `notifications`: RLS scopes them to the tenant, as everywhere. The `audience` capability on
   each row narrows them further to the people who can act on it — but that is a UI filter
   applied in `src/lib/notifications/query.ts`, layered on top of RLS and never instead of it.
+- `gl_accounts` (the chart of accounts) is **read by `can_read_accounts()` and written by
+  `can_write_accounts()`** (0037) — the app's `purchases.read`/`purchases.write` holders, which
+  is what `/accounts` has always been gated on, so no role lost anything it could reach through
+  a screen. 0021 attached `apply_tenant_policy`, whose single permissive `for all` policy meant
+  **every member could read *and rewrite* the chart** off PostgREST: a driver, the counter, the
+  plant floor. Not cosmetic — `current_balance` is on that table, so an open read was every
+  account balance in the business. The `for all` is dropped rather than supplemented, because
+  its USING half grants SELECT too: the 0033 trap, one table later. The auditor reads and does
+  not write, which is why the two helpers are separate role lists rather than one.
 - `audit_logs` is **read by four roles and written by everybody** (0035). SELECT needs
   `super_admin`/`operations_manager`/`regional_manager`/`auditor` — the four that hold
   `admin.read`, the auditor being why it is a role list and not `admin.write`. INSERT stays open
@@ -590,6 +599,15 @@ renders no tab strip. Tested in `src/lib/__tests__/nav.test.ts`.
   office's, and nobody has moved it yet. `daily_routes` is not in `archivable_tables()`, so the
   0028 trap does not apply. Self-asserting on all five outcomes, including that
   `can_write_run_sequence` does *not* name the dispatcher.
+- `0037_account_and_item_codes` — **the Owner keeps the codes, and the codes reach Xero.**
+  `gl_accounts.xero_account_code`; `items.income_account_id` + `items.xero_item_code`;
+  `xero_connections.sales_account_code`/`_name` with `xero_connection_status()` re-created to
+  carry them; `can_read_accounts()`/`can_write_accounts()`; and `gl_accounts`' permissive
+  `for all` policy replaced by four explicit ones. **Adds no table, drops no column and changes
+  no row.** Every new column is nullable and null, so an item nobody has coded pushes exactly
+  the payload it pushed before. `gl_accounts` is deliberately not in `archivable_tables()`, so
+  unlike 0028 there was no `archived_at` clause to preserve when the policies were rewritten —
+  asserted rather than assumed. Seven self-assertions.
 - `0013_notifications` — `tenants.settings jsonb` (AD-3) and the `notifications` table
   (AD-4). Beware the numbering drift: the unmerged branch
   `claude/warehouse-inventory-flow-psooyq` carries its own `0012_return_count.sql`, which
@@ -644,11 +662,17 @@ Proofs in `supabase/tests/`: `rls_isolation`, `rls_coverage`, `driver_scope`,
 `run_assignment`, `archive_records`, `laundry_pricing`, `platform_admin`, `main_flow_scope`,
 `job_billing`, `purchases_scope`, `supplier_payments_scope`, `import_helpers`,
 `import_activation`, `member_directory`, `boards_scope`, `item_master`,
-`audit_log_scope`, `run_sequence` (**398 assertions**).
-Three pre-existing files declare a `plan(N)` that disagrees with the assertions they actually
-run — `boards_scope` (20/23), `item_master` (16/17) and `main_flow_scope` (29/27). Nothing in
-them fails; the counts drifted. `run-db-tests.sh` does not fail on a plan mismatch, which is why
-it has gone unnoticed, and the 398 above is the number that actually passes. Demo data in `supabase/seed.sql` — not
+`audit_log_scope`, `run_sequence`, `accounts_scope` (**417 assertions**).
+
+**`run-db-tests.sh` parses the output rather than trusting the exit code, and that is not
+pedantry.** `psql` exits 0 for a pgTAP file that runs to completion, and a failed assertion is a
+*result row* (`not ok 7 - …`), not an error — so with `ON_ERROR_STOP=1` alone this script and
+therefore **CI went green over a security proof that had started failing**. It now fails on a
+`not ok`, on "Looks like you failed", and on a plan mismatch; all three were proved to fail the
+run by breaking a proof on purpose. The plan half matters because `plan(N)` is what catches a
+file that dies half way through — the case where the assertions you care about are the ones that
+never ran. Three files had drifted out of step that way (`boards_scope` 20/23, `item_master`
+16/17, `main_flow_scope` 29/27) and are corrected; none of them was failing. Demo data in `supabase/seed.sql` — not
 applied by migrations.
 
 **Do not re-add `grant execute on all functions in schema public to anon`.** That
@@ -927,6 +951,13 @@ rather than trusted. **Every migration through `0035_audit_log_read` is applied*
 ledger's last four entries are `0032_item_master`, `0033_laundry_prices_read`,
 `0034_counter_takes_jobs` and `0035_audit_log_read`. 0020–0024 are the renumbered branch migrations, already live under their original
 names (§7).
+
+**`0036_run_sequence_control` and `0037_account_and_item_codes` have NOT been applied.** They are
+the two migrations in this file the hosted project does not carry. 0037 is the more urgent of the
+two to *not* forget: until it lands, `gl_accounts` still carries 0021's permissive `for all`
+policy, so every member of the laundry can read the chart of accounts with its balances and
+rewrite it through PostgREST — and the new Accounts screen will offer an Owner a create form
+whose refusals are not yet enforced underneath.
 
 **`0036_run_sequence_control` has NOT been applied.** It is the one migration in this file the
 hosted project does not carry. Until it is, `routes.sequence` narrows the *screens* and the
@@ -1380,6 +1411,27 @@ invoice goes, because this app has no counter-cash concept.
   and only the second is written now. Left in place rather than dropped — it costs nothing and a
   destructive migration to remove an unread column is the wrong trade (the same call 0016 made
   about Pickup Time).
+- **The codes on a line reach Xero, and until somebody says what they are, nothing changes**
+  (0037). `buildInvoicePayload` has mapped `line.account_code` to `AccountCode` since 0026 and
+  **nothing had ever populated it** — `push.ts` selected `description, quantity, unit_price,
+  taxable` and stopped — so every invoice this app has pushed landed uncoded. The codes now
+  travel `invoice_lines.item_id → items.income_account_id → gl_accounts.xero_account_code` for
+  the account, and `items.xero_item_code` for `ItemCode`.
+  - **Both are separate fields from our own codes, on purpose.** Xero refuses an invoice naming
+    a code its own chart or inventory does not carry, so sending `items.item_code` on the
+    assumption the two match would turn one mismatched item into *every* invoice failing to
+    push. Blank means the key is omitted, which is exactly the payload that shipped before.
+  - **`xero_connections.sales_account_code` is the fallback**, chosen from the laundry's own Xero
+    income accounts beside the bank account payments post to. It exists because **most invoice
+    lines carry no item at all** — a fuel levy, a contract minimum, a consolidated laundry
+    charge — so item-level coding alone would leave uncoded precisely the lines a bookkeeper
+    would otherwise re-code by hand every month. A line's own account still wins.
+  - **Resolved at push time rather than snapshotted onto the line.** A code is a
+    *classification*, not money: a laundry that fills its codes in later, or corrects a wrong
+    one and presses Retry, should have the corrected code sent. What is frozen is the amount,
+    which `job_charge_snapshots` already holds. Both embeds are unambiguous (one FK per hop),
+    checked rather than assumed — this repo has shipped an ambiguous embed that was
+    compile-clean and dead in production.
 - `summariseXeroError` in `lib/xero/errors.ts` is shared by all three pushes. It was a private
   copy in two of them and the void path would have made three, at which point they drift and the
   least-used one stops parsing the shape Xero actually sends.
@@ -1388,6 +1440,72 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-08-25 · The Owner keeps the codes, the codes reach Xero, and the proofs count themselves
+Three things asked for together, and each turned out to have a defect behind it. One migration
+(`0037`), **no new table, no dropped column, no row changed and no new capability**. §20 and §25
+hold the design; §3, §7 and §11 the consequences.
+
+**1. The three plan-count mismatches are fixed, and so is the reason they hid.**
+`boards_scope` (20/23), `item_master` (16/17) and `main_flow_scope` (29/27) now declare what they
+run. None was failing — `main_flow_scope` genuinely *contains* 27 assertions and claimed 29, so
+nothing was being skipped, the number was simply wrong.
+- **The finding underneath is bigger than the counts.** `run-db-tests.sh` ran
+  `psql -v ON_ERROR_STOP=1` and trusted the exit code — but `psql` exits **0** for a pgTAP file
+  that runs to completion, and a failed assertion is a *result row* (`not ok 7 - …`), not an
+  error. So **CI would have gone green over a security proof that had started failing**, which
+  is a much worse thing than a wrong plan number. The runner now fails on `not ok`, on "Looks
+  like you failed" and on a plan mismatch, and **all three were proved to fail the run by
+  breaking a proof on purpose** rather than assumed to work.
+
+**2. The Owner can add to the chart of accounts — and before this, everybody could.**
+`/accounts` has been read-only since the MYOB import landed; its empty state said "appears here
+once it is imported from your accounting system", so a laundry wanting one more revenue code had
+nowhere to put it. There was no create action anywhere in `src/`.
+- **Underneath, the opposite was true.** 0021 attached `apply_tenant_policy` to `gl_accounts`,
+  whose single permissive `for all` policy carries nothing but `is_member(tenant_id)` — so
+  **every member could read *and rewrite* the chart straight off `/rest/v1/gl_accounts`**.
+  Proved against a 0001–0036 database rather than reasoned about: a `driver` session read the
+  balances, renamed an account, zeroed its balance and inserted a new one. `current_balance` is
+  on that table, so the read alone was every account balance in the business.
+- The `for all` is **dropped and replaced** by four explicit policies, not supplemented: its
+  USING half grants SELECT too, so a narrower read beside it would have been a second door onto
+  the same rows. The 0033 trap, one table later and now recorded three times.
+- **No new capability.** `purchases.read`/`purchases.write` are what `/accounts` was already
+  gated on, so no role lost anything it could reach through a screen. The auditor reads and does
+  not write, which is why `can_read_accounts()` and `can_write_accounts()` are two role lists
+  rather than one.
+
+**3. Nothing this app knew had ever reached Xero as a code.**
+`buildInvoicePayload` has mapped `line.account_code` to Xero's `AccountCode` since 0026 and
+**nothing ever populated it** — `push.ts` selected four columns and stopped. Every invoice line
+this app has pushed landed in Xero uncoded, to be sorted out by hand; no `ItemCode` went either.
+- An account code and an item code now travel with each line, through
+  `invoice_lines.item_id → items → gl_accounts`, with the laundry's default sales account behind
+  them for the many lines that carry **no item at all** (a fuel levy, a contract minimum, a
+  consolidated laundry charge — the lines a bookkeeper actually re-codes).
+- **Both Xero codes are separate fields from our own**, which is the decision that keeps this
+  safe: Xero refuses an invoice naming a code its own chart or inventory does not carry, so
+  defaulting to `items.item_code` would have turned one mismatched item into *every* invoice
+  failing to push. Blank omits the key, so a laundry that fills none of this in pushes exactly
+  the payload it pushed yesterday — asserted first in the payload tests, because it is the
+  property most worth not breaking.
+- Resolved at push time rather than snapshotted onto the line: a code is a *classification*, not
+  money, so correcting a wrong one and pressing Retry should send the corrected one. What is
+  frozen is the amount, which `job_charge_snapshots` already holds.
+
+- 766 unit tests (was 755) and **417 pgTAP assertions (was 398)**. `verify` green — typecheck,
+  lint, tests and the production build. All thirty-seven migrations applied to a fresh Postgres
+  16 with the whole pgTAP suite and the seed on top, and every pre-existing proof passes
+  unchanged.
+- Both new embeds were checked for ambiguity rather than assumed: exactly one FK per hop
+  (`invoice_lines → items`, `items → gl_accounts`). An ambiguous embed is compile-clean, test-
+  clean and dead in production with PGRST201, which this repo has shipped once.
+
+**Not applied to `laundrymart-syd`.** This container has no Supabase credentials, so 0036 and
+0037 are the two migrations in §7 the hosted project does not carry. **0037 is the one to apply
+first**: until it does, the new Accounts screen offers an Owner a create form whose refusals are
+not enforced underneath, and the chart of accounts remains readable and writable by every member.
+
 ### 2026-08-25 · The run is locked, and only the office may change its order
 The client's controlled-sequencing requirement, built on the existing
 `daily_routes → jobs` architecture rather than beside it. One migration (`0036`), **no new
@@ -3785,6 +3903,11 @@ bag, under the code the business already uses (0032). Staff type TOW001.
   `Adelaide Towel Service` holds **zero** `items` rows — its item master is exactly what the
   unbuilt MYOB import would fill. Harbour's five laundry items carry a category; its laundry bag
   does not, on purpose, because a container the laundry lends is not laundry a customer hands in.
+- **An item now carries where its money lands** (0037): `income_account_id` points at a row in
+  the chart of accounts, and `xero_item_code` is the item's code in Xero. Both nullable and both
+  null, so an item nobody has coded behaves exactly as it did before. The Owner can add to the
+  chart itself now — `/accounts` had been read-only since the MYOB import, and its empty state
+  said so, which left a laundry wanting one more revenue code with nowhere to put it.
 - **The open question is above this work, not inside it.** This app posts invoices and payments
   to **Xero** (§20) while MYOB is a one-off migration source (`docs/IMPORT-MYOB.md`). An item
   code is only worth carrying if it reconciles to the ledger that receives the invoice. Staying
