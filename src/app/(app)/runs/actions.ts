@@ -8,8 +8,12 @@ import { recordAudit } from "@/lib/audit";
 import { describeDbError, done, fail, firstIssue, requiredDate, toObject } from "@/lib/actions";
 import { logOrderActivity } from "@/lib/orders/activity";
 import { assignOneJobToBoard } from "@/lib/runs/assign";
+import { loadRunDay } from "@/lib/runs/run-day";
 import type { Session } from "@/lib/auth/context";
-import { checkSequence, parseSequencePlan, type OrderableStop } from "./sequence";
+import {
+  SEQUENCE_CONFLICT, SEQUENCE_SAVED,
+  checkSequence, movedCount, parseSequencePlan,
+} from "./sequence";
 
 /**
  * The office's two decisions about a board's day: what order, and which board.
@@ -24,92 +28,100 @@ const RUNS = "/runs";
 
 type Supabase = Awaited<ReturnType<typeof createClient>>;
 
-/** The stops on one board's day, in their stored order. */
-async function loadRunStops(
-  supabase: Supabase, tenantId: string, boardId: string, date: string,
-): Promise<Array<OrderableStop & { route_id: string; sequence: number }>> {
-  const { data: routes } = await supabase
-    .from("daily_routes")
-    .select("id")
-    .eq("tenant_id", tenantId)
-    .eq("board_id", boardId)
-    .eq("route_date", date)
-    .is("deleted_at", null)
-    .not("status", "in", "(cancelled)")
-    .returns<Array<{ id: string }>>();
-
-  const routeIds = (routes ?? []).map((route) => route.id);
-  if (routeIds.length === 0) return [];
-
-  const { data } = await supabase
-    .from("jobs")
-    .select("id, route_id, sequence, status, progress_status")
-    .eq("tenant_id", tenantId)
-    .in("route_id", routeIds)
-    .is("deleted_at", null)
-    .order("sequence")
-    .returns<Array<OrderableStop & { route_id: string; sequence: number }>>();
-  return data ?? [];
-}
-
 /**
- * Save a new order for one board's day.
+ * **Save & Lock** — the office's decision about the order of a board's day.
  *
  * The whole order is posted and written at once, because a board is a sequence
  * and saving each drag would leave the run sheet transiently wrong after every
- * one — the same argument the dispatch planner makes for Apply plan.
+ * one. Nothing is written while somebody is dragging; nothing is written by
+ * Cancel; and the run is locked again the moment this returns, which is the
+ * whole of the requirement's lock/edit/save cycle.
  *
- * Positions are rewritten from 1, not nudged. Nudging preserves whatever gaps
- * and duplicates the data already had, and "position 3" on a run sheet has to
- * mean the third call.
+ * **`routes.sequence`, not `routes.write`.** Planning a day and deciding the
+ * order of the calls turned out to be two decisions, and the second belongs to
+ * the Owner and the Office manager alone — a dispatcher holds the first.
+ *
+ * **The screen is not the boundary.** Every check below is repeated in the
+ * database: `apply_run_sequence()` re-resolves the run from (tenant, board,
+ * date) rather than trusting a posted run id, compares and swaps the version,
+ * and verifies the posted set is exactly this run's stops — and the guard
+ * triggers refuse the write outright to a role that may not order a run. What
+ * is done here is done for the **message**: a refusal from Postgres names a
+ * constraint, and a manager needs a sentence about their run.
  */
 export async function reorderRunStops(formData: FormData): Promise<void> {
-  const session = await assertCapability("routes.write");
+  const session = await assertCapability("routes.sequence");
   const raw = formData.get("plan");
   const parsed = parseSequencePlan(typeof raw === "string" ? raw : null);
   if (!parsed.ok) return fail(RUNS, parsed.error);
 
-  const { board_id: boardId, date, stops: proposed } = parsed.plan;
+  const {
+    board_id: boardId, date, stops: proposed, expected_version: expected,
+  } = parsed.plan;
   const back = `${RUNS}?date=${date}&board=${boardId}`;
   const supabase = await createClient();
 
-  const stops = await loadRunStops(supabase, session.tenantId, boardId, date);
-  if (stops.length === 0) {
+  // Named rather than left to RLS (§23): a platform admin's session reads every
+  // laundry, and this board id arrives from the browser.
+  const day = await loadRunDay(supabase, session.tenantId, boardId, date);
+  if (day.stops.length === 0) {
     return fail(back, "There is nothing on that board for that day any more.");
   }
 
   // Re-checked here even though the board refuses to compose a bad plan: the
   // browser is not the boundary, and the run may have moved on since the page
   // was rendered.
-  const valid = checkSequence(proposed, stops);
+  const valid = checkSequence(proposed, day.stops);
   if (!valid.ok) return fail(back, valid.error);
 
-  const bySeq = new Map(stops.map((stop) => [stop.id, stop.sequence]));
-  let moved = 0;
+  // Somebody else saved while this page was open. Caught here so the manager
+  // gets the sentence rather than a database refusal; `apply_run_sequence()`
+  // catches the narrower race — two saves that both pass this check — inside
+  // the transaction that writes the positions.
+  if (day.version !== expected) return fail(back, SEQUENCE_CONFLICT);
 
-  for (const [index, id] of proposed.entries()) {
-    const position = index + 1;
-    if (bySeq.get(id) === position) continue;
-    const { error } = await supabase
-      .from("jobs")
-      .update({ sequence: position })
-      .eq("id", id)
-      .eq("tenant_id", session.tenantId);
-    if (error) return fail(back, describeDbError(error));
-    moved += 1;
-  }
-
+  const previous = day.stops.map((stop) => stop.id);
+  const moved = movedCount(previous, proposed);
   if (moved === 0) return done(back, "That is already the order.");
 
+  // One statement, so the run is never transiently numbered twice — the reason
+  // `save_laundry_order_items()` exists in the same shape. It also renumbers
+  // from 1, which repairs whatever gaps or duplicates the stored data carried.
+  const { data: version, error } = await supabase.rpc("apply_run_sequence", {
+    t: session.tenantId,
+    board: boardId,
+    run_date: date,
+    stop_ids: proposed,
+    expected_version: expected,
+  });
+  if (error) {
+    return fail(back, error.message?.includes("updated by another user")
+      ? SEQUENCE_CONFLICT
+      : describeDbError(error));
+  }
+
   await recordAudit(session, {
-    entity: "daily_route", entityId: boardId, action: "update",
+    entity: "daily_route", entityId: day.routeIds[0] ?? boardId, action: "update",
     summary: `Run order changed for ${date} (${moved} stop(s) moved)`,
-    metadata: { boardId, date, order: proposed },
+    // Both orders, in full. "What was it before?" is the question an audit log
+    // gets asked about a run that went wrong, and a summary counting movements
+    // cannot answer it.
+    metadata: {
+      boardId,
+      runDate: date,
+      runIds: day.routeIds,
+      previousSequence: previous,
+      newSequence: proposed,
+      movedCount: moved,
+      changedBy: session.userId,
+      role: session.role,
+      sequenceVersion: version ?? expected + 1,
+    },
   });
 
   revalidatePath(RUNS);
   revalidatePath("/my-runs");
-  return done(back, `Run order saved — ${moved} stop(s) moved.`);
+  return done(back, SEQUENCE_SAVED);
 }
 
 /**

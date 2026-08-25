@@ -237,6 +237,14 @@ counter needed `0034` as well as `roles.ts`**, because 0025's restrictive write 
 actual boundary and a capability without a policy writes zero rows in silence. `routes.write` (plan and assign) is separate from `routes.status` (advance
 a run that is already out): the latter also goes to `driver` — RLS confines them to their own
 run — and to `customer_service`, so a stuck run is not waiting on a dispatcher.
+**`routes.sequence` (0036) is separate again, and narrower than both**: it is the order a board
+drives its day in, held by `super_admin` and `operations_manager` alone. The client's rule is
+that management determines the order and drivers execute it, and `routes.write` was the wrong
+authority for it — `dispatcher`, `branch_manager` and `regional_manager` all hold that. It is
+named in a `RUN_SEQUENCE` block and *subtracted* from the roles derived from `TENANT_ALL`, the
+same mechanism `JOB_TO_INVOICE` uses and for the same reason: a capability merely not mentioned
+is a capability six roles quietly hold. `can_write_run_sequence()` is the database's copy of the
+same sentence — see §4 and §27.
 
 ### 3a. Test role profiles
 `npm run seed:roles` provisions **one login per role** so a capability change can be checked by
@@ -355,6 +363,17 @@ key remains the way to reset or re-assert them through the Auth API, but nothing
   **Every assignment written from 0031 on names a board**, refused by the guard rather than by a
   constraint — the guard fires only when an assignment changes, so history is never re-judged. The guard fires only when the stop or the assignment
   changes, so completing an assigned job never re-runs eligibility.
+- **The order of a run may only be changed by the office, and a worked stop cannot move at all**
+  (`guard_job_sequence`, 0036). `jobs` is published on `/rest/v1/jobs` and `jobs_access` is a
+  single permissive `for all` policy, so before this **a driver could PATCH the sequence of the
+  run they were standing in** and anybody else in the laundry could PATCH any run's — proved by
+  probe, not by reading. A trigger rather than a restrictive policy because the rule is about
+  *one column*: RLS is row-level, and a driver must go on writing `progress_status` and
+  `arrived_at` on their own stops. It also refuses **out loud** (42501), where a restrictive
+  policy writes zero rows in silence — the failure this project has shipped twice. It fires only
+  on UPDATE of `sequence`, so assigning a new stop (an INSERT, appended at the end) is untouched.
+  `guard_run_sequence_control` protects the lock and the version on `daily_routes` the same way,
+  or a board could simply unlock its own run and walk past the first guard.
 - A production batch cannot start with an empty manifest, cannot be completed except from
   `ready_for_dispatch`, and cannot be reopened once finished (`guard_batch_transition`). Its
   manifest freezes when it leaves receiving — only `rejected_quantity` and notes stay writable
@@ -562,6 +581,15 @@ renders no tab strip. Tested in `src/lib/__tests__/nav.test.ts`.
   so the trail is append-only. The `for all` is dropped rather than supplemented,
   because its USING half grants SELECT too (the 0033 trap, one table later). Five
   self-assertions. Adds no table, no column, no function; changes no row.
+- `0036_run_sequence_control` — **the order of a run is management's decision, and the
+  database says so.** Four columns on `daily_routes` (`sequence_locked`, `sequence_version`,
+  `sequence_updated_by`, `sequence_updated_at`), `can_write_run_sequence()`, the two guard
+  triggers §4 describes, `apply_run_sequence()` (Save & Lock, one transaction) and
+  `compact_run_sequence()` (the gap-closer). **Adds no table, drops nothing and invalidates no
+  row**: every column's default describes what was already true — the order has always been the
+  office's, and nobody has moved it yet. `daily_routes` is not in `archivable_tables()`, so the
+  0028 trap does not apply. Self-asserting on all five outcomes, including that
+  `can_write_run_sequence` does *not* name the dispatcher.
 - `0013_notifications` — `tenants.settings jsonb` (AD-3) and the `notifications` table
   (AD-4). Beware the numbering drift: the unmerged branch
   `claude/warehouse-inventory-flow-psooyq` carries its own `0012_return_count.sql`, which
@@ -616,7 +644,11 @@ Proofs in `supabase/tests/`: `rls_isolation`, `rls_coverage`, `driver_scope`,
 `run_assignment`, `archive_records`, `laundry_pricing`, `platform_admin`, `main_flow_scope`,
 `job_billing`, `purchases_scope`, `supplier_payments_scope`, `import_helpers`,
 `import_activation`, `member_directory`, `boards_scope`, `item_master`,
-`audit_log_scope` (**368 assertions**). Demo data in `supabase/seed.sql` — not
+`audit_log_scope`, `run_sequence` (**398 assertions**).
+Three pre-existing files declare a `plan(N)` that disagrees with the assertions they actually
+run — `boards_scope` (20/23), `item_master` (16/17) and `main_flow_scope` (29/27). Nothing in
+them fails; the counts drifted. `run-db-tests.sh` does not fail on a plan mismatch, which is why
+it has gone unnoticed, and the 398 above is the number that actually passes. Demo data in `supabase/seed.sql` — not
 applied by migrations.
 
 **Do not re-add `grant execute on all functions in schema public to anon`.** That
@@ -895,6 +927,12 @@ rather than trusted. **Every migration through `0035_audit_log_read` is applied*
 ledger's last four entries are `0032_item_master`, `0033_laundry_prices_read`,
 `0034_counter_takes_jobs` and `0035_audit_log_read`. 0020–0024 are the renumbered branch migrations, already live under their original
 names (§7).
+
+**`0036_run_sequence_control` has NOT been applied.** It is the one migration in this file the
+hosted project does not carry. Until it is, `routes.sequence` narrows the *screens* and the
+database still lets any member — a driver included — rewrite `jobs.sequence` through PostgREST,
+which is the half that matters. Apply it before trusting the boundary; it is self-asserting and
+`apply_migration` is atomic, so a failed assertion rolls the whole thing back.
 
 **`0031_boards` and `0032_item_master` were applied on 2026-08-20**, in that order, each
 verified before the next. **`0033_laundry_prices_read` followed the same day.**
@@ -1350,6 +1388,74 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-08-25 · The run is locked, and only the office may change its order
+The client's controlled-sequencing requirement, built on the existing
+`daily_routes → jobs` architecture rather than beside it. One migration (`0036`), **no new
+table, no new column on `jobs`, nothing dropped and no existing row invalidated**. §27 holds the
+design; §3, §4, §7 and §11 the consequences.
+
+- **The security boundary did not exist, and that is the finding.** `roles.ts` gated the reorder
+  on `routes.write` while `jobs` sits on `/rest/v1/jobs` under a single permissive `for all`
+  policy — so **a driver could PATCH `jobs.sequence` on the run they were standing in**, and any
+  other member could PATCH anybody's. Reproduced against a 0001–0035 database rather than
+  reasoned about: `UPDATE 1`, a real row changed. That is exactly what §8 of the requirement says
+  must fail server-side, and it is why this could not be done in `roles.ts` alone.
+- **A trigger, not a restrictive policy, and the reasons are worth keeping.** The rule is about
+  *one column*, and RLS is row-level — a restrictive UPDATE policy on `jobs` would also stop a
+  driver writing `progress_status` and `arrived_at` on their own stops as they work them. And a
+  restrictive policy writes **zero rows with no error** to a caller it excludes, the silence this
+  project has shipped twice (0031 for boards, §26 for the counter); a trigger raising 42501
+  reaches the flash toast as a sentence. It fires only on UPDATE of `sequence`, so board
+  assignment — an INSERT appended at the end — is untouched, which §11 and §21 of the
+  requirement both insist on.
+- **`routes.sequence` is a capability of its own** because `routes.write` was the wrong
+  authority: the dispatcher, the branch manager and the regional manager all hold it and the
+  requirement names two roles. Named in a block and *subtracted* from the `TENANT_ALL`-derived
+  roles — the trap this file has now recorded three times, and the one that actually catches
+  `branch_manager` and `regional_manager` here.
+- **Editing is a screen state and is deliberately never persisted.** §6 of the requirement says
+  Cancel writes nothing, which settles it: entering edit mode cannot write either, or Cancel
+  would have to write it back. So `sequence_locked` is the standing statement that the order is
+  management's — read by the guard — and not a mutex. Nothing is checked out, and an abandoned
+  tab strands nothing.
+- **Concurrency is a version, not a timestamp** (§14). `updated_at` on `daily_routes` moves for
+  status changes and load confirmation, so it would refuse saves over edits that never touched
+  the order. The compare-and-swap happens inside the transaction that writes the positions.
+- **Two defects found while building, both by probing rather than review:**
+  - a board or a driver may update their **own** run row, so without a second guard they could
+    have set `sequence_locked = false` and walked straight past the first one, or rewound
+    `sequence_version` to defeat the concurrency check. `guard_run_sequence_control` narrows
+    those four columns and leaves status, crew, load confirmation and closing exactly as
+    writable as they were.
+  - **removing a stop left a hole in the run** (§12): `retireStopIfEmpty` soft-deleted the row
+    and never renumbered, so a run that lost its second call read 1, 3, 4 on the driver's phone.
+    Closed through `compact_run_sequence()`, which is safe to admit wider roles to *by
+    construction* — it takes no order from its caller, so it can only close a gap.
+- **`applyDispatchPlan` moved to the same capability**, because the unlinked planner writes
+  `jobs.sequence` too and would otherwise have been a live bypass of the screen next door.
+- 755 unit tests (was 739) and **398 pgTAP assertions (was 368)**. `verify` green — typecheck,
+  lint, tests and the production build. All thirty-six migrations applied to a fresh Postgres 16
+  with the whole pgTAP suite and the seed on top, and **every pre-existing proof passes
+  unchanged**, which is the check that mattered: the new trigger sits on a table five of them
+  own.
+- **Recorded rather than glossed:** three existing proofs declare a `plan(N)` that disagrees
+  with what they run (`boards_scope` 20/23, `item_master` 16/17, `main_flow_scope` 29/27).
+  Pre-existing and identical without 0036 — checked, not assumed. Nothing in them fails, but
+  `main_flow_scope` running 27 of a declared 29 means two assertions in a security proof are not
+  what somebody thought they were. Left alone as unrelated churn; worth a look.
+- **The lock/edit/cancel cycle was driven in a real browser**, not just reasoned about:
+  `/design-preview` gained the locked state as its own fixture, and 26 interaction assertions
+  pass at 390/768/1440 in light and dark — locked by default with no draggable row and no Save
+  anywhere, Adjust Run revealing 44×44 move controls, the payload carrying the version, Cancel
+  restoring the exact saved order and returning to locked, a board seeing no control at all, and
+  a worked stop disabled with a reason beside it. Zero console errors, zero overflow.
+
+**Not applied to `laundrymart-syd`.** This container has no Supabase credentials, so 0036 is the
+one migration in §7 the hosted project does not carry — and until it is applied the *screens* are
+narrowed while the database still lets a driver rewrite `jobs.sequence` off PostgREST. **Before
+trusting the boundary: apply 0036, then sign in as `driver@roles.example.com` and confirm the
+order cannot be changed, and as `owner@roles.example.com` that it can.**
+
 ### 2026-08-24 · Auth emails go through Resend, so no SMTP is needed
 The owner's instruction, and it closes the longest-standing open item in this file. **No
 migration; no schema, RLS, capability, policy or workflow change** — one sender replaces another.
@@ -3717,6 +3823,58 @@ a receipt and editing a completed one are the supervisor's set. DELETE on `laund
 granted either — nothing in the app deletes one — while DELETE on `laundry_order_items` was,
 because `save_laundry_order_items()` is SECURITY INVOKER and replaces the child set by deleting
 and re-inserting, so without it the counter could take a job in and never correct what is on it.
+
+## 27. Run sequencing: locked, edited, saved
+The client's rule, in one sentence: **management determines the order of the run, drivers
+execute it.** The Runs screen has ordered a board's day since 2026-08-20; what 0036 adds is the
+authority, the lock and the concurrency.
+
+- **`routes.sequence`, not `routes.write`.** Planning a day and deciding the order of the calls
+  turned out to be two decisions. `routes.write` is held by the dispatcher, the branch manager
+  and the regional manager; the requirement names two roles, so ordering got its own capability
+  (§3) and its own database gate, `can_write_run_sequence()`.
+- **Locked is the resting state, and editing is never persisted.** Opening a run shows 🔒 with no
+  handle, no arrow and no Save on screen — not a disabled control, which still invites a press.
+  Adjust Run is the only way in; it writes nothing, so **Cancel Changes has nothing to undo** and
+  a manager who abandons a tab leaves no run "checked out". Save & Lock Run commits the whole
+  order at once and the board returns to locked in the same render, because the component adopts
+  the server's new order during render (the job form's `defaultCustomerId` pattern).
+  `sequence_locked` is therefore the *standing statement* that this order is management's, read
+  by the guard trigger — not a mutex, and nothing in the app flips it.
+- **The screen is not the boundary, and this is the part that was actually broken.** `jobs` is
+  published on `/rest/v1/jobs` under one permissive `for all` policy, so a driver could PATCH
+  the sequence of the run they were standing in. Verified by probe against a 0001–0035 database:
+  `UPDATE 1`, a real row changed. §4 has the guards.
+- **Concurrency is a version, not a timestamp.** `daily_routes.sequence_version` is compared and
+  swapped inside the transaction that writes the positions, so a page open for twenty minutes
+  cannot silently overwrite a newer sequence. Deliberately not `updated_at`: that column moves
+  for status changes and load confirmation, which would refuse saves over edits that never
+  touched the order. The day's token is the **highest** version across the board+date's runs and
+  the swap matches `<= expected`, so a run opened after the last save joins the day's token
+  rather than deadlocking against a neighbour that has already been ordered.
+- **One statement, so the run is never numbered twice.** `apply_run_sequence()` re-resolves the
+  run from (tenant, board, date) — it does not trust a posted run id — checks the posted set is
+  exactly this run's stops, swaps the version and writes 1..n. SECURITY **INVOKER**, so RLS and
+  both guards still apply and a direct RPC call from a driver is refused by the same rule that
+  refuses the PATCH. Same shape and same reason as `save_laundry_order_items()`.
+- **A gap closes; a management decision does not reopen.** `compact_run_sequence()` is
+  SECURITY DEFINER because the roles that legitimately empty a stop (a dispatcher reassigning,
+  the counter moving a job) are wider than the roles that may order a run. Admitting them is
+  safe **by construction rather than by trust**: the function computes the new positions from
+  the order already stored and takes no order from its caller, so the most it can do is renumber
+  1,3,7 as 1,2,3. That is also why it is allowed past the worked-stop rule — it preserves
+  relative order, which is what that rule protects.
+- **A new job is appended, never resorted.** `findOrCreateStop` already placed a new stop at
+  `max(sequence) + 1`, and the guard is UPDATE-only precisely so that keeps working for the
+  roles that assign work and do not order runs. Asserted in pgTAP against a locked, manually
+  ordered run.
+- **`applyDispatchPlan` moved to the same capability.** The (unlinked) dispatch planner writes
+  `jobs.sequence` too, so leaving it on `routes.write` would have made the boundary a fiction —
+  a dispatcher refused on Runs could reorder the same day there. Two screens that write one fact
+  answer to one authority.
+- **The audit row carries both orders in full.** "What was it before?" is the question an audit
+  log gets asked about a run that went wrong, and a movement count cannot answer it. Board, run
+  date, run ids, previous and new sequence, actor, role and the resulting version.
 
 ## 21. Customer pricing and job billing
 **Two lifecycles on one job, and they meet at exactly one point.** The operational status says

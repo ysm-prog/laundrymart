@@ -34,6 +34,18 @@ export const sequenceSchema = z.object({
   date: isoDate,
   /** The stop ids in their new order, first to last. */
   stops: z.array(z.uuid()).min(1, "There is nothing to reorder."),
+  /**
+   * The order's version as it stood when editing began — the optimistic
+   * concurrency token (§14).
+   *
+   * Held here rather than derived from a timestamp because the client's clock
+   * is not evidence and `daily_routes.updated_at` moves for status changes and
+   * load confirmation, which would refuse saves over edits that never touched
+   * the order. `apply_run_sequence()` compares and swaps it in the same
+   * transaction that writes the positions, so two managers editing the same day
+   * cannot silently overwrite one another.
+   */
+  expected_version: z.number().int().min(1),
 });
 
 export type SequencePlan = z.infer<typeof sequenceSchema>;
@@ -69,6 +81,21 @@ export function parseSequencePlan(
   }
   return { ok: true, plan: parsed.data };
 }
+
+/**
+ * What a manager is told when somebody else saved first.
+ *
+ * Stated once because three places have to agree on it: the action's own
+ * pre-check, the sentence mapped from the database's refusal when two saves
+ * race past that check, and the test that pins both.
+ */
+export const SEQUENCE_CONFLICT =
+  "This run was updated by another user. Reload the run to see the latest "
+  + "sequence before making further changes.";
+
+/** The sentence a save ends with, per the requirement's §5. */
+export const SEQUENCE_SAVED =
+  "Run sequence updated successfully. The run has been locked.";
 
 /* --------------------------------------------------------- what may move */
 
@@ -192,4 +219,21 @@ export function moveStopTo(order: readonly string[], id: string, to: number): st
 export function isReordered(proposed: readonly string[], current: readonly string[]): boolean {
   if (proposed.length !== current.length) return true;
   return proposed.some((id, index) => id !== current[index]);
+}
+
+/**
+ * How many stops actually change position.
+ *
+ * What the operator is told ("4 stops moved") and what the audit row records as
+ * the size of the change. Counted by comparing positions rather than by asking
+ * whether the two lists differ, because moving one stop from the end to the
+ * front moves every stop between — and telling somebody "1 stop moved" when
+ * nine positions changed would be a wrong answer that looks right.
+ */
+export function movedCount(previous: readonly string[], next: readonly string[]): number {
+  const was = new Map(previous.map((id, index) => [id, index]));
+  return next.reduce(
+    (total, id, index) => (was.get(id) === index ? total : total + 1),
+    0,
+  );
 }

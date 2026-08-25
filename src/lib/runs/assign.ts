@@ -298,11 +298,11 @@ export async function retireStopIfEmpty(
 
   const { data: stop } = await supabase
     .from("jobs")
-    .select("id, status, progress_status, arrived_at, completed_at, service_type")
+    .select("id, route_id, status, progress_status, arrived_at, completed_at, service_type")
     .eq("tenant_id", session.tenantId)
     .eq("id", stopId).is("deleted_at", null)
     .maybeSingle<{
-      id: string; status: string; progress_status: string;
+      id: string; route_id: string | null; status: string; progress_status: string;
       arrived_at: string | null; completed_at: string | null; service_type: string;
     }>();
   if (!stop) return;
@@ -323,6 +323,32 @@ export async function retireStopIfEmpty(
     .from("jobs")
     .update({ deleted_at: new Date().toISOString() })
     .eq("id", stopId).eq("tenant_id", session.tenantId);
-  if (error) console.error("retiring an emptied stop failed", { stopId, error: error.message });
+  if (error) {
+    console.error("retiring an emptied stop failed", { stopId, error: error.message });
+    return;
+  }
+
+  // Close the gap the removed stop leaves, so the run stays 1..n with no hole
+  // in it. Without this a run that has lost its second call reads 1, 3, 4 on the
+  // driver's phone, and "position 3" stops meaning the third call.
+  //
+  // Through the definer function rather than by renumbering here, because the
+  // roles that legitimately empty a stop are wider than the roles that may
+  // *order* a run — a dispatcher reassigning work, or the counter moving a job
+  // to another board. `compact_run_sequence()` takes no order from its caller
+  // and computes the new positions from the order already stored, so admitting
+  // them can only ever close a gap: it cannot undo a management decision.
+  //
+  // A failure is cosmetic in the same way the retirement above is, so it is
+  // logged rather than surfaced — the gap is untidy, and failing the whole
+  // reassignment over it would be worse.
+  if (stop.route_id) {
+    const { error: gapError } = await supabase
+      .rpc("compact_run_sequence", { r: stop.route_id });
+    if (gapError) {
+      console.error("closing the gap after an emptied stop failed",
+        { stopId, routeId: stop.route_id, error: gapError.message });
+    }
+  }
 }
 

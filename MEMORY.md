@@ -1,7 +1,65 @@
 # MEMORY — working session handoff
 > Auto-loaded each session. Canonical state is CLAUDE.md; this is the live delta.
 
-## Latest: usable by somebody who has been shown it once
+## Latest: the run is locked, and only the office may change its order
+2026-08-25, branch `claude/code-review-requirements-ns6bav`. The client's controlled-sequencing
+requirement. CLAUDE.md **§27** holds the design; §3, §4, §7, §11 and the newest changelog entry
+have the rest. **One migration (`0036`), no new table, nothing dropped, no existing row
+invalidated** — every column's default describes what was already true.
+
+**The headline: the security boundary did not exist.** The reorder was gated on `routes.write`,
+while `jobs` sits on `/rest/v1/jobs` under a single permissive `for all` policy — so **a driver
+could PATCH `jobs.sequence` on the run they were standing in**. Reproduced against a 0001–0035
+database rather than reasoned about: `UPDATE 1`, a real row changed.
+
+**What changed, in five pieces:**
+- `routes.sequence` — a new capability, `super_admin` + `operations_manager` only. `routes.write`
+  was the wrong authority (dispatcher, branch_manager, regional_manager hold it). Named in a
+  `RUN_SEQUENCE` block and **subtracted** from the `TENANT_ALL`-derived roles — the leak trap
+  this repo has now recorded three times.
+- `guard_job_sequence` — a trigger, not a restrictive policy. The rule is about *one column*
+  (a driver must still write `progress_status`), and a restrictive policy writes **zero rows in
+  silence** where a trigger raises 42501. UPDATE-only, so assignment (an INSERT appended at the
+  end) still works for the roles that assign but do not order.
+- `guard_run_sequence_control` — found by probing: a board/driver may update their **own** run
+  row, so without this they could set `sequence_locked = false` and walk past the first guard.
+- `apply_run_sequence()` — Save & Lock in one transaction. Re-resolves the run from
+  (tenant, board, date) rather than trusting a posted id, compare-and-swaps `sequence_version`,
+  writes 1..n in one statement. SECURITY **INVOKER**, so RLS + both guards still apply.
+- `compact_run_sequence()` — closes the gap `retireStopIfEmpty` used to leave (a run that lost
+  its second call read 1, 3, 4). SECURITY DEFINER, safe **by construction**: it takes no order
+  from its caller, so it can only close a gap, never undo a management decision.
+
+**Two design calls worth not re-litigating:**
+- **Editing is never persisted.** §6 of the requirement says Cancel writes nothing, which settles
+  it — entering edit mode cannot write either, or Cancel would have to write it back.
+  `sequence_locked` is the standing statement that the order is management's, read by the guard;
+  it is not a mutex and nothing flips it.
+- **Concurrency is `sequence_version`, not `updated_at`** — that column moves for status changes
+  and load confirmation, which would refuse saves over edits that never touched the order. The
+  day's token is the **highest** version across the board+date's runs, swapped on `<= expected`,
+  so a run opened after the last save joins the token instead of deadlocking.
+
+`applyDispatchPlan` moved to the same capability: the unlinked planner writes `jobs.sequence` too
+and would have been a live bypass of the screen next door.
+
+**Verified:** 755 unit tests (was 739), **398 pgTAP assertions (was 368)**, `verify` green, all
+36 migrations against a fresh Postgres 16 with the seed on top, and **every pre-existing proof
+passes unchanged** — the check that mattered, since the new trigger sits on a table five of them
+own. The lock→edit→cancel cycle was driven in a real browser: 26 interaction assertions at
+390/768/1440, light and dark, 0 console errors, 0 overflow.
+
+**Recorded, not fixed (pre-existing, identical without 0036):** three proofs declare a `plan(N)`
+that disagrees with what they run — `boards_scope` 20/23, `item_master` 16/17, **`main_flow_scope`
+29/27**. Nothing fails, but that last one means two assertions in a security proof are not what
+somebody thought. `run-db-tests.sh` does not fail on a plan mismatch, which is why it hid.
+
+**NOT applied to `laundrymart-syd`.** No credentials here. 0036 is the one migration in §7 the
+hosted project does not carry, and until it is applied the *screens* are narrowed while the
+database still lets a driver rewrite `jobs.sequence`. Apply it, then sign in as
+`driver@roles.example.com` (cannot reorder) and `owner@roles.example.com` (can).
+
+## Previously: usable by somebody who has been shown it once
 2026-08-24, branch `claude/app-accessibility-all-ages-e7sh41`. CLAUDE.md §6, §10b, §26 and the
 newest changelog entry have it. **No migration. No schema, RLS, capability, policy or workflow
 change** — every screen still exists, every route still resolves, no role gained or lost anything.
@@ -184,6 +242,12 @@ fast-forwards, and Dev absorbed the 18-commit backlog the changelog kept recordi
   a platform admin**, and its price list is still empty, so `LJ00002` was priced by hand.
 
 ## Do these next
+- **Apply `0036_run_sequence_control` to `laundrymart-syd`.** The most urgent item here, because
+  until it lands the *screens* refuse a driver and the *database* does not — a driver's session
+  can still PATCH `jobs.sequence` on their own run through PostgREST. Self-asserting and
+  `apply_migration` is atomic, so a failed assertion rolls it back. Afterwards: sign in as
+  `driver@roles.example.com` and confirm no Adjust Run and no way to reorder, and as
+  `owner@roles.example.com` that Adjust Run → Save & Lock Run persists and re-locks.
 - **Open it with real rows in it.** This container has no Supabase credentials, so no
   authenticated screen was rendered. Sign in as `owner@roles.example.com`, press each card on the
   home screen, and set the text to Biggest on a phone.

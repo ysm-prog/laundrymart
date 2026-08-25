@@ -293,3 +293,78 @@ describe("job → invoice, and who the counter is", () => {
     expect(can("driver", "run.execute")).toBe(true);
   });
 });
+
+describe("ordering a run (routes.sequence)", () => {
+  /*
+   * The client's rule: management determines the order of the run, drivers
+   * execute it. That is a narrower statement than `routes.write`, which is why
+   * this capability exists at all — and these assertions are the reason it
+   * cannot quietly widen again.
+   *
+   * `can_write_run_sequence()` (0036) is the same sentence in the database, and
+   * `run_sequence.test.sql` proves the two agree by refusing a dispatcher's
+   * UPDATE. Neither half is the boundary on its own: `roles.ts` drives the nav
+   * and the page guards, and `jobs` is published on `/rest/v1/jobs`.
+   */
+  const OWNER_AND_OFFICE: Role[] = ["platform_admin", "super_admin", "operations_manager"];
+
+  it("is held by the Owner and the Office manager, and by nobody else", () => {
+    expect(rolesWith("routes.sequence").sort()).toEqual([...OWNER_AND_OFFICE].sort());
+  });
+
+  it("is narrower than routes.write, which is the entire point", () => {
+    // If these two sets were ever equal the capability would be dead weight and
+    // somebody would quite reasonably delete it — so the gap is asserted rather
+    // than assumed, and the roles in it are named.
+    const planners = rolesWith("routes.write");
+    const orderers = rolesWith("routes.sequence");
+    expect(planners.length).toBeGreaterThan(orderers.length);
+    expect(planners.filter((role) => !orderers.includes(role)).sort())
+      .toEqual(["branch_manager", "dispatcher", "regional_manager"]);
+  });
+
+  it("keeps the dispatcher planning the day without setting the order", () => {
+    expect(can("dispatcher", "routes.write")).toBe(true);
+    expect(can("dispatcher", "routes.status")).toBe(true);
+    expect(can("dispatcher", "routes.sequence")).toBe(false);
+  });
+
+  it("does not leak into the roles derived from TENANT_ALL", () => {
+    // The trap this file has recorded twice already: `branch_manager` and
+    // `regional_manager` are built by *subtracting* from TENANT_ALL, so a
+    // capability that is merely not mentioned is a capability they hold. Both
+    // keep `routes.write`, so this is a real narrowing rather than an accident
+    // of them holding nothing.
+    for (const role of ["branch_manager", "regional_manager"] as const) {
+      expect(can(role, "routes.write")).toBe(true);
+      expect(can(role, "routes.sequence")).toBe(false);
+    }
+    expect(can("auditor", "routes.sequence")).toBe(false);
+  });
+
+  it("gives the van and the round no way to reorder their own work", () => {
+    // The requirement names these two explicitly, and both can read the run and
+    // advance it — which is exactly why "they simply hold nothing" would be the
+    // wrong proof.
+    for (const role of ["driver", "board"] as const) {
+      expect(can(role, "routes.read")).toBe(true);
+      expect(can(role, "routes.status")).toBe(true);
+      expect(can(role, "routes.sequence")).toBe(false);
+      expect(can(role, "routes.write")).toBe(false);
+    }
+  });
+
+  it("keeps the counter and the floor out of it too", () => {
+    for (const role of ["customer_service", "warehouse_operator", "sales", "finance"] as const) {
+      expect(can(role, "routes.sequence")).toBe(false);
+    }
+  });
+
+  it("lets everybody who may order a run also open the screen", () => {
+    // A capability to change something you cannot see is a page guard away from
+    // being unusable: `/runs` is gated on `routes.read`.
+    for (const role of rolesWith("routes.sequence")) {
+      expect(can(role, "routes.read")).toBe(true);
+    }
+  });
+});
