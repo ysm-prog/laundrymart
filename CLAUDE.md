@@ -976,6 +976,36 @@ verified before the next. **`0033_laundry_prices_read` followed the same day.**
   database cannot repeat it; the live ledger's stored statements for `20260825114025` predate that
   one line, which is recorded here rather than glossed.
 
+**Two migrations from the unmerged branch `claude/code-review-requirements-ns6bav` went on the same
+afternoon, after `0036_invoice_account_codes` and by a different session** — `0036_run_sequence_control`
+(11:54) and `0037_account_and_item_codes` (11:58). The live ledger therefore carries a **second
+migration numbered 0036**, the same situation §7 records for 0015 and the two 0017s, and
+`supabase/migrations/` is again not a complete picture of the live project. My work was re-read
+afterwards and is intact: 24 policies across the six payable tables, `gl_accounts_read` still gated on
+`can_read_purchases`, **0** permissive `for all` left, the coherence trigger attached, and
+`sync_invoice_line_account` still not callable by `authenticated`. The two extra definer functions on
+the advisor list (`can_write_run_sequence`, `compact_run_sequence`) are that branch's, not 0036's.
+
+**Those two branches cannot both merge as they stand, and this was proved rather than reasoned
+about.** Applying every repo migration to a fresh Postgres 16 and then that branch's two, in filename
+order, fails:
+
+    ERROR: policy "gl_accounts_read" for table "gl_accounts" already exists
+
+`0037_account_and_item_codes` drops `gl_accounts_member` and creates `gl_accounts_read` — which
+`0036_invoice_account_codes` has already created. CI's DB job applies every migration to a fresh
+database, so **whichever of the two branches merges second breaks CI**. The live database does not
+show it because that session applied a *reconciled* 0037 that skips the policy half by hand, which its
+own header explains.
+
+**The two are the same rule under two names.** `can_read_accounts`/`can_write_accounts` (0037) and
+`can_read_purchases`/`can_write_purchases` (0036) carry **identical role lists** — the six
+`purchases.read` holders and the five `purchases.write` ones. So this is a naming collision rather
+than a disagreement, and the remedy is one of: drop 0037's policy half (live already has it), or
+rename one pair and have 0037 replace the four policies idempotently. **0036 covers six tables and
+0037 covers `gl_accounts` alone**, so keeping 0036's is the option that leaves the payable side gated
+one way rather than two. Whoever merges second decides; nothing is broken until then.
+
 **`0034_counter_takes_jobs` and `0035_audit_log_read` were applied on 2026-08-24**, in that order,
 and are now the ledger's last two entries. Both are self-asserting, and `apply_migration` is
 atomic, so a failed assertion rolls the whole thing back — which is what makes it safe to apply
