@@ -35,6 +35,7 @@ const styles = StyleSheet.create({
   tableHeader: { flexDirection: "row", backgroundColor: "#f3f4f6", paddingVertical: 5, paddingHorizontal: 6 },
   tableRow: { flexDirection: "row", paddingVertical: 5, paddingHorizontal: 6, borderBottomWidth: 1, borderBottomColor: "#f3f4f6" },
   colDescription: { flex: 4 },
+  colCode: { flex: 1.2 },
   colType: { flex: 1.6 },
   colNumber: { flex: 1.2, textAlign: "right" },
   colAmount: { flex: 1.4, textAlign: "right" },
@@ -120,6 +121,12 @@ export function InvoiceDocument({ data }: { data: InvoicePdfData }) {
 
         <View style={styles.tableHeader}>
           <Text style={[styles.text, styles.bold, styles.colDescription]}>Description</Text>
+          {/*
+            The account code, for the bookkeeper on the other end. It is the
+            column that turns a PDF into something that can be keyed straight
+            into a ledger, which is the whole point of coding a line at all.
+          */}
+          <Text style={[styles.text, styles.bold, styles.colCode]}>Code</Text>
           <Text style={[styles.text, styles.bold, styles.colType]}>Charge</Text>
           <Text style={[styles.text, styles.bold, styles.colNumber]}>Qty</Text>
           <Text style={[styles.text, styles.bold, styles.colNumber]}>Unit</Text>
@@ -136,6 +143,8 @@ export function InvoiceDocument({ data }: { data: InvoicePdfData }) {
               <Text style={[styles.text, styles.colDescription]}>
                 {line.description}{line.taxable ? "" : " (GST free)"}
               </Text>
+              {/* Blank, not a dash: an uncoded line is normal on a customer's copy. */}
+              <Text style={[styles.text, styles.colCode]}>{line.account_code ?? ""}</Text>
               <Text style={[styles.text, styles.colType]}>
                 {CHARGE_TYPE_LABELS[line.charge_type] ?? line.charge_type}
               </Text>

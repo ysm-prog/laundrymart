@@ -18,7 +18,7 @@ import { ACCOUNT_TYPES } from "./account-types";
  *
  * `purchases.write` rather than a new capability: this is the same set of
  * people who already write supplier bills and purchase orders, and the chart of
- * accounts is what those are coded against. `can_write_accounts()` (0037) is
+ * accounts is what those are coded against. `can_write_purchases()` (0036) is
  * the database's copy of the same sentence — and it is the boundary, because
  * before that migration `gl_accounts` carried `apply_tenant_policy`'s single
  * permissive `for all` policy and **every member of the laundry could rewrite

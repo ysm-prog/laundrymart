@@ -3,9 +3,10 @@ import { notFound } from "next/navigation";
 import { requireCapability } from "@/lib/auth/context";
 import { createClient } from "@/lib/supabase/server";
 import { can } from "@/lib/roles";
-import { date, money, today } from "@/lib/format";
+import { counted, date, money, today } from "@/lib/format";
 import { CHARGE_TYPE_LABELS, type ChargeType } from "@/lib/domain/pricing";
 import { formatIso } from "@/lib/domain/dates";
+import { uncodedLineCount } from "@/lib/domain/accounts";
 import { loadInvoiceBreakdown } from "@/lib/invoices/breakdown";
 import type { Invoice, InvoiceLine, Payment } from "@/lib/db/types";
 import {
@@ -13,7 +14,8 @@ import {
   PageHeader, SkeletonRows, Stat, StatusBadge, humanise,
 } from "@/components/ui";
 import { ConfirmSubmit } from "@/components/confirm-submit";
-import { Checkbox, Field, Input, Select, SubmitButton } from "@/components/form";
+import { Field, Input, Select, SubmitButton } from "@/components/form";
+import { InvoiceLineForm, type LineFormAccount, type LineFormItem } from "./line-form";
 import { PrintButton } from "@/components/print-button";
 import { emailIsConfigured } from "@/lib/email/send";
 import {
@@ -272,23 +274,51 @@ async function ServiceBreakdown({ invoiceId, tenantId }: { invoiceId: string; te
 
 async function Lines({ invoiceId, editable }: { invoiceId: string; editable: boolean }) {
   const supabase = await createClient();
-  const { data } = await supabase
-    .from("invoice_lines")
-    .select("id, invoice_id, description, charge_type, quantity, unit_price, amount, taxable, sequence")
-    .eq("invoice_id", invoiceId).order("sequence")
-    .returns<InvoiceLine[]>();
+
+  /*
+   * Three reads, and two of them only when the composer is going to be drawn.
+   * A sent invoice is a record, not a form: loading the item list and the whole
+   * chart of accounts to render a read-only table would be a few hundred rows
+   * fetched for nothing on every view of every historical invoice.
+   */
+  const [{ data }, catalogue, chart] = await Promise.all([
+    supabase
+      .from("invoice_lines")
+      .select("id, invoice_id, description, charge_type, quantity, unit_price, amount, taxable, "
+              + "sequence, gl_account_id, account_code")
+      .eq("invoice_id", invoiceId).order("sequence")
+      .returns<InvoiceLine[]>(),
+    editable ? loadItemCatalogue() : Promise.resolve([]),
+    editable ? loadChartOfAccounts() : Promise.resolve([]),
+  ]);
+
+  const lines = data ?? [];
+  const uncoded = uncodedLineCount(lines);
 
   return (
     <Card title="Lines">
       <DataTable
-        rows={data ?? []}
+        rows={lines}
         empty={<EmptyState title="No lines on this invoice yet" />}
         columns={[
           { header: "Description", cell: (row) => row.description },
           {
+            // The code is what the bookkeeper reads first, so it is a column of
+            // its own rather than a suffix on the description. An em dash rather
+            // than a blank: "not coded" is an answer, and an empty cell reads as
+            // a rendering fault.
+            header: "Code",
+            cell: (row) => (
+              <span className={row.account_code ? "font-mono" : "text-muted-foreground"}>
+                {row.account_code ?? "—"}
+              </span>
+            ),
+            hideBelow: "sm",
+          },
+          {
             header: "Charge",
             cell: (row) => CHARGE_TYPE_LABELS[row.charge_type as ChargeType] ?? humanise(row.charge_type),
-            hideBelow: "md",
+            hideBelow: "lg",
           },
           { header: "Qty", cell: (row) => row.quantity, align: "right", hideBelow: "sm" },
           { header: "Unit", cell: (row) => money(row.unit_price), align: "right", hideBelow: "sm" },
@@ -308,32 +338,75 @@ async function Lines({ invoiceId, editable }: { invoiceId: string; editable: boo
         ]}
       />
 
+      {/*
+        Counted and named, never refused. A line with no code is a legitimate
+        thing to write — it is the free-text line the client asked for — so the
+        app's job is to make the gap visible before the invoice is issued, not to
+        block the work. Shown on a sent invoice too: that is when somebody is
+        reconciling it and most wants to know.
+      */}
+      {uncoded > 0 ? (
+        <div className="mt-4">
+          <Notice tone="info" title={`${counted(uncoded, "line")} not coded to an account`}>
+            {editable
+              ? "They will reach your books with no account on them. Remove and re-add a line to give it a code."
+              : "They reached your books with no account on them."}
+          </Notice>
+        </div>
+      ) : null}
+
       {editable ? (
-        <form action={addInvoiceLine} className="mt-4 grid gap-3 border-t pt-4 sm:grid-cols-2 lg:grid-cols-5 print:hidden">
-          <input type="hidden" name="invoice_id" value={invoiceId} />
-          <Field label="Description" name="description" required className="lg:col-span-2">
-            <Input name="description" required />
-          </Field>
-          <Field label="Charge type" name="charge_type">
-            <Select name="charge_type" defaultValue="other"
-                    options={Object.entries(CHARGE_TYPE_LABELS).map(([value, label]) => ({ value, label }))} />
-          </Field>
-          <Field label="Quantity" name="quantity">
-            <Input name="quantity" type="number" step="0.01" min={0} defaultValue="1" />
-          </Field>
-          <Field label="Unit price" name="unit_price">
-            <Input name="unit_price" type="number" step="0.01" min={0} defaultValue="0" />
-          </Field>
-          <div className="flex items-end pb-2">
-            <Checkbox name="taxable" label="GST applies" defaultChecked />
-          </div>
-          <div className="flex items-end">
-            <SubmitButton variant="secondary">Add line</SubmitButton>
-          </div>
-        </form>
+        <InvoiceLineForm invoiceId={invoiceId} items={catalogue} accounts={chart}
+                         action={addInvoiceLine} />
       ) : null}
     </Card>
   );
+}
+
+/**
+ * The item list the composer searches.
+ *
+ * Capped, and `sell_price` descending is deliberately *not* the order — items are
+ * found by code, so the cap has to bite in code order or the list a search runs
+ * over is an arbitrary slice. Inactive items are left out: an invoice is written
+ * today, and offering something the laundry has retired is offering a mistake.
+ */
+async function loadItemCatalogue(): Promise<LineFormItem[]> {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("items")
+    .select("id, item_code, name, description, laundry_category, sell_price, tax_code, income_account_id")
+    .is("deleted_at", null)
+    .eq("status", "active")
+    .order("item_code", { nullsFirst: false })
+    .limit(500)
+    .returns<LineFormItem[]>();
+  return data ?? [];
+}
+
+/**
+ * The chart of accounts.
+ *
+ * Unpaginated for the same reason `/accounts` reads it that way: it is a few
+ * hundred rows of reference data that a person scans and a type-ahead ranks, and
+ * paging it would mean the search only ever saw the first page.
+ *
+ * **Returns nothing rather than throwing when the caller cannot read it.** Since
+ * 0036 the chart is gated on `purchases.read`, and while everyone holding
+ * `invoices.write` also holds that today, a role split tomorrow must degrade to
+ * "no codes offered" rather than to a 500 on the invoice screen.
+ */
+async function loadChartOfAccounts(): Promise<LineFormAccount[]> {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("gl_accounts")
+    .select("id, code, name, account_type, tax_code, is_header")
+    .is("deleted_at", null)
+    .eq("is_header", false)
+    .order("code")
+    .limit(1000)
+    .returns<LineFormAccount[]>();
+  return data ?? [];
 }
 
 async function Payments({ invoice, writable }: { invoice: InvoiceDetail; writable: boolean }) {

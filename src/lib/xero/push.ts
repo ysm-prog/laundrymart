@@ -43,14 +43,20 @@ type InvoiceRow = PayloadInvoice & {
  * for `tenants(name)`.
  */
 type Embedded<T> = T | T[] | null;
-type XeroAccount = { xero_account_code: string | null };
 type LineRow = PayloadLine & {
-  /** The account this line itself was coded to (`invoice_lines.gl_account_id`). */
-  line_account?: Embedded<XeroAccount>;
   items?: Embedded<{
     xero_item_code: string | null;
-    item_account?: Embedded<XeroAccount>;
+    gl_accounts?: Embedded<{ xero_account_code: string | null }>;
   }>;
+  /**
+   * The account 0036 stamps on the line itself. Read **in preference to** the
+   * one reached through the item, because it is set in both cases the invoice
+   * composer produces: picking an item copies that item's income account here,
+   * and picking a bare account code sets it with no item at all. A line coded
+   * the second way has no `items` row to travel through, so resolving only
+   * through the item would silently drop its code.
+   */
+  gl_accounts?: Embedded<{ xero_account_code: string | null }>;
 };
 
 const one = <T,>(value: Embedded<T> | undefined): T | null =>
@@ -64,11 +70,27 @@ function toPayloadLine(row: LineRow): PayloadLine {
     unit_price: row.unit_price,
     taxable: row.taxable,
     item_code: item?.xero_item_code ?? null,
-    // Both tiers are handed to the payload builder rather than resolved here,
-    // so the whole ladder — line, then item, then the laundry's default — is
-    // one pure rule with its own tests. See `resolveAccountCode`.
-    account_code: one(row.line_account)?.xero_account_code ?? null,
-    item_account_code: one(item?.item_account)?.xero_account_code ?? null,
+    /*
+     * **The Xero code, never the one printed on the invoice.** Two charts are in
+     * play and they are not the same: `invoice_lines.account_code` is the MYOB
+     * code the bookkeeper reads (`4-1100`), and `gl_accounts.xero_account_code`
+     * is what that account is called in Xero. Sending the first would make Xero
+     * refuse an invoice naming a code its own chart does not carry — so the MYOB
+     * code stays on the screen and in the PDF, and only this one travels.
+     *
+     * The line's own account first, the item's second: the composer sets the
+     * direct link for a line coded straight to an account, where there is no
+     * item to reach through.
+     *
+     * Both tiers are handed to the payload builder rather than chained here, so
+     * the whole ladder — line, then item, then the laundry's default sales
+     * account — is one pure rule with its own tests, and a **blank** tier falls
+     * through to the next rather than terminating the chain. A `??` here would
+     * stop on an empty string and send `AccountCode: ""`, which Xero rejects.
+     * See `resolveAccountCode`.
+     */
+    account_code: one(row.gl_accounts)?.xero_account_code ?? null,
+    item_account_code: one(item?.gl_accounts)?.xero_account_code ?? null,
   };
 }
 
@@ -147,8 +169,10 @@ export async function pushInvoiceToXero(
     // dead in production with PGRST201.
     supabase.from("invoice_lines")
       .select("description, quantity, unit_price, taxable, " +
-              "line_account:gl_accounts(xero_account_code), " +
-              "items(xero_item_code, item_account:gl_accounts(xero_account_code))")
+              "items(xero_item_code, gl_accounts(xero_account_code)), " +
+              // 0036's direct link. Unambiguous: `invoice_lines` has exactly one
+              // FK to `gl_accounts`, so this embed needs no constraint name.
+              "gl_accounts(xero_account_code)")
       .eq("invoice_id", invoice.id).eq("tenant_id", tenantId)
       .order("sequence")
       .returns<LineRow[]>(),

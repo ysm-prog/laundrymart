@@ -59,9 +59,13 @@ set local role authenticated;
 
 -- ================================================= the bookkeepers can work ==
 set local "request.jwt.claim.sub" = 'a0000000-0000-4000-8000-0000000000a1';
-select ok(public.can_read_accounts('aa000000-0000-4000-8000-000000000001'),
+-- 0036's pair, not a second one named for this table. Both migrations reached
+-- the same gate independently with identical role lists; keeping two names for
+-- one rule is the duplication this repo argues against, so 0036's stands and
+-- covers all six payable tables rather than `gl_accounts` alone.
+select ok(public.can_read_purchases('aa000000-0000-4000-8000-000000000001'),
           'the owner may read the chart');
-select ok(public.can_write_accounts('aa000000-0000-4000-8000-000000000001'),
+select ok(public.can_write_purchases('aa000000-0000-4000-8000-000000000001'),
           'the owner may change the chart');
 select lives_ok(
   $$insert into public.gl_accounts (tenant_id, code, name, account_type, xero_account_code)

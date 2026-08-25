@@ -24,6 +24,9 @@ import { DaySummary, JobCard, JobGroup } from "@/app/(app)/my-runs/run-view";
 import { BillingQueue, type QueueRow } from "@/app/(app)/invoices/awaiting/billing-queue";
 import { JobChargesEditor, type EditableCharge } from "@/app/(app)/orders/[id]/job-charges-editor";
 import {
+  InvoiceLineForm, type LineFormAccount, type LineFormItem,
+} from "@/app/(app)/invoices/[id]/line-form";
+import {
   InvoiceSelection, type SelectableInvoice,
 } from "@/app/(app)/invoices/invoice-selection";
 import { PriceTable } from "@/app/(app)/invoices/prices/price-table";
@@ -1054,6 +1057,40 @@ export default function DesignPreviewPage() {
               <JobChargesEditor orderId="preview" initial={PREVIEW_CHARGES}
                                 action={async () => { "use server"; }} />
             </Card>
+
+            {/* Adding a line, three ways. The client keeps their books against a
+                chart of accounts and every sale has to land on one, so a line can
+                be filled in from an item, from the code, or typed out. Worth
+                looking at rather than reading, because the three routes share one
+                set of fields and the failure this component exists to prevent —
+                an item with no account producing a silently uncoded line — is a
+                *state*, not a layout: pick TT001 and the account picker appears
+                with the reason above it. */}
+            <div id="invoice-line-composer-preview" className="space-y-6">
+            <Card title="Add a line to an invoice"
+                  description="An item, an account code, or free text. The code follows the item; a line with no code is legal and counted.">
+              <InvoiceLineForm
+                invoiceId="preview" items={PREVIEW_LINE_ITEMS} accounts={PREVIEW_CHART}
+                action={async () => { "use server"; }}
+              />
+            </Card>
+
+            <Card title="No chart of accounts yet"
+                  description="A laundry that has not imported one. Nothing is blocked — items and free text still work.">
+              <InvoiceLineForm
+                invoiceId="preview-empty" items={PREVIEW_LINE_ITEMS} accounts={[]}
+                action={async () => { "use server"; }}
+              />
+            </Card>
+
+            <Card title="No items yet"
+                  description="The real laundry's state today — 268 accounts, no item list. It opens on the code, because that is the route that still produces a coded line.">
+              <InvoiceLineForm
+                invoiceId="preview-no-items" items={[]} accounts={PREVIEW_CHART}
+                action={async () => { "use server"; }}
+              />
+            </Card>
+            </div>
           </section>
 
           {/* ------------------------------------------------- period billing --- */}
@@ -1248,6 +1285,34 @@ const PREVIEW_RUN_STOPS_WORKED: SequenceStop[] = [
  * that job cannot be approved, so the queue must render it unselectable with a
  * reason beside it rather than offering a tick that would half-fail.
  */
+/* -------------------------------------------------- invoice line composer --- */
+/* Real rows from the client's own chart of accounts and item list, codes and tax
+   codes included. The two that matter are deliberate: `TT001` has **no** income
+   account, which is the state that would otherwise produce an uncoded line in
+   silence; and the chart carries `5-1000 Towel Purchases`, the wrong side of the
+   books, so the ranking can be seen doing its job on a real name collision. */
+const PREVIEW_LINE_ITEMS: LineFormItem[] = [
+  { id: "i1", item_code: "TOW001", name: "Bath Towel — Black", description: "Commercial, black",
+    laundry_category: "bath_towels", sell_price: 3.20, tax_code: "GST", income_account_id: "g2" },
+  { id: "i2", item_code: "TOW010", name: "Hand Towel — White", description: null,
+    laundry_category: "hand_towels", sell_price: 1.80, tax_code: "N-T", income_account_id: "g3" },
+  { id: "i3", item_code: "TT001", name: "Tea Towel", description: "Cotton, checked",
+    laundry_category: "towels", sell_price: 0.95, tax_code: "GST", income_account_id: null },
+  { id: "i4", item_code: "LB-STD-01", name: "Laundry Bag", description: "Container, not laundry",
+    laundry_category: null, sell_price: 0, tax_code: "GST", income_account_id: null },
+];
+
+const PREVIEW_CHART: LineFormAccount[] = [
+  { id: "g1", code: "4-1000", name: "Sales of Towels", account_type: "Income", tax_code: "GST" },
+  { id: "g2", code: "4-1100", name: "Towels - Black", account_type: "Income", tax_code: "GST" },
+  { id: "g3", code: "4-1150", name: "Towels - White", account_type: "Income", tax_code: "N-T" },
+  { id: "g4", code: "4-1400", name: "Tea Towels", account_type: "Income", tax_code: "GST" },
+  { id: "g5", code: "4-2000", name: "Delivery Fees Collected", account_type: "Income", tax_code: "GST" },
+  { id: "g6", code: "4-7000", name: "Sundry Income", account_type: "Income", tax_code: "GST" },
+  { id: "g7", code: "5-1000", name: "Towel Purchases", account_type: "Cost of sales", tax_code: "GST" },
+  { id: "g8", code: "8-9000", name: "Rebates", account_type: "Other income", tax_code: "N-T" },
+];
+
 const PREVIEW_QUEUE: QueueRow[] = [
   {
     id: "job-1", orderNumber: "LJ00042", customerId: "cust-1",

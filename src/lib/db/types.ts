@@ -103,6 +103,13 @@ export type Item = {
   cost_price: number;
   /** The ledger's tax code (GST, FRE, …). Somebody else's vocabulary, so a string. */
   tax_code: string | null;
+  /**
+   * MYOB's "Income Account for Tracking Sales" (0036), which 0037 then carries
+   * through to Xero. What makes picking this item on an invoice fill the code
+   * in by itself. Two branches arrived at this same column independently — the
+   * shape §11 records for `invoice_lines.laundry_order_id` in 0018.
+   */
+  income_account_id: Uuid | null;
   replacement_cost: number;
   rental_price: number;
   wash_only_price: number;
@@ -113,8 +120,6 @@ export type Item = {
   /** When this row last agreed with the external ledger. Null until something syncs. */
   external_synced_at: string | null;
   status: string;
-  /** 0037 — the revenue account an invoice line for this item is coded to. */
-  income_account_id: Uuid | null;
   /** 0037 — this item's code in the laundry's Xero inventory, if it has one. */
   xero_item_code: string | null;
 };
@@ -382,6 +387,15 @@ export type InvoiceLine = {
   amount: number;
   taxable: boolean;
   sequence: number;
+  /**
+   * The GL account this line is coded to (0036), and a snapshot of its code.
+   * Both, for the reason `item_id` and `description` are both here: the link is
+   * what a report joins on, and the text is what survives a chart being tidied.
+   * Null on a free-text line, which is a legal and visible state — the invoice
+   * screen counts them rather than refusing them.
+   */
+  gl_account_id: Uuid | null;
+  account_code: string | null;
 };
 
 export type Payment = {

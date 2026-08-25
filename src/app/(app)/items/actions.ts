@@ -40,10 +40,18 @@ const itemSchema = z.object({
   sell_price: money,
   cost_price: money,
   tax_code: optionalText,
-  // The revenue account a line for this item is coded to, and the item's code
-  // as it is in **Xero** (0037). Both optional and both null by default: an
-  // item nobody has coded behaves exactly as it did before, which is what makes
-  // this safe to add to a chart that is already in use.
+  /*
+   * MYOB's "Income Account for Tracking Sales", and the item's code as it is in
+   * **Xero** (0036 + 0037). Both optional and both null by default: an item
+   * nobody has coded behaves exactly as it did before, which is what makes this
+   * safe to add to an item list already in use.
+   *
+   * `optionalUuid` because the select's placeholder posts `""`, and refusing to
+   * save until somebody picks would put the item master behind the chart of
+   * accounts. Cross-tenant safety is the FK plus RLS: an account id from another
+   * laundry is invisible to this session, so the insert fails on the foreign key
+   * rather than silently coding to somebody else's books.
+   */
   income_account_id: optionalUuid,
   xero_item_code: optionalText,
   myob_item_id: optionalText,

@@ -11,8 +11,8 @@ import {
 import { Field, FormActions, Input, Select, SubmitButton } from "@/components/form";
 import { ITEM_CATEGORIES } from "../categories";
 import { archiveItem, updateItem } from "../actions";
+import { IncomeAccountField } from "../income-account-field";
 import { ITEM_TYPES, ITEM_TYPE_LABELS } from "@/lib/domain/laundry-orders";
-import { accountOptionLabel, listIncomeAccounts } from "@/lib/accounts";
 
 export const dynamic = "force-dynamic";
 
@@ -30,19 +30,18 @@ export default async function ItemDetailPage({
   // alongside the item rather than in a second round trip. Empty for a role
   // that cannot see the chart, which cannot happen here — every `items.write`
   // holder also holds `purchases.read` (pinned in `roles.test.ts`).
-  const [{ data: item }, { data: pools }, accounts] = await Promise.all([
+  const [{ data: item }, { data: pools }] = await Promise.all([
     supabase.from("items")
       .select("id, sku, item_code, name, description, category, laundry_category, " +
               "ownership_type, is_sell, is_buy, sell_price, cost_price, tax_code, " +
               "income_account_id, xero_item_code, " +
               "replacement_cost, rental_price, wash_only_price, weight_kg, reorder_level, " +
-              "myob_item_id, myob_item_code, external_synced_at, status")
+              "myob_item_id, myob_item_code, external_synced_at, income_account_id, status")
       .eq("id", id).maybeSingle<Item>(),
     supabase.from("inventory_pools")
       .select("id, item_id, owner_type, state, customer_id, depot_id, vehicle_id, quantity, reorder_level")
       .eq("item_id", id).neq("quantity", 0).order("state")
       .returns<InventoryPool[]>(),
-    listIncomeAccounts(supabase, session.tenantId),
   ]);
 
   if (!item) notFound();
@@ -115,18 +114,9 @@ export default async function ItemDetailPage({
                 <Field label="Tax code" name="tax_code">
                   <Input name="tax_code" defaultValue={item.tax_code ?? ""} />
                 </Field>
-                <Field label="Income account" name="income_account_id"
-                       hint="Where an invoice line for this item is coded. Used when the invoice goes to Xero.">
-                  <Select name="income_account_id" placeholder="Not coded"
-                          defaultValue={item.income_account_id ?? ""}
-                          options={accounts.map((a) => ({
-                            value: a.id, label: accountOptionLabel(a),
-                          }))} />
-                </Field>
-                <Field label="Xero item code" name="xero_item_code"
-                       hint="This item's code in Xero, if it has one. Blank means no ItemCode is sent — nothing is guessed, because Xero refuses an invoice naming a code it does not have.">
-                  <Input name="xero_item_code" defaultValue={item.xero_item_code ?? ""} />
-                </Field>
+                <IncomeAccountField tenantId={session.tenantId}
+                                    defaultValue={item.income_account_id}
+                                    defaultXeroItemCode={item.xero_item_code} />
                 <Field label="MYOB item ID" name="myob_item_id"
                        hint={item.external_synced_at
                          ? `Last synchronised ${item.external_synced_at.slice(0, 10)}.`

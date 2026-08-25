@@ -1,40 +1,154 @@
 # MEMORY — working session handoff
 > Auto-loaded each session. Canonical state is CLAUDE.md; this is the live delta.
 
-## Latest: a line's own account code is the one that reaches Xero
-2026-08-25. Working the backlog. One migration (`0038`), **no new table, no new policy, no new
-function, no row changed**. CLAUDE.md §20 has the design, §7 and §11 the consequences.
+## Latest: merged with Prod — the coding ladder and the audit rule
+2026-08-25. **Most of this branch is already live on `ats.coreit.com.au`**; another session
+merged the run-sequencing work and the account-codes work to `Prod` while this branch was still
+open. `origin/Prod` was merged **into** this branch and the four conflicts resolved before
+anything else — the branch was seven commits behind.
 
-**The defect, now fixed.** The hosted project carries `invoice_lines.gl_account_id` from that
-unmerged branch, so a bookkeeper can code one line deliberately — and `push.ts` did not read it.
-It resolved from the line's *item* instead, so the item's standing account went to Xero rather
-than the one somebody chose. Nothing would have surfaced it until a reconciliation.
-- `resolveAccountCode` is the whole ladder in one pure, tested rule: **line's own account → its
-  item's → the laundry's default**, first one that is really there. Kept in the payload module
-  rather than split between reader and builder, because a precedence spread over two files is
-  one nobody can test.
-- **`invoice_lines.account_code` is deliberately not a tier.** It holds *our* chart's code. Xero
-  refuses an invoice naming a code its chart lacks, so sending it would turn one mismatched
-  account into every invoice failing. Every tier resolves through `gl_accounts.xero_account_code`.
-- A blank falls **through** to the next tier, not to nothing — otherwise clearing a code silently
-  uncodes the line.
-- `0038` adds `invoice_lines.gl_account_id` so the repo can build what the code reads (no-op
-  live). Its assertion is that `invoice_lines` has exactly **one** FK to `gl_accounts` — the push
-  embeds through it, and a second is PGRST201 in production, invisible to typecheck and tests.
+**What is genuinely new here, and not yet on Prod:**
+- **`resolveAccountCode`** — the Xero coding ladder as one pure, tested rule: **line's own
+  account → its item's → the laundry's default sales account**. Prod had independently fixed the
+  same defect inline in `push.ts` with `??`, in the same direction. Mine is kept for two reasons
+  and Prod's reasoning is kept with it: it is tested (9 assertions, 5 fail without the item
+  tier), and a `??` chain **stops on an empty string** — sending `AccountCode: ""`, which Xero
+  rejects — where the rule falls through a blank tier to the next real one.
+- **`buildSequenceAudit`** — the run-order audit record as a pure rule, so §15/§23's list
+  (previous order, new order, board, date, actor, role) is asserted field by field rather than
+  read. Confirmed by dropping the actor's role and by aliasing the arrays: two tests fail.
+- **`0038_invoice_line_account`** — `invoice_lines.gl_account_id`, `if not exists`, so a database
+  built from this repo carries what `push.ts` reads. A no-op after `0036_invoice_account_codes`.
 
-**`0037` is now order-independent** — the other half of the same collision. Its policy block
-would have failed 42710 against any already-gated database, as it did live where I skipped it by
-hand. The rule is encoded: **gate the chart if nobody has, leave it alone if somebody has.**
-Proved both ways: fresh → creates the four policies; other branch's gate first → notice, skip,
-that gate intact, **0** `for all` policies left.
+**What was resolved in Prod's favour, and why it is better than what I had:**
+- **`0037`'s policy half is gone entirely.** I had made it *conditional* (gate the chart if
+  nobody has). Prod **deleted** the `can_read_accounts()`/`can_write_accounts()` pair and the four
+  policies outright, because `0036_invoice_account_codes` already gates `gl_accounts` with
+  identical role lists across all six payable tables. Two names for one rule is the duplication
+  this repo argues against, and a conditional block would have left both helpers in the schema.
+- **`push.ts` keeps Prod's shape and comments** — the unaliased embeds matching its select, and
+  the two-charts explanation (`invoice_lines.account_code` is the *MYOB* code a bookkeeper reads;
+  only `gl_accounts.xero_account_code` travels). It also carries an insight mine lacked: a line
+  coded to a bare account has **no item row to travel through**, which is why the line tier
+  cannot be skipped.
 
-**Verified:** 773 unit tests (was 766), 417 pgTAP assertions (unchanged — no policy added),
-`verify` green, all 38 migrations against a fresh Postgres 16 with the seed. The new tests were
-confirmed to **fail without the fix** (removing the item tier fails five).
 
-**Applied live** — a no-op, as designed. All three embed hops read back as exactly one FK each.
+## Previously: two branches reconciled, both merged
+2026-08-25. `claude/invoice-item-code-selection-vlwwb4` (account codes on an invoice) and
+`claude/code-review-requirements-ns6bav` (run sequencing + Xero codes) were built the same
+afternoon, both applied migrations to `laundrymart-syd`, and **both gated `gl_accounts`**.
+CLAUDE.md's newest changelog entry, §3, §7, §27 and §28 have the whole of it.
 
-## Previously: 0036 and 0037 are live on `laundrymart-syd`
+**They could not both merge as they stood** — every migration on a fresh Postgres 16, in filename
+order, failed with `42710: policy "gl_accounts_read" already exists`. CI's DB job does exactly
+that. Resolved by keeping **0036's** gate (`can_read_purchases`/`can_write_purchases`, six payable
+tables) and dropping 0037's (`can_read_accounts`/`can_write_accounts`, `gl_accounts` alone,
+**identical role lists**). 0037 now asserts against 0036's gate rather than creating its own.
+
+**The Xero push takes theirs and generalises it.** Two charts, not one:
+`invoice_lines.account_code` is the MYOB code the bookkeeper reads; `gl_accounts.xero_account_code`
+is what Xero calls that account. Only the second travels — Xero refuses a code its chart lacks.
+Their path was `line → item → account`, which misses a line coded straight to an account; 0036's
+`invoice_lines.gl_account_id` is set either way, so it is read first with the item as fallback.
+
+**A live regression was found on the way**: `0036_run_sequence_control` was applied to the hosted
+project with its code unmerged, so the database refused a **dispatcher** reordering a stop while
+the deployed screen still offered it. Merging the branch is the fix.
+
+**Live ledger carries three of today's migrations**, two of them numbered 0036
+(`0036_invoice_account_codes`, `0036_run_sequence_control`, `0037_account_and_item_codes`) — the
+same situation §7 records for the two 0017s. Filename order matches apply order, so nothing needs
+renumbering.
+
+- 431 pgTAP assertions across 24 proofs; `verify` green; whole suite + seed on a fresh Postgres 16.
+- `run-db-tests.sh` now fails on `not ok` and on a plan mismatch — it used to trust psql's exit
+  code, which is 0 for a file full of failed assertions.
+
+---
+
+## Previous: account codes on an invoice line
+2026-08-25, branch `claude/invoice-item-code-selection-vlwwb4`. CLAUDE.md §3, §7, **§27** and the
+newest changelog entry have it. One migration (`0036_invoice_account_codes`) — **no new table, no
+new role, no new capability, nothing dropped, no row changed**.
+
+The client sent their MYOB chart of accounts (268 accounts, 24 income) and asked for an invoice
+line added **by item or by code**, with anything in neither list written as free text.
+
+**Three ways to fill one line, not three kinds of line.** Whichever route is taken the row is the
+same shape, so there is no `line_kind` column and a month-end line is indistinguishable from a
+typed one. `items.income_account_id` is the bridge (MYOB's "Income Account for Tracking Sales");
+`invoice_lines.gl_account_id` + `account_code` carry it — the link for joins, the text for history,
+kept coherent by `sync_invoice_line_account()`, which **derives the code and never accepts one**.
+An uncoded line is legal and **counted on the invoice**, never refused: the free-text line is what
+the client explicitly asked for.
+
+**Xero has been ready since 0026 and was never fed.** `buildInvoicePayload` has mapped
+`account_code` → `AccountCode` from the day it was written and nothing selected the column, so
+**every line this app has pushed landed in Xero's default sales account**. One word in one select.
+
+**The migration's first part is a security fix, and it is why it shipped with the feature.** All
+six payable tables (`gl_accounts`, `suppliers`, `supplier_bills`, `purchase_orders`,
+`supplier_payments`, `import_activation_state`) carried one permissive `for all … using
+is_member(tenant_id)` policy from `apply_tenant_policy`. Probed live as one of Adelaide's own
+**board** logins: **268 accounts** (owner's equity, drawings, every vehicle loan), **192 suppliers**,
+**1,515 bills** worth $65,724 — and an UPDATE renaming `4-1600 Laundry` **succeeded**. A delivery
+round could rewrite the chart of accounts. Same shape as 0006/`invoices`, 0018/`laundry_prices`:
+**the third time**, hidden because the demo tenant has none of this data so the 2026-08-20 board
+sweep read 0. **An empty table is not a proof.** Now `can_read_purchases()`/`can_write_purchases()`,
+`for all` **replaced** (its USING half grants SELECT — the 0033 trap).
+
+### Where it stands
+- 765 unit tests (was 739), **382 pgTAP assertions** (was 368), `verify` green, all 36 migrations
+  applied to a fresh Postgres 16 with the suite and the seed. All 14 new assertions **confirmed to
+  fail without 0036**, the write hole included.
+- Gallery: composer in three states, 24 combinations measured — 0 console errors, 0 overflow inside
+  it, 0 targets under 36px. Document overflow byte-identical to the recorded baseline. 26
+  interaction assertions drive every route.
+
+### Applied live on 2026-08-25, and merged
+**`0036` is the ledger's last entry** (`20260825114025`). Rehearsed in three aborted transactions,
+then read back as real sessions: `board1@ats.example.com` went **268 / 192 / 1,515 / 1 / 62 / 636 →
+0 of each**, its rename touched 0 rows, its own run and jobs untouched. Counter 0, driver 0. `jay@`
+still reads 268 and 1,515 and its importer-style insert **landed**. Every count unchanged.
+
+**The apply found a defect in the migration and the advisors caught it.** 18 → **21**: two expected
+helpers plus `sync_invoice_line_account` on `/rest/v1/rpc/`. The revoke said `from public, anon` —
+**enough locally, not on Supabase**, which hands each new function a *direct* `authenticated` grant
+that revoking PUBLIC does not touch. Only matters for a SECURITY DEFINER trigger function, which is
+what 0019 recorded for `guard_last_platform_admin`. Fixed live within the hour; advisors → **20**.
+
+Three follow-ups, and the middle one is the durable win:
+- `0036` now revokes from `public, anon, **authenticated**` with a fifth self-assertion naming it.
+- **`pg-bootstrap.sql` mirrors Supabase's *function* default privileges**, so that assertion is
+  real rather than vacuous — proved by reverting the word and watching it fail. 0029's lesson one
+  object class over: *the local harness was reproducing a friendlier database than the real one.*
+- **CLAUDE.md's claim that `sync_laundry_item_type`'s EXECUTE is revoked was false** and is
+  corrected. It is not revoked; it is SECURITY INVOKER, which is what keeps it off the advisor
+  list. Right observation, wrong reason — and the wrong reason is what made 0036's revoke look fine.
+
+### Next, and it needs a browser
+1. Set an income account on a few items, add a line each way on a draft, read the PDF.
+2. Push one invoice to Xero and check `AccountCode` arrives — **first time that field is populated**.
+3. **Adelaide holds 268 accounts and zero items**, so the composer opens on the account code there.
+   The item master still waits on the MYOB import (§25).
+
+### Traps this session re-learned
+- A gallery measurement reported a **clean sweep vacuously**: `next start` failed with
+  `EADDRINUSE`, the old build kept serving, `getElementById` returned null and the loop
+  `continue`d. Check the element exists before trusting a zero. **The pgTAP assertion above failed
+  the same way for a different reason** — twice in one session, so treat a passing new assertion as
+  unproven until it has been seen to fail.
+- `searchAccounts` first ranked revenue *within* a tier, so `5-1000 Towel Purchases` (name starts
+  with "towel") beat `4-1000 Sales of Towels` (merely contains it) — the wrong side of the books
+  answering a sales question. Revenue is a whole tier ahead now; an exact code still wins outright.
+
+---
+
+## Previous: usable by somebody who has been shown it once
+
+---
+
+## Latest: 0036 and 0037 are live on `laundrymart-syd`
 2026-08-25. Both applied and verified by read-back. CLAUDE.md §11 has the full record.
 
 **The pre-flight turned up a collision, and it changed what 0037 could be.** A third `0036` —

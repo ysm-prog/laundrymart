@@ -62,77 +62,28 @@ comment on column public.gl_accounts.xero_account_code is
   'not defaulted to `code`, because Xero refuses an invoice naming a code it '
   'does not carry and a guess would fail every push rather than one.';
 
-create or replace function public.can_read_accounts(t uuid)
-returns boolean language sql stable security definer set search_path = public as $$
-  select public.has_role(t, array[
-    'super_admin', 'operations_manager', 'finance',
-    'branch_manager', 'regional_manager', 'auditor'
-  ]);
-$$;
-
-create or replace function public.can_write_accounts(t uuid)
-returns boolean language sql stable security definer set search_path = public as $$
-  select public.has_role(t, array[
-    'super_admin', 'operations_manager', 'finance',
-    'branch_manager', 'regional_manager'
-  ]);
-$$;
-
-comment on function public.can_write_accounts(uuid) is
-  'Who may change the chart of accounts: the app''s `purchases.write` holders. '
-  'The auditor reads and does not write, which is the whole of that role.';
-
--- Dropped rather than wrapped. A permissive `for all` policy''s USING half is a
--- SELECT grant, so leaving it beside a narrower read would leave the read open.
+-- **The read/write gate on `gl_accounts` is NOT here, and that is deliberate.**
+-- This migration originally created `can_read_accounts()`/`can_write_accounts()`
+-- and four explicit policies to replace `gl_accounts_member`. `0036_invoice_account_codes`
+-- had already done that job — the same four policy names, on the same table,
+-- gated on `can_read_purchases()`/`can_write_purchases()` whose role lists are
+-- **identical** to what this pair would have carried, and applied across all six
+-- payable tables rather than this one alone.
 --
--- **Conditional, because another branch reaches this same table.** An unmerged
--- branch's `0036_invoice_account_codes` gates `gl_accounts` with the identical
--- four policy names and *the same two role lists*, under its own
--- `can_read_purchases()` / `can_write_purchases()`. It reached the hosted
--- project first, and this block had to be skipped by hand when 0037 was applied
--- there — see §11.
+-- Two names for one rule is the duplication this repo argues against everywhere,
+-- and keeping both would have left `gl_accounts` gated differently from the five
+-- siblings it is imported alongside. So 0036's gate stands and this half is gone.
+-- Applying both as first written fails outright — proved rather than reasoned
+-- about, on a fresh Postgres 16:
 --
--- So the rule is written down rather than left to whoever applies next: **gate
--- the chart if nobody has gated it, and leave it alone if somebody has.**
+--     ERROR: policy "gl_accounts_read" for table "gl_accounts" already exists
 --
---   * on a fresh database this repo built, the only policy is 0021's permissive
---     `for all`, so the four below are created and the chart is closed;
---   * where that branch ran first, its gate is already correct and equivalent,
---     and replacing it would leave `gl_accounts` gated differently from the five
---     sibling tables it gates the same way — worse than doing nothing.
---
--- Either way the chart ends gated exactly once, whichever order the two land
--- in, and this migration can no longer fail with 42710.
-do $$
-begin
-  if not exists (
-    select 1 from pg_policy
-     where polrelid = 'public.gl_accounts'::regclass
-       and polcmd = '*' and polpermissive
-  ) then
-    raise notice '0037: gl_accounts is already gated; leaving its policies alone';
-    return;
-  end if;
-
-  drop policy if exists gl_accounts_member on public.gl_accounts;
-
-  create policy gl_accounts_read on public.gl_accounts
-    for select to authenticated
-    using ((select public.is_member(tenant_id)) and (select public.can_read_accounts(tenant_id)));
-
-  create policy gl_accounts_insert on public.gl_accounts
-    for insert to authenticated
-    with check ((select public.is_member(tenant_id)) and (select public.can_write_accounts(tenant_id)));
-
-  create policy gl_accounts_update on public.gl_accounts
-    for update to authenticated
-    using ((select public.is_member(tenant_id)) and (select public.can_write_accounts(tenant_id)))
-    with check ((select public.is_member(tenant_id)) and (select public.can_write_accounts(tenant_id)));
-
-  create policy gl_accounts_delete on public.gl_accounts
-    for delete to authenticated
-    using ((select public.is_member(tenant_id)) and (select public.can_write_accounts(tenant_id)));
-end $$;
+-- One difference worth naming rather than silently accepting: 0036's policies
+-- read `can_read_purchases(tenant_id)` where this pair read
+-- `is_member(tenant_id) and can_read_accounts(tenant_id)`. They are equivalent —
+-- `has_role()` filters `memberships.tenant_id = t` itself, so membership is
+-- already implied — and 0017's billing policies have been written the shorter
+-- way since they shipped. Nothing is narrower or wider than it was.
 
 -- ------------------------------------------------ an item carries its codes --
 -- The income account a line for this item is coded to, and the item's code as
@@ -189,12 +140,7 @@ language sql stable security definer set search_path = public as $$
 $$;
 
 -- ------------------------------------------------------------------ grants ---
-revoke all on function public.can_read_accounts(uuid) from public, anon;
-revoke all on function public.can_write_accounts(uuid) from public, anon;
 revoke execute on function public.xero_connection_status(uuid) from public, anon;
-
-grant execute on function public.can_read_accounts(uuid) to authenticated, service_role;
-grant execute on function public.can_write_accounts(uuid) to authenticated, service_role;
 grant execute on function public.xero_connection_status(uuid) to authenticated, service_role;
 
 -- ------------------------------------------------- assert its own outcome ----
@@ -224,67 +170,48 @@ begin
     raise exception '0037: % item(s) arrived with a Xero code', v_count using errcode='P0001';
   end if;
 
-  -- 2. The permissive `for all` is gone and four explicit policies replace it.
-  --    Checked by name *and* by command, because the failure that matters is a
-  --    `for all` surviving beside them and re-granting SELECT (the 0033 trap).
+  -- 2. `gl_accounts` is gated, and it is **0036's** gate that does it. Asserted
+  --    from here rather than left to 0036 alone, because this migration is what
+  --    puts a Xero code on the table and the question "who can read that?" is
+  --    answered by those policies. Checked by outcome — no permissive `for all`
+  --    survives (its USING half would re-grant SELECT, the 0033 trap) and the
+  --    read names the gate — rather than by counting policies, which would
+  --    couple this file to how many verbs 0036 chose to split its writes into.
   if exists (select 1 from pg_policy
-              where polrelid='public.gl_accounts'::regclass and polname='gl_accounts_member') then
-    raise exception '0037: the permissive gl_accounts_member policy survived' using errcode='P0001';
+              where polrelid='public.gl_accounts'::regclass and polcmd='*' and polpermissive) then
+    raise exception '0037: a permissive `for all` policy remains on gl_accounts' using errcode='P0001';
   end if;
-  if exists (select 1 from pg_policy
-              where polrelid='public.gl_accounts'::regclass and polcmd='*') then
-    raise exception '0037: a `for all` policy remains on gl_accounts' using errcode='P0001';
-  end if;
-
-  select count(*) into v_count from pg_policy where polrelid='public.gl_accounts'::regclass;
-  if v_count <> 4 then
-    raise exception '0037: gl_accounts carries % policies, expected 4', v_count using errcode='P0001';
+  if coalesce((select pg_get_expr(polqual, polrelid) from pg_policy
+                where polrelid='public.gl_accounts'::regclass and polname='gl_accounts_read'), '')
+     not like '%can_read_purchases%' then
+    raise exception '0037: gl_accounts_read is not 0036''s gate — the chart of accounts '
+      'now carries a Xero code and must not be readable tenant-wide' using errcode='P0001';
   end if;
 
-  -- 3. Every policy still carries a membership check. Rewriting policies is how
-  --    a tenancy clause gets dropped by accident — 0028 exists because exactly
-  --    that happened one migration earlier.
-  --
-  --    Matched on either spelling, because the other branch's gate reaches
-  --    membership through `has_role()` inside `can_*_purchases()` rather than
-  --    naming `is_member` beside it. Both are membership-scoped; asserting our
-  --    spelling alone would fail on a database that is correctly gated.
-  select count(*) into v_count from pg_policy
-   where polrelid='public.gl_accounts'::regclass
-     and coalesce(pg_get_expr(polqual, polrelid), '')
-         || coalesce(pg_get_expr(polwithcheck, polrelid), '')
-         ~ '(is_member|can_read_accounts|can_write_accounts|can_read_purchases|can_write_purchases)';
-  if v_count <> 4 then
-    raise exception '0037: only % of 4 gl_accounts policies carry a membership check', v_count
-      using errcode='P0001';
+  -- 3. The write gate is narrower than the read gate, which is the entire point
+  --    of having two: the auditor reads the books and does not change them.
+  if pg_get_functiondef('public.can_write_purchases(uuid)'::regprocedure) like '%auditor%' then
+    raise exception '0037: can_write_purchases admits the auditor' using errcode='P0001';
+  end if;
+  if pg_get_functiondef('public.can_read_purchases(uuid)'::regprocedure) not like '%auditor%' then
+    raise exception '0037: can_read_purchases excludes the auditor' using errcode='P0001';
   end if;
 
-  -- 4. The write gate really is narrower than the read gate, which is the
-  --    entire point of having two. If these ever became the same set somebody
-  --    would rightly delete one.
-  if pg_get_functiondef('public.can_write_accounts(uuid)'::regprocedure) like '%auditor%' then
-    raise exception '0037: can_write_accounts admits the auditor' using errcode='P0001';
-  end if;
-  if pg_get_functiondef('public.can_read_accounts(uuid)'::regprocedure) not like '%auditor%' then
-    raise exception '0037: can_read_accounts excludes the auditor' using errcode='P0001';
-  end if;
-
-  -- 5. Not archivable, so there was no `archived_at` clause to preserve. Stated
-  --    as an assertion rather than a comment, because if this table is ever
-  --    added to the archive set these policies have to be rewritten with it.
+  -- 4. Not archivable, so 0036's policies had no `archived_at` clause to
+  --    preserve. Stated as an assertion rather than a comment, because if this
+  --    table is ever added to the archive set those policies must be rewritten
+  --    with it — the 0028 trap, checked from the other direction.
   if 'gl_accounts' = any (public.archivable_tables()) then
-    raise exception '0037: gl_accounts is archivable and these policies dropped its clause'
+    raise exception '0037: gl_accounts is archivable and its policies carry no clause'
       using errcode='P0001';
   end if;
 
-  -- 6. Nothing new is reachable without a login (0011, 0029).
-  if has_function_privilege('anon', 'public.can_read_accounts(uuid)', 'EXECUTE')
-     or has_function_privilege('anon', 'public.can_write_accounts(uuid)', 'EXECUTE')
-     or has_function_privilege('anon', 'public.xero_connection_status(uuid)', 'EXECUTE') then
+  -- 5. Nothing new is reachable without a login (0011, 0029).
+  if has_function_privilege('anon', 'public.xero_connection_status(uuid)', 'EXECUTE') then
     raise exception '0037: anon can execute a new function' using errcode='P0001';
   end if;
 
-  -- 7. 0026's posture on the token table must survive the re-created function.
+  -- 6. 0026's posture on the token table must survive the re-created function.
   if has_table_privilege('authenticated', 'public.xero_connections', 'SELECT') then
     raise exception '0037: authenticated can read xero_connections' using errcode='P0001';
   end if;

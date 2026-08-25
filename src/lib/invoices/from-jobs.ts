@@ -7,6 +7,7 @@ import { toZonedDate } from "@/lib/domain/timezone";
 import { isBillingMethod, type BillingMethod } from "@/lib/domain/billing";
 import { groupJobsForInvoicing } from "@/lib/domain/invoice-grouping";
 import { consolidateChargeLines, type ChargeEntry } from "@/lib/domain/invoice-consolidation";
+import { accountForLine, incomeAccountsForItems } from "@/lib/invoices/account-coding";
 import { logOrderActivity } from "@/lib/orders/activity";
 import { loadChargesForJobs, type StoredCharge } from "@/lib/orders/job-billing";
 
@@ -202,6 +203,12 @@ async function writeInvoiceForGroup(
     };
   }
 
+  // The GL code, inherited from the item. `lib/invoices/account-coding.ts` holds
+  // the rule and the reasoning; both invoice writers share it so they cannot drift.
+  const accountByItem = await incomeAccountsForItems(
+    supabase, session.tenantId, lines.map((line) => line.source_item_id),
+  );
+
   const { error: lineError } = await supabase.from("invoice_lines").insert(
     lines.map((line, index) => ({
       tenant_id: session.tenantId,
@@ -209,6 +216,7 @@ async function writeInvoiceForGroup(
       invoice_id: invoice.id,
       laundry_order_id: line.jobId,
       item_id: line.source_item_id,
+      gl_account_id: accountForLine(line.source_item_id, accountByItem),
       agreement_id: line.source_agreement_id,
       description: line.description,
       charge_type: line.charge_type,

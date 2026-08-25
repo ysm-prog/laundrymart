@@ -372,7 +372,7 @@ describe("ordering a run (routes.sequence)", () => {
 describe("the chart of accounts (0037)", () => {
   /*
    * `/accounts` is gated on `purchases.read` and its new create/edit actions on
-   * `purchases.write`. `can_read_accounts()` and `can_write_accounts()` are the
+   * `purchases.write`. `can_read_purchases()` and `can_write_purchases()` are the
    * database's copies of those two sets, and `accounts_scope.test.sql` proves
    * them by reading and writing as each role — so if either list moves here,
    * one of the two will disagree and a screen will offer something the policy

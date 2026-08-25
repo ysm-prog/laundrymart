@@ -9,10 +9,10 @@ import {
 } from "@/components/ui";
 import { Field, Input, Select, SubmitButton } from "@/components/form";
 import { ListControls } from "@/components/list-controls";
+import { IncomeAccountField } from "./income-account-field";
 import { ITEM_TYPES, ITEM_TYPE_LABELS } from "@/lib/domain/laundry-orders";
 import { ITEM_CATEGORIES } from "./categories";
 import { createItem } from "./actions";
-import { accountOptionLabel, listIncomeAccounts } from "@/lib/accounts";
 
 export const metadata = { title: "Items" };
 export const dynamic = "force-dynamic";
@@ -55,7 +55,7 @@ async function ItemList({ params }: { params: Search }) {
     .select("id, sku, item_code, name, description, category, laundry_category, " +
             "ownership_type, is_sell, is_buy, sell_price, cost_price, tax_code, " +
             "replacement_cost, rental_price, wash_only_price, weight_kg, reorder_level, " +
-            "myob_item_id, myob_item_code, external_synced_at, status")
+            "myob_item_id, myob_item_code, external_synced_at, income_account_id, status")
     .is("deleted_at", null)
     // By code, because that is what the list is scanned by. Staff look for
     // TOW001 and read down; alphabetical by name puts the towels in three places.
@@ -114,7 +114,6 @@ const LAUNDRY_CATEGORY_OPTIONS = ITEM_TYPES.map((value) => ({
  * one read for a role that cannot see this form at all.
  */
 async function NewItemForm({ tenantId }: { tenantId: string }) {
-  const accounts = await listIncomeAccounts(await createClient(), tenantId);
   return (
     <Card
       title="Add an item"
@@ -156,15 +155,7 @@ async function NewItemForm({ tenantId }: { tenantId: string }) {
         <Field label="Tax code" name="tax_code" hint="As it is in your books — GST, FRE.">
           <Input name="tax_code" placeholder="GST" />
         </Field>
-        <Field label="Income account" name="income_account_id"
-               hint="Where an invoice line for this item is coded. Used when the invoice goes to Xero.">
-          <Select name="income_account_id" placeholder="Not coded"
-                  options={accounts.map((a) => ({ value: a.id, label: accountOptionLabel(a) }))} />
-        </Field>
-        <Field label="Xero item code" name="xero_item_code"
-               hint="This item's code in Xero, if it has one. Blank means no ItemCode is sent.">
-          <Input name="xero_item_code" placeholder="TOW001" />
-        </Field>
+        <IncomeAccountField tenantId={tenantId} />
         <Field label="MYOB item ID" name="myob_item_id"
                hint="Optional. Filled in by an import; kept so the two systems can be reconciled.">
           <Input name="myob_item_id" />
