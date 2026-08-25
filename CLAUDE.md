@@ -3994,6 +3994,12 @@ The client's rule, in one sentence: **management determines the order of the run
 execute it.** The Runs screen has ordered a board's day since 2026-08-20; what 0036 adds is the
 authority, the lock and the concurrency.
 
+**`docs/REQUIREMENTS-RUN-SEQUENCING.md` is the client-facing statement of this feature** — the
+master specification of 2026-08-25 restated as requirements and reconciled against what was
+built, with the verification evidence, the six places the delivered system departs from the
+original wording, and the known limits. This section stays the engineering rationale; that
+document is what to hand somebody asking what the feature does.
+
 - **`routes.sequence`, not `routes.write`.** Planning a day and deciding the order of the calls
   turned out to be two decisions. `routes.write` is held by the dispatcher, the branch manager
   and the regional manager; the requirement names two roles, so ordering got its own capability
