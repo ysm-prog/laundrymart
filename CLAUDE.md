@@ -1507,6 +1507,37 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-08-25 · The audit record is a rule, not a literal
+The last item in the specification that could be closed without a login. **No migration; no
+schema, RLS, capability or workflow change** — one payload moved and gained tests.
+
+**§15 and §23 ask that every successful save record the previous order, the new order, the
+board, the date, the actor, their role and a timestamp — and nothing could check that.** The
+record was an object literal inside `reorderRunStops`, and a `"use server"` module may export
+nothing but server actions, so it was unreachable from a test. That is the trap this file
+records three times over (the job form's items, the planner's whole board, the magic-link rule),
+and two of those three shipped broken behind a green `verify`.
+
+- `buildSequenceAudit` is now a pure rule in `sequence.ts` with the requirement's list asserted
+  field by field, driven off the requirement rather than off the implementation — so a field
+  quietly dropped fails a test. Confirmed by dropping the actor's role and watching it fail.
+- **Both orders are copied, not aliased.** The action passes arrays it still owns; a record
+  holding them could change after the fact, which is the one thing an audit row must not do.
+  Also confirmed by breaking it.
+- **No timestamp is recorded**, deliberately: `audit_logs.created_at` defaults to `now()`, and a
+  client's idea of the time would be a second answer to when this happened — the wrong one.
+- Two conformance details checked rather than assumed while closing this out: `/runs` and
+  `/my-runs` are both `force-dynamic`, which is the mechanism behind §23's "a refresh, a fresh
+  login and another device all show the saved order"; and `formatAdelaideDate(date, "long")`
+  really does render §19's *"Tuesday, 25 August 2026"*, comma included.
+- 780 unit tests (was 773) and 417 pgTAP assertions (unchanged — this adds no policy). `verify`
+  green; all thirty-eight migrations against a fresh Postgres 16 with the seed on top.
+
+**What is left of that specification is one thing, and it needs a login:** taking a real run
+through Adjust Run → Save & Lock Run as `owner@roles.example.com` on `ats.coreit.com.au`.
+Everything else is proved at the database level, in the component gallery, by live probe, or by
+the pure rules above.
+
 ### 2026-08-25 · A line's own account code is the one that reaches Xero
 Working the backlog the requirements document leaves open. One migration (`0038`), **no new
 table, no new policy, no new function, no new capability, and no row changed** — the column it

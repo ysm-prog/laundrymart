@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  SEQUENCE_CONFLICT, SEQUENCE_SAVED,
+  SEQUENCE_CONFLICT, SEQUENCE_SAVED, buildSequenceAudit,
   checkSequence, isMovable, isReordered, lockReason, movedCount, moveStop, moveStopTo,
   parseSequencePlan, type OrderableStop,
 } from "../sequence";
@@ -219,5 +219,80 @@ describe("what the board actually posts", () => {
     const again = parseSequencePlan(posted(moveStop(first.plan.stops, C, "up"), 2));
     expect(again.ok && again.plan.stops).toEqual([A, C, B]);
     expect(again.ok && again.plan.expected_version).toBe(2);
+  });
+});
+
+describe("the audit record (§15, §23)", () => {
+  const RUN = "44444444-4444-4444-8444-444444444444";
+  const ACTOR = "55555555-5555-4555-8555-555555555555";
+  const audit = (over: Partial<Parameters<typeof buildSequenceAudit>[0]> = {}) =>
+    buildSequenceAudit({
+      boardId: BOARD, date: "2026-08-25", runIds: [RUN],
+      previous: [A, B, C], next: [C, A, B],
+      actorId: ACTOR, role: "operations_manager", version: 4, ...over,
+    });
+
+  it("records every field the requirement names", () => {
+    // Driven off the requirement's own list rather than off the implementation,
+    // so a field quietly dropped from the record fails here.
+    const record = audit();
+    expect(record.entity).toBe("daily_route");
+    expect(record.entityId).toBe(RUN);
+    expect(record.action).toBe("update");
+    for (const key of [
+      "boardId", "runDate", "previousSequence", "newSequence", "changedBy", "role",
+    ] as const) {
+      expect(record.metadata[key], `missing ${key}`).toBeDefined();
+    }
+    expect(record.metadata.boardId).toBe(BOARD);
+    expect(record.metadata.runDate).toBe("2026-08-25");
+    expect(record.metadata.changedBy).toBe(ACTOR);
+    expect(record.metadata.role).toBe("operations_manager");
+  });
+
+  it("keeps both orders in full, not a count of what moved", () => {
+    // The question an audit log gets asked about a run that went wrong is "what
+    // was it before?", and a movement count cannot answer it.
+    const record = audit();
+    expect(record.metadata.previousSequence).toEqual([A, B, C]);
+    expect(record.metadata.newSequence).toEqual([C, A, B]);
+  });
+
+  it("does not stamp its own time", () => {
+    // `audit_logs.created_at` defaults to now() in the database. A second answer
+    // to when this happened would be the wrong one.
+    expect(Object.keys(audit().metadata)).not.toContain("timestamp");
+    expect(Object.keys(audit().metadata)).not.toContain("at");
+  });
+
+  it("copies the orders rather than holding the caller's arrays", () => {
+    // The action passes arrays it still owns. A record that aliased them would
+    // change after the fact, which is the one thing an audit row must not do.
+    const previous = [A, B, C];
+    const next = [C, A, B];
+    const record = buildSequenceAudit({
+      boardId: BOARD, date: "2026-08-25", runIds: [RUN],
+      previous, next, actorId: ACTOR, role: "super_admin", version: 2,
+    });
+    previous.push("mutated");
+    next.length = 0;
+    expect(record.metadata.previousSequence).toEqual([A, B, C]);
+    expect(record.metadata.newSequence).toEqual([C, A, B]);
+  });
+
+  it("agrees with the sentence it writes", () => {
+    const record = audit();
+    expect(record.metadata.movedCount).toBe(movedCount([A, B, C], [C, A, B]));
+    expect(record.summary).toContain(`${record.metadata.movedCount} stop(s) moved`);
+    expect(record.summary).toContain("2026-08-25");
+  });
+
+  it("names the run it changed, falling back to the board when there is none", () => {
+    expect(audit({ runIds: [] }).entityId).toBe(BOARD);
+    expect(audit().metadata.runIds).toEqual([RUN]);
+  });
+
+  it("records the version the save produced, so a trail can be replayed in order", () => {
+    expect(audit({ version: 9 }).metadata.sequenceVersion).toBe(9);
   });
 });
