@@ -1539,6 +1539,12 @@ the hour, the trigger proved to still derive the code afterwards, advisors settl
   Right observation, wrong reason — **and the wrong reason is what made 0036's revoke look
   correct.** A note that explains a clean result by the wrong mechanism is worse than no note.
 
+**Merged to `Prod` on 2026-08-25** (`315f238`), a clean fast-forward, so it is live on
+`ats.coreit.com.au`. CI green on all three jobs — verify, gitleaks, and the DB job against a fresh
+Postgres 16 with the whole pgTAP suite and the seed, **now on the stricter `pg-bootstrap.sql`**. The
+migration went on **before** the merge, so the schema led the code: the safe order, and the same one
+the 2026-08-18 and 2026-08-20 entries record. `Dev` was not merged and is 2 commits behind.
+
 **Still not verified end to end:** set an income account on a few items, add a line each way on a
 draft, read the PDF, and push one invoice to Xero. **The account code reaching Xero is the one to
 watch** — it is the first time that field has ever been populated.
