@@ -607,7 +607,9 @@ renders no tab strip. Tested in `src/lib/__tests__/nav.test.ts`.
   no row.** Every new column is nullable and null, so an item nobody has coded pushes exactly
   the payload it pushed before. `gl_accounts` is deliberately not in `archivable_tables()`, so
   unlike 0028 there was no `archived_at` clause to preserve when the policies were rewritten —
-  asserted rather than assumed. Seven self-assertions.
+  asserted rather than assumed. Seven self-assertions. **Applied to the hosted project in a
+  reconciled form** — the policy half was already done there by an unmerged branch's
+  `0036_invoice_account_codes`, with identical role lists; see §11.
 - `0013_notifications` — `tenants.settings jsonb` (AD-3) and the `notifications` table
   (AD-4). Beware the numbering drift: the unmerged branch
   `claude/warehouse-inventory-flow-psooyq` carries its own `0012_return_count.sql`, which
@@ -952,18 +954,54 @@ ledger's last four entries are `0032_item_master`, `0033_laundry_prices_read`,
 `0034_counter_takes_jobs` and `0035_audit_log_read`. 0020–0024 are the renumbered branch migrations, already live under their original
 names (§7).
 
-**`0036_run_sequence_control` and `0037_account_and_item_codes` have NOT been applied.** They are
-the two migrations in this file the hosted project does not carry. 0037 is the more urgent of the
-two to *not* forget: until it lands, `gl_accounts` still carries 0021's permissive `for all`
-policy, so every member of the laundry can read the chart of accounts with its balances and
-rewrite it through PostgREST — and the new Accounts screen will offer an Owner a create form
-whose refusals are not yet enforced underneath.
+**`0036_run_sequence_control` and `0037_account_and_item_codes` were applied on 2026-08-25**, in
+that order — and the pre-flight turned up a collision that changed what 0037 could be.
 
-**`0036_run_sequence_control` has NOT been applied.** It is the one migration in this file the
-hosted project does not carry. Until it is, `routes.sequence` narrows the *screens* and the
-database still lets any member — a driver included — rewrite `jobs.sequence` through PostgREST,
-which is the half that matters. Apply it before trusting the boundary; it is self-asserting and
-`apply_migration` is atomic, so a failed assertion rolls the whole thing back.
+**There is a third `0036` on this project, from a branch not in this repo.**
+`0036_invoice_account_codes` was applied the same day from `claude/…invoice-account-codes` and
+does much of what our 0037 does: `can_read_purchases()`/`can_write_purchases()` — **the same two
+role lists** as our `can_read_accounts()`/`can_write_accounts()` — the identical four-policy
+rewrite of `gl_accounts` (same names), `items.income_account_id`, and additionally
+`invoice_lines.gl_account_id` + `invoice_lines.account_code` with a `sync_invoice_line_account`
+snapshot trigger. So **the chart of accounts was already closed before we got there**, which is
+why §7's warning about it is now historical rather than live.
+
+Our 0037 was therefore applied **reconciled**: only the four Xero-code columns
+(`gl_accounts.xero_account_code`, `items.xero_item_code`,
+`xero_connections.sales_account_code`/`_name`) and the re-created `xero_connection_status()`.
+Its policy half was skipped, because re-running it would fail on 42710 and, if forced, would
+leave `gl_accounts` gated differently from the five sibling tables that branch gates the same
+way. The repo file is unchanged and still correct for a fresh database; the ledger entry records
+the difference. Same shape as the 0018 convergence above, and the same remedy.
+
+- **After `0036_run_sequence_control`**, probed as **real sessions** in transactions that were
+  then aborted. The board and the dispatcher — both of which can *see* the run — were refused
+  `42501` with the sentence *"the order of a run is set by the office, and your role cannot
+  change it"*, and both were refused the unlock. A driver was lent one of the board's stops
+  inside the same rolled-back transaction (there is no ordinary driver login on this deployment
+  that can see a stop, so probing without that would have proved only RLS filtering, not the
+  guard) and, **seeing the row**, was refused identically. The office manager saved a real order
+  and the version moved 1 → 2; reversing it was refused *"that stop has already been worked"*;
+  and a stale session replaying version 1 got the concurrency sentence. Afterwards: 11 runs all
+  `sequence_locked` at version 1, both guards attached, **0 duplicate positions**, and 16 stops /
+  8 laundry jobs / 647 invoices / 20 memberships / 5 boards / 508 archived customers all
+  untouched.
+- **After `0037`**, nothing arrives coded — **0** accounts and **0** items carry a Xero code — so
+  the payload every invoice pushes is exactly the payload it pushed before. `xero_connection_status()`
+  now returns the sales account (8 columns), `authenticated` still cannot read `xero_connections`
+  (0026's posture survived the re-create), and an owner and an office manager can both **add an
+  account** while a driver, a board and the counter are refused `42501`.
+- **Advisors went 18 → 22**: `can_write_run_sequence` and `compact_run_sequence` from ours, plus
+  `can_read_purchases`/`can_write_purchases` from that other branch. All the documented definer
+  shape. `guard_job_sequence` and `guard_run_sequence_control` are **not** on the list, because
+  their EXECUTE is revoked — the trigger-function trap 0019 recorded. **0** `anon` table grants,
+  **0** `anon`-executable functions and **0** tables without RLS throughout.
+
+**Two things the read-back turned up that are the owner's, not the code's.** The chart of
+accounts (268 rows) belongs to **Adelaide**, which holds **no items**; the six items belong to
+**Harbour**, which holds **no accounts**. So coding an item to an account needs one or the other
+filling in first. And all **647 invoices carry 0 `invoice_lines`** — they came from the import as
+headers — so there is nothing yet for the Xero line coding to act on.
 
 **`0031_boards` and `0032_item_master` were applied on 2026-08-20**, in that order, each
 verified before the next. **`0033_laundry_prices_read` followed the same day.**
@@ -1501,10 +1539,13 @@ this app has pushed landed in Xero uncoded, to be sorted out by hand; no `ItemCo
   (`invoice_lines → items`, `items → gl_accounts`). An ambiguous embed is compile-clean, test-
   clean and dead in production with PGRST201, which this repo has shipped once.
 
-**Not applied to `laundrymart-syd`.** This container has no Supabase credentials, so 0036 and
-0037 are the two migrations in §7 the hosted project does not carry. **0037 is the one to apply
-first**: until it does, the new Accounts screen offers an Owner a create form whose refusals are
-not enforced underneath, and the chart of accounts remains readable and writable by every member.
+**Applied to `laundrymart-syd` on 2026-08-25** — §11 has the read-backs. 0037 went on in a
+**reconciled** form: an unmerged branch's `0036_invoice_account_codes` had already closed
+`gl_accounts` with the same four policies and the same two role lists, so only the four Xero-code
+columns and the re-created `xero_connection_status()` were applied. Verified afterwards as real
+sessions: an owner and an office manager can add an account, a driver, a board and the counter
+are refused 42501, and **0** accounts and **0** items carry a Xero code — so every invoice pushes
+exactly the payload it pushed before.
 
 ### 2026-08-25 · The run is locked, and only the office may change its order
 The client's controlled-sequencing requirement, built on the existing
@@ -1568,11 +1609,12 @@ design; §3, §4, §7 and §11 the consequences.
   restoring the exact saved order and returning to locked, a board seeing no control at all, and
   a worked stop disabled with a reason beside it. Zero console errors, zero overflow.
 
-**Not applied to `laundrymart-syd`.** This container has no Supabase credentials, so 0036 is the
-one migration in §7 the hosted project does not carry — and until it is applied the *screens* are
-narrowed while the database still lets a driver rewrite `jobs.sequence` off PostgREST. **Before
-trusting the boundary: apply 0036, then sign in as `driver@roles.example.com` and confirm the
-order cannot be changed, and as `owner@roles.example.com` that it can.**
+**Applied to `laundrymart-syd` on 2026-08-25** — §11 has the read-backs. The boundary was proved
+against real rows rather than assumed: a board and a dispatcher that can *see* the run were both
+refused 42501 with the sentence, a driver lent a stop inside a rolled-back transaction was
+refused identically **while seeing the row**, the office manager saved a real order (version
+1 → 2), moving a worked stop was refused, and a stale session replaying the old version got the
+concurrency message. 11 runs locked at version 1, 0 duplicate positions, every count unchanged.
 
 ### 2026-08-24 · Auth emails go through Resend, so no SMTP is needed
 The owner's instruction, and it closes the longest-standing open item in this file. **No

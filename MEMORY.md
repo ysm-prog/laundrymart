@@ -1,7 +1,53 @@
 # MEMORY — working session handoff
 > Auto-loaded each session. Canonical state is CLAUDE.md; this is the live delta.
 
-## Latest: the Owner keeps the codes, and the codes reach Xero
+## Latest: 0036 and 0037 are live on `laundrymart-syd`
+2026-08-25. Both applied and verified by read-back. CLAUDE.md §11 has the full record.
+
+**The pre-flight turned up a collision, and it changed what 0037 could be.** A third `0036` —
+`0036_invoice_account_codes`, from a branch not in this repo — was applied to the project the
+same day and had already done most of our 0037's policy work: `can_read_purchases()` /
+`can_write_purchases()` with **the same two role lists** as our `can_*_accounts()`, the identical
+four-policy rewrite of `gl_accounts` (same policy names), and `items.income_account_id`. It also
+added `invoice_lines.gl_account_id` + `account_code` with a `sync_invoice_line_account` trigger.
+- So our 0037 went on **reconciled**: only the four Xero-code columns
+  (`gl_accounts.xero_account_code`, `items.xero_item_code`, `xero_connections.sales_account_code`
+  /`_name`) and the re-created `xero_connection_status()`. Re-running the policy half would have
+  failed 42710, and forcing it would have left `gl_accounts` gated differently from the five
+  sibling tables that branch gates the same way. **The repo file is unchanged and still right for
+  a fresh database**; the ledger entry records the difference. Same shape as the 0018 convergence.
+
+**⚠️ Open, and the owner's call: two answers to "what account is this invoice line coded to".**
+That branch snapshots `invoice_lines.account_code` at write time via a trigger. Our `push.ts`
+ignores that column and resolves the code at push time from
+`invoice_lines.item_id → items.income_account_id → gl_accounts.xero_account_code`. Both are now
+live. If a bookkeeper codes a line explicitly, our push would send the *item's* code instead —
+so this wants deciding before the first real Xero push, and it is a small fix either way
+(prefer `invoice_lines.account_code` when present, fall back to the item).
+
+**Verified live, as real sessions in rolled-back transactions:**
+- **0036** — board and dispatcher, both of which can *see* the run, refused 42501 with the
+  sentence; both refused the unlock. A driver was **lent a stop** inside the rolled-back
+  transaction (no ordinary driver login on this deployment can see one, so probing without that
+  proves RLS filtering, not the guard) and, seeing the row, was refused identically. Office
+  manager saved a real order, version 1 → 2. Moving a worked stop refused. Stale session got the
+  concurrency sentence. After: 11 runs locked at v1, both guards attached, **0 duplicate
+  positions**, all counts unchanged (16 stops / 8 jobs / 647 invoices / 20 memberships / 5 boards
+  / 508 archived customers).
+- **0037** — **0** accounts and **0** items carry a Xero code, so every invoice pushes exactly
+  the payload it pushed before. `xero_connection_status()` returns 8 columns now; `authenticated`
+  still cannot read `xero_connections`. Owner and office manager can **add an account**; driver,
+  board and counter refused 42501.
+- **Advisors 18 → 22** (+2 ours, +2 that branch's). Our two trigger functions are correctly
+  **absent** — EXECUTE revoked, the 0019 trap avoided. 0 anon table grants, 0 anon functions,
+  0 tables without RLS.
+
+**Two data facts worth knowing before trying it:** the chart of accounts (268 rows) is
+**Adelaide's**, which has **no items**; the six items are **Harbour's**, which has **no
+accounts**. And all **647 invoices carry 0 invoice_lines** (import headers), so there is nothing
+yet for the line coding to act on.
+
+## Previously: the Owner keeps the codes, and the codes reach Xero
 2026-08-25, same branch. One migration (`0037`), **no new table, no dropped column, no row
 changed, no new capability**. CLAUDE.md §20 and §25 hold the design; §3, §7, §11 and the newest
 changelog entry the rest.
@@ -292,18 +338,16 @@ fast-forwards, and Dev absorbed the 18-commit backlog the changelog kept recordi
   a platform admin**, and its price list is still empty, so `LJ00002` was priced by hand.
 
 ## Do these next
-- **Apply `0037_account_and_item_codes` to `laundrymart-syd`, then `0036`.** 0037 first because
-  the chart of accounts is currently readable *and writable* by every member — a driver included
-  — and the new Accounts screen assumes otherwise. Both are self-asserting and `apply_migration`
-  is atomic. Afterwards: sign in as `driver@roles.example.com` and confirm `/accounts` is not
-  reachable and the chart reads 0 rows, and as `owner@roles.example.com` add one account, code it
-  to Xero, point an item at it, and push one invoice.
-- **Apply `0036_run_sequence_control` to `laundrymart-syd`.** The most urgent item here, because
-  until it lands the *screens* refuse a driver and the *database* does not — a driver's session
-  can still PATCH `jobs.sequence` on their own run through PostgREST. Self-asserting and
-  `apply_migration` is atomic, so a failed assertion rolls it back. Afterwards: sign in as
-  `driver@roles.example.com` and confirm no Adjust Run and no way to reorder, and as
-  `owner@roles.example.com` that Adjust Run → Save & Lock Run persists and re-locks.
+- **Decide the invoice-line coding overlap** (see the warning above). Two designs are live for
+  "what account is this line coded to"; our push path reads the item, that branch's trigger
+  snapshots the line. Decide before the first real Xero push.
+- **Reconcile the two `0036`s when that branch merges.** The repo will then hold two migrations
+  numbered 0036 and a duplicate helper pair (`can_*_accounts` vs `can_*_purchases`) with
+  identical role lists. Renumber and collapse to one pair — the same job §7 records for the two
+  0017s and the two 0015s.
+- **Open the screens with real rows.** Both migrations are verified at the database level; no
+  authenticated page has been rendered against them. Sign in as `owner@roles.example.com`:
+  Adjust Run → Save & Lock Run on a real board, and add one account at `/accounts`.
 - **Open it with real rows in it.** This container has no Supabase credentials, so no
   authenticated screen was rendered. Sign in as `owner@roles.example.com`, press each card on the
   home screen, and set the text to Biggest on a phone.
