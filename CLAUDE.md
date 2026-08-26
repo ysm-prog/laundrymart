@@ -2557,12 +2557,61 @@ the write is scoped to another's.
 - A link inside the open coding dialog was removed rather than resized: it navigated away
   from an unsaved form, which is a trap dressed as a convenience.
 
-**Applied to nothing yet — `0044` has not gone on `laundrymart-syd`.** Every release since
-2026-08-18 records the schema leading the code, and this one still needs that: apply the
-migration first, then merge. **Then, before trusting it: open a draft invoice on
-`ats.coreit.com.au`, press the code on the fuel line and give it an account; set Money ›
-Charge accounts › Fuel levy to the same account; approve a second job for that customer
-and confirm the fuel line on the draft comes back coded without anybody touching it.**
+**Applied to `laundrymart-syd` on 2026-08-26** as `charge_type_accounts`, now the ledger's
+last entry (49, was 48) — **before** the merge, so the schema led the code as every release
+since 2026-08-18 records. **The project therefore carries two migrations numbered 0044**,
+this one and `item_master_detail`; they touch disjoint objects, so unlike the 0036/0037 pair
+there was nothing to reconcile.
+
+- **The pre-flight check that mattered passed.** The live `guard_job_charge_snapshot` body
+  was confirmed **byte-identical to this repo's 0017** — `md5(prosrc)` compared against the
+  same hash computed on a local Postgres built from `supabase/migrations/` **with this
+  migration held back**, which is a sharper comparison than reading it. So the rebuild could
+  not silently revert an unmerged branch's work: the trap the 2026-08-20 entry records, and
+  the reason it is checked *before* rather than after. `charge_type_accounts` and
+  `guard_charge_type_account` were absent, both `purchases` gates present, **0** `anon`
+  table grants and **0** tables without RLS, so the migration's own assertions had something
+  real to pass.
+- **Applied directly rather than rehearsed, and that is the recorded practice for this
+  shape**: it carries nine self-assertions and `apply_migration` is atomic, which §18's
+  2026-08-24 entry gives as exactly what makes a self-asserting migration safe to apply in
+  one go. It returned clean, so all nine held.
+- **Both function bodies are byte-identical to the repo afterwards** — `34974e1e…` for
+  `guard_job_charge_snapshot` and `dd396a8a…` for `guard_charge_type_account`, each compared
+  against the same hash on a local database built from these files. That is the 0042
+  discipline, and it is what catches a transcription that differs by two characters in a
+  comment.
+- **Then proved behaviourally against the real row**, in a transaction that ended by
+  raising. `LJ00007`'s fuel charge — frozen, $50, uncoded, sitting on `INV00002` which is a
+  **draft** — was recoded and the write touched **1 row**. The row count is the assertion
+  that matters: a policy refusing a caller writes **zero rows with no error**, the silence
+  this project has shipped twice. In the same block: its amount was refused, its delete was
+  refused, a heading was refused, a duplicate charge type was refused, the recode was
+  refused once `INV00002` was set to `issued`, and deleting an account cleared the map's
+  default rather than dangling it. Nothing survived the rollback — **0** map rows, the
+  charge still uncoded, `INV00002` still a draft.
+- **And proved as seven real logins**, also rolled back: `board1@ats.example.com`, the
+  driver, the counter and the dispatcher each read **0** and wrote **0 rows**; the auditor
+  read **1** and wrote **0 rows**; finance and the owner read **1** and wrote **1 row**.
+  That is `can_read_purchases()` and `can_write_purchases()` exactly, told apart on live
+  data. The auditor's refusal is a silent zero rather than a raise, which is the UPDATE
+  behaviour `charge_accounts.test.sql` records and asserts by outcome.
+- **Advisors are 23**, unchanged — 22 documented SECURITY DEFINER helpers plus the auth
+  leaked-password toggle. **Neither new function is on the list**, so both revokes held
+  including `authenticated`: the trap 0019 recorded and 0036 shipped.
+- Counts untouched: 647 invoices, 268 accounts, 254 items, 509 customers, 18 memberships,
+  1 laundry, 1 job charge. **0** `anon` table grants, **0** tables without RLS.
+
+**One finding the apply turned up, and it changes the first thing to do.** `LJ00007`'s fuel
+charge is `charge_type = 'other'`, not `fuel_levy` — the screenshot's own Charge column says
+*Other*. So the default that codes **that** line is **Money › Charge accounts › Other**, not
+Fuel levy. Setting the fuel-levy default alone would leave it exactly as it is, which would
+read as the feature not working.
+
+**Still to do, and it needs a browser rather than a commit: open `INV00002` on
+`ats.coreit.com.au`, press the `—` on the `LJ00007 — fuel` line and give it an account; set
+Money › Charge accounts › Other to the same account; then approve a second job for that
+customer and confirm the fuel line comes back coded without anybody touching it.**
 ### 2026-08-26 · An item says what MYOB says about it, and the line says what the price means
 The owner opened all 257 of Adelaide's active items in MYOB one at a time and captured
 every field on the item page. Nine had nowhere to live in this schema, and two of those

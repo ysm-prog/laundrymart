@@ -55,10 +55,28 @@ code."* One migration (`0044`); **nothing dropped, no row changed, no capability
   overflow in-section, 0 targets <36px. Found the links at 18–23px; and a "clean" pass that
   was **measuring a dead server on the wrong port**, given away only by console errors.
 
-**NOT YET APPLIED to `laundrymart-syd`.** The schema must lead the code, as every release
-since 2026-08-18 records. Apply `0044`, then merge. Then, in a browser: code the fuel line
-on a draft, set Money › Charge accounts › Fuel levy to the same account, approve a second
-job for that customer, and confirm the rebuilt fuel line comes back coded unasked.
+**APPLIED to `laundrymart-syd`** on 2026-08-26 as `charge_type_accounts`, before the merge —
+the ledger's last entry (49). **Two migrations numbered 0044 are now live**, this one and
+`item_master_detail`; disjoint objects, nothing to reconcile.
+- Pre-flight: live guard body **byte-identical to this repo's 0017** (md5 vs a local build
+  with this migration held back), both new objects absent, 0 anon grants, 0 tables sans RLS.
+- After: both function bodies byte-identical to the repo (`34974e1e…`, `dd396a8a…`), 4
+  policies, 0 `for all`, neither function on the RPC surface, advisors **23** (unchanged).
+- Behaviour proved on the **real** row and rolled back: `LJ00007`'s frozen $50 fuel charge,
+  on draft `INV00002`, recoded — **1 row**, not a silent zero. Amount refused, delete
+  refused, heading refused, duplicate refused, recode refused once issued, account-delete
+  cleared the map. Nothing survived.
+- Seven real logins: board/driver/counter/dispatcher read 0 write 0; auditor reads 1 writes
+  0; finance and owner read 1 write 1 — `can_read_purchases` / `can_write_purchases` exactly.
+
+**The finding that changes the first step:** `LJ00007`'s fuel charge is
+`charge_type = 'other'`, **not** `fuel_levy`. The default that codes it is Money › Charge
+accounts › **Other**. Setting Fuel levy alone would leave the line uncoded and read as the
+feature not working.
+
+**Left to do, needs a browser:** open `INV00002`, press the `—` on `LJ00007 — fuel`, give it
+an account; set Charge accounts › Other to the same; approve a second job for that customer
+and confirm the fuel line comes back coded unasked.
 ## Also in this tree: MYOB's item page, and the line that reads it
 2026-08-26, branch `claude/functionality-request-fi8erj`. The owner captured every field on
 MYOB's item page for all 257 of Adelaide's active items; nine had nowhere to live here. One
