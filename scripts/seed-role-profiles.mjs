@@ -4,19 +4,29 @@
  *
  *   node --env-file=.env.local scripts/seed-role-profiles.mjs
  *   node --env-file=.env.local scripts/seed-role-profiles.mjs --dry-run
- *   node --env-file=.env.local scripts/seed-role-profiles.mjs --tenant "Harbour Commercial Laundry"
+ *   node --env-file=.env.local scripts/seed-role-profiles.mjs --tenant "Adelaide Towel Service"
  *   node --env-file=.env.local scripts/seed-role-profiles.mjs --remove --yes
  *
  * Idempotent: run it as often as you like. An address that already exists is
  * reused and its password reset to the one printed at the end, so a rerun is
  * also how you recover a test login nobody wrote down.
  *
+ * **These are no longer sandbox logins, and that changed on 2026-08-26.** The
+ * demo laundry was deleted when `Adelaide Towel Service` became the only tenant
+ * on this deployment, and the twelve profiles moved into it — so the default
+ * `--tenant` is now a real business and each profile reads whatever its role is
+ * allowed to read of real customers, real invoices and a real chart of
+ * accounts. That is what makes them useful for checking a capability change
+ * against the data people actually work with, and it is also why the shared
+ * password wants replacing with a per-profile sign-in link (People > Email
+ * sign-in link) rather than being passed around.
+ *
  * Two deliberate refusals:
  *
  *  - **`platform_admin` is skipped unless you pass `--platform-admin`.** It is
  *    not a membership (0019): the row goes in `platform_admins` and reaches
- *    *every* laundry on the project, so on a deployment that also holds a real
- *    tenant it is not a demo-tenant test login at all.
+ *    *every* laundry on the project, which is a different thing again from a
+ *    membership in one.
  *  - **`--remove` deletes a login only when nothing else points at it.** A test
  *    address that has since been given a membership somewhere else keeps its
  *    login and loses only what this script gave it.

@@ -15,11 +15,30 @@
 /** Domain for the generated addresses. `example.com` can never receive mail. */
 export const DEFAULT_EMAIL_DOMAIN = "roles.example.com";
 
-/** Shared password. Test logins, on a test tenant — printed on every run. */
+/**
+ * Shared password, printed on every run.
+ *
+ * **This stopped being "a test password on a test tenant" on 2026-08-26.** The
+ * demo laundry was deleted and these twelve profiles were moved into
+ * `Adelaide Towel Service`, which is a real business with 508 customers, 646
+ * invoices and a 268-line chart of accounts. A profile signed in as here reads
+ * whatever its role is allowed to read of *that*, so the shared password is now
+ * a credential on live data rather than on a sandbox. Reset it, or give each
+ * profile its own from People > Email sign-in link, before handing any of these
+ * to somebody outside the business.
+ */
 export const DEFAULT_PASSWORD = "RoleTest!2026";
 
-/** The demo laundry from `supabase/seed.sql`, resolved by name. */
-export const DEFAULT_TENANT = "Harbour Commercial Laundry";
+/**
+ * The laundry the memberships go in, resolved by name.
+ *
+ * `Adelaide Towel Service` since 2026-08-26: it is the only tenant on this
+ * deployment, so there is nowhere else for them to go. It was
+ * `Harbour Commercial Laundry`, the demo laundry from `supabase/seed.sql`,
+ * which no longer exists live — leaving that here would have made
+ * `npm run seed:roles` fail on a name nothing on the project answers to.
+ */
+export const DEFAULT_TENANT = "Adelaide Towel Service";
 
 /**
  * `note` is what the profile is *for* — the screen or the refusal worth

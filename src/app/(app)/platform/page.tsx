@@ -2,10 +2,11 @@ import { Suspense } from "react";
 import { requireCapability } from "@/lib/auth/context";
 import { createClient } from "@/lib/supabase/server";
 import {
-  Badge, Card, DataTable, EmptyState, PageHeader, SkeletonRows, StatusBadge,
+  Badge, ButtonLink, Card, DataTable, EmptyState, Notice, PageHeader, SkeletonRows, StatusBadge,
 } from "@/components/ui";
 import { Field, Input, Select, SubmitButton } from "@/components/form";
 import { createTenant, switchTenant, updateTenant } from "./actions";
+import { readPlatformSettings } from "./settings-shape";
 
 export const metadata = { title: "Laundries" };
 export const dynamic = "force-dynamic";
@@ -36,36 +37,73 @@ const STATUSES = [
 export default async function PlatformPage() {
   const session = await requireCapability("platform.read");
 
+  const supabase = await createClient();
+  const [{ data: stored }, { count }] = await Promise.all([
+    supabase.from("platform_settings").select("settings").eq("id", true).maybeSingle(),
+    // Head-only, and issued with the settings rather than after them.
+    supabase.from("tenants").select("id", { count: "exact", head: true }),
+  ]);
+  const { single_laundry: singleLaundry } = readPlatformSettings(stored?.settings);
+  // `guard_single_laundry` refuses a *second* laundry, not a first — the rule is
+  // "one", not "none", and a deployment has to be able to create the one it
+  // runs. So the form is still offered on an empty deployment; hiding it there
+  // would leave the switch a door that locks from the outside.
+  const pinned = singleLaundry && (count ?? 0) > 0;
+
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Laundries"
-        description="Every business running on this system. You are looking at one of them at a time — switching changes what the rest of the app shows you."
+        title={singleLaundry ? "This laundry" : "Laundries"}
+        description={singleLaundry
+          ? "This deployment is set up to run one laundry. Everything else in the app is about that one business."
+          : "Every business running on this system. You are looking at one of them at a time — switching changes what the rest of the app shows you."}
       />
 
       <Suspense fallback={<SkeletonRows rows={4} />}>
         <TenantList activeTenantId={session.tenantId} />
       </Suspense>
 
-      <Card
-        title="Add a laundry"
-        description="It starts empty. Invite its owner from People once you have switched to it."
-      >
-        <form action={createTenant} className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <Field label="Business name" name="name" required>
-            <Input name="name" required placeholder="Adelaide Towel Service" />
-          </Field>
-          <Field label="ABN" name="abn" hint="Optional. Shown on their invoices.">
-            <Input name="abn" inputMode="numeric" placeholder="12 345 678 901" />
-          </Field>
-          <Field label="Timezone" name="timezone">
-            <Select name="timezone" defaultValue="Australia/Adelaide" options={TIMEZONES} />
-          </Field>
-          <div className="flex items-end">
-            <SubmitButton pendingLabel="Adding…">Add laundry</SubmitButton>
+      {/* A statement rather than a disabled form. A control whose only possible
+          outcome is a refusal is a dead end dressed as a choice — the same call
+          the invoice composer made about its no-chart state. The way to undo it
+          is named here, because a switch nobody can find is a one-way door. */}
+      {pinned ? (
+        <Card
+          title="One laundry, for now"
+          description="Adding a second is switched off, in the app and in the database."
+        >
+          <Notice tone="info" title="Run one laundry only is on">
+            <p>
+              Turn it off under <strong>Settings</strong> and this screen offers the
+              Add&nbsp;a&nbsp;laundry form again. Nothing about multi-tenancy has been removed —
+              every laundry&rsquo;s records are still kept apart by the same rules.
+            </p>
+          </Notice>
+          <div className="mt-4">
+            <ButtonLink href="/platform/settings" variant="secondary">Settings</ButtonLink>
           </div>
-        </form>
-      </Card>
+        </Card>
+      ) : (
+        <Card
+          title="Add a laundry"
+          description="It starts empty. Invite its owner from People once you have switched to it."
+        >
+          <form action={createTenant} className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <Field label="Business name" name="name" required>
+              <Input name="name" required placeholder="Adelaide Towel Service" />
+            </Field>
+            <Field label="ABN" name="abn" hint="Optional. Shown on their invoices.">
+              <Input name="abn" inputMode="numeric" placeholder="12 345 678 901" />
+            </Field>
+            <Field label="Timezone" name="timezone">
+              <Select name="timezone" defaultValue="Australia/Adelaide" options={TIMEZONES} />
+            </Field>
+            <div className="flex items-end">
+              <SubmitButton pendingLabel="Adding…">Add laundry</SubmitButton>
+            </div>
+          </form>
+        </Card>
+      )}
     </div>
   );
 }

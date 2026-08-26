@@ -100,8 +100,11 @@ The master spec names a .NET 9 Web API; this build follows the supplied skeleton
     and none does.
   - The two constants are kept as separate names even though they now agree: they answer
     genuinely different questions, and a deployment that ever runs a second depot in another
-    state needs them to part company again. Harbour, the demo tenant, is still a Sydney laundry
-    in its own rows — which is exactly the case the seam is for.
+    state needs them to part company again. **The demo laundry that used to illustrate that —
+    Harbour, a Sydney business in its own rows — was deleted on 2026-08-26 when Adelaide became
+    the only tenant (§11), so the seam now has no live example.** It is kept anyway: the reason
+    for it is the second depot, not the second tenant, and a constant collapsed because nothing
+    currently needs it is a constant somebody has to re-derive later.
 - Invoice PDFs render server-side with `@react-pdf/renderer` (`src/lib/pdf/`), streamed from
   `/api/invoices/:id/pdf` and attached to the Resend email. `serverExternalPackages` keeps the
   renderer out of the client bundle.
@@ -322,12 +325,29 @@ behind at an address nothing mentions. Needs `SUPABASE_SERVICE_ROLE_KEY`: creati
 membership insert writes a `tenant_id` no session is bound to, so every statement in it filters
 `tenant_id` by hand.
 
+**`DEFAULT_TENANT` is `Adelaide Towel Service`, and since 2026-08-26 that is a real business
+rather than a sandbox.** The demo laundry these profiles used to live in was deleted when
+Adelaide became the only tenant (§11), and the owner's decision was to move the twelve across
+rather than strand them. So the thing this section used to promise — *test logins, on a test
+tenant* — is no longer true, and the consequences are worth stating rather than leaving to be
+discovered:
+- **Each profile reads whatever its role allows of real data.** That is the point: a capability
+  change can be checked against the customers, invoices and chart of accounts people actually
+  work with. The role gates are unchanged and were re-proved as real sessions on the day (§11).
+- **The shared password is therefore a live credential.** It is printed on every run and written
+  down in `scripts/role-profiles.mjs`, which is fine inside the team and wrong outside it.
+  Replace it, or give each profile its own through People › *Email sign-in link* (§10c).
+- **`@roles.example.com` still cannot receive mail** (RFC 2606), so the one protection that never
+  depended on the tenant — a stray invoice or overdue chase can never leave the building — holds
+  exactly as before.
+
 Four decisions worth keeping:
 - **Idempotent, and that is also the recovery path.** An address that exists is reused and its
   password reset, so a rerun is how you get back a test login nobody wrote down.
 - **`platform_admin` is opt-in (`--platform-admin`), not part of "all the roles".** It is not a
-  membership (0019) and it reaches *every* laundry on the project — on this deployment that
-  includes the real tenant beside the demo one, so it is not a demo-tenant test login at all.
+  membership (0019) and it reaches *every* laundry on the project. That mattered most when there
+  were two and one was real; with one it is the difference between a role inside the business and
+  a role above it, which is still not something to hand out by default.
 - **The driver profile gets a `drivers` row.** A `driver` membership with no such row leaves
   `current_driver_id()` null, every driver-scoped policy then matches nothing, and the result is
   a login that works with empty screens — which reads as a bug in My Runs.
@@ -759,6 +779,30 @@ renders no tab strip. Tested in `src/lib/__tests__/nav.test.ts`.
   inside its own transaction: a second open draft refused, a line on an issued
   invoice refused, and the cascade still deleting. Both halves were proved to
   fail without the fix rather than assumed to be doing something.
+- `0041_single_laundry` — **this deployment runs one laundry, and the database says
+  so rather than the screen.** `single_laundry_mode()` (reads
+  `platform_settings.settings->>'single_laundry'`), `guard_single_laundry()` and
+  its BEFORE INSERT trigger on `tenants`. **Adds no table, no column, no policy and
+  no capability; drops nothing and changes no row.**
+  - **A switch rather than a deletion, because the ask was "for now".** The mode
+    lives in 0019's one-row jsonb bag, so turning it off is one press on Platform ›
+    Settings — no deploy, no migration. Nothing here removes multi-tenancy:
+    `tenant_id`, every RLS policy and every proof of isolation are untouched, and
+    with the switch off the database behaves exactly as it did before.
+  - **Absent means off, and that is load-bearing.** `supabase/seed.sql` creates a
+    laundry and the pgTAP proofs create two, so a mode defaulting on would fail the
+    whole suite and the seed with it. A fresh database has no such key.
+  - **INSERT only, and the *second* one.** Renaming, suspending and deleting a
+    laundry stay as writable as they were, so the switch can never be the reason
+    somebody cannot undo it; and the first laundry is always allowed, because the
+    rule is "one", not "none". Both are asserted.
+  - A trigger and not a restrictive policy, for 0036's and 0040's reason: a
+    restrictive policy writes **zero rows with no error**, the silence this project
+    has shipped twice, where 42501 reaches the flash toast as a sentence.
+  - Both functions are revoked from `public, anon` **and `authenticated`** — nothing
+    in `src/` calls either, so neither belongs on the RPC surface. Self-asserting on
+    six outcomes, two of them **behavioural** against real inserts (refused with the
+    mode on, allowed with it off) and undone before the block ends.
 - `0013_notifications` — `tenants.settings jsonb` (AD-3) and the `notifications` table
   (AD-4). Beware the numbering drift: the unmerged branch
   `claude/warehouse-inventory-flow-psooyq` carries its own `0012_return_count.sql`, which
@@ -813,8 +857,8 @@ Proofs in `supabase/tests/`: `rls_isolation`, `rls_coverage`, `driver_scope`,
 `run_assignment`, `archive_records`, `laundry_pricing`, `platform_admin`, `main_flow_scope`,
 `job_billing`, `purchases_scope`, `supplier_payments_scope`, `import_helpers`,
 `import_activation`, `member_directory`, `boards_scope`, `item_master`,
-`audit_log_scope`, `run_sequence`, `accounts_scope`, `open_draft_invoices`
-(**469 assertions**).
+`audit_log_scope`, `run_sequence`, `accounts_scope`, `open_draft_invoices`,
+`single_laundry` (**478 assertions** across 26 files).
 
 **`run-db-tests.sh` parses the output rather than trusting the exit code, and that is not
 pedantry.** `psql` exits 0 for a pgTAP file that runs to completion, and a failed assertion is a
@@ -1195,8 +1239,39 @@ list that opened on this month would hide precisely the invoices that are late);
 on **last month**, which is `previousMonth`'s own reasoning.
 
 ## 11. Hosted project
-**`0040_open_draft_invoices` was applied on 2026-08-26** (`20260826040754`) and is now the
-ledger's last entry, behind `0040_item_master_write` (`20260826030846`) — **the project carries two
+**One laundry, since 2026-08-26.** `0041_single_laundry` (`20260826053208`) is the ledger's last
+entry, and the deployment now holds a single tenant — `Adelaide Towel Service` — with the
+`single_laundry` switch **on** in `platform_settings`.
+
+- **Pre-flight, before anything was written:** neither function nor the trigger existed, the
+  settings bag was `{}`, and the two-tenant state was exactly as recorded (2 tenants, 14 demo
+  memberships, 508 archived customers, 0 live ones).
+- **The data change was rehearsed in a transaction that ended by raising**, and the read-back
+  after that rollback confirmed nothing had moved. The real run then matched the rehearsal
+  figure for figure — 12 memberships moved, 1 `Test Driver` row, 1 `Test Board` row, **1,154**
+  rows out of the archive, 12 collateral rows deleted — and every one of its ten assertions
+  passed, so a mismatch anywhere would have rolled the whole thing back.
+- **After it:** **1** tenant, 18 logins, 18 memberships (all Adelaide's), 508 customers, 646
+  invoices, 254 items, 268 accounts, 192 suppliers, 1,515 supplier bills, 5 boards, 2 drivers,
+  1 depot, **0** laundry jobs, **0** runs, **0** deliveries. Both disabled guard triggers read
+  back `tgenabled = 'O'`.
+- **Then proved as real sessions.** Six role profiles, now members of the real laundry, read
+  exactly what their roles allow: the counter, the driver and a board get **0** invoices, **0**
+  accounts and **0** audit rows; the owner and the auditor get 646 / 268 / 41; finance gets the
+  money and **0** audit rows. And as a platform admin, inserting a second laundry straight at the
+  table came back **42501 — "this deployment is set up for one laundry, so another cannot be
+  added"** — while renaming the surviving one still touched its row. All rolled back.
+- **Advisors are 23** — 22 documented SECURITY DEFINER helpers plus the auth leaked-password
+  toggle, unchanged. `single_laundry_mode` and `guard_single_laundry` are **absent** from the
+  list, because both are revoked from `authenticated`: the trap 0019 recorded and 0036 shipped.
+  **0** `anon` table grants and **0** tables in `public` without RLS.
+- **What is gone:** `Harbour Commercial Laundry` and its 186 rows, plus 12 Adelaide rows that
+  pointed into it. Snapshotted to `docs/archive/harbour-demo-tenant-2026-08-26.json` first. One
+  `run-media` object under the old tenant's prefix survives, because Supabase refuses a direct
+  delete on `storage.objects`.
+
+**`0040_open_draft_invoices` was applied on 2026-08-26** (`20260826040754`), behind
+`0040_item_master_write` (`20260826030846`) — **the project carries two
 migrations numbered 0040**, from two branches the same afternoon, exactly as it carries two 0015s,
 two 0017s and two 0036s. They touch disjoint objects, so unlike the 0036/0037 pair there was
 nothing to reconcile and the repo file is what went on, unaltered.
@@ -1289,8 +1364,9 @@ activity.
 Deployed on Vercel at `ats.coreit.com.au`. All migrations through `0030_member_directory`
 applied (0014 on 2026-08-13, 0015 and 0016 on 2026-08-14, 0017, 0018, 0019 and 0025 on
 2026-08-16, 0026 and 0027 on 2026-08-17, 0030 on 2026-08-18), each verified by rolled-back probe
-rather than trusted. **Every migration through `0040_item_master_write` is applied**, and the ledger's last entry is
-`0040_item_master_write` (`20260826030846`, applied 2026-08-26), behind `0039_job_charge_codes`
+rather than trusted. **Every migration through `0041_single_laundry` is applied**, and the ledger's last entry is
+`0041_single_laundry` (`20260826053208`, applied 2026-08-26), behind the two `0040`s
+(`20260826040754` and `20260826030846`, the same day), behind `0039_job_charge_codes`
 (`20260826022128`, the same day), behind `0038_invoice_line_account`
 — whose file is in `supabase/migrations/` as of the 2026-08-26 merge and is a no-op against a
 database built from this repo, since 0036 already creates the column. Before those,
@@ -1729,26 +1805,50 @@ yet. Two answers to "what is this customer charged?" is the duplication this fil
 against everywhere else, so that branch needs deciding — adopted, or dropped and its two
 objects removed — before either is relied on.
 
-**There are two tenants and only one of them is real.** `Adelaide Towel Service`
-(`20000000-…-000000000001`) is the business: 508 customers and 646 invoices, no laundry jobs
-yet. `Harbour Commercial Laundry` (`10000000-…`) is the demo seed. Both logins
-(`darshan@`, `jay@ctnorwood.com.au`) are `super_admin` of **both**, and `requireSession()`
-picks a membership with `.limit(1)` and **no ordering** — so which of the two a person lands in
-is effectively arbitrary. Pre-existing, and worth fixing before anything depends on the split.
+**`Adelaide Towel Service` is the only tenant, since 2026-08-26.** `20000000-…-000000000001`,
+one depot, 508 customers, 646 invoices, 254 items, 268 accounts, 192 suppliers, 1,515 supplier
+bills, 5 boards, 2 drivers — and **0 laundry jobs and 0 runs**, because every one it held was
+test activity against a customer in the laundry that has gone. `Harbour Commercial Laundry`
+(`10000000-…`) was deleted whole; `0041` and the `single_laundry` switch keep it that way. The
+paragraphs below this one describe the two-tenant deployment and are dated records, not the
+current state.
+- **The `.limit(1)` ambiguity this paragraph used to warn about is moot rather than fixed.**
+  Both real logins were `super_admin` of both laundries and landed in an arbitrary one; there is
+  one laundry now, and `requireSession()` has been ordered and cookie-steered since 0019 anyway.
+- **What that costs, stated plainly:** `is_member()` and every proof of isolation still work
+  exactly as before, but the *live project* no longer has a second tenant to demonstrate them
+  against. Tenant isolation is proved by the pgTAP suite, which creates its own two laundries on
+  a fresh database — not by the deployment.
 
-**The real tenant's records are archived as of 2026-08-16** (§18): 1,154 rows hidden, nothing
-deleted, restored by `set_records_archived('20000000-…-000000000001', false)`.
+**The real tenant's records were archived on 2026-08-16 and restored on 2026-08-26** (§18): the
+same 1,154 rows, back through `set_records_archived('20000000-…-000000000001', false)` called as
+a real owner session. Nothing was deleted in either direction.
 
-**Thirteen logins as of 2026-08-16, and eleven of them are test profiles.** The two real ones are
-above; the rest are `<role>@roles.example.com` (§3a), one per membership role, members of
-`Harbour Commercial Laundry` **only** — proved rather than assumed: `is_member()` is false for
-`Adelaide Towel Service` for every one of them, and none is a platform admin, so the real
-laundry's 508 customers are outside all eleven. Shared password, printed by `npm run seed:roles`
-and easy to reset with a rerun; `npm run seed:roles -- --remove --yes` takes them off again.
-Written by SQL rather than by the Auth admin API because no session here holds the service-role
-key — `auth.users` + `auth.identities` in GoTrue's own shape, one email identity each. Treat
-this as a **demo-tenant** convenience: an address on a real laundry would want the script and a
-real invitation.
+**Eighteen logins, and twelve of them are test profiles in the real laundry.** The two real ones
+are `darshan@` and `jay@ctnorwood.com.au` (both `super_admin` **and** platform admins); four are
+`board1@`…`board4@ats.example.com` (§24); the rest are `<role>@roles.example.com` (§3a), one per
+membership role. **They were members of the demo laundry only until 2026-08-26 and are members of
+`Adelaide Towel Service` now** — the owner's decision when the demo laundry was deleted, so that
+a capability change can still be checked by signing in as each role.
+- **That reverses the property the old paragraph proved**, and the reversal is the point worth
+  reading: `is_member('Adelaide Towel Service')` used to be **false** for every test profile, so
+  the real laundry's 508 customers were outside all of them. It is **true** for all twelve now.
+  Each still only reads what its role allows — verified as real sessions on the day: the counter,
+  the driver and a board read **0** invoices, **0** accounts and **0** audit rows where the owner,
+  the auditor and finance read 646 / 268 / 41 — but "outside the real laundry entirely" is no
+  longer one of the layers.
+- **So the shared password is now a credential on live data.** It is printed by
+  `npm run seed:roles` and documented in `scripts/role-profiles.mjs`, which makes it fine for a
+  developer and wrong for anybody outside the business. Replace it — People › *Email sign-in
+  link* gives each profile its own (§10c) — before handing one out.
+- `driver@roles.example.com` and `board@roles.example.com` carry a `Test Driver` row and a
+  `Test Board` (`TESTBOARD`) in Adelaide, written in the shape `seed:roles` writes them so a
+  later run finds those rather than making a second set. Without them `current_driver_id()` and
+  `current_board_id()` are null and both logins work with empty screens, which reads as a broken
+  app (§3a, §24).
+- Written by SQL rather than by the Auth admin API because no session here holds the
+  service-role key — `auth.users` + `auth.identities` in GoTrue's own shape, one email identity
+  each. `npm run seed:roles -- --remove --yes` still takes them off.
 
 The live project also carries real supplier data from the unmerged purchases branch — 1,515
 supplier bills, 192 suppliers, 268 GL accounts, 636 import-activation rows. **No screen in this
@@ -1945,6 +2045,120 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-08-26 · Adelaide Towel Service is the only laundry
+The owner's instruction, and mostly a live data change: the demo laundry is deleted, its twelve
+role-profile logins moved into the real one, and the real one's 1,154 archived records restored.
+One migration (`0041`) keeps it that way — **no new table, no new column, no new policy, no new
+capability, nothing dropped and no row's meaning changed.** §11 has the read-backs; §7 the
+migration.
+
+**What went, and what it cost.** `Harbour Commercial Laundry` — the demo seed, live since
+2026-08-05 — was deleted whole: **186 rows across 27 tables**, in one `delete from tenants`, with
+all 51 foreign keys to it still enforced (every one is `on delete cascade`). Snapshotted first to
+`docs/archive/harbour-demo-tenant-2026-08-26.json`, so this is reversible by data rather than only
+by `supabase/seed.sql`.
+
+| table | rows | | table | rows |
+|---|---|---|---|---|
+| `audit_logs` | 47 | | `laundry_prices` | 9 |
+| `laundry_order_activity` | 21 | | `number_sequences` | 8 |
+| `memberships` | 14 | | `public_holidays` | 9 |
+| `jobs` (stops) | 13 | | `items` | 6 |
+| `inventory_pools` | 12 | | `customers` / `customer_locations` | 4 / 4 |
+| `daily_routes` | 8 | | everything else | 31 |
+
+- **Two guard triggers had to be disabled to let the cascade through**, and both were re-enabled
+  inside the same transaction so a failure anywhere would have rolled the disable back:
+  `guard_production_batch_lines_change` (a batch past receiving) and
+  `guard_laundry_order_items_change` (items on a finished job). The Jay CT deletion hit the same
+  pair five days earlier. `session_replication_role = replica` was **not** used — it would have
+  switched foreign keys off along with the guards.
+- **One demo media object survives, and could not be removed from here.** Supabase refuses a
+  direct `delete from storage.objects` (*"Use the Storage API instead"*), so the single
+  `run-media` file under the old tenant's prefix is still in the bucket. It is unreachable except
+  to a platform admin, whose `is_member()` is true of everything (0019). Delete it from the
+  Storage dashboard if it matters.
+
+**Twelve Adelaide rows went with it, and that is the part that goes beyond "delete the demo
+laundry".** Every one was an Adelaide row *pointing into* Harbour, so the cascade could not
+proceed while they existed — and every one was an artefact of the 2026-08-18 cross-tenant bug or
+the 2026-08-16 delivery-source session: `LJ00001` and its item and six activity rows, the stop
+`JOB00001`, `RUN00001`, and one `deliveries`/`delivery_lines` pair. All created between 10:39 and
+10:41 on 2026-08-16, all against Harbour's customer `CUST00004 "Test"`, and the delivery drove no
+stock movement. Adelaide is left with **0 laundry jobs and 0 runs**, which is the honest number —
+its entire job history was test activity, as the 2026-08-26 Jay CT entry already recorded.
+- **Found by a general sweep, not by the error that surfaced it.** Every foreign key between two
+  tenant-scoped tables was checked for rows whose `tenant_id` disagrees with its parent's: nine
+  such references, in both directions. The `delivery_lines → items` one is what blocked the
+  delete; the rest would have sat there indefinitely.
+
+**The twelve `@roles.example.com` profiles are members of `Adelaide Towel Service` now** — the
+owner's call, so a capability change can still be checked by signing in as each role.
+- **This reverses a property §11 used to prove**, and the reversal is written down rather than
+  quietly dropped: those logins were members of the demo laundry *only*, so the real laundry's 508
+  customers were outside all of them. They are not any more. **The shared password is a live
+  credential from today**, and wants replacing with a per-profile sign-in link (§10c).
+- **Read back as six real sessions after the move**, which is the assurance that replaces it: the
+  counter, the driver and a board read **0** invoices, **0** accounts and **0** audit rows; the
+  owner and the auditor read 646 / 268 / 41; finance reads the money and **0** audit rows. Every
+  gate 0017, 0033, 0035 and 0036 put in place holds on real data.
+- `driver@` and `board@` got a `Test Driver` and a `TESTBOARD` row in Adelaide, in the shape
+  `seed:roles` writes them. Without those, `current_driver_id()`/`current_board_id()` are null and
+  both logins work with empty screens — the failure §24 exists to prevent.
+
+**The 1,154 archived records are back**, through `set_records_archived(…, false)` called as a real
+owner session rather than by hand: 508 customers and 646 invoices readable again. Archiving them
+on 2026-08-16 was deliberate; with one laundry and nothing else in it, the app would otherwise
+have opened empty.
+
+**`0041` is what keeps it true, and it exists because the screen is not the boundary.** `tenants`
+carries 0019's `tenants_platform` policy, so a platform admin can POST a second laundry straight to
+`/rest/v1/tenants` without going near the Laundries screen. `guard_single_laundry` refuses it with
+**42501**; the action's own check is the readable sentence in front of it, the same arrangement
+`removePlatformAdmin` has with its last-administrator trigger.
+- **A switch, not a removal, because the ask was "for now".** `platform_settings.settings.
+  single_laundry` — 0019's one-row bag — so turning it off is one press on Platform › Settings,
+  with no deploy and no migration. Multi-tenancy is untouched: `tenant_id`, every policy and every
+  proof of isolation are exactly as they were.
+- **Absent means off**, which is load-bearing rather than tidy: the seed creates a laundry and the
+  proofs create two, so a mode defaulting on would take the whole suite down.
+- **INSERT only, and only the second one.** Renaming, suspending and *deleting* a laundry stay as
+  writable as they were — the switch must never be the reason somebody cannot undo it — and the
+  first laundry is always allowed, so an empty deployment can still create the one it runs. The
+  Laundries screen mirrors that: the form is still offered when there are none.
+- A statement replaces the form rather than a disabled button, and it names where the switch is.
+  A control whose only possible outcome is a refusal is a dead end dressed as a choice.
+
+**934 unit tests (was 928) and 478 pgTAP assertions across 26 files (was 469/25).** `verify` green
+— typecheck, lint, tests and the production build; all 43 migrations applied to a fresh Postgres 16
+with the whole suite and the seed on top. **The new assertions were confirmed to fail without their
+fix** rather than assumed to be doing something: the proof dies outright against a database built
+without `0041`, and replacing the checkbox preprocessor with `z.coerce.boolean()` fails the
+stray-value test (`"false"` would read as on, disagreeing with the trigger's own `= 'true'`).
+
+**Applied to `laundrymart-syd` before the merge**, so the schema led the code as every release
+since 2026-08-18 has. The data change was rehearsed in a transaction that ended by raising, and the
+rollback read back clean (2 tenants, 14 demo memberships, 0 live customers) before anything was
+committed; the real run then matched the rehearsal exactly and every one of its ten assertions
+passed. Afterwards: **1 tenant**, 18 logins, 18 memberships, 508 customers, 646 invoices, 254
+items, 268 accounts, 192 suppliers, 1,515 bills, 5 boards, 2 drivers, 0 jobs, 0 runs. Advisors
+unchanged at 23 — the two new functions are revoked from `authenticated` and so are **not** on the
+list, the trap 0019 recorded and 0036 shipped. 0 `anon` table grants, 0 tables without RLS. The
+refusal was then proved as a real platform-admin session: inserting a second laundry came back
+**42501 "this deployment is set up for one laundry, so another cannot be added"** while a rename
+still touched its row.
+
+**One finding that is the owner's, not the code's.** Adelaide's only depot (`ADL`) is `inactive` —
+set that way deliberately by `darshan@` at 01:57 on 2026-08-26, three presses in six seconds. Every
+site picker in the app filters `status = 'active'`, so with one laundry and one inactive site,
+**adding a customer, driver, board, vehicle or contract now offers no site at all**. Left alone
+because it was a deliberate recent decision; it is one press on Settings › Sites to reverse.
+
+**Not verified behind the auth gate.** This container has no Supabase credentials, so no
+authenticated screen was opened. **Before trusting it: sign in as `owner@roles.example.com` on
+`ats.coreit.com.au`, check Platform shows "This laundry" with no Add form, and confirm Customers
+lists the 508 that came back.**
+
 ### 2026-08-26 · One invoice per customer per month, and it fills up as it goes
 The owner's flow, reviewed as a business analyst first and then built. One migration (`0040`),
 **no new table, no new role, no new capability, nothing dropped and no row's meaning changed**.
@@ -5417,10 +5631,23 @@ nowhere else. Boards linked went **1 of 5 → 5 of 5**, so `LJ00003` and `LJ0000
   *Email sign-in link* beside each board on `/admin/users` (§10c) and let each round set its own.
   No SMTP, and no second invitation flow to build.
 
-**What is left of the cutover is the real laundry's, not the code's**: invite one person who is
-not a platform admin into Adelaide (its only two members are, and are filtered out of every picker
-by design), and enter Adelaide's own laundry prices — it still holds none, so `LJ00002` was priced
-by hand.
+**Six boards as of 2026-08-26, and Adelaide is the only laundry they can be in.** Its four rounds
+are joined by `TESTBOARD` / "Test Board", which came with `board@roles.example.com` when the demo
+laundry was deleted and the twelve role profiles moved across (§11). It is a test round in a real
+business and is labelled as one; leaving that profile without a `boards` row would have given it a
+login that works and shows nothing, which §24 exists to prevent. Harbour's Board 1 went with the
+laundry.
+
+**What is left of the cutover is the real laundry's, not the code's.** *Invite one person who is
+not a platform admin* is **done** in the sense that matters — Adelaide now holds twelve
+role-profile memberships, none of them platform admins, so its People screen and its job pickers
+are no longer empty. What genuinely remains: **a real member of staff**, rather than a test
+profile, and **Adelaide's own laundry prices**, which it still holds none of. And with only one
+depot — set `inactive` by the owner on 2026-08-26 — every "site" picker in the app (customer,
+contract, driver, board, vehicle, inventory, route template, invitation) currently offers nothing,
+because all eight filter `status = 'active'`. That is one press on Settings › Sites to undo and is
+deliberately left to the owner, but it is the first thing that will stop somebody adding a
+customer.
 
 ## 25. The item master, and MYOB
 `items` is the one item vocabulary: what the laundry rents out *and* what arrives in a customer's
@@ -5497,8 +5724,9 @@ bag, under the code the business already uses (0032). Staff type TOW001.
   owner would not go looking in for `TW`.
 - **125 of Adelaide's 254 items now say what kind of laundry they are** (2026-08-26), read off
   their names by `lib/domain/laundry-category.ts` — a pure rule with tests, not a one-off UPDATE,
-  because this answer decides what a customer is charged. Harbour's five keep theirs; its laundry
-  bag is still null on purpose, a container the laundry lends being not laundry a customer hands in.
+  because this answer decides what a customer is charged. (The demo laundry's five categorised
+  items went with it on 2026-08-26 — §11 — so the 254 below are now the whole item master on this
+  deployment.)
   **The other 129 are left null and that is the answer, not a gap**: they are chemicals, gloves,
   cups, machine parts, washroom paper and fees — things the laundry buys. An uncategorised item
   behaves exactly as it did before, because `laundry_category` only ever *derives* a kind of
