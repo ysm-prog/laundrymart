@@ -1097,33 +1097,24 @@ export default function DesignPreviewPage() {
               />
             </Card>
 
-            {/* The charge lines, now coded where they are made. The row states
-                worth looking at are all three at once: one carrying an item and
-                its account, one uncoded and saying so, and one added by hand —
-                because "is this coded?" has to be answerable without a click,
-                and an uncoded charge is the one that reaches the invoice needing
-                to be re-keyed. */}
+            {/* The charge lines, named from the item master. Typing a code into
+                the description finds the item; the item field under each row is
+                the same choice made deliberately. **No account code is shown**:
+                it travels from the item, the way MYOB's Category follows its
+                Item ID, so it is never a question asked here. */}
             <div id="job-charges-preview" className="space-y-6">
             <Card title="A job's charges"
-                  description="Editable right up until approval, and frozen the moment it is given. Each line can name an item and an account, so the invoice needs neither again.">
+                  description="Editable right up until approval, and frozen the moment it is given. Type an item code in the description to name the line — its rate, GST answer and account come with it.">
               <JobChargesEditor orderId="preview" initial={PREVIEW_CHARGES}
                                 items={PREVIEW_LINE_ITEMS} accounts={PREVIEW_CHART}
                                 action={async () => { "use server"; }} />
             </Card>
 
-            <Card title="A job's charges · no chart of accounts"
-                  description="A laundry that has not imported one. Nothing is blocked — the strip offers the item alone and says why there is no code.">
-              <JobChargesEditor orderId="preview-nochart" initial={PREVIEW_CHARGES}
-                                items={PREVIEW_LINE_ITEMS} accounts={[]}
-                                action={async () => { "use server"; }} />
-            </Card>
-
-            {/* The mirror image, and the state the real laundry was in until its
-                item master arrived: a full chart and nothing to pick from. The
-                control has to stop saying "item" here for the same reason it
-                stops saying "code" above. */}
+            {/* A laundry whose item master has not arrived. The description is
+                a plain box, because there is nothing to suggest — no dead
+                type-ahead, and nothing said about codes either way. */}
             <Card title="A job's charges · no item list"
-                  description="A chart of accounts and no items yet. The charge is coded by its account code, and the control offers only that.">
+                  description="No items on file yet. The description is plain text and the charge is priced by hand.">
               <JobChargesEditor orderId="preview-noitems" initial={PREVIEW_CHARGES}
                                 items={[]} accounts={PREVIEW_CHART}
                                 action={async () => { "use server"; }} />
