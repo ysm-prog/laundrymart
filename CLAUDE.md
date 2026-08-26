@@ -1498,10 +1498,11 @@ and both are the owner's to act on rather than the code's:
   `laundry_prices`, so `LJ00002` was priced by hand rather than by a price list.
 
 **Still to do in the app, not the database:** invite one person into Adelaide who is not a platform
-administrator, enter its price list, and set `laundry_category` on the items that are laundry a
-customer hands in (§25). Creating and linking the boards is **done**, and the item master is
-**done** — 254 items since 2026-08-26, which is what the third of those was waiting on. All 254
-arrived uncategorised and marked both sold and bought, because the export says neither.
+administrator, and enter its price list. Creating and linking the boards is **done**; the item
+master is **done** (254 items since 2026-08-26); and **the categories are done** — 125 of the 254
+say what kind of laundry they are as of 2026-08-26, applied from the tested rule in
+`lib/domain/laundry-category.ts`. The remaining 129 are the things the laundry buys and are
+correctly null. All 254 are still marked both sold and bought, because the export says neither.
 
 For **0030** that was: pre-flight (function absent, **0** `anon`-executable functions so the
 migration's own assertion would pass, 0 `anon` table grants, 15 memberships, 2 platform admins);
@@ -1839,6 +1840,61 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-08-26 · What kind of laundry each item is, read off its name
+The client's instruction: set `laundry_category` on the items customers hand in. **No migration;
+no schema, RLS, capability or policy change** — one pure rule, its tests, and a live data write.
+§25 holds the design.
+
+**125 of Adelaide's 254 items now carry a category**, and the other 129 are deliberately null.
+
+- **It is a rule in `src/lib/domain/laundry-category.ts`, not a one-off UPDATE**, because
+  `laundry_category` is what `sync_laundry_item_type` derives `item_type` from, and `item_type` is
+  what all three pricing tiers, every report and every historical row match on. This answer decides
+  what a customer is charged, so it is written where it can be read, reviewed and tested — the same
+  reason `plan.ts` and `order-items.ts` live outside their actions.
+- **It refuses to guess, and the refusals are most of the value.** A *wrong* category prices work at
+  another kind's rate with nothing on screen to explain it; a missing one leaves the item exactly as
+  it was, still pickable, with the counter choosing the kind beside it. So an item whose name does
+  not say what it is comes back null.
+- **The towel family is one bucket** — face washers, tea towels, glass cloths, salon and gym towels
+  all land on `towels`, because the nine kinds have no finer one and Harbour's tea towel was already
+  filed that way. One answer rather than two.
+
+**Five traps in the real list, each of them a wrong price**, and every one pinned by a test that was
+confirmed to fail without its guard:
+
+1. **A bath sheet is a bath towel, not bedding.** Six rows say "Bath Sheet"; the generic `sheet`
+   rule reaches them happily. Reordering the two rules fails the test.
+2. **Their `4-` hand towels are washroom paper** — `TCA Ultraslim Hand Towel`, `Hand Towel Salute
+   Premium`, `Hand Towel Regal Gold` and a dispenser. Categorising them puts paper stock on a
+   customer's laundry list. Dropping the paper exclusions fails two tests.
+3. **`Toilet Paper 2Ply 400 Sheet`** would have become bed sheets. Only the paper rule stops it.
+4. **Some rows name linen without being it** — *Lost Towels* is a charge for linen that did not come
+   back, *New Towels Black - dozen* is a sale of new stock, *Outsourced Washing Of Towels* is work
+   sent out.
+5. **A container bag is not laundry, but "per bag" is.** The first attempt excluded `/\bbags?\b/`
+   outright and silently swallowed `TL Towels Per Bag`, `TTL Tea Towels Per Bag`, `OC13 Rugby Tops
+   per bag` and `SB Sleeping Bags` — four real items. **A false exclusion is the quiet half of this
+   going wrong**: the row just stays uncategorised, which looks exactly like one the rule was never
+   meant to place. Found by dry-running the 254 rows, not by reading them.
+
+**Three left for a person rather than a regex**, and named rather than quietly skipped: `29927
+Waffle Check Super Soaker - Re` and `50761 Waffle Check Jumbo - Blue`, whose untruncated siblings
+are tea towels but which MYOB cut at 30 characters before the word that would place them; and
+`18662 Terry Nappies`, which is certainly laundry and fits none of the nine kinds.
+
+- 885 unit tests (was 872), 448 pgTAP assertions (unchanged — this adds no policy). `verify` green.
+
+**Applied to `laundrymart-syd` on 2026-08-26.** Rehearsed in a rolled-back transaction first, then
+applied behind six assertions including one that the table started uncategorised, so a rollback that
+had not rolled back could not have double-applied. Read back **as `board1@ats.example.com`**, a real
+Adelaide-only session: 254 items, 125 categorised, and `TW`/`GTW`→towels, `HTW`→hand towels,
+`BT`→bath towels, `SH`→sheets, `PC`→pillowcases, `TC`/`SB`→linen, `Capes`→uniforms, `BMC`→bath mats.
+Harbour's own 5 untouched. **No job was re-categorised**: `sync_laundry_item_type` fires on
+`laundry_order_items`, not on `items`, so the 5 existing job item rows still read `towels` exactly as
+they did. 647 invoices, 5 jobs and 0 Adelaide prices unchanged; the ledger's last entry is still
+`0040_item_master_write`.
+
 ### 2026-08-26 · The item master is one list, named one way, changed by two people
 The client's instruction: the list they sent is the master, it is the only item
 reference anywhere for ATS, and the Owner and the Office manager can maintain it. One
@@ -5160,15 +5216,26 @@ bag, under the code the business already uses (0032). Staff type TOW001.
   nine kinds of laundry; it now holds the business's own master list under the codes staff
   type, and "Item types" reads as a small set of categories — which is exactly the thing an
   owner would not go looking in for `TW`.
-- **Categories are set on the demo laundry only, and the real one's 254 items carry none.**
-  Harbour's five laundry items carry a `laundry_category`; its laundry bag does not, on purpose,
-  because a container the laundry lends is not laundry a customer hands in. `Adelaide Towel
-  Service` held **zero** `items` rows until 2026-08-26 and now holds **254**, imported from the
-  client's MYOB inventory export — **all of them uncategorised**, because that export says nothing
-  about which of them is laundry a customer hands in. That is the owner's to fill in, and until
-  they do those items price through the rate card and the price list exactly as they did before:
-  `laundry_category` feeds `sync_laundry_item_type`, which only ever *derives* a kind of laundry
-  and never overrides the caller's own answer.
+- **125 of Adelaide's 254 items now say what kind of laundry they are** (2026-08-26), read off
+  their names by `lib/domain/laundry-category.ts` — a pure rule with tests, not a one-off UPDATE,
+  because this answer decides what a customer is charged. Harbour's five keep theirs; its laundry
+  bag is still null on purpose, a container the laundry lends being not laundry a customer hands in.
+  **The other 129 are left null and that is the answer, not a gap**: they are chemicals, gloves,
+  cups, machine parts, washroom paper and fees — things the laundry buys. An uncategorised item
+  behaves exactly as it did before, because `laundry_category` only ever *derives* a kind of
+  laundry through `sync_laundry_item_type` and never overrides the counter's own answer.
+- **The rule refuses to guess, and the refusals are the design.** A wrong category is worse than
+  none: it prices work at another kind's rate with nothing on screen to show why. So an item whose
+  name does not say what it is stays null — including two rows MYOB truncated past the point of
+  saying (`29927 Waffle Check Super Soaker - Re` and `50761 Waffle Check Jumbo - Blue`, whose
+  untruncated siblings are tea towels) and `18662 Terry Nappies`, which is laundry and fits none of
+  the nine. Those want a person, not a regex.
+- **Five traps in the real list, each one a wrong price if missed**, and all five pinned by tests:
+  a **bath sheet** is a bath towel and not bedding; their `4-` **hand towels** are washroom *paper*
+  and a dispenser; **`Toilet Paper 2Ply 400 Sheet`** matches the generic sheet rule; *Lost Towels*
+  and *New Towels — dozen* name linen while being a charge and a sale; and a **container bag** is
+  not laundry while *Towels Per Bag* and *Sleeping Bags* both are — the last found by dry-running
+  the list, because a blanket `bag` exclusion had silently swallowed four real items.
 - **All 254 are marked both sold and bought, because the export carries neither flag.** The two
   coding pickers (the job's Charges card and the invoice line composer) filter on `is_sell`, so
   the lever exists: untick "I sell this" on the drums of detergent, the gloves and the fan shafts
