@@ -1476,6 +1476,63 @@ The multi-tenancy *architecture* is unchanged and stays: `tenant_id` on every ta
 `is_member()`, the admin client filtering by hand. One operating tenancy is a fact about today's
 data, not a licence to drop the boundary — §3 and §23 are untouched by this.
 
+**`0044_item_master_detail` was applied on 2026-08-26** (`20260826132916`) and is the ledger's
+last entry, **48** in all. Additive throughout, and applied before the code merged for the reason
+every release since 2026-08-18 records: the schema leads.
+
+- **Pre-flight, before anything was written**, thirteen checks and all thirteen as expected. The
+  one that mattered: **0043's `selling_unit`, `items_per_selling_unit` and `sell_price_basis`
+  confirmed present**, because 0044 *reuses* them rather than creating them and the screens in
+  the same commit read them at request time — where their absence is a browser error, not a
+  compile one. Also **0** columns named `sell_unit`/`sell_units_per`, so nobody had added the
+  duplicate pair; `tax_code` and `reorder_level` both still there; `gl_accounts` and `suppliers`
+  both real; **1** FK to `gl_accounts` (0036's) and **0** to `suppliers`; 0040's four policies
+  present with **0** permissive `for all`; **0** `anon` grants. 254 items, 268 accounts, 192
+  suppliers, 1 laundry.
+- **The rehearsal mechanism was re-proved before it was trusted**, as §11 requires rather than
+  taken from the 0040 note: a `create table` followed by a deliberate `raise` in the same call
+  left **0** tables behind, so a multi-statement call really is one transaction.
+- **Rehearsed against real rows, then aborted**, reporting through its own aborting exception
+  because `raise notice` does not come back through the API: **0 of 254** rows carried a
+  non-default after the columns were added (additive, proved rather than reasoned about), **254
+  of 254** had every new field null, a write of the whole buying half onto a real item touched
+  **1 row**, all three check constraints refused their bad value, an unknown account was refused
+  by the foreign key, and **deleting a linked account cleared the item rather than blocking** —
+  which is the whole reason the four references are `on delete set null`. Read back after the
+  rollback: **0** columns, **0** constraints, **0** indexes, **0** probe accounts, 254 items.
+- **After the apply**, the live `items` table is **identical to one built from
+  `supabase/migrations/` alone** — not sampled, but compared object by object: all **80** parts
+  (every column's type, nullability and default; every constraint definition including the five
+  `on delete set null` actions; every index definition; every column comment) diffed against a
+  local Postgres 16 built from the repo, **zero differences**, and the five comment *texts*
+  md5-compared one by one because that is the half the 0042 trap was hiding in.
+- **The applied text is byte-identical to the repo file**, md5 `fa06f906c8c9701b08cb12bd5d24129a`
+  over the ledger's stored statement against the same hash computed on the file minus its
+  trailing newline. **It matched first time**, unlike 0042 — where two characters in a comment
+  had to be bisected out. (The stored `chars` reads 15,852 against the file's 15,897 *bytes*:
+  Postgres counts characters and the file carries multi-byte `§` and `—`.)
+- **Then proved as real sessions**, writes inside a transaction that was then aborted. A
+  **board** read **254** items *and* all 254 new-column defaults — SELECT stays open to every
+  member, which is 0040's decision and what keeps a run sheet working — read **0** accounts
+  (0036's gate still holding), and its write touched **0 rows**. The row it tried was one it had
+  **read back itself** first, so 0 can only mean refused and never "no such row" — the 0040
+  lesson, verbatim. The **Owner** and the **Office manager** each touched **1 row**, which is the
+  assertion that matters, because a policy refusing a caller writes zero rows in silence and this
+  proves the gate does not lock out the two roles that should have it. The **plant floor** read
+  254 and wrote **0**. Afterwards the row carried the office manager's value and the owner's
+  basis with no trace of either refused write; after the rollback, **0** rows on the whole table
+  carry anything but the defaults.
+- **Advisors are 23**, unchanged — 22 documented SECURITY DEFINER helpers plus the auth
+  leaked-password toggle. 0044 adds no function, so none was expected and none appeared. **0**
+  `anon` table grants across the whole of `public` and **0** tables without RLS.
+- Counts before and after are the same: 254 items, 268 accounts, 192 suppliers, 647 invoices,
+  18 memberships, 5 boards, 1 laundry.
+
+**All fifteen of the item-page fields are null (or at their default) on all 254 rows**, which is
+the honest state and the one the screens are written for. They stay that way until somebody edits
+an item or the detail import lands — and that importer is still deliberately unbuilt, because
+`MYOB_Items_Register.xlsx` has not been read (§25).
+
 **`0042_free_status_moves` was applied on 2026-08-26** (`20260826112650`) and is the ledger's last
 entry, 46 in all. A widening rather than a narrowing, and applied before the code merged for the
 same reason every release since 2026-08-18 records: the schema leads.
@@ -2413,9 +2470,19 @@ to a line, and the totals maths is untouched.
   asserts the section is in the page *being served* before measuring anything, because a stale
   build answering is how the 2026-08-25 run passed vacuously.
 
-**Not verified behind the auth gate.** This container has no Supabase credentials, so `/items`
-and `/items/:id` were checked by typecheck, lint, 1001 tests, the production build and the
-migration against a real Postgres — not by being opened with real rows in them. **Before
+**Applied to `laundrymart-syd` on 2026-08-26** as `20260826132916`, now the ledger's last entry
+(48). §11 has the full record; the short version: thirteen pre-flight checks, the decisive one
+being that **0043's three columns are present**, since 0044 reuses them; rehearsed against real
+rows and rolled back; the applied text **byte-identical to the repo file** first time, and the
+resulting table diffed object by object against a local Postgres 16 built from
+`supabase/migrations/` alone with **zero differences** across all 80 parts. Proved as real
+sessions: a **board** reads all 254 items and writes **0 rows** on a row it had read back itself,
+while the **Owner** and the **Office manager** each write **1** — the assertion that matters,
+because a refusal writes zero rows in silence. Advisors 23, unchanged. Nothing moved.
+
+**Still not verified behind the auth gate.** The database half is proved; the browser half is
+not — this container has no Supabase credentials, so `/items` and `/items/:id` were checked by
+typecheck, lint, 1001 tests and the production build rather than by being opened. **Before
 trusting it: open an item on `ats.coreit.com.au`, set its selling unit to `ea` and its basis to
 tax-inclusive, save, and check the list shows `$0.22 / ea` — then add that item to a draft
 invoice line and confirm the unit shows beside the quantity and "This price includes GST" under

@@ -58,7 +58,15 @@ which is why no importer was written.
 
 **1001 unit tests** (was 991), **485 pgTAP across 26 files (unchanged — adds no policy)**,
 `verify` green, all 44 migrations on a fresh Postgres 16 with the suite and the seed. **36
-browser assertions** on the composer at 390/1440, 0 failures. **Not opened behind the auth gate.**
+browser assertions** on the composer at 390/1440, 0 failures.
+
+**Applied to `laundrymart-syd`** as `20260826132916`, the ledger's last entry (48). Rehearsed and
+rolled back first; applied text **byte-identical to the file** first time; the live `items` table
+diffed object by object against a local build from `supabase/migrations/` — **80 parts, zero
+differences**. As real sessions: **board reads 254, writes 0** (on a row it read back itself, so
+0 means refused); **Owner and Office manager write 1 each**; warehouse reads 254, writes 0.
+Advisors 23, unchanged. All 254 rows still at their defaults. **Not opened behind the auth
+gate** — the browser half is still unproved.
 
 ## Latest: 0043 is in the repo, and the Xero basis disagrees with it
 2026-08-26, branch `claude/invoice-creation-job-workflow-11mobw`. The owner asked for the live
