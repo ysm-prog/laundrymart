@@ -184,6 +184,12 @@ telling it whether the text it replaces was a search or a sentence.
   gate; read it, not the deploy. `github.silent` is `false` since 2026-08-26, so the deploy now
   reports itself on the commit — but a session like this still cannot read it: the raw GitHub API
   answers "GitHub access is not enabled for this session", and `ats.coreit.com.au` is refused by
-  the egress policy. Checking a deploy from here needs the Vercel dashboard or a `VERCEL_TOKEN`
-  plus `api.vercel.com` allowed — **so ask the owner and record the answer with its provenance**,
-  which is how the status-track release (`5792ce8`) was confirmed live on 2026-08-26.
+  the egress policy. **The GitHub half is an authorization gap, not an egress block** — every
+  `api.github.com` path answers *"GitHub access is not enabled for this session. An org admin must
+  connect the Claude GitHub App"* — so connecting that App is what would let a session here read a
+  deploy. Until then, ask the owner and record the answer with its provenance, which is how
+  `5792ce8` was confirmed live on 2026-08-26.
+- **`github.silent` is `false` and it works** — the Vercel status is on `cc7da9f`, checked. But do
+  not conclude it from `github.com/…/commit/:sha`: that page fetches 200 and carries **no** check
+  data at all, not even CI's, so an absent status there means nothing. Check a known-green control
+  before reporting an absence.

@@ -495,7 +495,8 @@ asked "did the production deploy go through?" there was no answer to read anywhe
 2026-08-26 merge record claimed one had completed without saying how that was established. Written
 explicitly as `false` rather than by deleting the key, so the file says the quiet was decided and
 then undone rather than never configured. The cost is the thing it was presumably set for: Vercel
-comments on pull requests again.
+comments on pull requests again. **Observed working the same day** — the Vercel status appears on
+`cc7da9f`, so this is a checked fact rather than a claim about what the setting ought to do.
 
 **The Vercel build command is `bash scripts/verify.sh || next build`, so a failing gate does not
 stop a deploy** — it falls through to a plain build and ships. That is deliberate (a deployment is
@@ -2357,7 +2358,9 @@ Recorded here with its provenance rather than as a bare fact, because the proven
 point of the entry: this is a person reading a dashboard — not a commit status, not a check, and
 not anything a session like this one could re-derive. **It should also be the last confirmation
 that has to arrive that way.** With `silent` off, the next production deploy says so on the commit
-that caused it, where the question can be answered by looking rather than by asking.
+that caused it, where the question can be answered by looking rather than by asking — **and that
+half is confirmed too**: the Vercel status is on `cc7da9f`, the commit this entry was written on.
+So the setting does what it is here to do, and the dashboard is no longer the only place to look.
 
 - **Written as `false` rather than by deleting the key.** Removing it restores the same default,
   but leaves the file silent about a decision that was made twice — once to quieten Vercel and once
@@ -2365,12 +2368,20 @@ that caused it, where the question can be answered by looking rather than by ask
 - **The cost is what it was presumably set for**: Vercel will comment on pull requests again. That
   is the trade, and it is the owner's call, which is why it changed on being asked rather than
   being proposed as a tidy-up.
-- **This does not, on its own, let a session like this one check a deploy.** Two other things
-  blocked that and both remain: the raw GitHub API answers *"GitHub access is not enabled for this
-  session"* so the deployments endpoint is unreachable, and `ats.coreit.com.au` is refused by the
-  egress policy (`connect_rejected … 403 to CONNECT`, recorded by the proxy's own status endpoint).
-  What changes is that a **person** looking at the commit on GitHub can now see the deploy, which
-  is what was actually asked for.
+- **This does not, on its own, let a session like this one check a deploy**, and the routes were
+  walked rather than assumed so the next one need not repeat them. Every `api.github.com` path —
+  `commits/:sha/status`, `check-runs`, `deployments` — answers *"GitHub access is not enabled for
+  this session. An org admin must connect the Claude GitHub App for this organization."*, which is
+  an **authorization gap, not an egress block**, and a different obstacle from `ats.coreit.com.au`
+  being refused by the network policy. `github.com/…/deployments` is refused separately, by the
+  session's repo scoping. No GitHub MCP tool lists check runs or statuses for a ref;
+  `get_check_run` needs an id that only arrives by webhook.
+- **The one route that does return something is a false-negative trap, and it is worth naming.**
+  `github.com/…/commit/:sha` fetches `200` — the repo is public — and carries **no Vercel status**,
+  which reads as "Vercel posted nothing". It is not: that page carries **no CI check either**, on a
+  commit whose three jobs are verifiably green through the Actions API. The checks region is loaded
+  client-side, so absence there is evidence of nothing. Check the control before reporting the
+  absence.
 
 **A second thing came out of looking and is now written down rather than left in the file to be
 discovered.** The build command is `bash scripts/verify.sh || next build`: if the gate fails,
