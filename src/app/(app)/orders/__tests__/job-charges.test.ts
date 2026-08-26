@@ -158,3 +158,62 @@ describe("parseJobCharges", () => {
     expect(result.lines[1]).toMatchObject({ charge_type: "fuel_levy", amount: 2.5 });
   });
 });
+
+describe("parseJobCharges · the account code (0039)", () => {
+  /**
+   * The editor posts a coded charge so the invoice raised from it needs no
+   * re-keying — the whole point of 0039. These are written against exactly what
+   * `JobChargesEditor` emits, including the `null` spelling of absence that took
+   * the job form down.
+   */
+  const row = (over: Record<string, unknown> = {}) => ({
+    description: "Bath towels",
+    charge_type: "wash_only",
+    quantity: 10,
+    unit_price: 3,
+    taxable: true,
+    source_agreement_id: null,
+    source_agreement_line_id: null,
+    source_item_id: null,
+    source_laundry_item_type: null,
+    pricing_model: null,
+    gl_account_id: null,
+    ...over,
+  });
+
+  it("carries the account the reviewer chose", () => {
+    const parsed = parseJobCharges(JSON.stringify([
+      row({ gl_account_id: "11111111-1111-4111-8111-111111111111" }),
+    ]));
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.lines[0]!.gl_account_id).toBe("11111111-1111-4111-8111-111111111111");
+  });
+
+  it("reads an uncoded charge as null rather than refusing it", () => {
+    // A charge nobody has coded is legal: the invoice counts it, the way the
+    // pricer reports laundry nobody has priced rather than billing it at zero.
+    const parsed = parseJobCharges(JSON.stringify([row()]));
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.lines[0]!.gl_account_id).toBeNull();
+  });
+
+  it("reads a missing key as null, not as a parse fault", () => {
+    // `JSON.stringify` drops `undefined`, so a row built before this field
+    // existed arrives without the key at all. That must not take the array down
+    // — the exact failure mode that made every job unsaveable in August.
+    const { gl_account_id: _omitted, ...withoutTheKey } = row();
+    const parsed = parseJobCharges(JSON.stringify([withoutTheKey]));
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.lines[0]!.gl_account_id).toBeNull();
+  });
+
+  it("refuses something that is not an id, and says which charge", () => {
+    const parsed = parseJobCharges(JSON.stringify([row(), row({ gl_account_id: "4-1100" })]));
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) return;
+    expect(parsed.problem).toContain("Charge 2");
+  });
+});
