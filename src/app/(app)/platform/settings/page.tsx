@@ -9,8 +9,11 @@ export const metadata = { title: "Platform settings" };
 export const dynamic = "force-dynamic";
 
 const TIMEZONES = [
-  "Australia/Sydney", "Australia/Melbourne", "Australia/Brisbane",
-  "Australia/Adelaide", "Australia/Perth", "Australia/Hobart", "Australia/Darwin",
+  // Adelaide leads because that is where this business is; the rest follow in
+  // population order. The list is the same set either way — only the default
+  // and the first thing an owner sees have moved.
+  "Australia/Adelaide", "Australia/Sydney", "Australia/Melbourne", "Australia/Brisbane",
+  "Australia/Perth", "Australia/Hobart", "Australia/Darwin",
 ].map((value) => ({ value, label: value.replace("Australia/", "") }));
 
 export default async function PlatformSettingsPage() {

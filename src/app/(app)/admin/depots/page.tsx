@@ -19,8 +19,11 @@ const AU_STATES = ["NSW", "VIC", "QLD", "WA", "SA", "TAS", "ACT", "NT"]
   .map((state) => ({ value: state, label: state }));
 
 const TIMEZONES = [
-  "Australia/Sydney", "Australia/Melbourne", "Australia/Brisbane",
-  "Australia/Adelaide", "Australia/Perth", "Australia/Hobart", "Australia/Darwin",
+  // Adelaide leads because that is where this business is; the rest follow in
+  // population order. The list is the same set either way — only the default
+  // and the first thing an owner sees have moved.
+  "Australia/Adelaide", "Australia/Sydney", "Australia/Melbourne", "Australia/Brisbane",
+  "Australia/Perth", "Australia/Hobart", "Australia/Darwin",
 ].map((value) => ({ value, label: value.replace("Australia/", "") }));
 
 type Search = { q?: string; status?: string };
@@ -65,7 +68,7 @@ export default async function DepotsPage({
             <Field label="Phone" name="contact_phone"><Input name="contact_phone" type="tel" /></Field>
             <Field label="Email" name="contact_email"><Input name="contact_email" type="email" /></Field>
             <Field label="Timezone" name="timezone">
-              <Select name="timezone" options={TIMEZONES} defaultValue="Australia/Sydney" />
+              <Select name="timezone" options={TIMEZONES} defaultValue="Australia/Adelaide" />
             </Field>
             <Field label="Status" name="status">
               <Select name="status" defaultValue="active"

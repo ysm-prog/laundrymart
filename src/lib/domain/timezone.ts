@@ -14,27 +14,40 @@
  * agrees on. `src/lib/format.ts` already defaults to the same zone for display.
  */
 
-export const BUSINESS_TIMEZONE = "Australia/Sydney";
+/**
+ * The zone the *business* runs on: `Australia/Adelaide`.
+ *
+ * **This was `Australia/Sydney` until 2026-08-26, and that was simply wrong.**
+ * The laundry is in Adelaide — its depot, its rounds and its staff are all
+ * there — and the Sydney value came from the skeleton this build started from
+ * rather than from anything about the client. It decided the instant composed
+ * from a counter's "received today", the day an invoice period ends, and the
+ * day a notification is filed under, so for half an hour either side of
+ * midnight it was answering with somebody else's date.
+ *
+ * **Moving it re-dated nothing, and that was checked rather than assumed.**
+ * The old comment here warned that rows already stored carry the Sydney
+ * decision — true, and the reason to look before changing it. What the live
+ * project actually holds for the real laundry is **one** app-composed
+ * `received_at`, and it is nowhere near midnight; its 646 invoices carry an
+ * imported `issue_date`, which is a `DATE` and has no zone to shift. Adelaide
+ * and Sydney differ by 30 minutes, so only an instant inside 30 minutes of
+ * midnight could change calendar day, and none does.
+ */
+export const BUSINESS_TIMEZONE = "Australia/Adelaide";
 
 /**
- * The zone the *road* runs on.
+ * The zone the *road* runs on — the same one, now that the business is on it.
  *
- * Deliberately separate from `BUSINESS_TIMEZONE`, and deliberately not a
- * replacement for it. Everything downstream of the counter — an invoice period,
- * the notification sweep's "which day did this event belong to", the instant
- * composed from a received date — has been computed in Sydney since the first
- * migration, and rows already stored carry that decision. Moving that constant
- * would silently re-date historical work.
- *
- * What runs on Adelaide time is the *operational day*: which runs a driver is
- * looking at, which day "today" is on My Runs, and the day boundaries a
- * timestamptz column is filtered against when answering "what happened on the
- * 14th". Those are questions about a depot's working day, and the depot is in
- * Adelaide.
+ * Kept as its own name rather than folded into `BUSINESS_TIMEZONE`, for two
+ * reasons and not out of caution about churn. The questions are genuinely
+ * different — one is "what day is this piece of paper filed under", the other
+ * is "which runs is a board looking at right now" — and a deployment that ever
+ * runs a second depot in another state will need them to part company again.
+ * The seam costs nothing while they agree.
  *
  * Both are read out of the platform's tz database via `offsetAt`, so the
- * October changeover — Adelaide's is a different instant from Sydney's only in
- * offset, not in date — is never hard-coded as +9:30 or +10:30.
+ * October changeover is never hard-coded as +9:30 or +10:30.
  */
 export const OPERATIONS_TIMEZONE = "Australia/Adelaide";
 

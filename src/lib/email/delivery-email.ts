@@ -37,7 +37,7 @@ export type DeliveryEmail = { subject: string; html: string; text: string };
 function auDateTime(iso: string): string {
   try {
     return new Intl.DateTimeFormat("en-AU", {
-      timeZone: "Australia/Sydney",
+      timeZone: "Australia/Adelaide",
       day: "2-digit", month: "2-digit", year: "numeric",
       hour: "numeric", minute: "2-digit", hour12: true,
     }).format(new Date(iso));

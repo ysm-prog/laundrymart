@@ -1,7 +1,43 @@
 # MEMORY — working session handoff
 > Auto-loaded each session. Canonical state is CLAUDE.md; this is the live delta.
 
-## Latest: what kind of laundry each item is
+## Latest: the business runs on Adelaide time
+2026-08-26, branch `claude/invoice-item-code-selection-vlwwb4`. **No migration, no schema
+change, and no live row altered.** CLAUDE.md §2 and the newest changelog entry have it.
+
+The client's correction: this project is based on Adelaide date and time. `BUSINESS_TIMEZONE`
+was `Australia/Sydney` — from the skeleton this build started from, not from anything about
+the client — and it decides the instant composed from "received today", the day an invoice
+period ends and the day a notification is filed under. For half an hour either side of
+midnight it filed this laundry's work under another state's date.
+
+- **The database always said Adelaide.** `tenants.timezone` and `depots.timezone` have read
+  `Australia/Adelaide` since the cutover; nothing in `src/` consulted them because the zone was
+  hard-coded. The correction changed **no live row**.
+- **Re-dated nothing, checked before moving:** 1 app-composed `received_at` (not near
+  midnight), 646 invoices whose `issue_date` is a `DATE`, 0 charges, 0 notifications. The two
+  zones differ by 30 minutes, so only an instant within 30 minutes of midnight could move day.
+- **Seven tests failed and all seven were rewritten to the decision**, not made to pass — they
+  encoded the old offsets (AEST +10 → ACST +9:30, AEDT +11 → ACDT +10:30, delivery email 2:30pm
+  → 2:00pm). Expected instants computed against the tz database, not by hand.
+- `OPERATIONS_TIMEZONE` and `BUSINESS_TIMEZONE` are both Adelaide now but stay separate names:
+  different questions, and Harbour (the demo tenant) is still a Sydney laundry in its own rows.
+- Cron unchanged (UTC; now 06:30–14:30 Adelaide). `syd1` region unchanged — that is a region,
+  not a timezone.
+- 885 unit tests, 448 pgTAP assertions, verify green.
+
+### Next
+1. Not merged to `Dev`/`Prod` yet.
+2. **Adelaide's price list is still not in hand.** The client says it was provided; the only
+   uploads present are the two MYOB workbooks, and neither carries rates — `MYOB_Inventory`
+   has a selling price on **2 of 257** rows and its second sheet is aggregate stats only.
+   `laundry_prices` for Adelaide is still **0**.
+3. Still never run end to end: take a job in → code a charge → approve → generate → confirm the
+   line arrives already coded.
+
+---
+
+## Previous: what kind of laundry each item is
 2026-08-26, branch `claude/invoice-item-code-selection-vlwwb4`. **No migration** — one pure
 rule (`src/lib/domain/laundry-category.ts`), its tests, and a live data write. CLAUDE.md §25
 and the newest changelog entry have it.

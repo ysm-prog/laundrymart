@@ -36,7 +36,7 @@ export function minutesOfDay(clock: string | null | undefined): number | null {
 }
 
 /** Local wall-clock minutes in a time zone, from an absolute instant. */
-export function minutesOfDayIn(now: Date, timeZone = "Australia/Sydney"): number {
+export function minutesOfDayIn(now: Date, timeZone = "Australia/Adelaide"): number {
   const parts = new Intl.DateTimeFormat("en-GB", {
     timeZone, hour: "2-digit", minute: "2-digit", hour12: false,
   }).formatToParts(now);
