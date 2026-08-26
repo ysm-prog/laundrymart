@@ -16,6 +16,50 @@ logins — which live there precisely so they cannot read the real business's re
 **The multi-tenancy architecture stays.** One operating tenancy is a fact about today's data, not
 a reason to drop `tenant_id`, RLS, or §23's rule that a read feeding a write names its tenant.
 
+## Latest: MYOB's item page, and the line that reads it
+2026-08-26, branch `claude/functionality-request-fi8erj`. The owner captured every field on
+MYOB's item page for all 257 of Adelaide's active items; nine had nowhere to live here. One
+migration (`0044`), **no table, no policy, no function, no capability; nothing dropped, no row
+changed.** All fifteen fields are null on all 254 imported rows.
+
+- **`0044_item_master_detail`** — twelve columns on `items` (`use_item_description`,
+  `track_stock`, three account FKs, the four buying fields, `buy_tax_code`,
+  `supplier_item_code`, `primary_supplier_id`, `default_reorder_qty`), three checks, two
+  partial indexes. Eight self-assertions, **each proved to fail** against a real Postgres 16.
+- **Twelve, not fifteen — `0043` had already shipped `selling_unit`,
+  `items_per_selling_unit` and `sell_price_basis`** with the same meanings, from the branch
+  that never landed here, so nothing in `src/` had ever read them. 0044 *asserts* them rather
+  than adding `sell_unit`/`sell_units_per` beside them, and this change is what gives them a
+  reader. **Do not add the second pair.**
+- **`gl_accounts`, not `accounts`.** `tax_code` stays the **selling** code (`line-form.tsx`
+  reads it that way) and `reorder_level` stays the *minimum stock level*; `buy_tax_code` and
+  `default_reorder_qty` sit beside them. All four asserted.
+- **`/items/:id` is MYOB's four groups now** (+ a fifth for rental linen), **one `<form>`, one
+  Save**. The add form gains only the selling unit and the basis. `ITEM_COLUMNS` states the
+  select once — the two hand-maintained strings had already drifted, and a form that posts a
+  field it never read clears it on every save.
+- **The invoice line prints the unit beside quantity and one basis sentence under the price.**
+  Labels only: nothing extra posted, no column on a line, totals untouched. `sellPriceLabel`
+  and `priceBasisHint` are pure and tested; the hint is **null on a non-taxable line**, because
+  both sentences are claims about GST.
+
+**Found and NOT fixed, as instructed:** an `exclusive`-basis item is **under-billed by the whole
+GST component** — `addInvoiceLine` stores `quantity × unit_price` and 0043's
+`recalculate_invoice` extracts GST *out of* that, so $100 exclusive bills $100/$9.09 where the
+item says $110/$10. Latent (no item carries a basis). Same shape as the Xero one below and the
+same reason to leave it: basis is per-*item*, `LineAmountTypes` is per-*document*.
+
+**Also stated rather than fixed:** an `optionalText`/`optionalUuid` field cannot be *cleared*
+once set anywhere in this app (`""` → `undefined` → dropped by `JSON.stringify`). 0044's new
+fields use a local `clearable` and do not inherit it, so `income_account_id` and the
+cost-of-sales account beside it behave differently on one card. And **`MYOB_Items_Register.xlsx`
+was not in the container** — the column mapping is the request's, not one read off the file,
+which is why no importer was written.
+
+**1001 unit tests** (was 991), **485 pgTAP across 26 files (unchanged — adds no policy)**,
+`verify` green, all 44 migrations on a fresh Postgres 16 with the suite and the seed. **36
+browser assertions** on the composer at 390/1440, 0 failures. **Not opened behind the auth gate.**
+
 ## Latest: 0043 is in the repo, and the Xero basis disagrees with it
 2026-08-26, branch `claude/invoice-creation-job-workflow-11mobw`. The owner asked for the live
 migration this repo lacked. **No `src/` change; one migration file, reconstructed not authored.**

@@ -479,7 +479,11 @@ async function loadItemCatalogue(): Promise<LineFormItem[]> {
   const supabase = await createClient();
   const { data } = await supabase
     .from("items")
-    .select("id, item_code, name, description, laundry_category, sell_price, tax_code, income_account_id")
+    .select("id, item_code, name, description, laundry_category, sell_price, tax_code, "
+            // 0043's two selling facts, read here for the first time: the unit the
+            // rate is per, and whether that rate already contains GST. Both are
+            // labels on the composed line — see `line-form.tsx`.
+            + "selling_unit, sell_price_basis, income_account_id")
     .is("deleted_at", null)
     .eq("status", "active")
     // An item the laundry only *buys* is not something a customer is charged

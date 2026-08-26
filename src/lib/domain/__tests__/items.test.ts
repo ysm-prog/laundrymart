@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  MAX_ITEM_CODE, checkItemCode, itemLabel, itemMatches, searchItems, type PickableItem,
+  MAX_ITEM_CODE, PRICE_BASIS_OPTIONS, checkItemCode, itemLabel, itemMatches,
+  priceBasisHint, searchItems, sellPriceLabel, type PickableItem,
 } from "@/lib/domain/items";
 
 const item = (over: Partial<PickableItem> = {}): PickableItem => ({
@@ -92,5 +93,78 @@ describe("checkItemCode", () => {
 
   it("accepts a free code", () => {
     expect(checkItemCode("SHT002", ["TOW001"])).toEqual({ ok: true });
+  });
+});
+
+describe("sellPriceLabel", () => {
+  it("puts the unit beside the price, which is what stops it being read wrong", () => {
+    expect(sellPriceLabel("$0.22", "ea")).toBe("$0.22 / ea");
+    expect(sellPriceLabel("$18.00", "ctn")).toBe("$18.00 / ctn");
+  });
+
+  it("gives the price alone when nobody has said what it is per", () => {
+    // The ordinary case, not the exception: `selling_unit` is null on all 254 of
+    // this laundry's imported items, so this is the branch the list renders today.
+    expect(sellPriceLabel("$0.22", null)).toBe("$0.22");
+    expect(sellPriceLabel("$0.22", undefined)).toBe("$0.22");
+  });
+
+  it("treats a whitespace-only unit as no unit", () => {
+    // `selling_unit` is free text copied out of an accounting package. "$0.22 / "
+    // with nothing after the slash reads as a fault in the app rather than as a
+    // field nobody filled in.
+    expect(sellPriceLabel("$0.22", "   ")).toBe("$0.22");
+  });
+
+  it("trims a unit somebody typed with a space", () => {
+    expect(sellPriceLabel("$0.22", " ea ")).toBe("$0.22 / ea");
+  });
+});
+
+describe("priceBasisHint", () => {
+  it("says which of the two things the price on screen means", () => {
+    expect(priceBasisHint("inclusive", true)).toBe("This price includes GST");
+    expect(priceBasisHint("exclusive", true)).toBe("GST is added to this price");
+  });
+
+  it("says nothing when the item has no basis on it", () => {
+    // Every one of this laundry's 254 items, so an absent basis is the ordinary
+    // case rather than an error to narrate at somebody.
+    expect(priceBasisHint(null, true)).toBeNull();
+    expect(priceBasisHint(undefined, true)).toBeNull();
+    expect(priceBasisHint("   ", true)).toBeNull();
+  });
+
+  it("says nothing on a line that carries no GST", () => {
+    // **Both sentences are claims about GST.** On a FRE or N-T line neither is
+    // true, and saying either would be worse than saying nothing — the same call
+    // `taxableFromTaxCode` makes when it does not recognise a code.
+    expect(priceBasisHint("inclusive", false)).toBeNull();
+    expect(priceBasisHint("exclusive", false)).toBeNull();
+  });
+
+  it("does not guess at a basis it does not recognise", () => {
+    // `sell_price_basis` is constrained to two values in the database, so this is
+    // unreachable through the app — and a rule that guessed would put a claim
+    // about somebody's tax on the screen on the strength of a typo.
+    expect(priceBasisHint("Inclusive of GST", true)).toBeNull();
+    expect(priceBasisHint("gst", true)).toBeNull();
+  });
+
+  it("reads the basis however it was cased or spaced", () => {
+    expect(priceBasisHint(" Inclusive ", true)).toBe("This price includes GST");
+    expect(priceBasisHint("EXCLUSIVE", true)).toBe("GST is added to this price");
+  });
+
+  it("recognises exactly the two values the picker offers and the database allows", () => {
+    // The pin that matters: the picker, the check constraint and this rule are
+    // three statements of one vocabulary, and a value offered by one and refused
+    // by another would be a save that fails on a constraint name. Driven off the
+    // options list rather than restating it, so adding a third option here fails
+    // rather than silently rendering no hint.
+    for (const option of PRICE_BASIS_OPTIONS) {
+      expect(priceBasisHint(option.value, true)).not.toBeNull();
+    }
+    expect(PRICE_BASIS_OPTIONS.map((option) => option.value)).toEqual(["inclusive", "exclusive"]);
   });
 });

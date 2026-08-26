@@ -31,6 +31,16 @@ export type CodingItem = PickableItem & {
   sell_price: number | string | null;
   tax_code: string | null;
   income_account_id: string | null;
+  /**
+   * What the price is *per* (`ea`, `ctn`) and whether it already contains GST —
+   * 0043's columns, given their first reader by 0044.
+   *
+   * Both are labels on the composed line, never inputs and never stored on it:
+   * a line records a quantity and a rate, and the unit is what tells somebody
+   * typing 12 whether that is 12 towels or 12 cartons.
+   */
+  selling_unit?: string | null;
+  sell_price_basis?: string | null;
 };
 
 export type CodingAccount = PickableAccount;

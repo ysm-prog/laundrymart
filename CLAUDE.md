@@ -826,6 +826,47 @@ renders no tab strip. Tested in `src/lib/__tests__/nav.test.ts`.
   inside its own transaction: a second open draft refused, a line on an issued
   invoice refused, and the cascade still deleting. Both halves were proved to
   fail without the fix rather than assumed to be doing something.
+- `0044_item_master_detail` — **the fields MYOB's item page actually holds.**
+  Twelve columns on `items`: `use_item_description`, `track_stock`,
+  `asset_account_id`, `cost_of_sales_account_id`, `expense_account_id`,
+  `buy_price_basis`, `buy_unit`, `buy_units_per`, `buy_tax_code`,
+  `supplier_item_code`, `primary_supplier_id`, `default_reorder_qty`, plus three
+  check constraints and two partial indexes. **Adds no table, no policy, no
+  function and no capability; drops nothing and changes no row.** Every column is
+  nullable or `not null default`, so a caller that never named them still does not.
+  - **Twelve, not the fifteen the request listed, and that is the decision worth
+    reading.** `0043` had already shipped `items.selling_unit`,
+    `items_per_selling_unit` and `sell_price_basis` — the same three facts, with
+    the same meanings and the identical `('inclusive','exclusive')` constraint —
+    from a branch that never reached this repo, which is why **nothing in `src/`
+    had ever read them**. Adding `sell_unit`/`sell_units_per` beside them would
+    have been two answers to one question on the table the whole application
+    resolves through. The migration *asserts* those three are present rather than
+    creating them, so it fails loudly on a database where 0043 has not applied —
+    the screens in the same commit read them at request time, where no typecheck
+    can see the absence. `buy_units_per` matches its sell-side twin at
+    `numeric(12,2)` rather than `(12,3)` for the same reason.
+  - **The chart of accounts is `gl_accounts`, not `accounts`.** All four account
+    references (0036's `income_account_id` and the three here) point at it, and
+    the migration counts them — four, and one to `suppliers` — because a
+    reference to the wrong table is a `create` that succeeds and a screen that
+    fails when somebody first picks from it.
+  - **`tax_code` and `reorder_level` are deliberately not renamed**, and that is
+    asserted too. The first is the **selling** code and `line-form.tsx` already
+    reads it that way, so renaming it would move a live read for no gain;
+    `buy_tax_code` is the new one. The second is MYOB's *minimum stock level* —
+    when to reorder — where `default_reorder_qty` is how much, and they are not
+    the same number.
+  - **RLS: nothing new, asserted rather than assumed.** 0040's four policies are
+    attached to the table, so a column added here is covered by all four the
+    moment it exists. What this file proves is that it did not undo them — no
+    permissive `for all` is back (the shape replaced four times in this schema),
+    all four are present, RLS is on, and `anon` holds no grant (0029's posture).
+  - Eight self-assertions, **every one confirmed to fail** by breaking what it
+    guards against a real Postgres 16 — a dropped 0043 column, a dropped FK, a
+    re-added `for all`, a dropped `tax_code`, a dropped `reorder_level`, an
+    `anon` grant, a dropped policy and a mistyped new column.
+
 - `0043_myob_invoice_lines` — **GST inside the price, and the columns a MYOB
   invoice line carries.** Three columns each on `invoice_lines` and
   `job_charge_snapshots` (`discount_percent`, `unit_label`, `tax_code`), three on
@@ -2298,6 +2339,109 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-08-26 · An item says what MYOB says about it, and the line says what the price means
+The owner opened all 257 of Adelaide's active items in MYOB one at a time and captured
+every field on the item page. Nine had nowhere to live in this schema, and two of those
+change what an invoice line should say. One migration (`0044`), **no new table, no new
+policy, no new function, no new capability; nothing dropped and no row changed.** §7 and
+§25 hold the design.
+
+**Three of the fifteen fields already existed, and reusing them is the decision worth
+reading.** `0043_myob_invoice_lines` had shipped `items.selling_unit`,
+`items_per_selling_unit` and `sell_price_basis` — the same three facts, the same meanings,
+the identical `('inclusive','exclusive')` constraint — from a branch that never reached
+this repository, which is why **nothing in `src/` had ever read them**: three columns with
+no reader. Adding `sell_unit` and `sell_units_per` beside them would have put two answers
+to one question on the table the whole application resolves through. So 0044 adds **twelve**
+and *asserts* the other three, which is also what finally gives 0043's three a reader.
+- **The chart of accounts is `gl_accounts`, not `accounts`**, and the migration counts the
+  foreign keys — four to it, one to `suppliers` — because a reference to the wrong table is
+  a `create` that succeeds and a screen that fails when somebody first picks from it.
+- **`tax_code` and `reorder_level` are not renamed, and that is asserted.** The first is the
+  **selling** code and `line-form.tsx` already reads it that way, so renaming it would move a
+  live read for no gain; `buy_tax_code` is the new one. The second is MYOB's *minimum stock
+  level* — when to reorder — where `default_reorder_qty` is how much. Two numbers, both kept.
+
+**The detail page is MYOB's four groups now, not one flat grid of twenty fields** — which
+0044 would have made thirty-five, with the buying tax code three rows under the rental price
+for no reason anybody could state. Details, Selling, Buying, Restocking, plus a fifth card
+for the rental linen that predates the item master and is not on MYOB's page. **Four cards,
+one `<form>`, one Save**: four forms would be four saves and three chances to lose the other
+cards' edits. The add form gains only the two fields that change what the price *means* —
+the selling unit and the basis.
+
+**The point of all of it is the invoice line.** The selling unit prints beside the quantity
+box, so somebody typing 12 knows whether that is 12 towels or 12 cartons; the basis prints
+one sentence under the price. Both are labels — nothing extra is posted, no column is added
+to a line, and the totals maths is untouched.
+
+**Four defects found in this change, three of them by driving it rather than reading it:**
+- **`aria-hidden` on the unit hid exactly the fact it exists to convey.** The first draft had
+  it, which would have left a screen-reader user hearing "Quantity, 1" and losing the carton.
+  It is `aria-describedby` now, announced with the box.
+- **A controlled `<input>` silently opts out of `Field`'s hint wiring.** `Input` consumes the
+  describedby context; the composer's price and description are bare `<input>`s because they
+  are driven by the item picked, so the new hint rendered on screen and was announced by
+  **nothing** — the gap the 2026-08-24 pass closed everywhere else. `useFieldControl` is
+  exported and `DescribedInput` uses it; the description field's own hint was unwired too and
+  is fixed with it. Caught by asserting on the attribute, not by looking: the sentence renders
+  identically either way, which is why this class survives a screenshot.
+- **The two new preprocessors would have broken `createItem` outright.** One schema serves both
+  forms and the add form deliberately posts two of the fifteen, so the rest arrive `undefined`
+  — which `z.enum().nullable()` refuses. `clearable` distinguishes *not posted* (leave the
+  column default) from *posted empty* (write null), which also means a price basis can be put
+  back to "not stated" after being set.
+- **Two hand-maintained `select(...)` strings had already drifted** — the detail page named
+  `income_account_id` twice, the list page never named `xero_item_code` — and neither is
+  visible to a typecheck. With fifteen more columns a form that *posts* a field it never
+  *read* would clear it on every save, so `ITEM_COLUMNS` states them once. Checked against the
+  real schema rather than by eye: all 39 exist, and the `Item` type and the select list are
+  the same 39, so no field is typed as present and never fetched.
+
+- 1001 unit tests (was 991) and **485 pgTAP assertions across 26 files, unchanged** — this adds
+  no policy and no capability, so it adds no proof; its own eight self-assertions are the proof.
+  `verify` green — typecheck, lint, tests and the production build; all 44 migrations applied to
+  a fresh Postgres 16 with the whole pgTAP suite and the seed on top.
+- **Every new assertion was confirmed to fail without its fix** rather than assumed to be doing
+  something. The eight in 0044, by breaking each thing it guards against a real database. The
+  ten unit tests, by dropping the not-taxable guard (1 fails), dropping the unit trim (2), and
+  making the rule guess at an unrecognised basis (2).
+- The composer is in `/design-preview` with the four real states across its fixtures — priced
+  per carton and inclusive, a unit on a non-taxable line, exclusive with no unit, and neither,
+  which is every one of Adelaide's 254 items today. **36 interaction assertions at 390 and 1440,
+  0 failures, 0 console errors, 0 overflow inside the section, nothing under 36px.** The harness
+  asserts the section is in the page *being served* before measuring anything, because a stale
+  build answering is how the 2026-08-25 run passed vacuously.
+
+**Not verified behind the auth gate.** This container has no Supabase credentials, so `/items`
+and `/items/:id` were checked by typecheck, lint, 1001 tests, the production build and the
+migration against a real Postgres — not by being opened with real rows in them. **Before
+trusting it: open an item on `ats.coreit.com.au`, set its selling unit to `ea` and its basis to
+tax-inclusive, save, and check the list shows `$0.22 / ea` — then add that item to a draft
+invoice line and confirm the unit shows beside the quantity and "This price includes GST" under
+the price.**
+
+**One thing found and deliberately not fixed, per the request's own instruction.** An item whose
+`sell_price_basis` is `exclusive` will be **under-billed by the whole GST component**:
+`addInvoiceLine` stores `amount = quantity × unit_price`, and 0043's `recalculate_invoice`
+treats every line amount as GST-**inclusive** and extracts the tax out of it — so $100
+exclusive bills $100 with $9.09 inside it where the item says $110 with $10 on top. Latent
+rather than live (no item carries a basis, so no line can produce it today), and left alone
+because the fix is a decision about the totals rather than a one-word change:
+`sell_price_basis` is per *item* while an invoice's basis is per *document* — Xero's
+`LineAmountTypes` is one field for the whole invoice — so a mixed-basis invoice cannot be
+expressed by flipping anything. It is the mirror image of the inconsistency the entry below
+records, and it belongs with whoever designed the inclusive-price model.
+
+**Two smaller things stated rather than fixed.** An `optionalText` or `optionalUuid` field
+**cannot be cleared once set** anywhere in this app — clearing posts `""`, which those helpers
+fold to `undefined`, which `JSON.stringify` drops, so the column is never written. That is
+long-standing behaviour across every form here and is not changed; 0044's own new fields simply
+do not inherit it, which is why `income_account_id` and the cost-of-sales account sitting beside
+it behave differently on the same card. And `MYOB_Items_Register.xlsx` is not in this
+container, so the fifteen column names above are the request's mapping rather than one read off
+the file — which is exactly why no importer was written.
+
 ### 2026-08-26 · 0043 comes into the repo, and the Xero basis no longer matches it
 The owner's instruction, after the merge record noted the hosted project carrying a migration
 this repository did not have. **No `src/` change; one migration file added, reconstructed rather
@@ -6626,6 +6770,46 @@ bag, under the code the business already uses (0032). Staff type TOW001.
   null, so an item nobody has coded behaves exactly as it did before. The Owner can add to the
   chart itself now — `/accounts` had been read-only since the MYOB import, and its empty state
   said so, which left a laundry wanting one more revenue code with nowhere to put it.
+- **An item now carries what MYOB's own item page carries** (`0044`, 2026-08-26).
+  `items` had held the columns of the MYOB *inventory export*, because that is the
+  export that was read; the owner then opened all 257 of Adelaide's active items in
+  MYOB one at a time and captured every field. Nine had nowhere to live here, and
+  two of those change what an invoice line should say. The detail page is now
+  MYOB's own four groups in MYOB's own order — Details, Selling, Buying,
+  Restocking (plus a fifth for the rental linen that predates the item master and
+  is not on MYOB's page) — because thirty-five fields in one flat grid is the wall
+  of inputs `FormSection` exists to prevent. **Four cards, one `<form>`, one Save:**
+  four forms would be four saves and three chances to lose the other cards' edits.
+  The add form gains only the two that change what the price *means* — the selling
+  unit and the price basis — and everything else is edited on the detail page.
+- **All fifteen of those fields are null on all 254 imported rows, and stay that
+  way until somebody edits an item or the detail import lands.** That importer is
+  deliberately **not** built here, for the reason this section already records
+  twice: it belongs beside `myob/inventory.ts` and it reads the real file rather
+  than guessing its column names. Nothing reads a null field differently from how
+  it read a missing one, so every existing screen is unchanged.
+- **The price now carries the unit it is a price *for*.** `$0.22` and `$0.22` read
+  identically whether one is per towel and the other per box of a hundred, and the
+  unit is the only thing on the row that tells them apart — so `sellPriceLabel`
+  puts it beside the rate on `/items`, and the invoice line composer prints it
+  beside the quantity box (as a label; nothing extra is posted and no column is
+  added to a line). `priceBasisHint` is the sentence under the price saying whether
+  the rate already contains GST. Both are pure and tested.
+  - **`priceBasisHint` returns nothing on a line carrying no GST**, deliberately:
+    both sentences are claims *about* GST, so on a `FRE` or `N-T` line neither is
+    true — the same call `taxableFromTaxCode` makes about a code it does not know.
+    And it does not feed the GST checkbox: the item's own tax code still beats its
+    account's, untouched.
+  - **Known and not fixed: `exclusive` is a promise the totals do not keep.**
+    `addInvoiceLine` stores `amount = quantity × unit_price` and 0043's
+    `recalculate_invoice` treats every line amount as GST-**inclusive**, extracting
+    the tax out of it. So an exclusive-basis item priced at $100 bills $100 with
+    $9.09 inside it where the item says $110 with $10 on top. Latent — no item
+    carries a basis — and left to whoever owns the inclusive-price model, because
+    `sell_price_basis` is per *item* while Xero's `LineAmountTypes` is per
+    *document*, so a mixed-basis invoice cannot be expressed by flipping anything.
+    The mirror image of the inconsistency §18's 2026-08-26 entry already records.
+
 - **The open question is above this work, not inside it.** This app posts invoices and payments
   to **Xero** (§20) while MYOB is a one-off migration source (`docs/IMPORT-MYOB.md`). An item
   code is only worth carrying if it reconciles to the ledger that receives the invoice. Staying

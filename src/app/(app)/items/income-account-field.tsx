@@ -1,6 +1,7 @@
-import { listIncomeAccounts, accountOptionLabel } from "@/lib/accounts";
+import { listIncomeAccounts, type IncomeAccount } from "@/lib/accounts";
 import { createClient } from "@/lib/supabase/server";
-import { Field, Input, Select } from "@/components/form";
+import { Field, Input } from "@/components/form";
+import { AccountField } from "./account-fields";
 
 /**
  * The two coding fields on an item: which account its sales land in, and what
@@ -18,34 +19,30 @@ import { Field, Input, Select } from "@/components/form";
  * in by itself. `xero_item_code` is deliberately separate from `item_code`: that
  * is the code staff type here, and Xero refuses an invoice naming an `ItemCode`
  * its own inventory does not carry, so the two are never assumed to match.
+ *
+ * **`accounts` is optional and the detail page passes it.** That page now draws
+ * four account pickers (0044 added the cost-of-sales, expense and asset
+ * accounts), and each fetching its own chart would be four round trips for one
+ * list. Left out, this reads its own — which is what the add form wants, since
+ * it is rendered only for a role that can see this form at all.
  */
 export async function IncomeAccountField({
-  tenantId, defaultValue, defaultXeroItemCode,
+  tenantId, accounts, defaultValue, defaultXeroItemCode,
 }: {
   tenantId: string;
+  accounts?: readonly IncomeAccount[];
   defaultValue?: string | null;
   defaultXeroItemCode?: string | null;
 }) {
-  const accounts = await listIncomeAccounts(await createClient(), tenantId);
+  const chart = accounts ?? await listIncomeAccounts(await createClient(), tenantId);
 
   return (
     <>
-      <Field
-        label="Income account" name="income_account_id"
-        hint={accounts.length === 0
-          // Said out loud rather than rendered as an empty select: a picker with
-          // nothing in it and no explanation reads as a broken screen.
-          ? "No chart of accounts on file yet. Import one and this item's sales can be coded."
-          : "Where an invoice line for this item is coded. Carried through to Xero."}
-      >
-        <Select
-          name="income_account_id" defaultValue={defaultValue ?? ""}
-          placeholder={accounts.length === 0 ? "No accounts available" : "Not coded"}
-          options={accounts.map((account) => ({
-            value: account.id, label: accountOptionLabel(account),
-          }))}
-        />
-      </Field>
+      <AccountField
+        accounts={chart} name="income_account_id" label="Income account"
+        hint="Where an invoice line for this item is coded. Carried through to Xero."
+        defaultValue={defaultValue}
+      />
       <Field
         label="Xero item code" name="xero_item_code"
         hint="This item's code in Xero, if it has one. Blank means no ItemCode is sent — nothing is guessed, because Xero refuses an invoice naming a code it does not have."

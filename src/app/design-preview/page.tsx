@@ -1571,15 +1571,25 @@ const PREVIEW_RUN_STOPS_WORKED: SequenceStop[] = [
    account, which is the state that would otherwise produce an uncoded line in
    silence; and the chart carries `5-1000 Towel Purchases`, the wrong side of the
    books, so the ranking can be seen doing its job on a real name collision. */
+/* The selling unit and the price basis (0043's columns, first read by 0044) are
+   deliberately spread across these four so all four states can be *seen*:
+   TOW001 is priced per carton and tax-inclusive, TOW010 carries a unit on a
+   non-taxable line (so no basis sentence is true and none is shown), TT001 is
+   exclusive with no unit, and the laundry bag has neither — which is every one
+   of Adelaide's 254 imported items today. */
 const PREVIEW_LINE_ITEMS: LineFormItem[] = [
   { id: "i1", item_code: "TOW001", name: "Bath Towel — Black", description: "Commercial, black",
-    laundry_category: "bath_towels", sell_price: 3.20, tax_code: "GST", income_account_id: "g2" },
+    laundry_category: "bath_towels", sell_price: 3.20, tax_code: "GST", income_account_id: "g2",
+    selling_unit: "ctn", sell_price_basis: "inclusive" },
   { id: "i2", item_code: "TOW010", name: "Hand Towel — White", description: null,
-    laundry_category: "hand_towels", sell_price: 1.80, tax_code: "N-T", income_account_id: "g3" },
+    laundry_category: "hand_towels", sell_price: 1.80, tax_code: "N-T", income_account_id: "g3",
+    selling_unit: "doz", sell_price_basis: "inclusive" },
   { id: "i3", item_code: "TT001", name: "Tea Towel", description: "Cotton, checked",
-    laundry_category: "towels", sell_price: 0.95, tax_code: "GST", income_account_id: null },
+    laundry_category: "towels", sell_price: 0.95, tax_code: "GST", income_account_id: null,
+    selling_unit: null, sell_price_basis: "exclusive" },
   { id: "i4", item_code: "LB-STD-01", name: "Laundry Bag", description: "Container, not laundry",
-    laundry_category: null, sell_price: 0, tax_code: "GST", income_account_id: null },
+    laundry_category: null, sell_price: 0, tax_code: "GST", income_account_id: null,
+    selling_unit: null, sell_price_basis: null },
 ];
 
 const PREVIEW_CHART: LineFormAccount[] = [
