@@ -1993,7 +1993,21 @@ from a job that has yet to be taken in.
 
 **Before trusting it: code one charge on a job, approve it, generate the invoice and confirm the
 line arrives already coded** — that last step is the whole point of the change, and it has still
-not been run.
+not been run. Adelaide is down to `LJ00001` after the cleanup above, so the run starts by taking
+a job in.
+
+**Merged to `Dev` and `Prod` on 2026-08-26**, so this and the item import are live on
+`ats.coreit.com.au`. `Prod` had moved fourteen commits while this branch was in flight — the YSM
+Hub filter language, Adjust Run on My Runs, and `0038_invoice_line_account` — so it was merged in
+first and the two documentation files were the only conflicts; every source file merged clean.
+`src/lib/xero/push.ts` was the one both sides had changed, and **theirs was kept because it is the
+better shape**: it splits the line's own account from the item's and lets `invoice-payload.ts`
+walk the ladder, which is what leaves room for the connection's default sales account underneath.
+The migration went on **before** the merge, so the schema led the code — the safe order, and the
+same one the last several releases record. 41 migrations applied to a fresh Postgres 16 with the
+whole pgTAP suite on top (**439 assertions**, none failing) and 870 unit tests green, which is the
+check that mattered: this is the first time both `0036`s, `0037`, `0038` and `0039` have been in
+one tree.
 
 ### 2026-08-26 · One way to filter a list, and it is YSM Hub's
 The filter language adopted from `ysm-prog/ysm-hub` and applied across every list in the app.
