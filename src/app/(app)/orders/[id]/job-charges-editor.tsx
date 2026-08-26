@@ -6,12 +6,13 @@ import { CHARGE_TYPES, CHARGE_TYPE_LABELS, round2, type ChargeType } from "@/lib
 import { formatMoney } from "@/lib/domain/pricing";
 import type { JobChargeInput } from "../job-charges";
 import { accountLabel, taxableFromTaxCode } from "@/lib/domain/accounts";
-import { codingOffer, type CodingOffer } from "@/lib/domain/coding";
+import { chargePatchForItem, codingOffer, type CodingOffer } from "@/lib/domain/coding";
 import { itemLabel } from "@/lib/domain/items";
 import { Button, CONTROL, IconButton, SELECT_CHEVRON } from "@/components/ui";
 import { SubmitButton } from "@/components/form";
 import {
-  AccountPicker, ItemPicker, type CodingAccount, type CodingItem,
+  AccountPicker, DescriptionWithItems, ItemPicker,
+  type CodingAccount, type CodingItem,
 } from "@/components/coding-pickers";
 
 /**
@@ -94,6 +95,27 @@ export function JobChargesEditor({
   const update = (key: string, patch: Partial<EditableCharge>) =>
     setRows((current) => current.map((row) => (row.key === key ? { ...row, ...patch } : row)));
 
+  // The one place an item fills a charge, so the description type-ahead and the
+  // row's own item field cannot drift apart. The rule itself is pure and tested.
+  // Unique per editor, not just per row: a row key is unique inside one editor
+  // and two editors on one page (the gallery renders three) would otherwise
+  // collide, pointing a label at another editor's input — the duplicate-id
+  // defect §27 already records once on this screen.
+  const fieldPrefix = (row: EditableCharge) => `${orderId}-charge-${row.key}`;
+
+  const patchForItem = (
+    row: EditableCharge, chosen: CodingItem, descriptionIsQuery = false,
+  ) =>
+    chargePatchForItem(row, chosen, {
+      accountTaxCode: chosen.income_account_id
+        ? accountsById.get(chosen.income_account_id)?.tax_code
+        : null,
+      // Text typed into the description box to *find* this item is a search, not
+      // a description: picking replaces it. Text already sitting there when the
+      // item is chosen from the field below is content, and survives.
+      descriptionIsQuery,
+    });
+
   const subtotal = round2(
     rows.reduce((sum, row) => sum + Number(row.quantity ?? 0) * Number(row.unit_price ?? 0), 0),
   );
@@ -113,13 +135,20 @@ export function JobChargesEditor({
       <div className="space-y-3">
         {rows.map((row, index) => (
           <div key={row.key} className="grid gap-2 rounded-lg border p-3 sm:grid-cols-12 sm:items-end">
-            <label className="sm:col-span-5">
+            <label className="sm:col-span-5" htmlFor={`${fieldPrefix(row)}-description`}>
               <span className="mb-1 block text-sm font-medium">Description</span>
-              <input
-                className={CONTROL}
+              {/* Typing a code here finds the item — the fast path. Free text
+                  still wins: suggestions are offered and never imposed. */}
+              <DescriptionWithItems
+                id={`${fieldPrefix(row)}-description`}
+                items={items}
+                hasItem={Boolean(row.source_item_id)}
                 value={row.description}
-                onChange={(event) => update(row.key, { description: event.target.value })}
-                placeholder="What is being charged"
+                onChange={(description) => update(row.key, { description })}
+                onChooseItem={(chosen) => update(row.key, patchForItem(row, chosen, true))}
+                placeholder={items.length > 0
+                  ? "What is being charged — or type an item code"
+                  : "What is being charged"}
               />
             </label>
 
@@ -211,10 +240,24 @@ export function JobChargesEditor({
               question at a time. The summary is always readable, so "is this
               coded?" never needs a click to answer.
             */}
+            {items.length > 0 ? (
+              // Open on every row rather than hidden behind the strip: the item
+              // is the question asked, and a control nobody finds is a control
+              // that does not exist. The account stays a consequence below.
+              <div className="sm:col-span-12">
+                <ItemPicker
+                  idPrefix={fieldPrefix(row)}
+                  items={items}
+                  chosen={row.source_item_id ? itemsById.get(row.source_item_id) ?? null : null}
+                  onChoose={(chosen) => update(row.key, patchForItem(row, chosen))}
+                  onClear={() => update(row.key, { source_item_id: null })}
+                />
+              </div>
+            ) : null}
+
             {offer.offered ? (
               <ChargeCoding
-                row={row}
-                items={items}
+                idPrefix={fieldPrefix(row)}
                 accounts={accounts}
                 offer={offer}
                 item={row.source_item_id ? itemsById.get(row.source_item_id) ?? null : null}
@@ -222,7 +265,6 @@ export function JobChargesEditor({
                 open={coding.has(row.key)}
                 onToggle={() => toggleCoding(row.key)}
                 onChange={(patch) => update(row.key, patch)}
-                accountsById={accountsById}
               />
             ) : null}
           </div>
@@ -262,10 +304,10 @@ export function JobChargesEditor({
  * description is filled, an edited one is left alone.
  */
 function ChargeCoding({
-  row, items, accounts, offer, item, account, open, onToggle, onChange, accountsById,
+  idPrefix, accounts, offer, item, account, open, onToggle, onChange,
 }: {
-  row: EditableCharge;
-  items: readonly CodingItem[];
+  /** Unique per editor as well as per row — see `fieldPrefix`. */
+  idPrefix: string;
   accounts: readonly CodingAccount[];
   offer: CodingOffer;
   item: CodingItem | null;
@@ -273,29 +315,7 @@ function ChargeCoding({
   open: boolean;
   onToggle: () => void;
   onChange: (patch: Partial<EditableCharge>) => void;
-  accountsById: ReadonlyMap<string, CodingAccount>;
 }) {
-  function chooseItem(chosen: CodingItem) {
-    const price = Number(chosen.sell_price ?? 0);
-    const fromItem = taxableFromTaxCode(chosen.tax_code);
-    const fromAccount = chosen.income_account_id
-      ? taxableFromTaxCode(accountsById.get(chosen.income_account_id)?.tax_code)
-      : null;
-    const taxable = fromItem ?? fromAccount;
-
-    onChange({
-      source_item_id: chosen.id,
-      // The item's own account, unless this charge already names one: choosing a
-      // code by hand is a deliberate override and picking an item must not undo it.
-      gl_account_id: row.gl_account_id ?? chosen.income_account_id,
-      // Only where the operator has not written their own. A charge often reads
-      // "Bath towels — 40 collected 14 Aug", which the item name would flatten.
-      ...(row.description.trim() ? {} : { description: chosen.name }),
-      ...(Number(row.unit_price ?? 0) === 0 && price > 0 ? { unit_price: price } : {}),
-      ...(taxable === null ? {} : { taxable }),
-    });
-  }
-
   function chooseAccount(chosen: CodingAccount) {
     const taxable = taxableFromTaxCode(chosen.tax_code);
     onChange({ gl_account_id: chosen.id, ...(taxable === null ? {} : { taxable }) });
@@ -326,22 +346,13 @@ function ChargeCoding({
           {/*
             **The item leads and the account follows.** MYOB works this way and so
             does the client's instruction: you pick the Item ID and the Category
-            comes with it — nobody sits and chooses a ledger account per line. So
-            the item is the question asked, and the account is shown underneath as
-            its *consequence*, editable for the cases the item cannot answer (a
-            recharge, a levy, an item nobody has coded yet).
+            comes with it — nobody sits and chooses a ledger account per line. The
+            item is asked on the row itself, above; this strip is its *consequence*,
+            editable for the cases an item cannot answer (a recharge, a levy, an
+            item nobody has coded yet).
           */}
-          {items.length > 0 ? (
-            <ItemPicker
-              idPrefix={`charge-${row.key}`}
-              items={items} chosen={item}
-              onChoose={chooseItem}
-              onClear={() => onChange({ source_item_id: null })}
-            />
-          ) : null}
-
           {accounts.length > 0 ? (
-            <div className={items.length > 0 ? "border-t pt-3" : undefined}>
+            <div>
               {account && item && item.income_account_id === account.id ? (
                 // The ordinary case: the item answered it, so this is a
                 // statement rather than a question. One line, no picker.
@@ -360,7 +371,7 @@ function ChargeCoding({
                 </div>
               ) : (
                 <AccountPicker
-                  idPrefix={`charge-${row.key}`}
+                  idPrefix={idPrefix}
                   accounts={accounts} chosen={account} noChart={false}
                   onChoose={chooseAccount}
                   onClear={() => onChange({ gl_account_id: null })}

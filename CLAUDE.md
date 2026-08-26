@@ -2127,6 +2127,55 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-08-26 · Type the item code where the charge is written
+Reported twice from the deployed app, the second time with the box in the screenshot holding
+`tw`: *"still cant find with item codes"*. **No migration; no schema, RLS, capability or
+workflow change.**
+
+**The first fix answered the wrong question, and that is the finding.** The entry below corrected
+a control that promised codes a laundry did not hold — a real defect, and not what was being
+asked. What the owner was actually doing was typing an item code into the **Description** box and
+expecting the item, the way MYOB behaves when you type an Item ID into a line. That box was plain
+free text, and the item search sat behind a small *"Add item or code"* link at the end of the row.
+So nothing happened, and the reasonable conclusion was that the codes were missing.
+
+- **The description box finds an item.** Typing `tw` offers `TW · Towels - Wash & Dry Only`;
+  Enter or a click fills the description, the rate, the GST answer and the account.
+  `searchItems` already ranked an exact code first — what was missing was a way to reach it.
+- **Free text still wins, and the component is shaped by that.** A charge is often "Bath towels
+  — 40 collected 14 Aug", which is in no item list. Suggestions appear only while the box has
+  focus, Escape dismisses them, and nothing is chosen without a deliberate Enter or click. Once
+  the row names an item there is nothing left to suggest and the list stops appearing.
+- **The item field is drawn open on every row**, not hidden behind the strip: the item is the
+  question asked (§27), and a control nobody finds is a control that does not exist. The account
+  stays a consequence inside the collapsible strip, which is now all that strip owns.
+- **`chargePatchForItem` is the one rule for what an item fills in**, pure and tested, so the two
+  entry points cannot drift. It refuses three ways, each a way a charge could quietly go wrong:
+  a description somebody wrote is kept, a rate somebody typed is kept, and an account chosen by
+  hand beats the item's. A **zero** list price is treated as *no price* rather than as free —
+  252 of Adelaide's 254 items carry none, because they are things the laundry buys.
+- **`descriptionIsQuery` is the distinction the rule cannot infer, and the browser caught it.**
+  The first run left the description reading `tow0` — "never overwrite what somebody typed" had
+  fired on text that was a *search*. Typing a code to find an item and typing a sentence to
+  describe a charge are different acts, so the caller says which it is holding. Exactly the
+  contradiction §27 records the invoice composer needing to resolve.
+- **Field ids are unique per editor, not just per row.** A row key is unique inside one editor;
+  two editors on one page — which the gallery renders — collided, pointing a label at another
+  editor's input. The duplicate-id defect §27 already records once on this screen.
+- 974 unit tests (was 962) and 431 pgTAP assertions (unchanged — this adds no policy). `verify`
+  green. **Driven in a real browser at 390 and 1440: 38 assertions, 0 console errors, 0 overflow,
+  the box 44px** — typing a code, Escape leaving the text alone, arrow keys, Enter filling from
+  the item, the posted payload carrying `source_item_id`, and free text still accepted.
+- **Three duplicate ids remain elsewhere on the gallery and are pre-existing** (`line-item`,
+  `line-item-hint`, `description`): they come from rendering three `InvoiceLineForm` fixtures on
+  one page, and a real invoice page has one. Recorded rather than swept into this change.
+
+**The tenant answer from the entry below still stands and is not a code change.** `LJ00006` is a
+**Harbour Commercial Laundry** job — the demo tenant, 6 items, **0** accounts. `TW`, `GTW`, `HTW`,
+`BT`, `Del`, `Capes`, `GL`, `SH`, `PC`, `TC` and the other 244 are **Adelaide Towel Service**'s,
+alongside its 261 postable accounts. Typing `tw` in Harbour will still find nothing, because
+nothing there is called that. Switch laundry in the account menu.
+
 ### 2026-08-26 · The dependency backlog, decided rather than left open
 Three pull requests had been sitting open against this repo. **No migration; nothing under `src/`
 or `supabase/` changed** — `git diff` over both is empty for all of it. §10a holds the pin
@@ -6076,6 +6125,15 @@ line by hand. `0036` closes that.
   `searchAccounts` puts revenue a whole tier ahead of the rest rather than nudging
   it — this chart holds `5-1000 Towel Purchases`, whose name *starts with* "towel"
   where `4-1000 Sales of Towels` merely contains it.
+- **The item code is typed where the charge is written.** The description box on a charge line
+  is an item type-ahead: `tw` offers `TW · Towels - Wash & Dry Only`, and picking it fills the
+  description, rate, GST answer and account. That is MYOB's behaviour and it is what people
+  reach for — the search used to sit behind an *"Add item or code"* link, so somebody typing a
+  code into the description saw nothing and concluded the codes were missing. Free text still
+  wins: suggestions are offered, Escape dismisses them, and nothing is chosen without a
+  deliberate Enter or click. `chargePatchForItem` is the single rule for what an item fills in,
+  shared with the row's own item field so the two cannot drift, and `descriptionIsQuery` is what
+  tells it whether the text it is replacing was a search or a sentence.
 - **A control never offers a route with nothing behind it, and that rule is now testable.**
   `codingOffer` (`lib/domain/coding.ts`) takes the two counts — sellable items, postable accounts
   — and returns what the control may promise plus what to say about an uncoded charge. A laundry
