@@ -33,9 +33,25 @@ no row changed. CLAUDE.md §4 (rules), §6 (screen), §7 (migration) and the cha
   without its fix; four old proofs rewritten to the decision. Gallery: 5 states, 24
   light/dark × width × text-size combinations clean, 36 interaction assertions.
 
-**Next, and it is the blocking one:** `0042` has **not** been applied to `laundrymart-syd`. Apply
-it before merging — the schema leads the code — then take one job in on `ats.coreit.com.au`,
-press a stage already behind it, and confirm it moves back with the timeline recording it.
+**Applied to `laundrymart-syd` on 2026-08-26** as `20260826112650 free_status_moves` — before the
+code merges, which is the order this repo requires for a widening too. Pre-flight confirmed the
+live guard was **identical to the repo's 0031** (diffed, not eyeballed), so the rebuild reverted
+nothing; rehearsed twice in transactions that ended by raising, with the rollback read back both
+times; the applied body then proved **byte-identical to the repo file** by `md5(prosrc)` against a
+local build. Proved as real sessions: the counter moved a pickup **back** a stage (**1 row**, not
+a silent zero), finished it from `new` with the 0017 hook firing, was refused a van on an
+unassigned job and refused reopening `LJ00007`; a board touched 0 rows; the owner assigned a real
+round and pulled it back with the assignment cleared. Advisors 23, unchanged.
+
+**Two things worth carrying forward.** `LJ00007` is now `completed` / `invoice_generated` — the
+terminal rule doing its job on a real invoiced document. And the apply closed a live RPC-surface
+exposure that was not this migration's: `authenticated` **could** execute
+`guard_laundry_order_transition` (the 0019/0036 trap, standing since 0031 re-granted it); 0042
+names `authenticated` in its revoke, so both roles now read false.
+
+**Left, and it needs a browser not a commit:** take one job in on `ats.coreit.com.au`, press a
+stage already behind it, and confirm it moves back with the timeline recording it under your name.
+Then merge to `Dev`/`Prod`.
 
 ## Previously: the dependency backlog, decided rather than left open
 2026-08-26, branch `claude/adelaide-towel-single-tenant-tbyy06` (restarted from `Prod` — its

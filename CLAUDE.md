@@ -1376,8 +1376,65 @@ the chase says *"reply if you need the invoice sent again"*, which is only true 
 sent it to.
 
 ## 11. Hosted project
-**One laundry, since 2026-08-26.** `0041_single_laundry` (`20260826053208`) is the ledger's last
-entry, and the deployment now holds a single tenant — `Adelaide Towel Service` — with the
+**`0042_free_status_moves` was applied on 2026-08-26** (`20260826112650`) and is the ledger's last
+entry, 46 in all. A widening rather than a narrowing, and applied before the code merged for the
+same reason every release since 2026-08-18 records: the schema leads.
+
+- **Pre-flight, before anything was written:** the live `guard_laundry_order_transition` body
+  confirmed **identical to this repo's 0031** — stripped of comments and diffed line by line, 54
+  lines each, rather than eyeballed — so the rebuild could not silently revert an unmerged
+  branch's work. That is the trap 0031's own header records and the reason it is checked *before*
+  rather than after. The trigger was attached as a row-level BEFORE UPDATE,
+  `chk_laundry_orders_assignment_status` was present (the widened clearing depends on it), and
+  the switch `0041` guards was **on**, which is why the migration's behavioural block reuses a
+  laundry instead of creating one.
+- **The new guard is a strict superset of the old**, checked edge by edge: every move 0031's
+  linear table permitted, 0042 permits. So no live row and no in-flight job could be invalidated
+  by it, and there is nothing to back-fill.
+- **Rehearsed twice, in transactions that ended by raising.** The first aborted on the probe's own
+  wrong assumption — it expected the live job to be movable, and `LJ00007` is `completed` — which
+  is itself the useful finding. The read-back after that rollback is what proves the mechanism:
+  guard **still linear**, `authenticated` **still** able to execute it (so the revoke rolled back
+  too), **0** probe customers, boards or jobs, counts unchanged. A multi-statement call really is
+  one transaction, re-proved rather than taken from the 0040 note.
+- **The second rehearsal reported through its own aborting exception**, because a `raise notice`
+  does not come back through the API: `[pickup moved back to new] [pickup refused a round: t]
+  [pickup completed from new: completed, 0017 hook gave billing=awaiting_review] [cannot reopen:
+  t] [LJ00007 (invoiced) refused reopening: t]`.
+- **After the apply**, the live function body is **byte-identical to the repo file** —
+  `md5(prosrc)` compared against the same hash computed on a local Postgres built from
+  `supabase/migrations/`, which is stronger than reading it. It did not match on the first attempt:
+  the text typed into `apply_migration` differed from the file by **two characters in a comment**
+  (`Rule 2. Said` against `Rule 2, said`), found by bisecting prefix hashes, and the function was
+  re-created from the file's exact text until the hashes agreed. The ledger's stored statement
+  keeps the transcription; the object matches the repo.
+- **Proved as real sessions afterwards**, writes inside a transaction that was then aborted.
+  `customer-service@roles.example.com` moved a pickup **back** a stage — **1 row**, and it is the
+  row count that matters, because a restrictive policy refusing a caller writes **zero rows with
+  no error**, the silence this project has shipped twice. The same session then finished it
+  straight from `new` with `billing_status` landing on `awaiting_review`; was refused a van on an
+  unassigned job; and was refused reopening `LJ00007`. `board1@ats.example.com` moving an office
+  job touched **0** rows. `owner@roles.example.com` assigned a real board and pulled it back, and
+  the assignment cleared. Nothing survived the rollback.
+- **A live exposure was closed on the way through, and it was not this migration's.** Pre-flight
+  found `authenticated` **could execute** `guard_laundry_order_transition` at
+  `/rest/v1/rpc/…` — the trap 0019 recorded and 0036 shipped, sitting on this function since
+  0031's `create or replace` re-granted it. 0042 names `authenticated` in its revoke, so both it
+  and `anon` now read false. Inert in practice (SECURITY INVOKER: called outside a trigger it can
+  only error), which is exactly the argument for not publishing it.
+- **Advisors are 23**, unchanged: 22 documented SECURITY DEFINER helpers plus the auth
+  leaked-password toggle. `guard_laundry_order_transition` is **absent**, as it should be. **0**
+  `anon` table grants and **0** tables in `public` without RLS.
+- Counts before and after are the same: **1** laundry job (`LJ00007`), 509 customers, 5 boards,
+  647 invoices, 254 items, 268 accounts, 18 memberships, 1 tenant.
+
+**`LJ00007` is the job this change was reported on, and it is now `completed` /
+`invoice_generated`.** So the laundry has taken a job all the way through since the screenshot —
+and it is the case the terminal rule exists for: a job already on an invoice cannot be reopened,
+because the customer's document and ours would then disagree.
+
+**One laundry, since 2026-08-26.** `0041_single_laundry` (`20260826053208`) was the ledger's last
+entry until the above, and the deployment holds a single tenant — `Adelaide Towel Service` — with the
 `single_laundry` switch **on** in `platform_settings`.
 
 - **Pre-flight, before anything was written:** neither function nor the trigger existed, the
@@ -2270,12 +2327,38 @@ wrong shape for a track.
   records as a vacuous pass. The harness now asserts the section is in the page being served
   before it measures anything.
 
-**Applied to `laundrymart-syd`: not yet.** `0042` is proved against a fresh Postgres 16 with the
-whole suite and the seed on top, and its behavioural half was run against a seeded database, but
-it has not gone on the hosted project — which is the order this file requires for a *widening*
-as much as for a narrowing: the schema leads the code. **Do that before merging**, then take one
-job in on `ats.coreit.com.au`, press a stage already behind it, and confirm the job moves back and
-the timeline records the move with your name on it.
+**Applied to `laundrymart-syd` on 2026-08-26** as `20260826112650 free_status_moves`, now the
+ledger's last entry (46, was 45). Before the code merges, which is the order this file requires
+for a widening as much as for a narrowing. §11 has the full record; the short version:
+
+- **The pre-flight check that mattered passed**: the live guard body was confirmed **identical**
+  to this repo's 0031 — compared mechanically, by stripping comments and diffing, not by eye — so
+  rebuilding it reverted nothing an unmerged branch had put there.
+- **Rehearsed twice in transactions that ended by raising**, and the rollback was read back both
+  times: guard still linear, the revoke rolled back with it, **0** probe rows. The second
+  rehearsal's own findings came back in the aborting exception, including
+  `billing=awaiting_review` — 0017's hook surviving the rebuild, proved rather than asserted.
+- **Then proved as real sessions**, in a rolled-back transaction: the **counter**
+  (`customer_service`) moved a pickup **back** a stage — **1 row**, not a silent zero, which is
+  the shape this repo has shipped twice — then finished it straight from `new` with the billing
+  hook firing; an unassigned job was refused a van; a **board** moving an office job touched **0**
+  rows; and the owner assigned a real round and pulled it back with the assignment cleared.
+- **`LJ00007` — the job this change was reported on — is now `completed` and
+  `invoice_generated`**, and was refused reopening. That is the terminal rule doing exactly the
+  job it was kept for: the document has already been raised.
+- **The apply closed a live RPC-surface exposure that was not this migration's.** Pre-flight found
+  `authenticated` **could** execute `guard_laundry_order_transition` — the trap 0019 recorded and
+  0036 shipped, standing on this function since 0031. It is revoked now (`anon` and
+  `authenticated` both false). Harmless in practice, since it is SECURITY INVOKER and could only
+  ever error, which is precisely why it should not have been callable.
+- **Advisors are 23**, unchanged — 22 documented definer helpers plus the auth leaked-password
+  toggle. This one is absent from the list. **0** `anon` table grants, **0** tables without RLS.
+- Counts untouched: 1 job, 509 customers, 5 boards, 647 invoices, 254 items, 268 accounts, 18
+  memberships, 1 laundry.
+
+**What is left needs a browser, not a commit:** take one job in on `ats.coreit.com.au`, press a
+stage already behind it, and confirm it moves back with the timeline recording the move under your
+name.
 
 ### 2026-08-26 · The dependency backlog, decided rather than left open
 Three pull requests had been sitting open against this repo. **No migration; nothing under `src/`
