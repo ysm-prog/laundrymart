@@ -284,8 +284,14 @@ export const NAVIGATION: NavItem[] = [
         blurb: "Loads moving through washing, drying, folding and packing.",
       },
       {
-        label: "Item types", href: "/items", capability: "items.read",
-        blurb: "The linen you handle — sheets, towels, mats — and its default price.",
+        // **"Items", not "Item types".** That label dates from when this screen
+        // held nine kinds of laundry; it now holds the business's own master
+        // list — 254 rows for Adelaide, under the codes staff type — and every
+        // job, price tier, charge, invoice line and report resolves through it.
+        // "Item types" reads as a small set of categories, which is exactly the
+        // thing an owner would not go looking in for `TW`.
+        label: "Items", href: "/items", capability: "items.read",
+        blurb: "Your master item list, under the codes your books use.",
       },
     ],
   },

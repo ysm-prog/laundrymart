@@ -23,6 +23,7 @@ import { DateNav } from "@/app/(app)/my-runs/date-nav";
 import { DaySummary, JobCard, JobGroup } from "@/app/(app)/my-runs/run-view";
 import { BillingQueue, type QueueRow } from "@/app/(app)/invoices/awaiting/billing-queue";
 import { JobChargesEditor, type EditableCharge } from "@/app/(app)/orders/[id]/job-charges-editor";
+import { ItemPickerPreview } from "./item-picker-preview";
 import {
   InvoiceLineForm, type LineFormAccount, type LineFormItem,
 } from "@/app/(app)/invoices/[id]/line-form";
@@ -1096,6 +1097,38 @@ export default function DesignPreviewPage() {
               <JobChargesEditor orderId="preview-nochart" initial={PREVIEW_CHARGES}
                                 items={PREVIEW_LINE_ITEMS} accounts={[]}
                                 action={async () => { "use server"; }} />
+            </Card>
+            </div>
+
+            {/* **The one way an item is chosen, in the two things it is chosen
+                for.** Until 2026-08-26 the job form picked an item from a plain
+                `<select>` while the invoice and the charges used this type-ahead
+                — two ways to name the same thing, and the dropdown became
+                unusable the moment a real master list arrived (Adelaide's is 254
+                rows). One picker now serves both, and `purpose` is the only
+                difference.
+
+                Worth looking at rather than reading, because what differs is a
+                *state*: type "tow" into each and the coding one prices the
+                result while the laundry one does not. That is deliberate — a
+                job's rate comes from `laundry_prices`, and with 252 of 254 items
+                carrying no sell price, "no price set" beside a bag of towels
+                would read as "this job will not be billed". */}
+            <div id="item-picker-preview" className="space-y-6">
+            <Card title="Naming an item on a job's laundry"
+                  description="What the counter sees. The kind of laundry comes with the item; no price is shown, because the rate is the customer's, not the item's.">
+              <div className="grid gap-4 sm:grid-cols-2">
+                {/* Two of them, because the job form draws one per laundry row
+                    and every row must carry its own ids — the defect the charges
+                    editor shipped and only a rendered page could show. */}
+                <ItemPickerPreview items={PREVIEW_LINE_ITEMS} idPrefix="laundry-row-1" purpose="laundry" />
+                <ItemPickerPreview items={PREVIEW_LINE_ITEMS} idPrefix="laundry-row-2" purpose="laundry" />
+              </div>
+            </Card>
+
+            <Card title="Naming an item on an invoice line or a job charge"
+                  description="The same picker, coding a line. Here the item really does bring its price, its GST answer and its account, so the results say so.">
+              <ItemPickerPreview items={PREVIEW_LINE_ITEMS} idPrefix="coding-row-1" purpose="coding" />
             </Card>
             </div>
 

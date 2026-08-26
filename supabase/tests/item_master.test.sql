@@ -15,7 +15,7 @@
 -- the item master has no `item_id`, and the assertions below check that such a
 -- row still inserts, still carries its own category, and is untouched.
 begin;
-select plan(17);
+select plan(25);
 
 insert into auth.users (id, email) values
   ('11111111-1111-1111-1111-111111111111','a@example.com'),
@@ -168,6 +168,71 @@ select ok(not has_table_privilege('anon', 'public.items', 'SELECT'),
           'anon holds no SELECT privilege on the item master');
 select ok(not has_function_privilege('anon', 'public.sync_laundry_item_type()', 'EXECUTE'),
           'anon cannot execute the coherence trigger function');
+
+
+-- ============================================================ 0040: writes ==
+-- The item master is read by everybody and changed by two roles.
+--
+-- Before 0040 `items` carried 0002's single permissive `for all … using
+-- is_member(tenant_id)`, so any member could rewrite it off PostgREST — proved
+-- against the live project as one of Adelaide's own `board` logins, which
+-- renamed the code that laundry bills at $0.22.
+--
+-- **Every refusal here is asserted by outcome, not by absence of an error.** A
+-- policy that excludes a caller makes UPDATE and DELETE touch zero rows *in
+-- silence*; only INSERT raises. Counting afterwards is what tells a working
+-- boundary apart from a broken statement — the lesson §26 records, where
+-- `lives_ok` passed throughout a bug that wrote nothing.
+reset role;
+insert into auth.users (id, email) values
+  ('33333333-3333-3333-3333-333333333333','plant@example.com');
+insert into public.memberships (user_id, tenant_id, role) values
+  ('33333333-3333-3333-3333-333333333333','aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','warehouse_operator');
+
+-- ------------------------------------------------------- the plant floor ----
+set local role authenticated;
+set local "request.jwt.claim.sub" = '33333333-3333-3333-3333-333333333333';
+
+select is((select count(*) from public.items)::int, 2,
+          'the plant floor still reads every item in its laundry');
+select ok(not public.can_write_items('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
+          'and is not one of the two roles that may change the list');
+
+update public.items set name = 'Renamed by the plant floor'
+ where id = '11110000-0000-0000-0000-00000000000a';
+select is((select count(*) from public.items where name = 'Renamed by the plant floor')::int, 0,
+          'its rename touched nothing — the silent refusal, counted rather than trusted');
+
+select throws_ok(
+  $$insert into public.items (tenant_id, sku, item_code, name, category)
+    values ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','XX-01','XX001','Invented on the floor','other')$$,
+  '42501', null,
+  'and its insert is refused out loud');
+
+delete from public.items where id = '11110000-0000-0000-0000-00000000000c';
+select is((select count(*) from public.items)::int, 2,
+          'and its delete removed nothing');
+
+-- ------------------------------------------------------------- the Owner ----
+-- The half that matters as much as the refusals: a gate that stops everybody is
+-- not a gate, it is an outage.
+set local "request.jwt.claim.sub" = '11111111-1111-1111-1111-111111111111';
+
+select ok(public.can_write_items('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
+          'the Owner may change the list');
+
+update public.items set name = 'Bath Towel — White'
+ where id = '11110000-0000-0000-0000-00000000000a';
+select is((select name from public.items where id = '11110000-0000-0000-0000-00000000000a'),
+          'Bath Towel — White',
+          'and the Owner''s rename lands');
+
+insert into public.items (tenant_id, sku, item_code, name, category)
+  values ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','AP-01','APR001','Apron','other');
+select is((select count(*) from public.items)::int, 3,
+          'and the Owner''s new item lands');
+
+reset role;
 
 select finish();
 rollback;

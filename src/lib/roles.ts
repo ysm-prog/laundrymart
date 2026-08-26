@@ -212,11 +212,36 @@ const JOB_TO_INVOICE: Capability[] = ALL.filter(
 const RUN_SEQUENCE: Capability[] = ["routes.sequence"];
 
 /**
+ * Changing the item master.
+ *
+ * Held by the Owner and the Office manager alone, on the client's own rule: the
+ * item list is the master reference the whole application resolves through — a
+ * job's laundry, all three pricing tiers, every charge, every invoice line and
+ * every report — so it is maintained in one place by two people rather than
+ * edited wherever somebody happens to be standing.
+ *
+ * A block for the reason `JOB_TO_INVOICE` and `RUN_SEQUENCE` are blocks: the
+ * roles below derive their capabilities from `TENANT_ALL`, so a capability that
+ * is merely *not mentioned* is one they quietly hold. `branch_manager` and
+ * `regional_manager` are the two this catches, and they held `items.write`
+ * until 2026-08-26.
+ *
+ * **`items.read` is deliberately not in it.** A board reads item names off its
+ * run sheet, the plant runs batches keyed on them and the counter picks them
+ * into a job; taking the read away would empty those screens. `0040` draws the
+ * same line underneath, which is the half that actually binds — before it, every
+ * member could rewrite the list straight off `/rest/v1/items` whatever this file
+ * said.
+ */
+const ITEM_MASTER: Capability[] = ["items.write"];
+
+/**
  * Everything a role may hold that is neither platform work, nor the main flow,
- * nor the run order.
+ * nor the run order, nor the item master.
  */
 const outsideMainFlow = (caps: Capability[]): Capability[] =>
-  caps.filter((c) => !JOB_TO_INVOICE.includes(c) && !RUN_SEQUENCE.includes(c));
+  caps.filter((c) => !JOB_TO_INVOICE.includes(c) && !RUN_SEQUENCE.includes(c)
+                  && !ITEM_MASTER.includes(c));
 
 /**
  * Everything a role bounded by one laundry may hold — that is, all of it except
