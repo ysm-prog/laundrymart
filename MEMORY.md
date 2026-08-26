@@ -20,13 +20,20 @@ all three jobs for both.
 - Counts moved because the laundry is using it: **648** invoices (was 647), **10** laundry jobs
   (was 8).
 
-**Open, and the owner's call — do not merge these without being asked.** Adelaide holds **two
-customer records both named `Jay CT`**, `CUST00509` (`f529d68b`, 4 jobs + 1 invoice + 3 stops) and
-`CUST00510` (`476d9761`, 1 job + 1 stop), created **0.65s apart** on 2026-08-20 with a location row
-each at the same address. That is why Board 1's 28 Aug run has two stops at one address and the Run
-order card shows "Jay CT" twice — `findOrCreateStop` keys on (tenant, run, customer) and is right.
-Merging repoints jobs, stops, locations and an invoice and cannot be undone; same call the 2026-08-20
-entry made about `LJ00001`.
+**`Jay CT` is a test customer — the owner confirmed it on 2026-08-26 — and it exists twice**
+(`CUST00509` = 4 jobs + `INV00001` + 3 stops, `CUST00510` = 1 job + 1 stop, created 0.65s apart with
+a location row each at the same address). That is why Board 1's 28 Aug run has two stops at one
+address and the Run order card shows "Jay CT" twice; `findOrCreateStop` keys on (tenant, run,
+customer) and is right. Nothing to fix in code, and not deleted — it is the only end-to-end evidence
+the billing path has.
+
+**The correction that came out of it, and it is the important one.** CLAUDE.md §11 claimed `LJ00002`
+was *"the first time the billing lifecycle has run against real work"*. It was not:
+**all six of Adelaide's laundry jobs are against test customers** (LJ00002–06 = Jay CT, LJ00001 =
+a customer named `Test`); jobs against a non-test customer = **0**. What *is* true and is new:
+`INV00001` (draft, $55, one line, from LJ00002, 2026-08-26) is the **only one of 648 invoices that
+carries a line at all**, so job → price → approve → generate is now proved end to end — against test
+data. Both corrected in §11.
 
 **Still needs a login, not a commit:** open My Runs as `owner@roles.example.com` on
 `ats.coreit.com.au` and drive Adjust Run in the browser; confirm `board1@ats.example.com` sees no

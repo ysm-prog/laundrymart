@@ -1039,22 +1039,28 @@ does the live database carry everything the merged code calls?
 - Counts as read: 648 invoices, 10 laundry jobs, 6 Adelaide memberships. Both are up on the last
   record (647 / 8) because the laundry has been using the app.
 
-**One data issue found, and it is the owner's to decide rather than this session's.** `Adelaide Towel
-Service` holds **two customer records both named `Jay CT`** — `CUST00509` (`f529d68b`) and `CUST00510`
-(`476d9761`) — created **0.65 seconds apart** on 2026-08-20, each with its own `customer_locations`
-row at the same address, *11 Frazer avenue Gulfview Height 5096*. That is why Board 1's 28 August run
-carries two stops at one address and why the Run order card shows "Jay CT" at both position 1 and
-position 2: `findOrCreateStop` keys on (tenant, run, **customer**) and is behaving correctly — as far
-as the database is concerned these are two customers, so the van is booked to call twice.
-- The work is split across them: `CUST00509` carries LJ00002/3/4/5, three stops and **one invoice**;
-  `CUST00510` carries LJ00006 and one stop.
-- **Not merged here.** Merging two customer records on a live business means repointing jobs, stops,
-  locations and an invoice, and it cannot be undone by a second migration — the same call the
-  2026-08-20 entry made about `LJ00001`: a record about a customer is the owner's, not a bug's
-  leftover. The ids are above if they decide to.
+**`Jay CT` is a test customer, and it exists twice.** `Adelaide Towel Service` holds two records
+both named `Jay CT` — `CUST00509` (`f529d68b`) and `CUST00510` (`476d9761`) — created **0.65 seconds
+apart** on 2026-08-20, each with its own `customer_locations` row at the same address, *11 Frazer
+avenue Gulfview Height 5096*. **The owner confirmed on 2026-08-26 that Jay CT is for testing**, which
+is what settles how to read it: this is not a duplicate in a real customer list, it is test data, and
+the finding it actually produces is the correction above — Adelaide's activity is **entirely** test
+activity.
+- Why it is visible at all: Board 1's 28 August run carries two stops at one address, so the Run
+  order card shows "Jay CT" at both position 1 and position 2. **`findOrCreateStop` is behaving
+  correctly** — it keys on (tenant, run, **customer**), and as far as the database is concerned these
+  are two customers, so the van is booked to call twice. Nothing to fix in the code.
+- The work is split across them: `CUST00509` carries LJ00002/3/4/5, three stops and `INV00001`;
+  `CUST00510` carries LJ00006 and one stop. Adelaide's only other laundry job, `LJ00001`, is against
+  `CUST00003` — a customer named `Test`, and one of the 508 archived.
+- **Still not deleted or merged here, and being test data is not on its own a reason to.** Nobody
+  asked for it, it is doing no harm, and it is the only end-to-end evidence the billing path has;
+  deleting it would remove the one invoice in the project that carries a line. If it is ever tidied,
+  archiving (`set_records_archived`, reversible) beats deleting.
 - `SubmitButton` already disables on `useFormStatus().pending`, so the ordinary double-click is
-  guarded; 0.65s apart is consistent with a double submit **before hydration** or with two deliberate
-  creations. Not chased further, because guessing at a cause is how a fix lands on the wrong thing.
+  guarded; 0.65s apart is consistent with a double submit **before hydration**. Not chased further,
+  because guessing at a cause is how a fix lands on the wrong thing — and on a test record there is
+  nothing at stake to justify the guess.
 
 `laundrymart-syd` · ref `xujhwljrmogenhvqpkrf` · ap-southeast-2 (Sydney) · org `ysm-prog`.
 Deployed on Vercel at `ats.coreit.com.au`. All migrations through `0030_member_directory`
@@ -1336,14 +1342,26 @@ Corrected 2026-08-25; see that changelog entry and the note under 0011 below.
 **Read back on 2026-08-24, and the real laundry has been used since the cutover.**
 `Adelaide Towel Service` now holds four laundry jobs of its own, three of them raised after the
 20 August entry above: `LJ00002` was completed, **priced and approved** (1 frozen
-`job_charge_snapshots` row — the first time the billing lifecycle has run against real work), and
-`LJ00003`/`LJ00004` are `assigned` to boards. Two things follow, and both are the owner's to act
-on rather than the code's:
+`job_charge_snapshots` row), and `LJ00003`/`LJ00004` are `assigned` to boards. Two things follow,
+and both are the owner's to act on rather than the code's:
 
-- **No invoice has been generated from any of it.** `invoice_source_jobs` is 0 and no invoice has
-  been created since 20 August, so `LJ00002` is sitting approved in the billing queue waiting for
-  the month-end run. The roll-up is still the one step of the money path never exercised end to
-  end.
+> **Corrected 2026-08-26, and this is the correction that matters most in this section.** This
+> paragraph called `LJ00002` *"the first time the billing lifecycle has run against real work"*.
+> It was not real work. **Every one of Adelaide's six laundry jobs is against a test customer** —
+> `LJ00002`–`LJ00006` against `Jay CT` (which the owner confirms is a test record, and which exists
+> twice — see the 2026-08-26 entry) and `LJ00001` against a customer literally named `Test`. Jobs
+> against a non-test customer: **0**. So the lifecycle is *proved*, and it has still never billed a
+> real customer. A milestone recorded against test data is worse than no milestone, because the
+> next person reads it as coverage they have.
+
+- **An invoice has now been generated from it, and that closes the last unexercised step.**
+  `INV00001` — draft, **$55.00**, one line, raised from `LJ00002` on 2026-08-26 — is the **only one
+  of the project's 648 invoices that carries a line at all**; the other 647 came in from the import
+  as headers. So job → price → approve → generate really does work end to end, which §21 had never
+  been able to say. It is a **test** invoice against `Jay CT`, it is still a draft, and it has not
+  been issued, sent or pushed to Xero. *(Superseded: this bullet previously read "no invoice has
+  been generated from any of it… the roll-up is still the one step of the money path never
+  exercised end to end.")*
 - **Adelaide's four boards were linked to no login (0 of 4)**, so `LJ00003` and `LJ00004` were
   assigned to rounds nobody could sign in as and My Runs was empty for them. **Fixed the same day**
   — see §24 and the 0034/0035 paragraph above: four logins written by SQL, boards linked 5 of 5.
