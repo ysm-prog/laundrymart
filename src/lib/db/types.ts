@@ -96,13 +96,47 @@ export type Item = {
    */
   laundry_category: string | null;
   ownership_type: string;
+  /**
+   * MYOB's "Use item description on sales and purchases" (0044) — print the
+   * longer description on a document rather than the name.
+   */
+  use_item_description: boolean;
   /** MYOB's "Item I Sell" / "Item I Buy". Both, neither and either are real. */
   is_sell: boolean;
   is_buy: boolean;
   sell_price: number;
   cost_price: number;
-  /** The ledger's tax code (GST, FRE, …). Somebody else's vocabulary, so a string. */
+  /**
+   * The **selling** tax code (GST, FRE, …). Somebody else's vocabulary, so a
+   * string. Deliberately not renamed when `buy_tax_code` arrived in 0044: the
+   * invoice line composer already reads this one as the sell-side answer.
+   */
   tax_code: string | null;
+  /*
+   * The selling half of MYOB's item page. **These three are 0043's**, which
+   * reached the database from a branch that never reached this repository — so
+   * until 0044 they were columns with no reader, and this is the type that gives
+   * them one.
+   */
+  /** "Selling price is" — whether `sell_price` already contains GST. */
+  sell_price_basis: string | null;
+  /** "Selling unit of measure" — ea, ctn, doz. A label, never a conversion. */
+  selling_unit: string | null;
+  /** "Items per selling unit". */
+  items_per_selling_unit: number | null;
+  /** Where the cost of what was sold is booked (0044). */
+  cost_of_sales_account_id: Uuid | null;
+  /*
+   * The buying half, all 0044 and all null on every row today. Shaped to mirror
+   * the selling half exactly, so the two sides of the item page read the same.
+   */
+  buy_price_basis: string | null;
+  buy_unit: string | null;
+  buy_units_per: number | null;
+  buy_tax_code: string | null;
+  expense_account_id: Uuid | null;
+  /** What the *supplier* calls this, which is routinely not what we call it. */
+  supplier_item_code: string | null;
   /**
    * MYOB's "Income Account for Tracking Sales" (0036), which 0037 then carries
    * through to Xero. What makes picking this item on an invoice fill the code
@@ -114,7 +148,19 @@ export type Item = {
   rental_price: number;
   wash_only_price: number;
   weight_kg: number;
+  /**
+   * MYOB's "Minimum stock level" — the point at which to reorder. Distinct from
+   * `default_reorder_qty` below, which is how *much* to order; they are two
+   * numbers and 0044 keeps both rather than overloading this one.
+   */
   reorder_level: number;
+  /** MYOB's "I track stock for this item" (0044) — whether it is counted at all. */
+  track_stock: boolean;
+  /** Where stock on hand sits on the balance sheet (0044). */
+  asset_account_id: Uuid | null;
+  primary_supplier_id: Uuid | null;
+  /** "Default reorder quantity", per buying unit (0044). */
+  default_reorder_qty: number;
   myob_item_id: string | null;
   myob_item_code: string | null;
   /** When this row last agreed with the external ledger. Null until something syncs. */

@@ -1,6 +1,7 @@
 import { Suspense } from "react";
 import { notFound } from "next/navigation";
 import { requireCapability } from "@/lib/auth/context";
+import { GST_RATE_FALLBACK, tenantGstRate } from "@/lib/gst";
 import { createClient } from "@/lib/supabase/server";
 import { can } from "@/lib/roles";
 import { counted, date, money, today } from "@/lib/format";
@@ -377,19 +378,28 @@ async function ServiceBreakdown({ invoiceId, tenantId }: { invoiceId: string; te
   );
 }
 
-async function Lines(
-  { invoiceId, editable, tenantId }:
-  { invoiceId: string; editable: boolean; tenantId: string },
-) {
+async function Lines({
+  invoiceId, editable, tenantId,
+}: {
+  invoiceId: string;
+  editable: boolean;
+  /**
+   * §23, and it decides money twice over: the GST rate below is read for this
+   * laundry, and both pickers offer ids that are posted straight back onto a
+   * line. A platform admin reads every laundry, so neither may be left to RLS.
+   */
+  tenantId: string;
+}) {
   const supabase = await createClient();
 
   /*
-   * Three reads, and two of them only when the composer is going to be drawn.
-   * A sent invoice is a record, not a form: loading the item list and the whole
-   * chart of accounts to render a read-only table would be a few hundred rows
-   * fetched for nothing on every view of every historical invoice.
+   * Four reads, and three of them only when the composer is going to be drawn.
+   * A sent invoice is a record, not a form: loading the item list, the whole
+   * chart of accounts and the GST rate to render a read-only table would be a
+   * few hundred rows fetched for nothing on every view of every historical
+   * invoice.
    */
-  const [{ data }, catalogue, chart] = await Promise.all([
+  const [{ data }, catalogue, chart, gstRate] = await Promise.all([
     supabase
       .from("invoice_lines")
       .select("id, invoice_id, description, charge_type, quantity, unit_price, amount, taxable, "
@@ -398,6 +408,7 @@ async function Lines(
       .returns<InvoiceLine[]>(),
     editable ? loadItemCatalogue(tenantId) : Promise.resolve([]),
     editable ? loadChartOfAccounts(tenantId) : Promise.resolve([]),
+    editable ? tenantGstRate(supabase, tenantId) : Promise.resolve(GST_RATE_FALLBACK),
   ]);
 
   const lines = data ?? [];
@@ -471,7 +482,7 @@ async function Lines(
 
       {editable ? (
         <InvoiceLineForm invoiceId={invoiceId} items={catalogue} accounts={chart}
-                         action={addInvoiceLine} />
+                         gstRate={gstRate} action={addInvoiceLine} />
       ) : null}
     </Card>
   );
@@ -489,7 +500,11 @@ async function loadItemCatalogue(tenantId: string): Promise<LineFormItem[]> {
   const supabase = await createClient();
   const { data } = await supabase
     .from("items")
-    .select("id, item_code, name, description, laundry_category, sell_price, tax_code, income_account_id")
+    .select("id, item_code, name, description, laundry_category, sell_price, tax_code, "
+            // 0043's two selling facts, read here for the first time: the unit the
+            // rate is per, and whether that rate already contains GST. Both are
+            // labels on the composed line — see `line-form.tsx`.
+            + "selling_unit, sell_price_basis, income_account_id")
     // §23, as for the chart below: the item picked here carries an account id
     // onto the line, so the read that offers it names its tenant.
     .eq("tenant_id", tenantId)

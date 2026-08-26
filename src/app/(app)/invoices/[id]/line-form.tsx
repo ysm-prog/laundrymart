@@ -3,8 +3,9 @@
 import { useMemo, useState } from "react";
 import { CHARGE_TYPE_LABELS } from "@/lib/domain/pricing";
 import { accountLabel, taxableFromTaxCode } from "@/lib/domain/accounts";
+import { lineRateFromItem, priceBasisHint } from "@/lib/domain/items";
 import { CONTROL, cx, Eyebrow } from "@/components/ui";
-import { Field, Input, Select, SubmitButton } from "@/components/form";
+import { Field, Select, SubmitButton, useFieldControl } from "@/components/form";
 import {
   AccountPicker, ItemPicker, type CodingAccount, type CodingItem,
 } from "@/components/coding-pickers";
@@ -43,11 +44,18 @@ const MODES: ReadonlyArray<{ value: Mode; label: string; hint: string }> = [
 ];
 
 export function InvoiceLineForm({
-  invoiceId, items, accounts, action,
+  invoiceId, items, accounts, gstRate, action,
 }: {
   invoiceId: string;
   items: readonly LineFormItem[];
   accounts: readonly LineFormAccount[];
+  /**
+   * The laundry's own GST rate, for grossing an item's price up when the item
+   * states it GST-exclusive. Passed in rather than assumed at 10%: this number
+   * decides what a customer is billed, and a constant here would be a second
+   * answer to a question `tenants.gst_rate` already holds.
+   */
+  gstRate: number;
   /**
    * `addInvoiceLine`, passed in rather than imported. The same arrangement
    * `InvoiceSelection` and `JobChargesEditor` use, and for the same reason: it is
@@ -110,8 +118,6 @@ export function InvoiceLineForm({
   function chooseItem(chosen: LineFormItem) {
     setItemId(chosen.id);
     if (!typed) setDescription(chosen.name);
-    const price = Number(chosen.sell_price ?? 0);
-    setUnitPrice(Number.isFinite(price) && price > 0 ? price.toFixed(2) : "0");
     // The item's own account is the whole reason picking an item produces a code.
     setAccountId(chosen.income_account_id);
     // The item's tax code first, then the account's. An item saying FRE where its
@@ -122,6 +128,19 @@ export function InvoiceLineForm({
       : null;
     const answer = fromItem ?? fromAccount;
     if (answer !== null) setTaxable(answer);
+
+    /*
+     * **The rate is the item's price as a LINE rate, which is not always the
+     * same number.** A line amount is GST-inclusive (0043), so an item stating
+     * its price GST-exclusive is grossed up here — otherwise the line bills
+     * short by exactly the GST and nothing on the screen says so.
+     *
+     * Resolved after the GST answer above, because whether GST applies is half
+     * of what decides the rate: on a FRE line there is nothing to add.
+     */
+    const willBeTaxable = answer ?? taxable;
+    const price = lineRateFromItem(chosen.sell_price, chosen.sell_price_basis, willBeTaxable, gstRate);
+    setUnitPrice(Number.isFinite(price) && price > 0 ? price.toFixed(2) : "0");
   }
 
   function chooseAccount(chosen: LineFormAccount, fillDescription: boolean) {
@@ -136,6 +155,24 @@ export function InvoiceLineForm({
   }
 
   const noChart = accounts.length === 0;
+
+  /*
+   * The two things a picked item says *about its price*, both of them labels.
+   *
+   * Neither is posted and neither is stored on the line: a line records a
+   * quantity and a rate, and adding a third column for the unit would be a
+   * second answer to a question `items.selling_unit` already answers — the
+   * duplication this codebase argues against everywhere. They exist because the
+   * number on screen is ambiguous without them. `$0.22 × 12` is twelve towels or
+   * twelve cartons of a hundred depending on a fact that lives one screen away,
+   * and `$72.70` is either $72.70 of goods or $66.09 of goods and $6.61 of tax.
+   *
+   * Both go blank the moment the item is cleared, because they are the item's
+   * facts and not the line's — a stale "ctn" beside a hand-typed rate would be
+   * worse than no unit at all.
+   */
+  const sellingUnit = item?.selling_unit?.trim() || null;
+  const basisHint = priceBasisHint(item?.sell_price_basis, taxable);
 
   return (
     <form action={action} className="mt-4 space-y-4 border-t pt-4 print:hidden">
@@ -228,7 +265,7 @@ export function InvoiceLineForm({
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Field label="Description" name="description" required className="lg:col-span-2"
                hint="What the customer sees on the invoice.">
-          <input
+          <DescribedInput
             id="description" name="description" required
             className={CONTROL} value={description}
             onChange={(event) => { setDescription(event.target.value); setTyped(true); }}
@@ -239,10 +276,42 @@ export function InvoiceLineForm({
                   options={Object.entries(CHARGE_TYPE_LABELS).map(([value, label]) => ({ value, label }))} />
         </Field>
         <Field label="Quantity" name="quantity">
-          <Input name="quantity" type="number" step="0.01" min={0} defaultValue="1" inputMode="decimal" />
+          {/*
+            The unit sits *inside* the field, beside the box rather than under
+            it: it qualifies the number being typed, and a hint below would read
+            as guidance about the field instead of as part of the value. Not an
+            input — nobody edits it here, it is whatever the item says it is.
+
+            **It is described, not hidden**, and that was a correction to this
+            change rather than the first draft: `aria-hidden` on the span would
+            have left a screen-reader user hearing "Quantity, 1" — losing exactly
+            the fact this exists to convey, that the 1 is a carton of a hundred
+            and not one towel. `aria-describedby` announces it with the box,
+            which is what `Field` does for a hint and what `Input` cannot be
+            handed by hand.
+          */}
+          <div className="flex items-center gap-2">
+            <DescribedInput
+              id="quantity" name="quantity" type="number" step="0.01" min={0}
+              defaultValue="1" inputMode="decimal" className={CONTROL}
+              aria-describedby={sellingUnit ? "quantity-unit" : undefined}
+            />
+            {sellingUnit ? (
+              <span id="quantity-unit" className="shrink-0 text-sm text-muted-foreground">
+                {sellingUnit}
+              </span>
+            ) : null}
+          </div>
         </Field>
-        <Field label="Unit price" name="unit_price">
-          <input
+        {/*
+          `hint` rather than a hand-rolled `<p>`: `Field` wires a hint to its
+          control through `aria-describedby`, so "this price includes GST" is
+          announced with the box instead of floating beside it. Absent — an item
+          with no basis, or a line carrying no GST — the field renders exactly as
+          it did before.
+        */}
+        <Field label="Unit price" name="unit_price" hint={basisHint ?? undefined}>
+          <DescribedInput
             id="unit_price" name="unit_price" type="number" step="0.01" min={0}
             inputMode="decimal" className={CONTROL} value={unitPrice}
             onChange={(event) => setUnitPrice(event.target.value)}
@@ -291,4 +360,23 @@ function modeHint(mode: Mode, itemCount: number, accountCount: number): string {
          + "Pick an item or type the line out.";
   }
   return MODES.find((option) => option.value === mode)!.hint;
+}
+
+/**
+ * A controlled `<input>` that still picks up its `Field`'s hint and error.
+ *
+ * `Input` cannot be used for these two — it is uncontrolled, and both of these
+ * are driven by the item picked above — but a bare `<input>` silently opts out
+ * of the `aria-describedby` wiring `Field` provides, so its hint is on screen
+ * and announced by nothing. Found by driving the form and asserting on the
+ * attribute rather than by looking at it: the sentence renders identically
+ * either way, which is exactly why this class of gap survives a screenshot.
+ */
+function DescribedInput(props: React.ComponentProps<"input">) {
+  const field = useFieldControl();
+  return (
+    <input {...props}
+           aria-describedby={props["aria-describedby"] ?? field.describedBy}
+           aria-invalid={props["aria-invalid"] ?? (field.invalid || undefined)} />
+  );
 }

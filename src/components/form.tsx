@@ -64,7 +64,22 @@ const FieldControlContext = createContext<{ describedBy?: string; invalid: boole
   invalid: false,
 });
 
-function useFieldControl() {
+/**
+ * The hint/error wiring `Field` is holding, for a control it does not render.
+ *
+ * `Input`, `Textarea`, `Select` and `Checkbox` consume this themselves, so
+ * nothing had to reach for it — until a **controlled** input needed a hint. The
+ * invoice line composer holds its price in React state (the item picked fills it
+ * in), so it renders a bare `<input className={CONTROL}>` rather than `Input`,
+ * and a bare input joins no context: its hint rendered on screen and was
+ * announced by nothing, which is precisely the gap the 2026-08-24 pass closed
+ * everywhere else.
+ *
+ * Exported rather than solved by giving `Input` a controlled mode: that is a
+ * shared component with ~200 call sites, and widening its contract to fix two
+ * fields is the larger change.
+ */
+export function useFieldControl() {
   return useContext(FieldControlContext);
 }
 

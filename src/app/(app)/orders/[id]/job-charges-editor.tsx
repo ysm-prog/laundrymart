@@ -6,6 +6,7 @@ import { CHARGE_TYPES, CHARGE_TYPE_LABELS, round2, type ChargeType } from "@/lib
 import { formatMoney } from "@/lib/domain/pricing";
 import type { JobChargeInput } from "../job-charges";
 import { chargePatchForItem } from "@/lib/domain/coding";
+import { GST_RATE_FALLBACK } from "@/lib/domain/items";
 import { Button, CONTROL, IconButton, SELECT_CHEVRON } from "@/components/ui";
 import { SubmitButton } from "@/components/form";
 import {
@@ -50,6 +51,7 @@ function blankCharge(): EditableCharge {
 
 export function JobChargesEditor({
   orderId, initial, action, returnTo, items = [], accounts = [],
+  gstRate = GST_RATE_FALLBACK,
 }: {
   orderId: string;
   initial: EditableCharge[];
@@ -74,6 +76,13 @@ export function JobChargesEditor({
    * the rare line that is in neither list.
    */
   accounts?: readonly CodingAccount[];
+  /**
+   * The laundry's own GST rate, for grossing an item's price up when the item
+   * states it GST-exclusive. It matters more here than on an invoice line:
+   * approval **freezes** these numbers, so a rate short by the GST is short on a
+   * row nobody can edit afterwards.
+   */
+  gstRate?: number;
 }) {
   const [rows, setRows] = useState<EditableCharge[]>(initial);
 
@@ -102,6 +111,10 @@ export function JobChargesEditor({
       // a description: picking replaces it. Text already sitting there when the
       // item is chosen from the field below is content, and survives.
       descriptionIsQuery,
+      // A charge feeds an invoice line, and a line amount is GST-inclusive
+      // (0043) — so an item stating its price GST-exclusive is grossed up
+      // before it becomes a rate here.
+      gstRate,
     });
 
   const subtotal = round2(

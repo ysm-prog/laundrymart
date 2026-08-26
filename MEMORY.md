@@ -59,6 +59,82 @@ code."* One migration (`0044`); **nothing dropped, no row changed, no capability
 since 2026-08-18 records. Apply `0044`, then merge. Then, in a browser: code the fuel line
 on a draft, set Money › Charge accounts › Fuel levy to the same account, approve a second
 job for that customer, and confirm the rebuilt fuel line comes back coded unasked.
+## Also in this tree: MYOB's item page, and the line that reads it
+2026-08-26, branch `claude/functionality-request-fi8erj`. The owner captured every field on
+MYOB's item page for all 257 of Adelaide's active items; nine had nowhere to live here. One
+migration (`0044`), **no table, no policy, no function, no capability; nothing dropped, no row
+changed.** All fifteen fields are null on all 254 imported rows.
+
+- **`0044_item_master_detail`** — twelve columns on `items` (`use_item_description`,
+  `track_stock`, three account FKs, the four buying fields, `buy_tax_code`,
+  `supplier_item_code`, `primary_supplier_id`, `default_reorder_qty`), three checks, two
+  partial indexes. Eight self-assertions, **each proved to fail** against a real Postgres 16.
+- **Twelve, not fifteen — `0043` had already shipped `selling_unit`,
+  `items_per_selling_unit` and `sell_price_basis`** with the same meanings, from the branch
+  that never landed here, so nothing in `src/` had ever read them. 0044 *asserts* them rather
+  than adding `sell_unit`/`sell_units_per` beside them, and this change is what gives them a
+  reader. **Do not add the second pair.**
+- **`gl_accounts`, not `accounts`.** `tax_code` stays the **selling** code (`line-form.tsx`
+  reads it that way) and `reorder_level` stays the *minimum stock level*; `buy_tax_code` and
+  `default_reorder_qty` sit beside them. All four asserted.
+- **`/items/:id` is MYOB's four groups now** (+ a fifth for rental linen), **one `<form>`, one
+  Save**. The add form gains only the selling unit and the basis. `ITEM_COLUMNS` states the
+  select once — the two hand-maintained strings had already drifted, and a form that posts a
+  field it never read clears it on every save.
+- **The invoice line prints the unit beside quantity and one basis sentence under the price.**
+  Labels only: nothing extra posted, no column on a line, totals untouched. `sellPriceLabel`
+  and `priceBasisHint` are pure and tested; the hint is **null on a non-taxable line**, because
+  both sentences are claims about GST.
+
+**The under-billing is FIXED** (owner's instruction, after it was first reported and left). An
+`exclusive`-basis item short-charged by the whole GST component — `addInvoiceLine` stores
+`quantity × unit_price` and 0043's `recalculate_invoice` extracts GST *out of* that, so $100
+exclusive billed $100/$9.09 where the item says $110/$10.
+- **`lineRateFromItem`** grosses an exclusive price up at the moment an item becomes money.
+  **The totals maths is untouched** — a line amount being GST-inclusive is 0043's decision, so
+  the conversion was wrong, not the arithmetic. A per-line basis column would reverse 0043 and
+  re-price every invoice; do not.
+- **Both call sites**: the invoice composer and `chargePatchForItem` (worse — approval *freezes*
+  that number). Untouched on all three no-GST paths: no basis (all 254 items), FRE/N-T, rate 0.
+  An unknown basis is never guessed at.
+- Reads `tenants.gst_rate` via `lib/gst.ts`. **`GST_RATE_FALLBACK` lives in
+  `lib/domain/items.ts`, not beside its reader** — `coding.ts` needs it and reaches the client
+  bundle, so importing a module naming the server client is the §2 `next build` trap.
+- Hint wording changed with it: "GST **has been** added to the item's price". Two tests pinning
+  the old string were rewritten to the decision.
+
+**The Xero half is FIXED too**, independently on `Prod` while this was in flight —
+`buildInvoicePayload` now sends `LineAmountTypes: "Inclusive"`. **The two agree, and their
+reasoning is the same:** `recalculate_invoice` totals `invoice_lines` unconditionally inclusive
+regardless of any item's basis, so a *stored* line has one basis and never a mixture, and
+`sell_price_basis` only ever governs **composition** — which is where this change converts it.
+End to end: exclusive list price grossed up into the line, stored line inclusive, totals extract
+the tax, Xero told so. The old caution that a per-item basis could not go through a per-document
+field is retired: the per-item basis never reaches a stored line.
+
+**Also stated rather than fixed:** an `optionalText`/`optionalUuid` field cannot be *cleared*
+once set anywhere in this app (`""` → `undefined` → dropped by `JSON.stringify`). 0044's new
+fields use a local `clearable` and do not inherit it, so `income_account_id` and the
+cost-of-sales account beside it behave differently on one card. And **`MYOB_Items_Register.xlsx`
+was not in the container** — the column mapping is the request's, not one read off the file,
+which is why no importer was written.
+
+**1001 unit tests** (was 991), **485 pgTAP across 26 files (unchanged — adds no policy)**,
+`verify` green, all 44 migrations on a fresh Postgres 16 with the suite and the seed. **36
+browser assertions** on the composer at 390/1440, 0 failures.
+
+**Merged to `Prod` (`ec75cd9`) and `Dev` (`0f1a4c1`)** — identical trees, CI green on all three
+jobs for each. `Prod` a clean fast-forward. Nothing outstanding: 0044 went on the project first.
+**Read the log, not the status** — both Verify jobs served stale `in_progress`; their logs carry
+`== PASSED ==`. Third time this file records that trap.
+
+**Applied to `laundrymart-syd`** as `20260826132916`, the ledger's last entry (48). Rehearsed and
+rolled back first; applied text **byte-identical to the file** first time; the live `items` table
+diffed object by object against a local build from `supabase/migrations/` — **80 parts, zero
+differences**. As real sessions: **board reads 254, writes 0** (on a row it read back itself, so
+0 means refused); **Owner and Office manager write 1 each**; warehouse reads 254, writes 0.
+Advisors 23, unchanged. All 254 rows still at their defaults. **Not opened behind the auth
+gate** — the browser half is still unproved.
 
 ## Latest: 0043 is in the repo, and the Xero basis disagrees with it
 2026-08-26, branch `claude/invoice-creation-job-workflow-11mobw`. The owner asked for the live
