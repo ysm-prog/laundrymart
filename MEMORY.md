@@ -1,7 +1,43 @@
 # MEMORY — working session handoff
 > Auto-loaded each session. Canonical state is CLAUDE.md; this is the live delta.
 
-## Latest: the dependency backlog, decided rather than left open
+## Latest: a job's stage is picked, not walked
+2026-08-26, branch `claude/tasks-design-ysm-hub-loe44p`. Reported from the deployed app on
+`LJ00007`: the *What happens next* card offered **Mark ready for delivery** and **Cancel job**,
+and nothing else. The ask was YSM Hub's tasks design, so the user can pick any status. **One
+migration (`0042`)** — no new table, column, policy, function or capability; nothing dropped and
+no row changed. CLAUDE.md §4 (rules), §6 (screen), §7 (migration) and the changelog hold it.
+
+- **Scope was put to the owner** and they chose *any live stage, both ways*: New / In progress /
+  Ready for delivery / Assigned / Out for delivery all reachable from each other, with
+  **completed and cancelled still terminal** — by then 0017's hook has moved a job to
+  `awaiting_review`, it may carry a frozen charge, and 0040's draft may have billed it.
+- **`guard_laundry_order_transition` rewritten**, from **0031's** body so 0017's two billing
+  hooks and 0031's board clearing survive verbatim (the trap 0031's own header records). Four
+  data-coherence rules left, none of them "you cannot go backwards": pickup has no delivery;
+  laundry still in the plant is not given to a round; assigned before it goes out; goes out
+  before it is completed. Assignment clearing widened from one edge to all six.
+- **`StatusTrack`** (`orders/[id]/status-track.tsx`) draws it — YSM Hub's `.status-track` in this
+  app's tokens, steps as **form submits** rather than click handlers because every screen here is
+  a server component. `buildStatusTrack` is the rule, pure and tested; the component decides
+  nothing.
+- **Two capabilities deliberately not widened**: sending a job out stays `orders.manage`, and
+  pulling one back off a round gains `routes.write` — otherwise the status control is a back door
+  around Remove Assignment. `capabilitiesForMove` / `leavesTheRound` are those rules, and
+  `advanceOrder` now also runs `retireStopIfEmpty` so a run does not read 1, 3, 4 on the phone.
+- Found while rebuilding the card: a platform admin was offered the status buttons on **another
+  laundry's** job, where the tenant-filtered UPDATE matched no row and the toast said it worked.
+  The track stops with its own sentence instead.
+- **981 unit tests (was 965), 485 pgTAP assertions (was 478)**, `verify` green, all 44 migrations
+  on a fresh Postgres 16 with the whole suite and the seed. Every new assertion proved to fail
+  without its fix; four old proofs rewritten to the decision. Gallery: 5 states, 24
+  light/dark × width × text-size combinations clean, 36 interaction assertions.
+
+**Next, and it is the blocking one:** `0042` has **not** been applied to `laundrymart-syd`. Apply
+it before merging — the schema leads the code — then take one job in on `ats.coreit.com.au`,
+press a stage already behind it, and confirm it moves back with the timeline recording it.
+
+## Previously: the dependency backlog, decided rather than left open
 2026-08-26, branch `claude/adelaide-towel-single-tenant-tbyy06` (restarted from `Prod` — its
 earlier PRs are merged). Three pull requests had been sitting open. **No migration; nothing under
 `src/` or `supabase/` changed.** CLAUDE.md §10a holds the pin evidence.
@@ -26,7 +62,7 @@ earlier PRs are merged). Three pull requests had been sitting open. **No migrati
 `emailed_to`, 0 `auth.one_time_tokens`), and Adelaide's only depot (`ADL`) is `inactive` — set
 deliberately on 2026-08-26 — so every site picker in the app currently offers nothing.
 
-## Previously: the emails look like the rest of it, and the chase cannot fire blind
+## Earlier: the emails look like the rest of it, and the chase cannot fire blind
 2026-08-26, branch `claude/adelaide-towel-single-tenant-tbyy06`. Wiring Resend for PROD in YSM
 Hub's language with the Core IT credit. **No migration** — `git diff` over `supabase/` is empty.
 CLAUDE.md §10d holds the design.

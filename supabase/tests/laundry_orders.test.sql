@@ -12,7 +12,7 @@
 -- on a van" and "a finished job stays finished" are asserted here, against the
 -- trigger, rather than trusted to the screen.
 begin;
-select plan(32);
+select plan(39);
 
 insert into auth.users (id, email) values
   ('11111111-1111-1111-1111-111111111111','a@example.com'),
@@ -114,27 +114,41 @@ select is((select due_date from public.laundry_orders
           'a delivery job is due on its delivery date');
 
 -- ---------------------------------------------------------- transitions -----
+-- **Since 0042 the stages are picked, not walked.** Three of the assertions in
+-- this section used to say the opposite — that a job takes one step at a time,
+-- forwards — and they are rewritten to the decision rather than deleted: what a
+-- proof asserts is what the next person reads the rule as. What survives is the
+-- four rules that are about the job's own facts, and each is proved below.
 select throws_ok(
   $$update public.laundry_orders set status = 'completed'
      where id = 'd0000000-0000-0000-0000-00000000000a'$$,
   'P0001',
-  'a job cannot go from new to completed',
-  'the workflow cannot be skipped');
+  'a delivery job must be assigned to a board and go out before it is completed',
+  'a delivery job cannot be finished before it has been anywhere');
 
 select lives_ok(
   $$update public.laundry_orders set status = 'in_progress'
      where id = 'd0000000-0000-0000-0000-00000000000a'$$,
   'new to in progress is allowed');
 
-select throws_ok(
+select lives_ok(
   $$update public.laundry_orders set status = 'new'
      where id = 'd0000000-0000-0000-0000-00000000000a'$$,
-  'P0001',
-  'a job cannot go from in_progress to new',
-  'a job does not go backwards');
+  'a job goes back a stage when it was moved on by mistake');
 
-update public.laundry_orders set status = 'ready_for_delivery'
- where id = 'd0000000-0000-0000-0000-00000000000a';
+select throws_ok(
+  $$update public.laundry_orders set status = 'assigned',
+        assigned_board_id = '55555555-5555-5555-5555-55555555555a',
+        assigned_delivery_date = '2026-08-20'
+     where id = 'd0000000-0000-0000-0000-00000000000a'$$,
+  'P0001',
+  'a job is marked ready for delivery before it is given to a round',
+  'laundry still in the plant is not handed to a delivery round');
+
+select lives_ok(
+  $$update public.laundry_orders set status = 'ready_for_delivery'
+     where id = 'd0000000-0000-0000-0000-00000000000a'$$,
+  'a job skips a stage it does not need');
 
 -- The fork the whole module turns on, asserted from both sides.
 select throws_ok(
@@ -144,13 +158,15 @@ select throws_ok(
   'a delivery job must be assigned to a board and go out before it is completed',
   'a delivery job cannot be completed off the shelf');
 
--- Since 0016 a delivery job cannot jump the assignment step either: it needs a
--- board and a date before it can go out.
+-- A delivery job cannot jump the assignment step: it needs a board and a date
+-- before it can go out. 0042 restates this as a rule about the job's own
+-- assignment rather than about which stage it came from, because every other
+-- stage is now reachable — a job out on nobody's van is invisible to My Runs.
 select throws_ok(
   $$update public.laundry_orders set status = 'out_for_delivery'
      where id = 'd0000000-0000-0000-0000-00000000000a'$$,
   'P0001',
-  'a job cannot go from ready_for_delivery to out_for_delivery',
+  'a delivery job is assigned to a round before it goes out',
   'a delivery job must be assigned before it goes out');
 
 select throws_ok(
@@ -176,6 +192,35 @@ select lives_ok(
   $$update public.laundry_orders set status = 'out_for_delivery'
      where id = 'd0000000-0000-0000-0000-00000000000a'$$,
   'an assigned delivery job goes out on a van');
+
+-- **Coming back off a round.** 0031 cleared the assignment on the single
+-- `assigned -> ready_for_delivery` edge; 0042 widened that to every move out of
+-- the two delivery stages into the three plant ones, because those are all
+-- reachable now — and without it `chk_laundry_orders_assignment_status` refuses
+-- the whole update, since an assignment may only be held from `assigned` on.
+select lives_ok(
+  $$update public.laundry_orders set status = 'in_progress'
+     where id = 'd0000000-0000-0000-0000-00000000000a'$$,
+  'a job out on a van can be pulled back into the plant');
+
+select is((select assigned_board_id from public.laundry_orders
+            where id = 'd0000000-0000-0000-0000-00000000000a'), null,
+          'coming off a round clears the board');
+
+select is((select assigned_delivery_date from public.laundry_orders
+            where id = 'd0000000-0000-0000-0000-00000000000a'), null,
+          'coming off a round clears the delivery date');
+
+-- And back out again, which is the point of allowing it at all.
+update public.laundry_orders set status = 'ready_for_delivery'
+ where id = 'd0000000-0000-0000-0000-00000000000a';
+update public.laundry_orders
+   set status = 'assigned',
+       assigned_board_id = '55555555-5555-5555-5555-55555555555a',
+       assigned_delivery_date = '2026-08-20'
+ where id = 'd0000000-0000-0000-0000-00000000000a';
+update public.laundry_orders set status = 'out_for_delivery'
+ where id = 'd0000000-0000-0000-0000-00000000000a';
 
 update public.laundry_orders set status = 'completed'
  where id = 'd0000000-0000-0000-0000-00000000000a';
@@ -223,6 +268,26 @@ select lives_ok(
   $$update public.laundry_orders set status = 'completed'
      where id = 'd0000000-0000-0000-0000-00000000000b'$$,
   'a customer pickup is completed when they walk out with it');
+
+-- A pickup has no delivery to go out on, so nothing stands between it and being
+-- finished — including the two stages in front of it. The counter hand who takes
+-- a bag in, washes it and hands it straight back has one press, not three.
+insert into public.laundry_orders
+  (id, tenant_id, customer_id, order_number, delivery_required, expected_collection_date)
+values ('d0000000-0000-0000-0000-00000000000d','bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+        'c0000000-0000-0000-0000-00000000000b','LJ00002', false, '2026-08-22');
+
+select lives_ok(
+  $$update public.laundry_orders set status = 'completed'
+     where id = 'd0000000-0000-0000-0000-00000000000d'$$,
+  'a customer pickup is finished straight from new');
+
+select throws_ok(
+  $$update public.laundry_orders set status = 'in_progress'
+     where id = 'd0000000-0000-0000-0000-00000000000d'$$,
+  'P0001',
+  'a job cannot go from completed to in_progress',
+  'a finished job stays finished however it got there');
 
 -- ------------------------------------------------------- item constraints ---
 set local "request.jwt.claim.sub" = '11111111-1111-1111-1111-111111111111';

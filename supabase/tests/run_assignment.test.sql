@@ -140,12 +140,18 @@ select throws_ok(
   'this job is a customer pickup, so it is not eligible for delivery assignment',
   'a customer pickup cannot be assigned for delivery');
 
+-- Still refused since 0042 opened the stages up, and refused on purpose: the
+-- objection is that the laundry is not washed yet, not that the job came from
+-- the wrong place. Note it is the *transition* guard that catches this and not
+-- the assignment guard beside it, even though that one runs first — its own
+-- "not ready for delivery yet" branch reads `new.status`, which is already
+-- `assigned` by the time it looks.
 select throws_ok(
   $$select pg_temp.assign('d0000000-0000-0000-0000-0000000000a2',
       'bb000000-0000-0000-0000-000000000001','2026-08-14',
       '10000000-0000-0000-0000-000000000001')$$,
   'P0001',
-  'a job cannot go from new to assigned',
+  'a job is marked ready for delivery before it is given to a round',
   'a job that has not left the plant cannot be assigned');
 
 select throws_ok(

@@ -22,7 +22,7 @@ export const metadata = { title: "Help" };
 const DAY = [
   {
     title: "Take the laundry in",
-    body: "Create a Job for the customer: what they brought, when they want it back, and whether you are delivering it or they are collecting. It moves New \u2192 In progress \u2192 Ready for delivery as the plant works on it.",
+    body: "Create a Job for the customer: what they brought, when they want it back, and whether you are delivering it or they are collecting. It moves New \u2192 In progress \u2192 Ready for delivery as the plant works on it \u2014 press any stage on the job's own page to move it there, including back a stage if it was moved on by mistake.",
     href: "/orders/new", link: "Create a job",
   },
   {
@@ -90,7 +90,7 @@ const GLOSSARY: Array<{ term: string; also?: string; meaning: string }> = [
   },
   {
     term: "Job", also: "laundry order, ticket, docket",
-    meaning: "One customer's laundry, from the moment it lands on the counter to the moment it goes back: what they brought in, when they get it back, and where it is up to. Its seven states are New, In progress, Ready for delivery, Assigned, Out for delivery, Completed and Cancelled.",
+    meaning: "One customer's laundry, from the moment it lands on the counter to the moment it goes back: what they brought in, when they get it back, and where it is up to. Its seven states are New, In progress, Ready for delivery, Assigned, Out for delivery, Completed and Cancelled. The first five can be picked in any order; the last two are final.",
   },
   {
     term: "Assigned",
@@ -194,7 +194,7 @@ const SAFE = [
   "Creating anything — a customer, a contract, a job. Nothing is charged or sent to anyone until you issue an invoice.",
   "Assigning a job to a driver, changing the driver, changing the date, or removing the assignment. None of it touches the laundry, the customer or the price, and none of it cancels anything.",
   "Archiving a customer. They drop out of lists; their history, stops and invoices are all kept.",
-  "Creating a job and moving it along. Every step is recorded on the job with your name and the time.",
+  "Creating a job and moving it along. Press any stage on the job's page to move it there — forwards, backwards, or skipping one it does not need. Every move is recorded on the job with your name and the time, so a correction is part of the history rather than a hidden edit.",
   "Inviting somebody, or changing what they can see. Settings › People, and you can change your mind at any time.",
   "Completing a job. It never bills anybody — it only puts the job in front of whoever checks the charges.",
   "Pricing a job, re-pricing it, and editing its charges — right up until you approve them.",
