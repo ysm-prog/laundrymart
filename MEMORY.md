@@ -56,6 +56,11 @@ none.
 nothing to reconcile; **proved** by applying both to a fresh Postgres 16 in filename order with the
 whole suite on top. Merged tree: **928 unit tests, 469 pgTAP assertions**, `verify` green.
 
+**Merged: `Dev` and `Prod` are both `816c52c`, identical trees, CI green on all three jobs for
+both.** `Dev` had moved six commits while this was in flight (the item master gate, its capability
+block, the "Items" rename, `laundry_category`, and the Adelaide-time correction); only the two
+documentation files conflicted.
+
 **Still not opened behind the auth gate** (no credentials here). Next: take a job in on
 `ats.coreit.com.au`, approve it, check Money › Open drafts; take a second job in for the same
 customer, approve it, confirm the *same* invoice number picks it up with quantities added rather

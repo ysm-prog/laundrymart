@@ -2072,6 +2072,12 @@ which both branches touched, merged clean. Both changelog entries and both schem
 with the collision note above. `Prod` was an ancestor of `Dev`, so it fast-forwarded to the
 identical tree rather than taking a second resolution.
 
+Both branches are **`816c52c`** and their trees are identical. **CI green on all three jobs for
+both** — verify, gitleaks, and the DB job against a fresh Postgres 16 with the whole pgTAP suite
+and the seed, which is the run that proves the two 0040s co-exist somewhere other than this
+container. Read off the *run*, not the check: §18's 2026-08-26 entry records the check-runs API
+serving a stale `in_progress` for a job that had finished minutes earlier.
+
 ### 2026-08-26 · The business runs on Adelaide time
 The client's correction: this project is based on Adelaide date and time. **No migration; no
 schema, RLS, capability or policy change, and no live row altered** — one constant and the
