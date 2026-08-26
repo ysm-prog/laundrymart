@@ -4,13 +4,16 @@ import { requireCapability, requireSession } from "@/lib/auth/context";
 import { createClient } from "@/lib/supabase/server";
 import { can } from "@/lib/roles";
 import {
-  EmptyState, Notice, PageContainer, PageHeader, SkeletonRows,
+  Badge, Card, EmptyState, Notice, PageContainer, PageHeader, SkeletonRows,
 } from "@/components/ui";
+import { counted } from "@/lib/format";
 import {
   OPERATIONS_TIMEZONE, formatAdelaideDate, getAdelaideNow, getAdelaideToday, isCalendarDate,
 } from "@/lib/domain/timezone";
 import { groupRunDay } from "@/lib/domain/run-assignment";
 import { loadBoardDayJobs, resolveBoardScope } from "@/lib/runs/my-runs";
+import { loadBoardSequence } from "@/lib/runs/sequence-stops";
+import { SequenceBoard } from "@/app/(app)/runs/sequence-board";
 import { DateNav } from "./date-nav";
 import { DayWorkflow } from "./run-workflow";
 import { DaySummary, JobCard, JobGroup } from "./run-view";
@@ -91,6 +94,11 @@ export default async function MyRunsPage({ searchParams }: { searchParams: Promi
               (scope.isSelf && can(session.role, "run.execute"))
               || can(session.role, "routes.write")
             }
+            // Adjust Run is the Owner's and the Office manager's alone. It is
+            // not `canWork`: a dispatcher may work somebody's day on their
+            // behalf and still may not decide what order it is driven in, which
+            // is the whole of the client's rule and of 0036's guard trigger.
+            canSequence={can(session.role, "routes.sequence")}
           />
         </Suspense>
       )}
@@ -101,9 +109,10 @@ export default async function MyRunsPage({ searchParams }: { searchParams: Promi
 /* ------------------------------------------------------------------- day */
 
 async function Day({
-  boardId, boardName, date, isSelf, canWork,
+  boardId, boardName, date, isSelf, canWork, canSequence,
 }: {
-  boardId: string; boardName: string; date: string; isSelf: boolean; canWork: boolean;
+  boardId: string; boardName: string; date: string; isSelf: boolean;
+  canWork: boolean; canSequence: boolean;
 }) {
   const session = await requireSession();
   const supabase = await createClient();
@@ -123,6 +132,14 @@ async function Day({
       />
     );
   }
+
+  // Read only for the two roles that may act on it, and only once there is a day
+  // to order — a round opening its own workspace pays for no extra query. It is
+  // the same read the Runs screen and the save action both perform, so the
+  // version drawn here is the version the save is checked against.
+  const sequence = canSequence
+    ? await loadBoardSequence(supabase, session.tenantId, boardId, date)
+    : null;
 
   return (
     <div className="space-y-5">
@@ -148,6 +165,27 @@ async function Day({
 
       {canWork ? (
         <DayWorkflow jobs={jobs} boardId={boardId} date={date} returnTo={returnTo} />
+      ) : null}
+
+      {sequence && sequence.stops.length > 0 ? (
+        <Card
+          title="Run order"
+          description={
+            "The order this round drives in. Press Adjust Run to move a stop, "
+            + "then Save & Lock Run — the round sees the new order straight away."
+          }
+          actions={<Badge tone="neutral">{counted(sequence.stops.length, "stop")}</Badge>}
+        >
+          <SequenceBoard
+            boardId={boardId}
+            boardName={boardName}
+            date={date}
+            stops={sequence.stops}
+            version={sequence.version}
+            canSequence
+            returnTo={returnTo}
+          />
+        </Card>
       ) : null}
 
       <JobGroup title="To deliver" count={day.toDeliver.length}>

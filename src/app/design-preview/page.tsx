@@ -964,6 +964,29 @@ export default function DesignPreviewPage() {
               ))}
             </JobGroup>
 
+            {/* Adjust Run, where the manager is actually standing.
+
+                The round's own day is the screen somebody is looking at when
+                they notice the van should call at the school before the hotel,
+                so the ordering board is drawn here too — the same component the
+                Runs screen uses, so there is one answer to "how is a run
+                ordered". It renders for the Owner and the Office manager alone:
+                a board holds `routes.read` and not `routes.sequence`, and gets
+                no card at all rather than a disabled button. */}
+            <div id="my-runs-run-order">
+              <Card
+                title="Run order"
+                description="The order this round drives in. Press Adjust Run to move a stop, then Save &amp; Lock Run — the round sees the new order straight away."
+                actions={<Badge tone="neutral">3 stops</Badge>}
+              >
+                <SequenceBoard
+                  boardId="b1" boardName="Board 1" date="2026-08-16"
+                  stops={PREVIEW_RUN_STOPS} version={1} canSequence
+                  returnTo="/design-preview"
+                />
+              </Card>
+            </div>
+
             <Card
               title="Ready for delivery, assigned to nobody"
               description="Customer pickups are not listed — they are never assigned for delivery."
@@ -1373,7 +1396,7 @@ const PREVIEW_CONSOLIDATED = consolidateChargeLines(
  */
 const PREVIEW_RUN_STOPS: SequenceStop[] = [
   {
-    id: "s1", status: "assigned", progressStatus: "not_started",
+    id: "s1", status: "assigned", progress_status: "not_started",
     customerName: "ABC Hotel", address: "123 Main Street, Adelaide, SA",
     jobs: [
       { id: "j1", orderNumber: "LJ01041", itemCount: 3 },
@@ -1381,12 +1404,12 @@ const PREVIEW_RUN_STOPS: SequenceStop[] = [
     ],
   },
   {
-    id: "s2", status: "assigned", progressStatus: "not_started",
+    id: "s2", status: "assigned", progress_status: "not_started",
     customerName: "XYZ Medical", address: "55 North Terrace, Adelaide, SA",
     jobs: [{ id: "j3", orderNumber: "LJ01045", itemCount: 2 }],
   },
   {
-    id: "s3", status: "assigned", progressStatus: "not_started",
+    id: "s3", status: "assigned", progress_status: "not_started",
     customerName: "City Gym", address: "19 King William Street, Adelaide, SA",
     jobs: [{ id: "j4", orderNumber: "LJ01051", itemCount: 1 }],
   },
@@ -1394,9 +1417,9 @@ const PREVIEW_RUN_STOPS: SequenceStop[] = [
 
 /** The same day, with the first call already made. */
 const PREVIEW_RUN_STOPS_WORKED: SequenceStop[] = [
-  { ...PREVIEW_RUN_STOPS[0]!, status: "completed", progressStatus: "delivery_completed" },
+  { ...PREVIEW_RUN_STOPS[0]!, status: "completed", progress_status: "delivery_completed" },
   PREVIEW_RUN_STOPS[1]!,
-  { ...PREVIEW_RUN_STOPS[2]!, progressStatus: "at_customer" },
+  { ...PREVIEW_RUN_STOPS[2]!, progress_status: "at_customer" },
 ];
 
 /**

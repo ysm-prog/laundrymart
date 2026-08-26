@@ -4,7 +4,7 @@
 ## Latest: the YSM Hub filter language, on every list
 2026-08-26, branch `claude/ysm-hub-style-filters-84bgd5`. **No migration** — the ledger's last
 entry is still `0038_invoice_line_account` and `git diff` over `supabase/` is empty. 837 unit
-tests (was 780), `verify` green.
+tests (was 806) — **843 with `Prod` merged in** — and `verify` green.
 
 - **`components/filters.tsx` + `lib/filters.ts` are the new surface**: `FilterChips`,
   `ToggleChips`, `PeriodFilter`, `FilterSummary`, with the rules pure and tested beside them.
@@ -24,14 +24,81 @@ tests (was 780), `verify` green.
 `ats.coreit.com.au`: Money › Awaiting invoice → press "Not priced yet" and confirm the chip's
 count matches the rows under it.
 
-## Previously: merged to Prod and Dev — the branch is live
-2026-08-26. **PR #23 → `Prod` (`00c6613`), PR #24 → `Dev`**, CI green on all three jobs for both.
-Nothing was outstanding to apply; `ats.coreit.com.au` carries that branch. Still open and needing
-a login: take one real run through Adjust Run → Save & Lock Run as `owner@roles.example.com`, and
-the Xero coding ladder has never met real data (no `XERO_CLIENT_ID`, 0 connections, 647 invoices
-with 0 lines).
+## Previously: Adjust Run merged, and verified against the live database
+2026-08-26. **`Prod` = `f8eb138` (PR #26), `Dev` = `6c1dd4c` (PR #27)**, identical trees, CI green on
+all three jobs for both.
 
-## Earlier: merged with Prod — the coding ladder and the audit rule
+- **Nothing to deploy to Supabase.** The branch adds no migration. Checked by **object, not by ledger
+  name** — six migrations sit live under their pre-renumbering names, so a name diff reports six
+  false gaps. Everything Adjust Run calls at request time is live and correctly shaped
+  (`apply_run_sequence` INVOKER, `compact_run_sequence` DEFINER, `daily_routes.sequence_*`, both
+  guard triggers — which are named `guard_jobs_sequence` / `guard_daily_routes_sequence_control`,
+  **not** after their functions).
+- **The boundary is proved against real rows for the first time**: Adelaide Board 1 / 28 Aug, in a
+  block ending with a raise so nothing commits — board refused 42501, dispatcher refused 42501,
+  `operations_manager` saved v1→2 with the stops really swapping, stale replay refused. Rollback read
+  back clean (version 1, still locked, 0 audit rows).
+- Advisors **22** = 21 documented definer helpers + auth toggle; `sync_invoice_line_account` still
+  absent, so the 2026-08-25 revoke holds. 0 anon table grants, 0 tables without RLS.
+- Counts moved because the laundry is using it: **648** invoices (was 647), **10** laundry jobs
+  (was 8).
+
+**`Jay CT` is a test customer — the owner confirmed it on 2026-08-26 — and it exists twice**
+(`CUST00509` = 4 jobs + `INV00001` + 3 stops, `CUST00510` = 1 job + 1 stop, created 0.65s apart with
+a location row each at the same address). That is why Board 1's 28 Aug run has two stops at one
+address and the Run order card shows "Jay CT" twice; `findOrCreateStop` keys on (tenant, run,
+customer) and is right. Nothing to fix in code, and not deleted — it is the only end-to-end evidence
+the billing path has.
+
+**The correction that came out of it, and it is the important one.** CLAUDE.md §11 claimed `LJ00002`
+was *"the first time the billing lifecycle has run against real work"*. It was not:
+**all six of Adelaide's laundry jobs are against test customers** (LJ00002–06 = Jay CT, LJ00001 =
+a customer named `Test`); jobs against a non-test customer = **0**. What *is* true and is new:
+`INV00001` (draft, $55, one line, from LJ00002, 2026-08-26) is the **only one of 648 invoices that
+carries a line at all**, so job → price → approve → generate is now proved end to end — against test
+data. Both corrected in §11.
+
+**Still needs a login, not a commit:** open My Runs as `owner@roles.example.com` on
+`ats.coreit.com.au` and drive Adjust Run in the browser; confirm `board1@ats.example.com` sees no
+card.
+
+
+## Earlier: Adjust Run reaches My Runs
+2026-08-26, branch `claude/adjust-run-button-roles-ushdk9`. The owner asked for the button on the
+screen they are actually looking at, restricted to the Owner and the Office manager. **No
+migration, no schema, no RLS, no capability, no new role.**
+
+- `/my-runs` now draws a **"Run order"** card between the day's workflow and its job groups: the
+  *same* `SequenceBoard` and the *same* `reorderRunStops` the Runs screen uses. Gated on
+  `routes.sequence`, so a board, a driver and a dispatcher get **no card at all** — and no extra
+  query, because the read is skipped with it.
+- `lib/runs/sequence-stops.ts` is new and shared by both screens. Not tidiness: the version a page
+  renders with is the token its save is compared against, so a second read would be a stale-version
+  refusal nobody could explain.
+- `SequenceBoard` gained `returnTo`; `reorderRunStops` reads it through `returnTo(formData, …)`.
+  Without it a manager adjusting a run from the round's day would be moved to `/runs`.
+- `SequenceStop` moved into `sequence.ts` as `OrderableStop & { … }`, so `progressStatus` and its
+  `asOrderable` adapter are gone. Design-preview fixtures updated with it.
+- 812 unit tests (was 806), `verify` green. Both new assertions **proved to fail** without their
+  fix. 42 browser interaction assertions at 390/1440, and 12 measured combinations with 0 overflow
+  inside the card, 0 sub-36px targets, 0 console errors.
+- **The measurement harness caught itself twice** and both are recorded in CLAUDE.md §18: a stale
+  `next start` (failed loudly — the 2026-08-25 vacuous-pass trap), and a text-size sweep that was
+  vacuous because `"biggest"` is the label and `"xlarge"` is the value. It now asserts the root
+  font size actually moved.
+
+**Not opened behind the auth gate** — no Supabase credentials here. Before trusting it: as
+`owner@roles.example.com` on `ats.coreit.com.au`, open My Runs for Board 1 on a two-stop day,
+Adjust Run, swap 1 and 2, Save & Lock Run; then check `board1@ats.example.com` sees no card. That
+is also the one item the 2026-08-25 entry left open.
+
+
+## Earlier still: merged to Prod and Dev
+2026-08-26. **PR #23 → `Prod` (`00c6613`), PR #24 → `Dev`**, CI green on all three jobs for both
+(verify, gitleaks, and the DB job: 40 migrations, 431 pgTAP assertions and the seed against a
+fresh Postgres 16). `ats.coreit.com.au` carries the whole branch.
+
+## Older: merged with Prod — the coding ladder and the audit rule
 2026-08-25. **Most of this branch is already live on `ats.coreit.com.au`**; another session
 merged the run-sequencing work and the account-codes work to `Prod` while this branch was still
 open. `origin/Prod` was merged **into** this branch and the four conflicts resolved before

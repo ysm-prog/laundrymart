@@ -440,6 +440,12 @@ with it.
 date it chooses, grouped To deliver / Out for delivery / Completed, in the order the office set
 and with each stop's position printed on the card, with Confirm Load and Start Route in front of
 them. Gated on `routes.read` so a manager can open it for a board.
+**Since 2026-08-26 it also carries Adjust Run**, in a "Run order" card between the day's workflow
+and its job groups — the same `SequenceBoard` the Runs screen draws, so there is one answer to
+"how is a run ordered" rather than two. It renders **only** for a holder of `routes.sequence`
+(the Owner and the Office manager): a board, a driver and a dispatcher get no card at all rather
+than a disabled button, and no extra query either, since the read is skipped with it. The save
+posts `return_to`, so a manager who adjusts a run from the round's day lands back on it. See §28.
 `/run` survives as the second tab ("At the depot") because it owns the offline outbox, the
 service worker and the unload inventory sweep, and is the one screen that must work with no
 signal.
@@ -1083,6 +1089,63 @@ list that opened on this month would hide precisely the invoices that are late);
 on **last month**, which is `previousMonth`'s own reasoning.
 
 ## 11. Hosted project
+**Verified against `laundrymart-syd` on 2026-08-26 after the Adjust Run merge, and there was nothing
+to apply.** The branch adds no migration, so this was a conformance check rather than a deployment:
+does the live database carry everything the merged code calls?
+
+- **Every one of the repo's 40 migrations is live**, checked by **object** rather than by ledger name
+  — six of them sit in the ledger under their pre-renumbering names (`optional_inspection`,
+  `0012_return_count`, `purchases`, `supplier_payments`, `import_helpers`,
+  `0015_import_activation`), so a name diff alone reports six false gaps. `production_batches.route_id`,
+  `production_batch_lines.driver_quantity`, `gl_accounts`/`suppliers`/`supplier_bills`,
+  `supplier_payments` and `import_activation_state` are all present. The live ledger has 41 entries to
+  the repo's 40 because `0015_import_activation_grants` was applied separately.
+- **Everything Adjust Run calls at request time exists and is shaped right**: `apply_run_sequence()`
+  (SECURITY **INVOKER**, so RLS and both guards still apply), `can_write_run_sequence()`,
+  `compact_run_sequence()` (SECURITY **DEFINER**, safe by construction — §28),
+  `daily_routes.sequence_locked/_version/_updated_by/_updated_at` (which `loadRunDay` selects, so
+  their absence would 500 the page), and `jobs.sequence`. The triggers are attached under
+  `guard_jobs_sequence` and `guard_daily_routes_sequence_control` — **the trigger names differ from
+  their function names**, which is worth writing down: a probe looking for `guard_job_sequence` in
+  `pg_trigger` reports it missing and is wrong. `guard_job_sequence` is correctly **not** executable
+  by `authenticated` (the trap 0019 and 0036 both record) while `apply_run_sequence` is.
+- **The feature was then proved end to end as real sessions**, on Adelaide's Board 1 for 2026-08-28 —
+  the first time the lock/adjust/save cycle has run against real rows. In one block that ends by
+  raising, so **nothing could commit**: a `board` was refused **42501** *"only the owner or an
+  operations manager can change a run's order"*; a `dispatcher` (a real member re-roled inside the
+  block) was refused identically; an `operations_manager` **saved**, version 1 → 2, and the two stops
+  really swapped; and a stale page replaying version 1 got the concurrency sentence. Read back after
+  the rollback: version **1**, still locked, order unchanged, the borrowed membership back to `board`,
+  and **0** audit rows written.
+- **Advisors are 22** — the 21 documented SECURITY DEFINER helpers plus the auth leaked-password
+  toggle. `sync_invoice_line_account` is still **absent** from the list, so the 2026-08-25 live revoke
+  is holding. **0** `anon` table grants and **0** tables in `public` without RLS.
+- Counts as read: 648 invoices, 10 laundry jobs, 6 Adelaide memberships. Both are up on the last
+  record (647 / 8) because the laundry has been using the app.
+
+**`Jay CT` is a test customer, and it exists twice.** `Adelaide Towel Service` holds two records
+both named `Jay CT` — `CUST00509` (`f529d68b`) and `CUST00510` (`476d9761`) — created **0.65 seconds
+apart** on 2026-08-20, each with its own `customer_locations` row at the same address, *11 Frazer
+avenue Gulfview Height 5096*. **The owner confirmed on 2026-08-26 that Jay CT is for testing**, which
+is what settles how to read it: this is not a duplicate in a real customer list, it is test data, and
+the finding it actually produces is the correction above — Adelaide's activity is **entirely** test
+activity.
+- Why it is visible at all: Board 1's 28 August run carries two stops at one address, so the Run
+  order card shows "Jay CT" at both position 1 and position 2. **`findOrCreateStop` is behaving
+  correctly** — it keys on (tenant, run, **customer**), and as far as the database is concerned these
+  are two customers, so the van is booked to call twice. Nothing to fix in the code.
+- The work is split across them: `CUST00509` carries LJ00002/3/4/5, three stops and `INV00001`;
+  `CUST00510` carries LJ00006 and one stop. Adelaide's only other laundry job, `LJ00001`, is against
+  `CUST00003` — a customer named `Test`, and one of the 508 archived.
+- **Still not deleted or merged here, and being test data is not on its own a reason to.** Nobody
+  asked for it, it is doing no harm, and it is the only end-to-end evidence the billing path has;
+  deleting it would remove the one invoice in the project that carries a line. If it is ever tidied,
+  archiving (`set_records_archived`, reversible) beats deleting.
+- `SubmitButton` already disables on `useFormStatus().pending`, so the ordinary double-click is
+  guarded; 0.65s apart is consistent with a double submit **before hydration**. Not chased further,
+  because guessing at a cause is how a fix lands on the wrong thing — and on a test record there is
+  nothing at stake to justify the guess.
+
 `laundrymart-syd` · ref `xujhwljrmogenhvqpkrf` · ap-southeast-2 (Sydney) · org `ysm-prog`.
 Deployed on Vercel at `ats.coreit.com.au`. All migrations through `0030_member_directory`
 applied (0014 on 2026-08-13, 0015 and 0016 on 2026-08-14, 0017, 0018, 0019 and 0025 on
@@ -1363,14 +1426,26 @@ Corrected 2026-08-25; see that changelog entry and the note under 0011 below.
 **Read back on 2026-08-24, and the real laundry has been used since the cutover.**
 `Adelaide Towel Service` now holds four laundry jobs of its own, three of them raised after the
 20 August entry above: `LJ00002` was completed, **priced and approved** (1 frozen
-`job_charge_snapshots` row — the first time the billing lifecycle has run against real work), and
-`LJ00003`/`LJ00004` are `assigned` to boards. Two things follow, and both are the owner's to act
-on rather than the code's:
+`job_charge_snapshots` row), and `LJ00003`/`LJ00004` are `assigned` to boards. Two things follow,
+and both are the owner's to act on rather than the code's:
 
-- **No invoice has been generated from any of it.** `invoice_source_jobs` is 0 and no invoice has
-  been created since 20 August, so `LJ00002` is sitting approved in the billing queue waiting for
-  the month-end run. The roll-up is still the one step of the money path never exercised end to
-  end.
+> **Corrected 2026-08-26, and this is the correction that matters most in this section.** This
+> paragraph called `LJ00002` *"the first time the billing lifecycle has run against real work"*.
+> It was not real work. **Every one of Adelaide's six laundry jobs is against a test customer** —
+> `LJ00002`–`LJ00006` against `Jay CT` (which the owner confirms is a test record, and which exists
+> twice — see the 2026-08-26 entry) and `LJ00001` against a customer literally named `Test`. Jobs
+> against a non-test customer: **0**. So the lifecycle is *proved*, and it has still never billed a
+> real customer. A milestone recorded against test data is worse than no milestone, because the
+> next person reads it as coverage they have.
+
+- **An invoice has now been generated from it, and that closes the last unexercised step.**
+  `INV00001` — draft, **$55.00**, one line, raised from `LJ00002` on 2026-08-26 — is the **only one
+  of the project's 648 invoices that carries a line at all**; the other 647 came in from the import
+  as headers. So job → price → approve → generate really does work end to end, which §21 had never
+  been able to say. It is a **test** invoice against `Jay CT`, it is still a draft, and it has not
+  been issued, sent or pushed to Xero. *(Superseded: this bullet previously read "no invoice has
+  been generated from any of it… the roll-up is still the one step of the money path never
+  exercised end to end.")*
 - **Adelaide's four boards were linked to no login (0 of 4)**, so `LJ00003` and `LJ00004` were
   assigned to rounds nobody could sign in as and My Runs was empty for them. **Fixed the same day**
   — see §24 and the 0034/0035 paragraph above: four logins written by SQL, boards linked 5 of 5.
@@ -1776,8 +1851,9 @@ whole argument:
 - `delivery(s)` and `pickup(s)` on the two operations screens are gone — `counted()` retired the
   parenthetical plural on 2026-08-24 and these two were missed.
 
-- 837 unit tests (was 780) and 431 pgTAP assertions (unchanged — this adds no policy). `verify`
-  green: typecheck, lint, tests and the production build.
+- 837 unit tests (was 806) and 431 pgTAP assertions (unchanged — this adds no policy). `verify`
+  green: typecheck, lint, tests and the production build. **843 with `Prod` merged in**, which
+  brought Adjust Run's six.
 - **The new tests were confirmed to fail without the code**, not assumed to be doing something:
   breaking `filterHref`'s page reset fails two, and making the financial year a calendar year
   fails two more.
@@ -1801,6 +1877,86 @@ authenticated lists were checked by typecheck, lint, 837 tests, the production b
 component gallery — not by being opened with real rows in them. **Before trusting it: open Money
 › Awaiting invoice on `ats.coreit.com.au`, press "Not priced yet", and check the count on the chip
 matches the rows underneath.**
+
+### 2026-08-26 · Adjust Run, on the screen the manager is standing on
+The order of a run could only be changed from `/runs`. My Runs — where a manager actually is when
+they notice the van should call at the school before the hotel — printed the position on every job
+card and offered no way to change it. **No migration; no schema, RLS, capability, policy or
+workflow change**, and no role gained or lost anything.
+
+- **The same board, not a second one.** `/my-runs` now draws the same `SequenceBoard` the Runs
+  screen draws, posting to the same `reorderRunStops`. Ordering is a rule the database enforces
+  (`can_write_run_sequence()`, `guard_job_sequence`, `apply_run_sequence()` — all 0036), and a
+  second implementation in front of it would be a second answer to a question with one answer.
+  So this is a **placement** change and a shared read, not new behaviour.
+- **`routes.sequence`, deliberately not `canWork`.** My Runs already lets a dispatcher work
+  somebody's day on their behalf (`routes.write`), and reusing that for the new control would
+  have offered a button 0036's guard trigger refuses — a control that can only ever fail, on the
+  screen the client asked for it on. The card is gated on `routes.sequence`, which is the Owner
+  and the Office manager alone, and **a board, a driver or a dispatcher gets no card at all**
+  rather than a disabled one.
+- **The read is skipped with the card, not merely hidden.** `loadBoardSequence` runs only for a
+  viewer who may act on it and only once the day has work in it, so a round opening its own
+  workspace pays for nothing.
+- **One loader for both screens, and that is a concurrency decision.** `lib/runs/sequence-stops.ts`
+  is the day's stops with their laundry under them, lifted out of `/runs/page.tsx` verbatim. The
+  version a page renders with is the token its save is compared against, so two reads of "what is
+  on this run" would be two answers waiting to disagree — a stale-version refusal a manager could
+  not explain, not a tidiness question.
+- **`return_to` is what makes the save land where it was pressed.** Without it a manager adjusting
+  a run from the round's day would be moved to `/runs`, which reads as the save having done
+  something else entirely. The action re-validates it as a plain same-site path — a form field is
+  not evidence, and an absolute one would make every sequence save an open redirect.
+- **`SequenceStop` moved into `sequence.ts` and lost its `asOrderable` adapter.** It carried
+  `progressStatus` where the rules and the database both say `progress_status`, so every call site
+  translated between the two; the type now sits beside the rules that read it, as
+  `OrderableStop & { … }`, and one mapping is gone rather than duplicated into a second screen.
+
+- 812 unit tests (was 806) and 431 pgTAP assertions (unchanged — this adds no policy). `verify`
+  green: typecheck, lint, tests and the production build.
+- **Both new assertions were confirmed to fail without their fix** rather than assumed to be doing
+  something. Renaming the posted field to `returnTo` fails the seam test — the producer/consumer
+  disagreement this repo has shipped three times behind a green `verify`, and which here would not
+  even look like a failure: the save would work and quietly move the manager to another screen.
+  Widening the gate to `routes.write` fails the capability test.
+- **Driven in a real browser, not reasoned about.** The card is in `/design-preview` as its own
+  fixture and **42 interaction assertions** pass at 390 and 1440: locked by default with no
+  draggable row, no arrow and no Save anywhere; Adjust Run revealing six 44×44 move controls;
+  stop 1 and stop 2 swapping in the list *and* in the posted payload; the version not moving until
+  it is saved; the last stop refusing to move past the end; and Cancel restoring the exact saved
+  order, returning to locked and taking every control away again.
+- Measured light and dark at 320/390/768/1440 and across all three text sizes at 390 — **12
+  combinations, 0 console errors, 0 overflow inside the card and 0 interactive targets under
+  36px**. Document overflow is 7px at 320 and 34px at 390 Biggest, **byte-identical to the
+  baseline the 2026-08-24 entry recorded**: the pre-existing dispatch-planner fixture, unchanged.
+- **The measurement harness caught itself first, which is why the numbers are worth anything.**
+  The first run reported the card missing at all twelve combinations — the id had been added after
+  the build, and `next start` was serving the old one. That is the failure the 2026-08-25 entry
+  records as having passed *vacuously*; here it failed loudly instead. The text-size sweep then
+  passed vacuously anyway, because `"biggest"` is the *label* and `"xlarge"` is the value, so the
+  attribute matched no rule. The harness now asserts the root font size actually moved
+  (16 → 18.4 → 20.8px) and the recorded overflow numbers reappeared the moment it did.
+
+**Merged to `Prod` (`f8eb138`, PR #26) and `Dev` (`6c1dd4c`, PR #27) on 2026-08-26**, CI green on all
+three jobs for both. No migration went with it, so nothing was outstanding to apply — §11 records the
+conformance check that proves it, including that every object the merged code calls at request time
+is live and correctly shaped.
+
+**The boundary is now proved against real rows**, which is what the 2026-08-25 entry left open: on
+Adelaide's Board 1 for 28 August, in a block that ends by raising so nothing can commit, a board and
+a dispatcher were both refused **42501** with the sentence, an `operations_manager` saved and the two
+stops really swapped (version 1 → 2), and a stale replay got the concurrency message. The rollback
+was read back clean.
+
+**Still not opened behind the auth gate.** This container has no Supabase credentials, so the *card*
+was proved through the component gallery, the payload assertions, the source-level gate and the
+build — the database half above is proved, the browser half is not. **Before trusting it: sign in as
+`owner@roles.example.com` on `ats.coreit.com.au`, open My Runs for Board 1 on a day with two
+stops, press Adjust Run, swap 1 and 2, and press Save & Lock Run** — the run should re-lock in the
+new order, the toast should read "Run sequence updated successfully. The run has been locked.",
+and you should still be on My Runs. Then sign in as `board1@ats.example.com` and confirm there is
+no Run order card at all. That also closes the one item §18's 2026-08-25 entry left open, which
+has always needed a login rather than a commit.
 
 ### 2026-08-25 · The audit record is a rule, not a literal
 The last item in the specification that could be closed without a login. **No migration; no
@@ -4687,6 +4843,14 @@ document is what to hand somebody asking what the feature does.
   `jobs.sequence` too, so leaving it on `routes.write` would have made the boundary a fiction —
   a dispatcher refused on Runs could reorder the same day there. Two screens that write one fact
   answer to one authority.
+- **Adjust Run is drawn on My Runs as well** (2026-08-26), because that is the screen somebody is
+  standing on when they notice the van should call at the school before the hotel. The *same*
+  component, the same action and the same capability — a second implementation of ordering would
+  be a second answer to a question the database has only one answer to. The two screens share
+  `lib/runs/sequence-stops.ts`, which matters beyond tidiness: the version a page renders with is
+  the version its save is compared against, so a second read of "what is on this run" would be a
+  concurrency bug rather than a duplication. `return_to` is what makes the save land back where it
+  was pressed, re-validated as a plain same-site path because a form field is not evidence.
 - **The audit row carries both orders in full.** "What was it before?" is the question an audit
   log gets asked about a run that went wrong, and a movement count cannot answer it. Board, run
   date, run ids, previous and new sequence, actor, role and the resulting version.
