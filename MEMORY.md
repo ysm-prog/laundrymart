@@ -185,4 +185,5 @@ telling it whether the text it replaces was a search or a sentence.
   reports itself on the commit — but a session like this still cannot read it: the raw GitHub API
   answers "GitHub access is not enabled for this session", and `ats.coreit.com.au` is refused by
   the egress policy. Checking a deploy from here needs the Vercel dashboard or a `VERCEL_TOKEN`
-  plus `api.vercel.com` allowed.
+  plus `api.vercel.com` allowed — **so ask the owner and record the answer with its provenance**,
+  which is how the status-track release (`5792ce8`) was confirmed live on 2026-08-26.

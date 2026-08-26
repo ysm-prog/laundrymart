@@ -2346,9 +2346,18 @@ under `src/`** — one boolean in one config file. §5 holds the reasoning.
 **It was found by being unable to answer a plain question.** Asked whether the production deploy
 for the status-track merge had gone through, there was nowhere to look: Vercel posts nothing to
 GitHub while `silent` is on, so no commit status, no check and no comment ever appeared. Worth
-noting because the 2026-08-26 merge record two entries down asserts *"the Vercel production deploy
-completed"* — with this setting on, it is not clear how that was established, and a claim nobody
-can re-check is the thing §11's discipline exists to avoid.
+noting because the merge record two entries down said `ats.coreit.com.au` *carries* that release —
+which, with this setting on, could only ever have been inferred from a push having succeeded. A
+claim nobody can re-check is the thing §11's discipline exists to avoid, so it was asked rather
+than left standing.
+
+**The answer is that it did deploy, and the owner confirmed it in the Vercel dashboard**
+(2026-08-26), so `ats.coreit.com.au` really is carrying the status-track release (`5792ce8`).
+Recorded here with its provenance rather than as a bare fact, because the provenance is the whole
+point of the entry: this is a person reading a dashboard — not a commit status, not a check, and
+not anything a session like this one could re-derive. **It should also be the last confirmation
+that has to arrive that way.** With `silent` off, the next production deploy says so on the commit
+that caused it, where the question can be answered by looking rather than by asking.
 
 - **Written as `false` rather than by deleting the key.** Removing it restores the same default,
   but leaves the file silent about a decision that was made twice — once to quieten Vercel and once
@@ -2629,8 +2638,10 @@ for a widening as much as for a narrowing. §11 has the full record; the short v
 stage already behind it, and confirm it moves back with the timeline recording the move under your
 name.
 
-**Merged to `Prod` (`5792ce8`) and `Dev` (`70379d8`) on 2026-08-26**, so `ats.coreit.com.au`
-carries it. **CI green on all three jobs for both** — Verify, gitleaks, and the DB job applying all
+**Merged to `Prod` (`5792ce8`) and `Dev` (`70379d8`) on 2026-08-26**, and the deploy was
+**confirmed by the owner in the Vercel dashboard** — said here rather than inferred from the push,
+because at the time nothing about a Vercel deploy reached GitHub at all (the `github.silent` entry
+above). **CI green on all three jobs for both** — Verify, gitleaks, and the DB job applying all
 45 migrations to a fresh Postgres 16 with the whole pgTAP suite and the seed. `Prod` was a clean
 fast-forward and was never force-pushed; the two branches hold identical trees, `Dev` carrying only
 the extra catch-up merge commits.
