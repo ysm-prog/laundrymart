@@ -2499,6 +2499,26 @@ to a line, and the totals maths is untouched.
   asserts the section is in the page *being served* before measuring anything, because a stale
   build answering is how the 2026-08-25 run passed vacuously.
 
+**Merged to `Prod` (`ec75cd9`) and `Dev` (`0f1a4c1`) on 2026-08-26**, both holding identical
+trees, **CI green on all three jobs for each** — Verify, gitleaks, and the DB job applying all 47
+migrations to a fresh Postgres 16 with the whole pgTAP suite and the seed. `Prod` was a clean
+fast-forward and was never force-pushed; `Dev` carries the extra merge commit its own history
+needed. **Nothing left to apply**: `0044` went on the hosted project before the merge, which is
+the order every release since 2026-08-18 records.
+
+**Read the log, not the status — for the third time.** Both Verify jobs served `in_progress` from
+the runs *and* the jobs endpoint long after finishing; each job's own log carries `== PASSED ==`
+followed by cleanup, at 13:50:47 and 13:51:10. The 2026-08-26 filter-language and status-track
+entries both record this; it is a property of the API here rather than a flake, so check the log
+before concluding a job is stuck.
+
+**`Prod` had moved three commits while this branch was in flight, and one of them is why the
+Xero paragraph above changed.** That session flipped `buildInvoicePayload` to
+`LineAmountTypes: "Inclusive"` — the other half of the same finding. Only `CLAUDE.md` conflicted;
+every source file merged clean, including `invoice-payload.ts`, which neither branch touched on
+the same lines. This branch's two entries go on top and `Prod`'s renamed 0043 heading is kept,
+because it is now the true one.
+
 **Applied to `laundrymart-syd` on 2026-08-26** as `20260826132916`, now the ledger's last entry
 (48). §11 has the full record; the short version: thirteen pre-flight checks, the decisive one
 being that **0043's three columns are present**, since 0044 reuses them; rehearsed against real

@@ -80,6 +80,11 @@ which is why no importer was written.
 `verify` green, all 44 migrations on a fresh Postgres 16 with the suite and the seed. **36
 browser assertions** on the composer at 390/1440, 0 failures.
 
+**Merged to `Prod` (`ec75cd9`) and `Dev` (`0f1a4c1`)** — identical trees, CI green on all three
+jobs for each. `Prod` a clean fast-forward. Nothing outstanding: 0044 went on the project first.
+**Read the log, not the status** — both Verify jobs served stale `in_progress`; their logs carry
+`== PASSED ==`. Third time this file records that trap.
+
 **Applied to `laundrymart-syd`** as `20260826132916`, the ledger's last entry (48). Rehearsed and
 rolled back first; applied text **byte-identical to the file** first time; the live `items` table
 diffed object by object against a local build from `supabase/migrations/` — **80 parts, zero
