@@ -1149,10 +1149,9 @@ activity.
 - The work is split across them: `CUST00509` carries LJ00002/3/4/5, three stops and `INV00001`;
   `CUST00510` carries LJ00006 and one stop. Adelaide's only other laundry job, `LJ00001`, is against
   `CUST00003` — a customer named `Test`, and one of the 508 archived.
-- **Still not deleted or merged here, and being test data is not on its own a reason to.** Nobody
-  asked for it, it is doing no harm, and it is the only end-to-end evidence the billing path has;
-  deleting it would remove the one invoice in the project that carries a line. If it is ever tidied,
-  archiving (`set_records_archived`, reversible) beats deleting.
+- **Deleted on 2026-08-26 at the owner's instruction.** The reasoning above for leaving it alone
+  was overruled by the owner, which is their call to make; the full record of what went is in the
+  2026-08-26 changelog entry, so it can be recreated if the evidence is ever wanted back.
 - `SubmitButton` already disables on `useFormStatus().pending`, so the ordinary double-click is
   guarded; 0.65s apart is consistent with a double submit **before hydration**. Not chased further,
   because guessing at a cause is how a fix lands on the wrong thing — and on a test record there is
@@ -1459,14 +1458,15 @@ and both are the owner's to act on rather than the code's:
 > real customer. A milestone recorded against test data is worse than no milestone, because the
 > next person reads it as coverage they have.
 
-- **An invoice has now been generated from it, and that closes the last unexercised step.**
-  `INV00001` — draft, **$55.00**, one line, raised from `LJ00002` on 2026-08-26 — is the **only one
-  of the project's 648 invoices that carries a line at all**; the other 647 came in from the import
-  as headers. So job → price → approve → generate really does work end to end, which §21 had never
-  been able to say. It is a **test** invoice against `Jay CT`, it is still a draft, and it has not
-  been issued, sent or pushed to Xero. *(Superseded: this bullet previously read "no invoice has
-  been generated from any of it… the roll-up is still the one step of the money path never
-  exercised end to end.")*
+- **An invoice was generated from it, it proved the roll-up works, and it has since been deleted
+  with the rest of the test data** (2026-08-26, at the owner's instruction — see the changelog
+  entry). `INV00001` was a draft of **$55.00** carrying **one line**, raised from `LJ00002`, and
+  for a few hours it was the only one of the project's 648 invoices to carry a line at all. So
+  job → price → approve → generate **has** been exercised end to end, which §21 had never been able
+  to say — but the artefact is gone, and **no invoice on the project carries a line today**. The
+  next run-through will be the first against a real customer. *(Superseded twice: this bullet first
+  read "no invoice has been generated from any of it… the roll-up is still the one step of the
+  money path never exercised end to end.")*
 - **Adelaide's four boards were linked to no login (0 of 4)**, so `LJ00003` and `LJ00004` were
   assigned to rounds nobody could sign in as and My Runs was empty for them. **Fixed the same day**
   — see §24 and the 0034/0035 paragraph above: four logins written by SQL, boards linked 5 of 5.
@@ -1815,6 +1815,66 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-08-26 · The Jay CT test data is deleted
+The owner's instruction, on the records the entry below identified as test data. **No migration; no
+schema, RLS, capability, policy or code change** — this is a live data deletion and nothing else.
+`git diff` over `src/` and `supabase/` is empty.
+
+**58 rows across 11 tables**, all in `Adelaide Towel Service`, all belonging to the two duplicate
+`Jay CT` customer records:
+
+| table | rows |
+|---|---|
+| `customers` | 2 — `CUST00509` (`f529d68b`), `CUST00510` (`476d9761`) |
+| `customer_locations` | 2 — both *11 Frazer avenue Gulfview Height 5096* |
+| `laundry_orders` | 5 — `LJ00002`–`LJ00006` |
+| `laundry_order_items` | 7 |
+| `laundry_order_activity` | 31 |
+| `job_charge_snapshots` | 1 — frozen, $50.00, `wash_only`, from `LJ00002` |
+| `jobs` (stops) | 4 — `JOB00002`–`JOB00005` |
+| `daily_routes` | 3 — `RUN00002`, `RUN00003`, `RUN00004` |
+| `invoices` | 1 — `INV00001`, draft, $55.00 ($50 + $5 GST), due 2026-09-09 |
+| `invoice_lines` | 1 — *"LJ00002 — Laundry Service"*, 1 × $50.00, taxable |
+| `invoice_source_jobs` | 1 |
+
+**Five decisions in it, and the first is the one that makes the rest safe.**
+
+- **The runs were checked for other customers before they were deleted, not assumed to be empty.**
+  `RUN00002/3/4` exist only because Jay CT work was assigned to them, but "only" is a claim about
+  data, so the block aborts if a single stop on any of them belongs to somebody else. That check is
+  the difference between a tidy-up and deleting a stranger's delivery.
+- **Rehearsed first in a transaction that could not commit**, the discipline §11 sets for every live
+  change: the same block, ending in a `raise`, reporting the row count per table and the totals it
+  would leave behind. The real run then matched it **exactly** — 5 orders, 4 stops, 1 invoice, 3
+  runs, and 646/508/1/1 left in Adelaide.
+- **Two DELETE guards had to be bypassed, and that is worth stating plainly rather than burying.**
+  `guard_job_charge_snapshots_change` refuses to delete a frozen charge **even for `super_admin`** —
+  immutability is the whole point of it (§21) — and `guard_laundry_order_items_change` protects the
+  items on a finished job. Both were disabled inside the transaction and re-enabled in it, so a
+  failure anywhere would have rolled the disable back with everything else. Both read `tgenabled =
+  'O'` afterwards.
+- **Deletion order is dependency order**, from `invoice_lines` down to `customers`, with every
+  foreign key still enforced — `session_replication_role = replica` was **not** used, because it
+  would have switched FK enforcement off along with the guards and could have left dangling rows
+  silently. Verified after: **0** orphan invoice lines, stops, orders or items.
+- **The `Test` customer was left alone.** `CUST00003` and its `LJ00001` are also test data, but the
+  instruction was about Jay CT and deleting more than was asked for is not tidiness. Adelaide
+  therefore still holds 1 laundry job and 1 run (`RUN00001`).
+
+**What Adelaide looks like now:** **0** active customers, **508** archived, **1** laundry job
+(`LJ00001`), **1** run, **646** invoices. Harbour is untouched — 4 jobs, 4 active customers, 8 runs,
+13 stops, 1 invoice. Across both, 647 invoices and 512 customers, and **no invoice carries a line any
+more**.
+
+**The cost, recorded rather than glossed:** `INV00001` was the only invoice on the project that had
+ever carried a line, so the live evidence that job → price → approve → generate works end to end has
+gone with it. The path is still covered by unit tests and pgTAP; what is missing is a real
+run-through, and the next one will be the first against a genuine customer. §11's two bullets are
+corrected accordingly — one of them had been merged an hour earlier asserting that invoice exists.
+
+**Reconstructable if it is ever wanted back.** Everything above was captured as a full `jsonb`
+snapshot of all eleven tables before anything was deleted, and the identifying values are in the
+table above. It was **test** data, so recreating it by hand through the app would be as quick.
 ### 2026-08-26 · The item list arrives, and it brings codes but not prices
 The client sent their MYOB inventory export with an updated requirement: pick the
 **ItemCode and price**, not the account code. Half of that is now built and the
