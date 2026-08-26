@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { ChevronLeft, ChevronRight } from "lucide-react";
-import { CONTROL, SELECT_CHEVRON, cx } from "@/components/ui";
+import { CONTROL_AUTO, SELECT_CHEVRON, cx } from "@/components/ui";
 import {
   addDays, formatAdelaideDate, getAdelaideToday, isAdelaideToday,
 } from "@/lib/domain/timezone";
@@ -93,7 +93,7 @@ export function DateNav({
             name="date"
             defaultValue={date}
             onChange={submitOnChange}
-            className={cx(CONTROL, "w-auto min-w-[9.5rem]")}
+            className={cx(CONTROL_AUTO, "min-w-[9.5rem]")}
           />
           <button type="submit" className="sr-only">Show this date</button>
         </form>
@@ -115,7 +115,7 @@ export function DateNav({
               name="board"
               defaultValue={boardParam}
               onChange={submitOnChange}
-              className={cx(CONTROL, SELECT_CHEVRON, "w-auto min-w-[12rem]")}
+              className={cx(CONTROL_AUTO, SELECT_CHEVRON, "min-w-[12rem]")}
             >
               <option value="me">Me</option>
               {boards.map((board) => (

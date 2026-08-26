@@ -9,6 +9,7 @@ import {
 } from "@/components/ui";
 import { Field, Input, Select, SubmitButton } from "@/components/form";
 import { ListControls } from "@/components/list-controls";
+import { FilterChips } from "@/components/filters";
 import { IncomeAccountField } from "./income-account-field";
 import { ITEM_TYPES, ITEM_TYPE_LABELS } from "@/lib/domain/laundry-orders";
 import { ITEM_CATEGORIES } from "./categories";
@@ -33,10 +34,16 @@ export default async function ItemsPage({ searchParams }: { searchParams: Promis
       <ListControls
         action="/items"
         q={params.q}
-        filters={[{
-          name: "category", label: "Category", value: params.category,
-          options: ITEM_CATEGORIES.map((value) => ({ value, label: humanise(value) })),
-        }]}
+        params={params}
+        filterKeys={["q", "category"]}
+        placeholder="Item code, name or description…"
+        chips={
+          <FilterChips
+            basePath="/items" params={params} name="category" label="Item category"
+            allLabel="All items"
+            options={ITEM_CATEGORIES.map((value) => ({ value, label: humanise(value) }))}
+          />
+        }
       />
 
       <Suspense key={JSON.stringify(params)} fallback={<SkeletonRows rows={6} />}>

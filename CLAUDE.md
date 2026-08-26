@@ -912,13 +912,21 @@ description, primary action, optional `back`), `Card`, `FormSection` (a titled g
 what turns a wall of inputs into a short sequence of questions), `Stat`, `Stage`, `EmptyState`.
 Status: `Badge`/`StatusBadge`, `Notice` (icon + tone). Actions: `Button`/`ButtonLink`
 (primary/secondary/danger/ghost/subtle × sm/md/lg), `IconButton`, `CONTROL` + `SELECT_CHEVRON`
-(the one input skin — import it, never restyle an input at the call site).
+(the one input skin — import it, never restyle an input at the call site) and **`CONTROL_AUTO`
+for a control sized to its content**, which exists because `cx(CONTROL, "w-auto")` never worked:
+both are plain `width` utilities of equal specificity and Tailwind emits `.w-full` after
+`.w-auto`, so the later rule wins. Ten call sites were written that way — the whole Customer
+laundry filter row, both My Runs pickers, the period range — and every one rendered full width.
+A *responsive* override (`sm:w-auto`) is fine and is left alone: variants are emitted after the
+base utilities, so those genuinely do win.
 Forms (`form.tsx`): `Field`, `Input`, `Textarea`, `Select`, `Checkbox`, `WeekdayPicker`,
 `SubmitButton`, `FormActions` (**sticky at the foot of the viewport on a phone**, so the one
 action the operator came for is never buried under a long form).
 Shell: `AppShell` (rail + header + content; owns the collapse and drawer state),
 `AppNav`/`SectionNav`/`BrandMark`/`ThemeToggle` (`app-nav.tsx`), `GlobalSearch`, `UserMenu`,
 `NotificationBell`, `ListControls`/`Pagination` (`list-controls.tsx`).
+Filters (`filters.tsx`): `FilterChips` (single-select), `ToggleChips` (multi-select),
+`PeriodFilter`, `FilterChip`, `FilterSummary` — see §29.
 Overlays: `ConfirmSubmit` for destructive actions (**inline, not a modal** — the consequence
 belongs beside the control, especially on a phone) and `Overlay` for a genuine detour
 (centred dialog from `sm`, bottom sheet below it; focus trap, scroll lock, Escape, focus
@@ -997,6 +1005,82 @@ Removing access deletes the membership and nothing else: the login survives (it 
 access to another tenant), and every row they wrote still points at them. Both removal and a
 role change refuse the last `admin.write` holder — with two administrators each could otherwise
 demote the other and lock the tenant out of its own People screen.
+
+## 29. The filter language
+Every list page is narrowed the same way, adopted from `ysm-prog/ysm-hub`'s `DateRangeFilter`
+and status strip (§10b) so the two products read as one company's software. Three layers, and a
+page uses whichever of them it needs:
+
+1. **Chips** for the one or two questions a list is usually narrowed by, answered in a single
+   press. `FilterChips` is single-select, `ToggleChips` multi-select.
+2. **The search box and any selects**, answered together and submitted once — the long tail.
+3. **`FilterSummary`**: how many rows are showing, and the way back out.
+
+`ListControls` composes all three in that order. A page must not hand-roll a fourth: the drift
+that component exists to prevent is a list whose search box is a different control from every
+other input in the app, and that has happened here before.
+
+- **A chip is a link, not a button wired to state.** Every list page here is an async server
+  component; the filter has to be in the URL for the render to see it at all, and putting it
+  there is also what makes a filtered list bookmarkable, shareable and survivable across a page
+  of results. YSM's pages are client-rendered and keep the same fact in React state synced to
+  the URL — same contract, different mechanism.
+- **The active chip is an ink pill**, which is §10b's "this is where you are" — the same
+  treatment as the active rail row, and deliberately not teal. Teal means *this is the action*,
+  and a filter you have already applied is not the action. 44px tall, not YSM's 28: these are
+  pressed on a counter tablet.
+- **A chip's count is what pressing it would really show**, computed against every *other*
+  filter already applied. A count of the whole list promises two rows and delivers none the
+  moment a second filter is on. Where the count would cost extra round trips — a paginated list
+  — the chips carry no count at all rather than a wrong one.
+- **A chip nothing matches is left off**, not drawn greyed. Twelve inventory states and eight
+  batch stages, of which a laundry uses five, would otherwise be a filter that mostly cannot be
+  used.
+- **Pressing the chip you are on clears it**, so a group always has two ways out.
+- **Filters live in the URL and never in state**, and `filterHref` is the one builder. It always
+  drops `page` — page 3 of an old filter is rarely page 3 of a new one and is quite often past
+  the end of it, an empty list that reads as "nothing matches" — and drops `error`/`ok`, so a
+  stale flash message is not re-shown by a filter change.
+- **Chip selections ride through the search form as hidden fields**, or typing a term would
+  silently throw away the chip somebody just pressed. Likewise the period form carries the other
+  filters.
+- **An empty list must say which kind of empty it is.** *No customers match those filters* and
+  *no customers yet* need different next steps, and telling a new laundry its list is empty when
+  it has simply searched for a typo is how somebody concludes the app has lost their data.
+  `isFiltered(params, keys)` is that question, and `""` is not a filter — an empty search box
+  submits `?q=`.
+- **One Clear, not two.** `ListControls` drops its own when a `FilterSummary` is present, because
+  the summary is where it belongs when there is one.
+- **The date window is one canonical set of presets** (`PERIOD_PRESETS` in `lib/domain/dates.ts`):
+  Today · Yesterday · This week · Last week · This month · Last month · This quarter · This
+  financial year · All time · Custom. Two departures from YSM's list, both deliberate — *last
+  week* and *last month* are here because this app's periods are mostly billing periods and the
+  month-end run bills the month that has *finished*; and `this_fy` is the **Australian**
+  financial year, 1 July → 30 June, because the GST, the ABN validator and the BAS quarters
+  already assume it and a January-to-December "this year" would be the one window on screen that
+  did not match the books.
+- **A screen offers a subset, never a new window.** `BILLING_PERIOD_PRESETS` leaves out *All
+  time* — an unbounded billing period is an invitation to bill the wrong thing —
+  and `ACTIVITY_PERIOD_PRESETS` includes it, because a list of jobs or stops is a thing you
+  legitimately want all of. Both end on Custom, so the escape hatch is always in the same place.
+- **`resolvePeriod` is the one reader of `?period=&from=&to=`.** It stores the *preset*, not the
+  dates it resolved to, which is the difference between a bookmarked "this month" that follows
+  the calendar and one stuck in the month it was made. A bare `from`/`to` pair with no preset is
+  taken as Custom, so an older link still works; half a range and an inverted one fall back
+  rather than showing an open-ended list that looks like the filter being ignored. Junk falls
+  back rather than throwing — on a server component a throw is a 500 on a list page.
+- **The resolved window is printed beside the chips.** Without it "This financial year" is a
+  claim the reader has to take on trust, and checking which one it means is the first thing
+  anybody does.
+- **The rules are pure and tested** — `lib/filters.ts` and the period half of `lib/domain/dates.ts`
+  — and the components are the thin part. A rule stated inside a component is a rule no unit test
+  can reach, which is the trap this file records three times over.
+
+**Defaults are per screen and each is a decision.** Collections and Deliveries open on **today**
+(what happened on the round); the audit log, the invoice register, Problems and the billing queue
+open on **all time** (narrowing on open would hide the thing somebody came to find, and a chase
+list that opened on this month would hide precisely the invoices that are late); `/billing` opens
+on **last month**, which is `previousMonth`'s own reasoning.
 
 ## 11. Hosted project
 `laundrymart-syd` · ref `xujhwljrmogenhvqpkrf` · ap-southeast-2 (Sydney) · org `ysm-prog`.
@@ -1634,6 +1718,90 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-08-26 · One way to filter a list, and it is YSM Hub's
+The filter language adopted from `ysm-prog/ysm-hub` and applied across every list in the app.
+**No migration; no schema, RLS, capability, policy or workflow change** — no route moved and no
+role gained or lost anything. §29 holds the design.
+
+**The gap was that half the app could not be narrowed at all.** Eleven screens had no filter of
+any kind — the billing queue among them, which is a list of *every* open job with a bulk Approve
+under it. Another two offered a date range with no presets, hand-rolled in a skin that was not
+`CONTROL`. The ten screens that did have `ListControls` shared a search box and a `<select>` and
+nothing else: no Clear, no count, and an empty result that could not tell *no rows match* from
+*nothing here*.
+
+- **Chips, fields, summary — in that order, on every list.** `FilterChips`/`ToggleChips`/
+  `PeriodFilter`/`FilterSummary` in `components/filters.tsx`, composed by `ListControls`.
+- **A chip's count is what pressing it would really show**, computed against the other filters
+  already applied. A count of the whole list promises two rows and delivers none the moment a
+  second filter is on — which is the shape of a filter people stop trusting.
+- **Ten canonical period presets, one reader.** Today → This financial year → All time → Custom,
+  with `resolvePeriod` the single reader of `?period=&from=&to=`. `this_fy` is the **Australian**
+  financial year, because everything else in this app already assumes it.
+- **`ToggleChips` is multi-select where the question needs it** — "what is still wet?" is washing
+  *and* drying, and a `<select>` cannot ask it at all. Used on the plant, on Problems, on stock
+  movements and on the bell.
+
+**Four defects found by driving the gallery rather than by reading the code**, which is §10b's
+whole argument:
+
+- **`cx(CONTROL, "w-auto")` has never worked.** Both are plain `width` utilities of equal
+  specificity and Tailwind emits `.w-full` after `.w-auto` (byte 22717 against 22698 of the built
+  stylesheet), so the later rule wins. Ten call sites were written that way — the entire Customer
+  laundry filter row, both My Runs pickers, and the new period range — and every one was
+  rendering **full width**. `CONTROL_AUTO` replaces the class rather than layering over it. A
+  responsive `sm:w-auto` was checked and is fine: variants are emitted after the base utilities.
+- **`ListControls` hard-coded `id="q"`**, so the first page to grow a second list would have had
+  two boxes sharing an id and one label pointing at the wrong one. The id is derived from the
+  action now — and Stock, which is where it would have happened, was given chips and *one* search
+  box instead, because two fields spelled `q` is one value with two controls disagreeing about it.
+- **Two Clear links**, a few pixels apart, when a bar carried both a form and a summary. The bar
+  drops its own when a summary is present.
+- **A `min-w` floor in `rem`** on the search box, which grows with the reading control and so
+  defeats itself: at Large on a 320px phone a 14rem minimum is 258px inside a 296px card. Now
+  `sm:` only — below `sm` the bar stacks and needs no floor. The same trap the 2026-08-24
+  accessibility pass recorded.
+
+**Three more things fixed on the way, none of them cosmetic:**
+- **The audit log had no date filter.** It is read to answer "what happened on the 14th?", and
+  without a window that is a hunt through pages of everything. Its `created_at` is a timestamp, so
+  the window is converted through `getAdelaideDayRange` — `<= 2026-08-26` on a timestamp means
+  midnight and would drop the whole day.
+- **Public holidays could only be read forward.** The query was "this year onwards" with no way
+  back, so last year's calendar — the thing you check when a contract billed a surcharge you did
+  not expect — was unreachable from the screen that owns it.
+- **The Customer laundry tiles never said which one you had pressed.** They have always been
+  filter links; the list narrowed and nothing on the page admitted why. They mark themselves now,
+  and pressing the active one clears it.
+- `delivery(s)` and `pickup(s)` on the two operations screens are gone — `counted()` retired the
+  parenthetical plural on 2026-08-24 and these two were missed.
+
+- 837 unit tests (was 780) and 431 pgTAP assertions (unchanged — this adds no policy). `verify`
+  green: typecheck, lint, tests and the production build.
+- **The new tests were confirmed to fail without the code**, not assumed to be doing something:
+  breaking `filterHref`'s page reset fails two, and making the financial year a calendar year
+  fails two more.
+- The gallery gained the filter bar in four states (filtered, unfiltered, multi-select
+  mid-selection, Custom open) and was measured light and dark at 320/390/768/1440 across all
+  three text sizes: **24 combinations, 0 console errors, 0 overflow inside the section and 0
+  interactive targets under 36px**. Sixteen interaction assertions drive the chips — that a chip
+  carries the other filters through, that a preset drops a stale `from`/`to`, that pressing an
+  active chip clears it, that multi-select adds and removes, and that every search box has a
+  label pointing at it.
+- **Document overflow is byte-identical to the baseline** — 7px / 55px / 104px at 320 and 34px at
+  390, all pre-existing — measured against a stash-and-rebuild rather than assumed. Twice, because
+  the first measurement pass was **vacuous**: it set `data-theme` and `es_theme`, and this app
+  uses a `dark` *class* and a `textSize` key, so it measured the light theme twelve times and
+  called it twenty-four. The second pass reports the applied background colour so it cannot lie
+  about that again. A later run also silently pointed at a dead port; the script now fails if the
+  response is not 200 or the section is absent. Both are the trap the 2026-08-25 entry records.
+
+**Not verified against a live project.** This container has no Supabase credentials, so the
+authenticated lists were checked by typecheck, lint, 837 tests, the production build and the
+component gallery — not by being opened with real rows in them. **Before trusting it: open Money
+› Awaiting invoice on `ats.coreit.com.au`, press "Not priced yet", and check the count on the chip
+matches the rows underneath.**
+
 ### 2026-08-25 · The audit record is a rule, not a literal
 The last item in the specification that could be closed without a login. **No migration; no
 schema, RLS, capability or workflow change** — one payload moved and gained tests.
