@@ -47,12 +47,21 @@ name, the way 0036 does. Fifth instance of that trap here.
   including no duplicate ids across two pickers and a guard that the section is in the page
   *being served*.
 
+**Applied live** as `20260826030846`, the ledger's last entry. Read back as five real
+sessions, writes rolled back: the board, the warehouse operator and the counter all still
+**read** the list and their rename touches **0 rows** with the name unchanged, insert
+refused 42501; `owner@roles` (a real super_admin, **not** a platform admin) and the office
+manager both rename 1 row and insert successfully. 4 policies on `items`, one verb each,
+**0 permissive for-all**. Advisors 22 → 23, the addition being `can_write_items`.
+
+**The rehearsal needed a second attempt and the reason is worth keeping**: the first pass
+renamed by `item_code in ('TW','TOW001')` and the Owner's rename came back 0 rows — which
+reads as a refusal and was actually *no such code in Harbour*. Every probe now renames a row
+the session has just read back, so 0 rows can only mean refused.
+
 ### Next
-1. **`0040` is NOT applied to `laundrymart-syd`** — ledger's last entry is
-   `0039_job_charge_codes`. **The hole is open on the live project until it is.**
-2. Not merged to `Dev`/`Prod`.
-3. Still never run end to end: take a job in → code a charge → approve → generate → confirm
-   the line arrives already coded.
+Still never run end to end: take a job in → code a charge → approve → generate → confirm the
+line arrives already coded.
 
 ---
 

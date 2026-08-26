@@ -1185,8 +1185,9 @@ activity.
 Deployed on Vercel at `ats.coreit.com.au`. All migrations through `0030_member_directory`
 applied (0014 on 2026-08-13, 0015 and 0016 on 2026-08-14, 0017, 0018, 0019 and 0025 on
 2026-08-16, 0026 and 0027 on 2026-08-17, 0030 on 2026-08-18), each verified by rolled-back probe
-rather than trusted. **Every migration through `0039_job_charge_codes` is applied**, and the ledger's last entry is
-`0039_job_charge_codes` (`20260826022128`, applied 2026-08-26), behind `0038_invoice_line_account`
+rather than trusted. **Every migration through `0040_item_master_write` is applied**, and the ledger's last entry is
+`0040_item_master_write` (`20260826030846`, applied 2026-08-26), behind `0039_job_charge_codes`
+(`20260826022128`, the same day), behind `0038_invoice_line_account`
 — whose file is in `supabase/migrations/` as of the 2026-08-26 merge and is a no-op against a
 database built from this repo, since 0036 already creates the column. Before those,
 `0033_laundry_prices_read`,
@@ -1913,10 +1914,29 @@ search group and the page copy follow it.
   console errors. The first assertion checks the section is in the page **being served**,
   because a stale build answering is how a measurement run passed vacuously on 2026-08-25.
 
-**Not applied to `laundrymart-syd`.** `0040` is in the repo and the ledger's last live entry
-is still `0039_job_charge_codes`. **Until it is applied the hole above is open on the live
-project** — every member of Adelaide can still rewrite the 254-row master list off
-PostgREST.
+**Applied to `laundrymart-syd` on 2026-08-26** as `20260826030846`, now the ledger's last
+entry. Rehearsed first the way §11 requires, and the rehearsal needed a second attempt for a
+reason worth keeping: the first pass renamed by `item_code in ('TW','TOW001')`, and the
+Owner's rename came back **0 rows** — which reads as a refusal and was in fact *no such code
+in Harbour*. A refusal and an unmatched row are the same result, so every probe now renames a
+row the session has **just read back**, where 0 rows can only mean refused.
+
+- **Read back as five real sessions**, writes inside a transaction that was then aborted.
+  `board1@ats.example.com` still reads its 254 items and its rename touches **0 rows** with
+  the name unchanged (`Toilet Paper - Quilton`) and its insert refused **42501**; the
+  warehouse operator and the counter the same on Harbour's 6. `owner@roles.example.com` — a
+  real `super_admin` who is **not** a platform admin, so `has_role` is being tested rather
+  than `is_platform_admin` — renames **1 row** and its insert **LANDS**, as does the office
+  manager's. Both halves proved: the refusals are real, and the gate does not lock out the
+  two roles that should have it.
+- **`items` now carries four policies, one verb each, and 0 permissive `for all`.**
+- **Nothing moved:** 254 Adelaide items, 6 Harbour, 268 accounts, 647 invoices, 0 probe rows
+  left behind, **0** `anon`-executable functions, **0** `anon` table grants and **0** tables
+  without RLS.
+- **Advisors 22 → 23**, the one addition being `can_write_items` — the documented definer
+  shape, internally scoped to `auth.uid()` through `has_role`, and the exact counterpart of
+  `can_write_purchases` already on the list. `guard_job_charge_account` and
+  `sync_invoice_line_account` are still absent, so 0039's and 0036's revokes are holding.
 
 ### 2026-08-26 · The item list arrives, and it brings codes but not prices
 The client sent their MYOB inventory export with an updated requirement: pick the
