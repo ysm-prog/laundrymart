@@ -6,6 +6,7 @@ import { CHARGE_TYPES, CHARGE_TYPE_LABELS, round2, type ChargeType } from "@/lib
 import { formatMoney } from "@/lib/domain/pricing";
 import type { JobChargeInput } from "../job-charges";
 import { accountLabel, taxableFromTaxCode } from "@/lib/domain/accounts";
+import { codingOffer, type CodingOffer } from "@/lib/domain/coding";
 import { itemLabel } from "@/lib/domain/items";
 import { Button, CONTROL, IconButton, SELECT_CHEVRON } from "@/components/ui";
 import { SubmitButton } from "@/components/form";
@@ -76,7 +77,12 @@ export function JobChargesEditor({
 
   const itemsById = useMemo(() => new Map(items.map((one) => [one.id, one])), [items]);
   const accountsById = useMemo(() => new Map(accounts.map((one) => [one.id, one])), [accounts]);
-  const canCode = items.length > 0 || accounts.length > 0;
+  // What this laundry can honestly offer. A control that promises a code to a
+  // laundry holding no chart of accounts is the dead end §27 records.
+  const offer = useMemo(
+    () => codingOffer({ items: items.length, accounts: accounts.length }),
+    [items.length, accounts.length],
+  );
 
   const toggleCoding = (key: string) =>
     setCoding((current) => {
@@ -205,11 +211,12 @@ export function JobChargesEditor({
               question at a time. The summary is always readable, so "is this
               coded?" never needs a click to answer.
             */}
-            {canCode ? (
+            {offer.offered ? (
               <ChargeCoding
                 row={row}
                 items={items}
                 accounts={accounts}
+                offer={offer}
                 item={row.source_item_id ? itemsById.get(row.source_item_id) ?? null : null}
                 account={row.gl_account_id ? accountsById.get(row.gl_account_id) ?? null : null}
                 open={coding.has(row.key)}
@@ -255,11 +262,12 @@ export function JobChargesEditor({
  * description is filled, an edited one is left alone.
  */
 function ChargeCoding({
-  row, items, accounts, item, account, open, onToggle, onChange, accountsById,
+  row, items, accounts, offer, item, account, open, onToggle, onChange, accountsById,
 }: {
   row: EditableCharge;
   items: readonly CodingItem[];
   accounts: readonly CodingAccount[];
+  offer: CodingOffer;
   item: CodingItem | null;
   account: CodingAccount | null;
   open: boolean;
@@ -302,14 +310,14 @@ function ChargeCoding({
     <div className="sm:col-span-12">
       <div className="flex flex-wrap items-center gap-2 border-t pt-2">
         <span className={summary ? "font-mono text-xs" : "text-xs text-muted-foreground"}>
-          {summary || "Not coded — this charge reaches the invoice with no account on it"}
+          {summary || offer.uncoded}
         </span>
         <button
           type="button" onClick={onToggle}
           aria-expanded={open}
           className="ml-auto min-h-11 rounded-lg px-3 text-sm underline underline-offset-4"
         >
-          {open ? "Done" : summary ? "Change" : "Add item or code"}
+          {open ? "Done" : summary ? "Change" : offer.label}
         </button>
       </div>
 
@@ -359,12 +367,14 @@ function ChargeCoding({
                 />
               )}
             </div>
-          ) : (
+          ) : summary ? (
+            // Only where the strip above is showing the item rather than the
+            // absence — otherwise this repeats the sentence a line higher up.
             <p className="text-xs text-muted-foreground">
-              No chart of accounts on file, so nothing can be coded yet. The item and
-              the price still apply.
+              No chart of accounts on file, so this charge cannot be coded yet. The
+              item and the price still apply.
             </p>
-          )}
+          ) : null}
         </div>
       ) : null}
     </div>

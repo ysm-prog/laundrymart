@@ -2129,9 +2129,12 @@ carries 0019's `tenants_platform` policy, so a platform admin can POST a second 
 - A statement replaces the form rather than a disabled button, and it names where the switch is.
   A control whose only possible outcome is a refusal is a dead end dressed as a choice.
 
-**934 unit tests (was 928) and 478 pgTAP assertions across 26 files (was 469/25).** `verify` green
-— typecheck, lint, tests and the production build; all 43 migrations applied to a fresh Postgres 16
-with the whole suite and the seed on top. **The new assertions were confirmed to fail without their
+**934 unit tests (was 928) and 478 pgTAP assertions across 26 files (was 469/25)** on the branch;
+**940 and 478** with `Prod` merged in, which brought the coding control's six. `verify` green —
+typecheck, lint, tests and the production build; all 43 migrations applied to a fresh Postgres 16
+with the whole suite and **the seed on top**, which is the check that matters for this one: the
+seed creates a laundry, so it passing is `single_laundry` defaulting to off proved rather than
+asserted. **The new assertions were confirmed to fail without their
 fix** rather than assumed to be doing something: the proof dies outright against a database built
 without `0041`, and replacing the checkbox preprocessor with `z.coerce.boolean()` fails the
 stray-value test (`"false"` would read as on, disagreeing with the trigger's own `= 'true'`).
@@ -2158,6 +2161,58 @@ because it was a deliberate recent decision; it is one press on Settings › Sit
 authenticated screen was opened. **Before trusting it: sign in as `owner@roles.example.com` on
 `ats.coreit.com.au`, check Platform shows "This laundry" with no Add form, and confirm Customers
 lists the 508 that came back.**
+
+### 2026-08-26 · A control that promises a code the laundry does not have
+
+> **Read with the entry above.** The laundry this describes — `Harbour Commercial Laundry`, and
+> with it `LJ00006` — was deleted later the same day when Adelaide became the only tenant, so the
+> job and the tenant named below no longer exist. The finding and the fix are unaffected: the
+> control was promising a code to a laundry with no chart of accounts, and it no longer does.
+Reported from the deployed app: *"I still can't get the codes here"*, on `LJ00006`'s charges.
+**No migration; no schema, RLS, capability or workflow change** — one rule moved out of a
+component and gained tests.
+
+**The report was right and the code was not at fault — the screen was.** `LJ00006` belongs to
+**Harbour Commercial Laundry**, the demo tenant, which holds **0 `gl_accounts`**. The 261
+postable accounts and the 254 items are **Adelaide Towel Service**'s. Both owner logins are
+platform admins and `super_admin` of both, so the account menu switches between them; the
+charges screen was reading the right tenant and finding nothing.
+
+**What was actually broken is that the control said "Add item or code" anyway**, and pressing it
+produced an item picker and an apology. That is precisely the defect §27 records being fixed on
+the invoice composer one screen over — *a greyed-out button with a sentence under it beats a dead
+end dressed as a choice* — and the charges editor never learned it. The two screens had the rule
+twice: `modeHint` is a private function inside `line-form.tsx`, so it is unreachable from a test,
+which is the trap this file records four times over.
+
+- **`codingOffer` in `lib/domain/coding.ts`** is that rule, pure and tested: given how many items
+  and postable accounts the laundry holds, what the control may honestly promise and what to say
+  about a charge carrying no account. Four cases, and the two live ones are asserted **by name** —
+  Harbour's 6 items and no chart, Adelaide's chart and (until its item master arrived) no items.
+- **The absence sentence names the missing list, not the consequence.** "Not coded — this charge
+  reaches the invoice with no account on it" is true and useless where no chart exists: it reads
+  as the operator's omission when nothing they can do on that screen would fix it. It now says
+  *"No chart of accounts on file, so nothing can be coded yet"*, and only reports the bare
+  consequence where both lists are present and nobody has coded the line.
+- **The expanded panel no longer repeats the sentence** sitting one line above it — the no-chart
+  note shows only where the strip is displaying an item summary instead.
+- **`line-form.tsx` is deliberately untouched.** Its disabled-mode-button handling is already
+  correct and its hints are per *mode*, a different shape from this one toggle; forcing them
+  together would be a worse fit than two rules, one of which is now tested.
+- 934 unit tests (was 928) and 431 pgTAP assertions (unchanged — this adds no policy). `verify`
+  green. **Both new assertions were confirmed to fail without the fix** by reinstating the label.
+- The gallery gained the **third** state — a chart and no item list — beside the existing
+  no-chart one. All three driven in a real browser at 390 and 1440: **48 assertions, 0 console
+  errors, 0 overflow inside the editors, every control 44px**, and each one checked for what is
+  actually behind it rather than for its label alone.
+
+**Two things this does not fix, both the owner's and neither a code change.** Adelaide holds
+**0 of 254 items with an income account**, so picking an item there produces no code — the MYOB
+inventory export §25 quotes carries no such column (`Item ID | Item Number | Name | On hand |
+Current value ($) | Selling price ($) | Tax`), so nothing was dropped and nothing was guessed.
+Set it per item on `/items/:id`; only the handful a customer is actually charged for need it,
+since 255 of 257 rows carry no selling price and are things the laundry buys. And **0 of 261
+accounts carry a `xero_account_code`**, so even a coded line still sends nothing to Xero.
 
 ### 2026-08-26 · One invoice per customer per month, and it fills up as it goes
 The owner's flow, reviewed as a business analyst first and then built. One migration (`0040`),
@@ -5837,6 +5892,12 @@ line by hand. `0036` closes that.
   `searchAccounts` puts revenue a whole tier ahead of the rest rather than nudging
   it — this chart holds `5-1000 Towel Purchases`, whose name *starts with* "towel"
   where `4-1000 Sales of Towels` merely contains it.
+- **A control never offers a route with nothing behind it, and that rule is now testable.**
+  `codingOffer` (`lib/domain/coding.ts`) takes the two counts — sellable items, postable accounts
+  — and returns what the control may promise plus what to say about an uncoded charge. A laundry
+  holding no chart is told *"No chart of accounts on file, so nothing can be coded yet"* rather
+  than invited to add a code and then apologised to. The job charges editor reads it;
+  `line-form.tsx` keeps its own per-mode hints, which are a different shape and already correct.
 - **Xero has been ready for this since 0026 and was never fed.** `buildInvoicePayload`
   has mapped `account_code` to `AccountCode` from the day it was written and nothing
   selected the column, so every pushed line has landed in Xero's default sales

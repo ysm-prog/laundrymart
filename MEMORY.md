@@ -44,7 +44,9 @@ because the ask was "for now" — one press on Platform › Settings turns it of
 first laundry is always allowed.
 
 **934 unit tests (was 928), 478 pgTAP assertions across 26 files (was 469/25), `verify` green**,
-43 migrations against a fresh Postgres 16 with the suite and seed. New assertions proved to fail
+43 migrations against a fresh Postgres 16 with the suite and seed. **940/478 with `Prod` merged
+in**, which brought the coding-control fix. The seed applying on top is the real check here: it
+creates a laundry, so passing is "absent means off" proved rather than asserted. New assertions proved to fail
 without the fix: the proof dies outright without 0041, and `z.coerce.boolean()` in place of the
 checkbox preprocessor fails the stray-value test.
 
@@ -65,6 +67,32 @@ object under the old tenant's prefix survives: Supabase refuses a direct delete 
 **Not verified behind the auth gate** — no Supabase credentials here. Before trusting it: sign in
 as `owner@roles.example.com` on `ats.coreit.com.au`, check Platform shows "This laundry" with no
 Add form, and that Customers lists the 508 that came back.
+
+## Previously: the coding control stopped promising codes that are not there
+
+> **Superseded in its data, not its fix.** `Harbour Commercial Laundry` and `LJ00006` were deleted
+> later the same day (see the entry above). The rule and its tests stand.
+2026-08-26, branch `claude/code-review-requirements-ns6bav`. Reported from the deployed app —
+*"I still can't get the codes here"* on `LJ00006`'s charges. **No migration.**
+
+**The diagnosis is data, not code.** `LJ00006` is a **Harbour Commercial Laundry** job (the demo
+tenant), and Harbour holds **0 `gl_accounts`**. The **261** postable accounts and the **254**
+items belong to **Adelaide Towel Service**. Both owner logins are platform admins and
+`super_admin` of both, so the answer is the tenant switcher in the account menu.
+
+**What was genuinely broken:** the charges editor said "Add item or code" regardless, and pressing
+it produced an item picker and an apology — the dead end §27 already records being fixed on the
+invoice composer one screen over. `codingOffer` in `lib/domain/coding.ts` is that rule now, pure
+and tested; the absence sentence names the *missing list* rather than the consequence. 934 unit
+tests (was 928), gallery gained the third state, 48 browser assertions at 390/1440 with 0 console
+errors, and both new assertions confirmed to fail without the fix.
+
+**Two things left, both the owner's and neither a code change:**
+- Adelaide holds **0 of 254 items with an income account**, so item→code produces nothing there.
+  The MYOB inventory export carries no such column, so nothing was dropped or guessed (§25's
+  discipline). Set it on `/items/:id` — only the few items a customer is charged for need it.
+- **0 of 261 accounts carry a `xero_account_code`**, so even a coded line sends nothing to Xero.
+
 
 ## Previously: one invoice per customer per month, and it fills up as it goes
 2026-08-26, branch `claude/invoice-draft-consolidation-eqr3o7`. **One migration (`0040`)**, no new

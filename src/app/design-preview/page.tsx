@@ -1112,9 +1112,20 @@ export default function DesignPreviewPage() {
             </Card>
 
             <Card title="A job's charges · no chart of accounts"
-                  description="A laundry that has not imported one. Nothing is blocked — the coding strip simply says so.">
+                  description="A laundry that has not imported one. Nothing is blocked — the strip offers the item alone and says why there is no code.">
               <JobChargesEditor orderId="preview-nochart" initial={PREVIEW_CHARGES}
                                 items={PREVIEW_LINE_ITEMS} accounts={[]}
+                                action={async () => { "use server"; }} />
+            </Card>
+
+            {/* The mirror image, and the state the real laundry was in until its
+                item master arrived: a full chart and nothing to pick from. The
+                control has to stop saying "item" here for the same reason it
+                stops saying "code" above. */}
+            <Card title="A job's charges · no item list"
+                  description="A chart of accounts and no items yet. The charge is coded by its account code, and the control offers only that.">
+              <JobChargesEditor orderId="preview-noitems" initial={PREVIEW_CHARGES}
+                                items={[]} accounts={PREVIEW_CHART}
                                 action={async () => { "use server"; }} />
             </Card>
             </div>
