@@ -338,7 +338,7 @@ export async function generateInvoicesForJobs(
    * A per-job customer never has one — their job *is* the invoice. Otherwise the
    * caller's explicit window wins, and failing that the job finds its own from
    * its completion date. **Resolved in the business timezone**: a job finished at
-   * 09:00 Sydney on 1 September is a September job, and composing that boundary
+   * 09:00 Adelaide on 1 September is a September job, and composing that boundary
    * in UTC would put it on August's invoice, silently.
    */
   const periodOf = (job: BillableJob, method: BillingMethod): BillingPeriod | null => {

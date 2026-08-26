@@ -7,31 +7,33 @@ import {
 /**
  * These are the tests that keep "received today" meaning the day the shop was
  * open. Every one of them fails if the conversion quietly falls back to the
- * host's timezone — which on Vercel is UTC, ten or eleven hours behind the
+ * host's timezone — which on Vercel is UTC, nine and a half or ten and a half
+ * hours behind the
  * counter.
  */
 
 describe("toInstant", () => {
-  it("reads a winter morning as AEST (+10)", () => {
-    expect(toInstant("2026-07-15", "09:30")).toBe("2026-07-14T23:30:00.000Z");
+  it("reads a winter morning as ACST (+9:30)", () => {
+    expect(toInstant("2026-07-15", "09:30")).toBe("2026-07-15T00:00:00.000Z");
   });
 
-  it("reads a summer morning as AEDT (+11)", () => {
-    // Same wall clock, different offset. Hard-coding +10 passes the test above
+  it("reads a summer morning as ACDT (+10:30)", () => {
+    // Same wall clock, different offset. Hard-coding +9:30 passes the test above
     // and silently books every summer job an hour late.
-    expect(toInstant("2026-01-15", "09:30")).toBe("2026-01-14T22:30:00.000Z");
+    expect(toInstant("2026-01-15", "09:30")).toBe("2026-01-14T23:00:00.000Z");
   });
 
   it("keeps a late-night receipt on the day the counter saw it", () => {
-    // The off-by-one this module exists to prevent: 11:30pm in Sydney is already
-    // tomorrow in UTC for half the year, and yesterday's takings would lose it.
+    // The off-by-one this module exists to prevent: 11:30pm in Adelaide is
+    // already tomorrow in UTC for half the year, and yesterday's takings would
+    // lose it.
     const instant = toInstant("2026-01-15", "23:30");
-    expect(instant).toBe("2026-01-15T12:30:00.000Z");
+    expect(instant).toBe("2026-01-15T13:00:00.000Z");
     expect(toZonedDate(instant)).toBe("2026-01-15");
   });
 
   it("resolves a time that daylight saving skipped, forward", () => {
-    // 2:30am on 4 October 2026 does not exist in Sydney — the clocks jump from
+    // 2:30am on 4 October 2026 does not exist in Adelaide — the clocks jump from
     // 2am to 3am. Every calendar application resolves forward; so do we, rather
     // than throwing at someone typing a plausible time.
     expect(toZonedTime(toInstant("2026-10-04", "02:30"))).toBe("03:30");
@@ -44,11 +46,11 @@ describe("toInstant", () => {
   });
 
   it("defaults to midnight when no time is given", () => {
-    expect(toInstant("2026-07-15")).toBe("2026-07-14T14:00:00.000Z");
+    expect(toInstant("2026-07-15")).toBe("2026-07-14T14:30:00.000Z");
   });
 
   it("accepts a seconds-precision time", () => {
-    expect(toInstant("2026-07-15", "09:30:00")).toBe("2026-07-14T23:30:00.000Z");
+    expect(toInstant("2026-07-15", "09:30:00")).toBe("2026-07-15T00:00:00.000Z");
   });
 
   it("refuses something that is not a date", () => {

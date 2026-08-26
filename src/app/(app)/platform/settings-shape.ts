@@ -14,7 +14,7 @@ import { z } from "zod";
  */
 export const platformSettingsSchema = z.object({
   /** What a laundry created from the Laundries screen starts with. */
-  default_timezone: z.string().trim().min(3).default("Australia/Sydney"),
+  default_timezone: z.string().trim().min(3).default("Australia/Adelaide"),
   default_gst_rate: z.coerce.number().min(0).max(1).default(0.1),
   /**
    * Whether a newly created laundry starts with customer emails switched on.

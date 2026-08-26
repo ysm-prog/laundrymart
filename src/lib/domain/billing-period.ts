@@ -24,7 +24,7 @@
  *
  * **Dates arrive already resolved in the business timezone.** Callers pass
  * `toZonedDate(job.completed_at)`, never a raw `timestamptz`. A job finished at
- * 09:00 Sydney on 1 September is a September job, and composing that boundary in
+ * 09:00 Adelaide on 1 September is a September job, and composing that boundary in
  * UTC is how it would land on August's invoice — silently, on the wrong bill.
  */
 

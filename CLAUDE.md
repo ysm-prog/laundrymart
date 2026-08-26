@@ -27,7 +27,10 @@ The master spec names a .NET 9 Web API; this build follows the supplied skeleton
   RLS — always filter `tenant_id`).
 - Auth via `getClaims()` (local JWT verify, no network); `requireSession()` is memoised per
   request. `requireCapability()` guards pages; `assertCapability()` guards actions.
-- Functions pinned to `syd1` to co-locate with the Sydney DB (vercel.json).
+- Functions pinned to `syd1` to co-locate with the Sydney DB (vercel.json). **That is a
+  *region*, not a timezone, and it stays** — the Supabase project is in `ap-southeast-2` and
+  there is no Adelaide region to move to. The business runs on Adelaide time regardless; see
+  the timezone note below.
 - The session refresh + auth gate is `src/proxy.ts` (Next 16's rename of `middleware`).
 - Server Actions only for writes. They derive `tenant_id` from the session; `fail()`/`done()`
   set a one-shot flash cookie and redirect clean (always `return fail(...)` — the `return` is
@@ -74,14 +77,31 @@ The master spec names a .NET 9 Web API; this build follows the supplied skeleton
   helpers, the laundry-job workflow (`laundry-orders.ts`), the run-assignment rules
   (`run-assignment.ts`) and the timezone conversion (`timezone.ts`). Unit-tested; shared by
   preview, route generation, invoicing, the jobs module and My Runs so they cannot diverge.
-- **Two timezones, on purpose.** `BUSINESS_TIMEZONE` is `Australia/Sydney` and is what
+- **The whole application runs on `Australia/Adelaide`** (2026-08-26). `BUSINESS_TIMEZONE`
   composes a stored instant (`received_at`), an invoice period and a notification's
-  `occurred_on` — every row written since 0001 carries that decision, so it does not move.
-  `OPERATIONS_TIMEZONE` is `Australia/Adelaide` and is the *operational day*: My Runs' default
-  date, its arrows, and the day boundary a `timestamptz` is filtered against when answering
-  "what happened on the 14th". Both live in `timezone.ts` and both read their offset out of
-  `Intl`, so neither hard-codes +9:30/+10:30/+10/+11. `getAdelaideDayRange()` is the one to
-  reach for when filtering a timestamp column by an operational day.
+  `occurred_on`; `OPERATIONS_TIMEZONE` is the *operational day* — My Runs' default date, its
+  arrows, and the day boundary a `timestamptz` is filtered against when answering "what
+  happened on the 14th". Both live in `timezone.ts`, both are Adelaide, and both read their
+  offset out of `Intl`, so neither hard-codes +9:30/+10:30. `getAdelaideDayRange()` is the one
+  to reach for when filtering a timestamp column by an operational day.
+  - **`BUSINESS_TIMEZONE` was `Australia/Sydney` until 2026-08-26, and that was a defect
+    rather than a decision.** It came from the skeleton this build started from, not from
+    anything about the client, and this file used to defend it — *"every row written since
+    0001 carries that decision, so it does not move"*. That was the right instinct and the
+    wrong conclusion: the laundry is in Adelaide, so for the half hour either side of midnight
+    the app filed a counter's work under another state's date.
+  - **The database always said Adelaide.** `tenants.timezone` and `depots.timezone` have read
+    `Australia/Adelaide` for the real laundry since the cutover; nothing in `src/` consulted
+    them, because the constant was hard-coded. So this correction changed no live row.
+  - **Moving it re-dated nothing, and that was checked before it moved.** The real laundry
+    holds **one** app-composed `received_at`, nowhere near midnight; its 646 invoices carry an
+    imported `issue_date`, which is a `DATE` with no zone to shift. Adelaide and Sydney differ
+    by 30 minutes, so only an instant inside 30 minutes of midnight could change calendar day,
+    and none does.
+  - The two constants are kept as separate names even though they now agree: they answer
+    genuinely different questions, and a deployment that ever runs a second depot in another
+    state needs them to part company again. Harbour, the demo tenant, is still a Sydney laundry
+    in its own rows — which is exactly the case the seam is for.
 - Invoice PDFs render server-side with `@react-pdf/renderer` (`src/lib/pdf/`), streamed from
   `/api/invoices/:id/pdf` and attached to the Resend email. `serverExternalPackages` keeps the
   renderer out of the client bundle.
@@ -881,8 +901,10 @@ deployment's mail down at the moment it redeployed. `CRON_SECRET` is optional on
 same principle, with one difference that matters: `/api/notifications/sweep` refuses **every**
 request while it is unset, so an unconfigured deployment loses the swept notifications rather
 than exposing an endpoint that enumerates every tenant's overdue invoices. The Vercel cron
-entry lives in `vercel.json` and its schedule is **UTC** — the five daily hits are 07:00 to
-15:00 Sydney (AEST; an hour later in wall-clock terms under AEDT, still inside the working day).
+entry lives in `vercel.json` and its schedule is **UTC** — the five daily hits are 06:30 to
+14:30 Adelaide (ACST; an hour later in wall-clock terms under ACDT, still inside the working
+day). The schedule itself did not move when the business timezone did: it is five hits across a
+working day, not a promise about a particular clock time.
 
 ## 10a. Toolchain pins
 Next 16 (Turbopack), React 19, Tailwind 4 (CSS-first — no `tailwind.config.ts`), Zod 4,
@@ -2034,13 +2056,62 @@ customer; take a second job in for the same customer, approve it, and confirm th
 number picks it up with the item quantities added together rather than a second line. Then press
 Issue now and check the invoice is dated today.** That last step is the one nothing here can prove.
 
-**Merged to `Dev` and then `Prod` on 2026-08-26.** `Dev` had moved four commits while this branch
+**The business moved to Adelaide time in the middle of this, and the running draft followed it for
+free.** `BUSINESS_TIMEZONE` went from `Australia/Sydney` to `Australia/Adelaide` on a branch that
+merged an hour after this one was written; `billingPeriodFor` is handed a date already resolved by
+`toZonedDate`, so which month a job falls in now answers in Adelaide with no change here. What did
+need correcting is the *wording*: five comments and two acceptance rows in this branch said
+"09:00 Sydney", which after that change names the wrong state — and a note that explains a correct
+result by the wrong mechanism is the thing §11 records as worse than no note.
+
+**Merged to `Dev` and then `Prod` on 2026-08-26.** `Dev` had moved six commits while this branch
 was in flight — the item master gate (`0040_item_master_write`), its capability block in
-`roles.ts`, the "Items" rename in the rail and the `laundry_category` rule — so those came in with
-the merge. **Only the two documentation files conflicted**; `nav.ts` and the component gallery,
+`roles.ts`, the "Items" rename in the rail, the `laundry_category` rule and the Adelaide-time
+correction — so those came in with the merge. **Only the two documentation files conflicted**; `nav.ts` and the component gallery,
 which both branches touched, merged clean. Both changelog entries and both schema entries are kept,
 with the collision note above. `Prod` was an ancestor of `Dev`, so it fast-forwarded to the
 identical tree rather than taking a second resolution.
+
+### 2026-08-26 · The business runs on Adelaide time
+The client's correction: this project is based on Adelaide date and time. **No migration; no
+schema, RLS, capability or policy change, and no live row altered** — one constant and the
+handful of places that had hard-coded the old one. §2 holds the design.
+
+**`BUSINESS_TIMEZONE` was `Australia/Sydney`, and that was a defect rather than a decision.**
+It came from the skeleton this build started from, not from anything about the client. It
+decides the instant composed from a counter's "received today", the day an invoice period ends
+and the day a notification is filed under — so for the half hour either side of midnight the
+app was filing this laundry's work under another state's date.
+
+- **The database always said Adelaide.** `tenants.timezone` and `depots.timezone` have read
+  `Australia/Adelaide` for the real laundry since the cutover. Nothing in `src/` consulted
+  them, because the zone was a hard-coded constant — so the correction changed **no live row**,
+  and the check that proved it also showed the data had been right all along.
+- **Moving it re-dated nothing, checked before it moved rather than after.** The real laundry
+  holds **one** app-composed `received_at` and it is nowhere near midnight; its 646 invoices
+  carry an imported `issue_date`, a `DATE` with no zone to shift; 0 job charges and 0
+  notifications. Adelaide and Sydney differ by 30 minutes, so only an instant within 30 minutes
+  of midnight could change calendar day, and none does.
+- **Seven tests failed, and every one was rewritten to the decision rather than made to pass.**
+  They were the tests that *encoded* the old offsets — `toInstant` reading a winter morning as
+  AEST (+10) is now ACST (+9:30), the summer one AEDT (+11) → ACDT (+10:30), and the delivery
+  email renders 04:30Z as 2:00 pm rather than 2:30 pm. The expected instants were computed
+  against the platform's own tz database, not worked out by hand.
+- **`adelaide.test.ts` asserted the two zones were different**, which was the right shape for
+  the old decision and is now the wrong claim; it asserts both are Adelaide and says why the
+  two names are still kept apart.
+- **The two constants stay separate names even though they agree.** They answer different
+  questions — what day a piece of paper is filed under, versus which runs a board is looking at
+  — and Harbour, the demo tenant, is still a Sydney laundry in its own rows, which is exactly
+  the case the seam is for.
+- **The cron schedule did not move.** `vercel.json` is UTC; its five daily hits are 06:30 to
+  14:30 Adelaide instead of 07:00 to 15:00 Sydney. It is five hits across a working day, not a
+  promise about a clock time. The `syd1` function region also stays: that is a *region*, the
+  Supabase project is in `ap-southeast-2`, and there is no Adelaide one.
+- The timezone pickers on `/admin/depots` and the platform screens now lead with Adelaide and
+  default to it, which is what an owner of this deployment would pick.
+- 885 unit tests (unchanged in count — seven rewritten, none added), 448 pgTAP assertions.
+  `verify` green.
 
 ### 2026-08-26 · What kind of laundry each item is, read off its name
 The client's instruction: set `laundry_category` on the items customers hand in. **No migration;
@@ -5771,7 +5842,7 @@ acceptance table. This section is the engineering rationale.
   is one burnt invoice number, which is the right trade against a lock held across a request.
 - **The period is a pure rule** (`lib/domain/billing-period.ts`): calendar month, ISO week, or a
   fortnight on a fixed 1970 Monday anchor, resolved in the **business timezone** — a job finished
-  at 09:00 Sydney on 1 September is a September job, and composing that boundary in UTC would put
+  at 09:00 Adelaide on 1 September is a September job, and composing that boundary in UTC would put
   it on August's invoice, silently. `invoice_per_job` and `manual` have no period, which is a real
   answer and not a failure.
 - **Job lines are rebuilt, never patched.** Adding a job re-derives *every* job-origin line from

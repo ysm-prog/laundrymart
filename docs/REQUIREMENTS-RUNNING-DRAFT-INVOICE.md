@@ -262,7 +262,7 @@ downstream write failed would lose a decision somebody actually made.
    this repository records three times over: a rule stated inside a `"use server"`
    module or beside I/O is a rule no unit test can reach, and two such contracts
    have shipped broken here behind a green `verify`.
-2. Dates resolve in the **business timezone**. A job completed at 9am Sydney on
+2. Dates resolve in the **business timezone**. A job completed at 9am Adelaide on
    1 September belongs to September, and composing the boundary in UTC is how it
    would land on August's invoice — silently.
 3. A job with no completion date has no period and is not placed automatically.
@@ -381,7 +381,7 @@ downstream write failed would lose a decision somebody actually made.
 | A7 | Remove a job from a draft → job back to `approved`, lines rebuilt without it | R5 |
 | A8 | A `manual` customer's approval → no draft, job waits in the queue | D1, R1 |
 | A9 | An `invoice_per_job` customer's approval → its own invoice | R1 |
-| A10 | A job completed 1 Sept 09:00 Sydney → September's draft | R2 |
+| A10 | A job completed 1 Sept 09:00 Adelaide → September's draft | R2 |
 | A11 | Month-end run for a customer with a contract **and** jobs → one invoice | R6 |
 | A12 | Re-run the same month → no duplicate contract lines, no duplicate jobs | R6 |
 | A13 | Insert a line on an issued invoice through PostgREST → refused, 42501 | R10 |

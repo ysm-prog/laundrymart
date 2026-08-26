@@ -227,8 +227,8 @@ describe("the received instant", () => {
   });
 
   it("keeps the time already on a job when only its date is corrected", () => {
-    // 8:30am Sydney on 12 August, moved back a day: still 8:30am.
-    const existing = "2026-08-11T22:30:00.000Z";
+    // 8:30am Adelaide on 12 August, moved back a day: still 8:30am.
+    const existing = "2026-08-11T23:00:00.000Z";
     expect(toZonedTime(existing)).toBe("08:30");
     const corrected = receivedInstant("2026-08-11", existing);
     expect(toZonedDate(corrected)).toBe("2026-08-11");

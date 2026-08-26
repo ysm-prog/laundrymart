@@ -113,7 +113,7 @@ describe("billingPeriodFor", () => {
   });
 
   it("keeps a job finished on the first of the month out of the previous one", () => {
-    // The boundary the business timezone exists for: 09:00 Sydney on 1 September
+    // The boundary the business timezone exists for: 09:00 Adelaide on 1 September
     // resolves to 2026-09-01, not to 2026-08-31.
     expect(billingPeriodFor("monthly_consolidated", "2026-09-01"))
       .toEqual({ start: "2026-09-01", end: "2026-09-30" });
