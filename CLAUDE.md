@@ -489,6 +489,19 @@ Feature branch → `Dev` → `Prod`. CI (`Prod`/`Dev`) runs verify, gitleaks and
 (migrations + pgTAP + seed); the Vercel build runs the same verify gate and only those two
 branches deploy. Never force-push `Prod`.
 
+**`github.silent` is `false` (2026-08-26), so a deploy reports itself on the commit that caused
+it.** It was `true`, which is why nothing about a Vercel deploy has ever appeared on GitHub —
+asked "did the production deploy go through?" there was no answer to read anywhere, and the
+2026-08-26 merge record claimed one had completed without saying how that was established. Written
+explicitly as `false` rather than by deleting the key, so the file says the quiet was decided and
+then undone rather than never configured. The cost is the thing it was presumably set for: Vercel
+comments on pull requests again.
+
+**The Vercel build command is `bash scripts/verify.sh || next build`, so a failing gate does not
+stop a deploy** — it falls through to a plain build and ships. That is deliberate (a deployment is
+better than none while a flaky check is sorted out) and it means *deploy succeeded* and *the gate
+passed* are two separate facts. CI is what actually holds the gate; read it rather than the deploy.
+
 ## 6. Routes
 `/` landing · `/login` · `/auth/callback` · `/auth/invite` · `/offline` · `/api/sync` ·
 `/api/media` · `/api/invoices/:id/pdf` ·
@@ -2255,6 +2268,38 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-08-26 · A deploy says so on the commit that caused it
+`vercel.json` carried `"github": { "silent": true }`. **No migration, no schema change, nothing
+under `src/`** — one boolean in one config file. §5 holds the reasoning.
+
+**It was found by being unable to answer a plain question.** Asked whether the production deploy
+for the status-track merge had gone through, there was nowhere to look: Vercel posts nothing to
+GitHub while `silent` is on, so no commit status, no check and no comment ever appeared. Worth
+noting because the 2026-08-26 merge record two entries down asserts *"the Vercel production deploy
+completed"* — with this setting on, it is not clear how that was established, and a claim nobody
+can re-check is the thing §11's discipline exists to avoid.
+
+- **Written as `false` rather than by deleting the key.** Removing it restores the same default,
+  but leaves the file silent about a decision that was made twice — once to quieten Vercel and once
+  to undo it. The explicit value is the record.
+- **The cost is what it was presumably set for**: Vercel will comment on pull requests again. That
+  is the trade, and it is the owner's call, which is why it changed on being asked rather than
+  being proposed as a tidy-up.
+- **This does not, on its own, let a session like this one check a deploy.** Two other things
+  blocked that and both remain: the raw GitHub API answers *"GitHub access is not enabled for this
+  session"* so the deployments endpoint is unreachable, and `ats.coreit.com.au` is refused by the
+  egress policy (`connect_rejected … 403 to CONNECT`, recorded by the proxy's own status endpoint).
+  What changes is that a **person** looking at the commit on GitHub can now see the deploy, which
+  is what was actually asked for.
+
+**A second thing came out of looking and is now written down rather than left in the file to be
+discovered.** The build command is `bash scripts/verify.sh || next build`: if the gate fails,
+Vercel falls through to a plain build and **still deploys**. So on this project a green deploy is
+not evidence the gate passed — CI is what holds it. Both facts are in §5 now.
+
+Nothing to verify beyond the JSON parsing and the gate: this file is read by Vercel, not by the
+app, so no test covers it and none should pretend to.
+
 ### 2026-08-26 · A job never becomes an invoice — it joins a draft
 Reported from the deployed app: *"you allowed to create a invoice from Job by clicking on
 Approve button but it shouldn't, it always should go to draft invoice and only create invoice
