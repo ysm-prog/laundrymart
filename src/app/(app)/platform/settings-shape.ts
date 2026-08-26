@@ -28,6 +28,26 @@ export const platformSettingsSchema = z.object({
     (value) => value === "on" || value === "true" || value === true,
     z.boolean(),
   ).default(false),
+  /**
+   * Whether this deployment runs one laundry and refuses a second.
+   *
+   * Unlike the two above it is **not** a default a new laundry starts with —
+   * it is a statement about the deployment itself, which is why it sits in its
+   * own card on the settings screen rather than under "New laundry defaults".
+   *
+   * The switch is only the readable half. `guard_single_laundry` (0041) is the
+   * boundary, and it reads this same key: `tenants` carries 0019's
+   * `tenants_platform` policy, so a platform admin can POST one straight to
+   * `/rest/v1/tenants` without going near the screen. One answer, one flip.
+   *
+   * Defaults to **false**, and that is load-bearing rather than tidy: the seed
+   * creates a laundry and the pgTAP proofs create two, so a mode that defaulted
+   * on would take the whole suite down with it.
+   */
+  single_laundry: z.preprocess(
+    (value) => value === "on" || value === "true" || value === true,
+    z.boolean(),
+  ).default(false),
 });
 
 export type PlatformSettings = z.infer<typeof platformSettingsSchema>;
