@@ -4,7 +4,9 @@ import { useState } from "react";
 import Link from "next/link";
 import { Badge, Button, Notice, cx } from "@/components/ui";
 import { SubmitButton } from "@/components/form";
-import { isMovable, isReordered, lockReason, moveStop, moveStopTo } from "./sequence";
+import {
+  isMovable, isReordered, lockReason, moveStop, moveStopTo, type SequenceStop,
+} from "./sequence";
 import { reorderRunStops } from "./actions";
 import { counted } from "@/lib/format";
 
@@ -38,17 +40,10 @@ import { counted } from "@/lib/format";
  * same tested `moveStop` / `moveStopTo`.
  */
 
-export type SequenceStop = {
-  id: string;
-  status: string;
-  progressStatus: string;
-  customerName: string;
-  address: string | null;
-  jobs: Array<{ id: string; orderNumber: string; itemCount: number }>;
-};
+export type { SequenceStop };
 
 export function SequenceBoard({
-  boardId, boardName, date, stops, version, canSequence,
+  boardId, boardName, date, stops, version, canSequence, returnTo,
 }: {
   boardId: string;
   boardName: string;
@@ -58,6 +53,16 @@ export function SequenceBoard({
   version: number;
   /** Whether this person may order a run at all. Drivers and boards may not. */
   canSequence: boolean;
+  /**
+   * Where the save should land, when it is not the Runs screen.
+   *
+   * My Runs draws this same board, and a manager who adjusts a run from there
+   * has to come back to the round's day rather than be moved to another screen
+   * — the `return_to` convention the billing panes already hold. The action
+   * re-validates it as a plain same-site path, because a form field is not
+   * evidence and an absolute one would make every save an open redirect.
+   */
+  returnTo?: string;
 }) {
   const original = stops.map((stop) => stop.id);
   const signature = `${version}:${original.join(",")}`;
@@ -82,7 +87,7 @@ export function SequenceBoard({
   const byId = new Map(stops.map((stop) => [stop.id, stop]));
   const dirty = isReordered(order, original);
   const rows = order.map((id) => byId.get(id)).filter(Boolean) as SequenceStop[];
-  const frozen = rows.filter((stop) => !isMovable(asOrderable(stop)));
+  const frozen = rows.filter((stop) => !isMovable(stop));
 
   const move = (id: string, direction: "up" | "down") =>
     setOrder((current) => moveStop(current, id, direction));
@@ -110,6 +115,7 @@ export function SequenceBoard({
           board_id: boardId, date, stops: order, expected_version: version,
         })}
       />
+      {returnTo ? <input type="hidden" name="return_to" value={returnTo} /> : null}
 
       <StateBanner
         editing={editing} boardName={boardName} stopCount={rows.length}
@@ -126,8 +132,8 @@ export function SequenceBoard({
 
       <ol className="space-y-2">
         {rows.map((stop, index) => {
-          const locked = !isMovable(asOrderable(stop));
-          const reason = lockReason(asOrderable(stop));
+          const locked = !isMovable(stop);
+          const reason = lockReason(stop);
           const draggable = editing && !locked;
           return (
             <li
@@ -280,7 +286,3 @@ function StateBanner({
     </div>
   );
 }
-
-const asOrderable = (stop: SequenceStop) => ({
-  id: stop.id, status: stop.status, progress_status: stop.progressStatus,
-});
