@@ -5,14 +5,11 @@ import { Trash2 } from "lucide-react";
 import { CHARGE_TYPES, CHARGE_TYPE_LABELS, round2, type ChargeType } from "@/lib/domain/pricing";
 import { formatMoney } from "@/lib/domain/pricing";
 import type { JobChargeInput } from "../job-charges";
-import { accountLabel, taxableFromTaxCode } from "@/lib/domain/accounts";
-import { chargePatchForItem, codingOffer, type CodingOffer } from "@/lib/domain/coding";
-import { itemLabel } from "@/lib/domain/items";
+import { chargePatchForItem } from "@/lib/domain/coding";
 import { Button, CONTROL, IconButton, SELECT_CHEVRON } from "@/components/ui";
 import { SubmitButton } from "@/components/form";
 import {
-  AccountPicker, DescriptionWithItems, ItemPicker,
-  type CodingAccount, type CodingItem,
+  DescriptionWithItems, ItemPicker, type CodingAccount, type CodingItem,
 } from "@/components/coding-pickers";
 
 /**
@@ -59,50 +56,41 @@ export function JobChargesEditor({
   action: (formData: FormData) => void;
   returnTo?: string;
   /**
-   * The item list and the chart of accounts, so a charge can be coded **here**
-   * rather than again on the invoice it becomes.
-   *
-   * This is the half MYOB has and this app did not: MYOB puts the Item ID and
-   * the Category (its name for the account code) on the line at the moment the
-   * line is written, and here the charge screen had neither — so a hand-added
-   * charge reached the invoice uncoded and somebody re-keyed the code. Default
-   * `[]` so a laundry with no chart, or a role that cannot read one, simply gets
-   * the screen it had before rather than an error.
+   * The item list a charge is named from. Default `[]`, so a laundry with no
+   * items simply gets a plain description box rather than an error.
    */
   items?: readonly CodingItem[];
+  /**
+   * **The chart of accounts is read here and never shown here.**
+   *
+   * MYOB's model, and the client's instruction: you pick the Item and the
+   * Category comes with it — nobody chooses a ledger account per charge line.
+   * So an account code is *never* a question this screen asks. It travels
+   * silently from `items.income_account_id`, and this list is needed only to
+   * look up that account's tax code so the GST tick follows the item too.
+   *
+   * A charge that names no item therefore reaches the invoice uncoded, which is
+   * deliberate: the invoice line composer is where a code is chosen by hand, on
+   * the rare line that is in neither list.
+   */
   accounts?: readonly CodingAccount[];
 }) {
   const [rows, setRows] = useState<EditableCharge[]>(initial);
-  /** Which rows have their pickers open. Screen state; nothing is posted for it. */
-  const [coding, setCoding] = useState<ReadonlySet<string>>(new Set());
 
   const itemsById = useMemo(() => new Map(items.map((one) => [one.id, one])), [items]);
   const accountsById = useMemo(() => new Map(accounts.map((one) => [one.id, one])), [accounts]);
-  // What this laundry can honestly offer. A control that promises a code to a
-  // laundry holding no chart of accounts is the dead end §27 records.
-  const offer = useMemo(
-    () => codingOffer({ items: items.length, accounts: accounts.length }),
-    [items.length, accounts.length],
-  );
-
-  const toggleCoding = (key: string) =>
-    setCoding((current) => {
-      const next = new Set(current);
-      if (next.has(key)) next.delete(key); else next.add(key);
-      return next;
-    });
 
   const update = (key: string, patch: Partial<EditableCharge>) =>
     setRows((current) => current.map((row) => (row.key === key ? { ...row, ...patch } : row)));
 
-  // The one place an item fills a charge, so the description type-ahead and the
-  // row's own item field cannot drift apart. The rule itself is pure and tested.
   // Unique per editor, not just per row: a row key is unique inside one editor
   // and two editors on one page (the gallery renders three) would otherwise
   // collide, pointing a label at another editor's input — the duplicate-id
   // defect §27 already records once on this screen.
   const fieldPrefix = (row: EditableCharge) => `${orderId}-charge-${row.key}`;
 
+  // The one place an item fills a charge, so the description type-ahead and the
+  // row's own item field cannot drift apart. The rule itself is pure and tested.
   const patchForItem = (
     row: EditableCharge, chosen: CodingItem, descriptionIsQuery = false,
   ) =>
@@ -231,15 +219,6 @@ export function JobChargesEditor({
               </span>
             </div>
 
-            {/*
-              The coding strip: what this charge is, and where the money lands.
-
-              Collapsed to one line by default and expanded per row, because a
-              job's charges are a *list* — two full pickers open on every row
-              would be a wall, and the accessibility pass settled on asking one
-              question at a time. The summary is always readable, so "is this
-              coded?" never needs a click to answer.
-            */}
             {items.length > 0 ? (
               // Open on every row rather than hidden behind the strip: the item
               // is the question asked, and a control nobody finds is a control
@@ -255,18 +234,6 @@ export function JobChargesEditor({
               </div>
             ) : null}
 
-            {offer.offered ? (
-              <ChargeCoding
-                idPrefix={fieldPrefix(row)}
-                accounts={accounts}
-                offer={offer}
-                item={row.source_item_id ? itemsById.get(row.source_item_id) ?? null : null}
-                account={row.gl_account_id ? accountsById.get(row.gl_account_id) ?? null : null}
-                open={coding.has(row.key)}
-                onToggle={() => toggleCoding(row.key)}
-                onChange={(patch) => update(row.key, patch)}
-              />
-            ) : null}
           </div>
         ))}
 
@@ -291,103 +258,5 @@ export function JobChargesEditor({
         </div>
       </div>
     </form>
-  );
-}
-
-/**
- * One charge's item and account code.
- *
- * **Picking an item fills the rest of the line**, which is the whole point: the
- * description, the rate, whether GST applies and the account all follow from the
- * item, the same way they do on the invoice composer and the same way MYOB's
- * Item ID column behaves. What a person typed is never overwritten — a blank
- * description is filled, an edited one is left alone.
- */
-function ChargeCoding({
-  idPrefix, accounts, offer, item, account, open, onToggle, onChange,
-}: {
-  /** Unique per editor as well as per row — see `fieldPrefix`. */
-  idPrefix: string;
-  accounts: readonly CodingAccount[];
-  offer: CodingOffer;
-  item: CodingItem | null;
-  account: CodingAccount | null;
-  open: boolean;
-  onToggle: () => void;
-  onChange: (patch: Partial<EditableCharge>) => void;
-}) {
-  function chooseAccount(chosen: CodingAccount) {
-    const taxable = taxableFromTaxCode(chosen.tax_code);
-    onChange({ gl_account_id: chosen.id, ...(taxable === null ? {} : { taxable }) });
-  }
-
-  const summary = [
-    item ? itemLabel(item) : null,
-    account ? accountLabel(account) : null,
-  ].filter(Boolean).join("  ·  ");
-
-  return (
-    <div className="sm:col-span-12">
-      <div className="flex flex-wrap items-center gap-2 border-t pt-2">
-        <span className={summary ? "font-mono text-xs" : "text-xs text-muted-foreground"}>
-          {summary || offer.uncoded}
-        </span>
-        <button
-          type="button" onClick={onToggle}
-          aria-expanded={open}
-          className="ml-auto min-h-11 rounded-lg px-3 text-sm underline underline-offset-4"
-        >
-          {open ? "Done" : summary ? "Change" : offer.label}
-        </button>
-      </div>
-
-      {open ? (
-        <div className="mt-2 space-y-3 rounded-xl border bg-surface-muted/40 p-3">
-          {/*
-            **The item leads and the account follows.** MYOB works this way and so
-            does the client's instruction: you pick the Item ID and the Category
-            comes with it — nobody sits and chooses a ledger account per line. The
-            item is asked on the row itself, above; this strip is its *consequence*,
-            editable for the cases an item cannot answer (a recharge, a levy, an
-            item nobody has coded yet).
-          */}
-          {accounts.length > 0 ? (
-            <div>
-              {account && item && item.income_account_id === account.id ? (
-                // The ordinary case: the item answered it, so this is a
-                // statement rather than a question. One line, no picker.
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="text-xs text-muted-foreground">
-                    Codes to <span className="font-mono text-foreground">{accountLabel(account)}</span>
-                    {" "}— from the item
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => onChange({ gl_account_id: null })}
-                    className="min-h-11 rounded-lg px-3 text-sm underline underline-offset-4"
-                  >
-                    Use a different account
-                  </button>
-                </div>
-              ) : (
-                <AccountPicker
-                  idPrefix={idPrefix}
-                  accounts={accounts} chosen={account} noChart={false}
-                  onChoose={chooseAccount}
-                  onClear={() => onChange({ gl_account_id: null })}
-                />
-              )}
-            </div>
-          ) : summary ? (
-            // Only where the strip above is showing the item rather than the
-            // absence — otherwise this repeats the sentence a line higher up.
-            <p className="text-xs text-muted-foreground">
-              No chart of accounts on file, so this charge cannot be coded yet. The
-              item and the price still apply.
-            </p>
-          ) : null}
-        </div>
-      ) : null}
-    </div>
   );
 }

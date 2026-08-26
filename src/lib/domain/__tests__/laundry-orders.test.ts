@@ -1,12 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
-  ORDER_ACTIONS, ORDER_STATUSES, RECEIVED_VIA, RECEIVED_VIA_OPTIONS, TERMINAL_STATUSES,
-  actionsFor, checkTransition, describeItem, initialDeliveryRequired, initialReceivedVia,
-  isBlankItem,
+  ORDER_ACTIONS, ORDER_STAGES, ORDER_STATUSES, RECEIVED_VIA, RECEIVED_VIA_OPTIONS,
+  TERMINAL_STATUSES,
+  actionsFor, buildStatusTrack, capabilitiesForMove, checkTransition, describeItem,
+  initialDeliveryRequired, initialReceivedVia, isBlankItem, leavesTheRound,
   isOrderStatus, isOverdue, nextStatuses, receivedInstant, receivedViaOptions,
-  summariseItems, validateItem,
+  stagesFor, summariseItems, validateItem,
   type OrderStatus,
 } from "@/lib/domain/laundry-orders";
+import type { Capability } from "@/lib/roles";
 import { businessToday, toZonedDate, toZonedTime } from "@/lib/domain/timezone";
 
 const DELIVERY = true;
@@ -41,17 +43,30 @@ describe("the status list", () => {
 });
 
 describe("nextStatuses", () => {
-  it("gives a delivery job to a driver before it goes out", () => {
-    expect(nextStatuses("new", DELIVERY)).toEqual(["in_progress", "cancelled"]);
-    expect(nextStatuses("in_progress", DELIVERY)).toEqual(["ready_for_delivery", "cancelled"]);
-    expect(nextStatuses("ready_for_delivery", DELIVERY)).toEqual(["assigned", "cancelled"]);
+  // These four used to read as a linear table — one step, forwards. Since 0042
+  // the plant stages are pickable in any order and in either direction, and the
+  // expectations are rewritten to that decision rather than relaxed: what a test
+  // asserts is what the next person reads the rule as.
+  it("offers a delivery job every stage its own facts allow", () => {
+    expect(nextStatuses("new", DELIVERY))
+      .toEqual(["in_progress", "ready_for_delivery", "cancelled"]);
+    expect(nextStatuses("in_progress", DELIVERY))
+      .toEqual(["new", "ready_for_delivery", "cancelled"]);
+    expect(nextStatuses("ready_for_delivery", DELIVERY))
+      .toEqual(["new", "in_progress", "assigned", "cancelled"]);
     expect(nextStatuses("assigned", DELIVERY))
-      .toEqual(["out_for_delivery", "ready_for_delivery", "cancelled"]);
-    expect(nextStatuses("out_for_delivery", DELIVERY)).toEqual(["completed", "cancelled"]);
+      .toEqual(["new", "in_progress", "ready_for_delivery", "out_for_delivery", "cancelled"]);
+    expect(nextStatuses("out_for_delivery", DELIVERY))
+      .toEqual(["new", "in_progress", "ready_for_delivery", "completed", "cancelled"]);
   });
 
-  it("finishes a customer pickup straight off the shelf", () => {
-    expect(nextStatuses("ready_for_delivery", PICKUP)).toEqual(["completed", "cancelled"]);
+  it("finishes a customer pickup from wherever it has got to", () => {
+    // A pickup has no delivery standing between it and being handed back, so the
+    // counter hand who takes a bag in, washes it and returns it has one press.
+    expect(nextStatuses("new", PICKUP))
+      .toEqual(["in_progress", "ready_for_delivery", "completed", "cancelled"]);
+    expect(nextStatuses("ready_for_delivery", PICKUP))
+      .toEqual(["new", "in_progress", "completed", "cancelled"]);
     // A job nobody is delivering is never assigned and never goes out.
     expect(nextStatuses("in_progress", PICKUP)).not.toContain("out_for_delivery");
     expect(nextStatuses("ready_for_delivery", PICKUP)).not.toContain("assigned");
@@ -65,6 +80,21 @@ describe("nextStatuses", () => {
   });
 });
 
+describe("stagesFor", () => {
+  it("draws a pickup without the two stages it can never reach", () => {
+    // Left off rather than drawn dead, which is the rule §29 already settles for
+    // a filter chip nothing matches.
+    expect(stagesFor(PICKUP)).toEqual(["new", "in_progress", "ready_for_delivery", "completed"]);
+    expect(stagesFor(DELIVERY)).toEqual([...ORDER_STAGES]);
+  });
+
+  it("never puts cancelled on the track", () => {
+    // Cancelling is not a stage of the work — it is the work stopping — and the
+    // page says so in a banner of its own.
+    expect(ORDER_STAGES).not.toContain("cancelled");
+  });
+});
+
 describe("checkTransition", () => {
   it("allows the moves the workflow defines", () => {
     expect(checkTransition("new", "in_progress", DELIVERY).ok).toBe(true);
@@ -75,16 +105,41 @@ describe("checkTransition", () => {
     expect(checkTransition("ready_for_delivery", "completed", PICKUP).ok).toBe(true);
   });
 
-  it("lets an assigned job go back to the ready queue — Remove Assignment", () => {
-    // The one backwards edge in the table, and it is not a cancellation: the
-    // job keeps its laundry, its customer and its history.
+  it("moves a job back a stage, and back several", () => {
+    // Going backwards is not a cancellation: the job keeps its laundry, its
+    // customer and its whole history. `assigned -> ready_for_delivery` was the
+    // only one of these the old table allowed, as Remove Assignment.
     expect(checkTransition("assigned", "ready_for_delivery", DELIVERY).ok).toBe(true);
+    expect(checkTransition("ready_for_delivery", "in_progress", DELIVERY).ok).toBe(true);
+    expect(checkTransition("out_for_delivery", "new", DELIVERY).ok).toBe(true);
+    expect(checkTransition("in_progress", "new", PICKUP).ok).toBe(true);
   });
 
-  it("will not send a job out before it has a driver", () => {
+  it("skips a stage a job does not need", () => {
+    expect(checkTransition("new", "ready_for_delivery", DELIVERY).ok).toBe(true);
+    expect(checkTransition("new", "completed", PICKUP).ok).toBe(true);
+  });
+
+  it("will not send a job out before it has a round", () => {
     const wrong = checkTransition("ready_for_delivery", "out_for_delivery", DELIVERY);
     expect(wrong.ok).toBe(false);
-    expect(wrong.ok === false && wrong.reason).toMatch(/assign this job to a driver/i);
+    expect(wrong.ok === false && wrong.reason).toMatch(/assign this job to a round/i);
+  });
+
+  it("will not hand laundry still in the plant to a round", () => {
+    // The one forward rule that survives, and it is not about sequence: the
+    // objection is that the washing is not done. Same sentence
+    // `checkAssignable` and `guard_laundry_order_assignment` already give.
+    for (const from of ["new", "in_progress"] as OrderStatus[]) {
+      const wrong = checkTransition(from, "assigned", DELIVERY);
+      expect(wrong.ok, from).toBe(false);
+      expect(wrong.ok === false && wrong.reason).toMatch(/not ready for delivery yet/i);
+    }
+    // And a job already on a van is re-assigned by coming off it first, because
+    // a new delivery date is captured by the assign form and not by a status.
+    const out = checkTransition("out_for_delivery", "assigned", DELIVERY);
+    expect(out.ok).toBe(false);
+    expect(out.ok === false && out.reason).toMatch(/already out for delivery/i);
   });
 
   it("will not assign a customer pickup to a driver", () => {
@@ -93,17 +148,12 @@ describe("checkTransition", () => {
     expect(wrong.ok === false && wrong.reason).toMatch(/collecting/i);
   });
 
-  it("refuses to skip the middle of the workflow", () => {
+  it("will not finish a delivery job that has been nowhere", () => {
+    // Not a sequencing rule either: a delivery recorded against a job that never
+    // went out is an account of something that did not happen.
     const skipped = checkTransition("new", "completed", DELIVERY);
     expect(skipped.ok).toBe(false);
-    expect(skipped.ok === false && skipped.reason).toMatch(/cannot go from new/i);
-  });
-
-  it("refuses to go backwards", () => {
-    expect(checkTransition("ready_for_delivery", "in_progress", DELIVERY).ok).toBe(false);
-    expect(checkTransition("out_for_delivery", "ready_for_delivery", DELIVERY).ok).toBe(false);
-    expect(checkTransition("out_for_delivery", "assigned", DELIVERY).ok).toBe(false);
-    expect(checkTransition("assigned", "in_progress", DELIVERY).ok).toBe(false);
+    expect(skipped.ok === false && skipped.reason).toMatch(/gone out/i);
   });
 
   it("will not send a customer pickup out on a van", () => {
@@ -115,7 +165,7 @@ describe("checkTransition", () => {
   it("will not complete a delivery job that never left", () => {
     const wrong = checkTransition("ready_for_delivery", "completed", DELIVERY);
     expect(wrong.ok).toBe(false);
-    expect(wrong.ok === false && wrong.reason).toMatch(/assign this job to a driver/i);
+    expect(wrong.ok === false && wrong.reason).toMatch(/gone out/i);
     expect(checkTransition("assigned", "completed", DELIVERY).ok).toBe(false);
   });
 
@@ -142,18 +192,14 @@ describe("checkTransition", () => {
 
 describe("actionsFor", () => {
   it("offers delivery and pickup jobs their own last step", () => {
-    // A ready delivery job has no status button of its own any more: it needs a
-    // driver and a date, which is a form, not a status move.
+    // A ready delivery job has no completion of its own: it needs a round and a
+    // date first, which is a form rather than a status move.
     const ready = actionsFor("ready_for_delivery", DELIVERY).map((action) => action.key);
-    expect(ready).not.toContain("dispatch");
     expect(ready).not.toContain("collect");
     expect(ready).not.toContain("deliver");
 
-    const assigned = actionsFor("assigned", DELIVERY).map((action) => action.key);
-    expect(assigned).toContain("dispatch");
-    // "Mark ready" must not appear on an assigned job: that edge exists, but it
-    // is Remove Assignment and it clears four columns besides the status.
-    expect(assigned).not.toContain("ready");
+    const out = actionsFor("out_for_delivery", DELIVERY).map((action) => action.key);
+    expect(out).toContain("deliver");
 
     const pickup = actionsFor("ready_for_delivery", PICKUP).map((action) => action.key);
     expect(pickup).toContain("collect");
@@ -177,6 +223,156 @@ describe("actionsFor", () => {
     for (const action of ORDER_ACTIONS.filter(
       (entry) => !["cancel", "dispatch"].includes(entry.key))) {
       expect(action.capability, action.key).toBe("orders.status");
+    }
+  });
+});
+
+describe("buildStatusTrack", () => {
+  const ALL = () => true;
+  const NONE = () => false;
+  const only = (...held: Capability[]) => (c: Capability) => held.includes(c);
+
+  it("marks what is done, where the job is, and what is still ahead", () => {
+    const track = buildStatusTrack({ status: "ready_for_delivery", deliveryRequired: DELIVERY }, ALL);
+    expect(track.map((step) => [step.status, step.state])).toEqual([
+      ["new", "done"],
+      ["in_progress", "done"],
+      ["ready_for_delivery", "current"],
+      ["assigned", "upcoming"],
+      ["out_for_delivery", "upcoming"],
+      ["completed", "upcoming"],
+    ]);
+  });
+
+  it("makes the stages already passed pressable, which is the whole point", () => {
+    // The track exists so a job moved on by mistake can be put back. If the done
+    // steps are not pressable it is a progress bar, not a control.
+    const track = buildStatusTrack({ status: "ready_for_delivery", deliveryRequired: DELIVERY }, ALL);
+    expect(track.filter((step) => step.jump).map((step) => step.status))
+      .toEqual(["new", "in_progress"]);
+  });
+
+  it("never makes the current stage pressable, and gives it no note", () => {
+    for (const status of ORDER_STAGES) {
+      const step = buildStatusTrack({ status, deliveryRequired: DELIVERY }, ALL)
+        .find((s) => s.state === "current");
+      expect(step?.jump, status).toBe(false);
+      expect(step?.note, status).toBeNull();
+    }
+  });
+
+  it("says where the control is for a stage the track cannot post", () => {
+    // Assigned and Completed capture more than a status, so they are drawn and
+    // explained rather than left silently inert — a control whose only possible
+    // outcome is a refusal is a dead end dressed as a choice.
+    const assigned = buildStatusTrack(
+      { status: "ready_for_delivery", deliveryRequired: DELIVERY }, ALL,
+    ).find((step) => step.status === "assigned");
+    expect(assigned?.jump).toBe(false);
+    expect(assigned?.note).toMatch(/Delivery card/i);
+
+    const completed = buildStatusTrack(
+      { status: "out_for_delivery", deliveryRequired: DELIVERY }, ALL,
+    ).find((step) => step.status === "completed");
+    expect(completed?.jump).toBe(false);
+    expect(completed?.note).toMatch(/who handed it over/i);
+  });
+
+  it("carries the reason a stage is out of reach rather than a blank", () => {
+    const track = buildStatusTrack({ status: "new", deliveryRequired: DELIVERY }, ALL);
+    expect(track.find((step) => step.status === "assigned")?.note)
+      .toMatch(/not ready for delivery yet/i);
+    expect(track.find((step) => step.status === "out_for_delivery")?.note)
+      .toMatch(/assign this job to a round/i);
+  });
+
+  it("holds the send-out override behind the management capability", () => {
+    const job = { status: "assigned" as OrderStatus, deliveryRequired: DELIVERY };
+    const counter = buildStatusTrack(job, only("orders.status", "routes.write"))
+      .find((step) => step.status === "out_for_delivery");
+    expect(counter?.jump).toBe(false);
+    expect(counter?.note).toMatch(/your role/i);
+
+    const manager = buildStatusTrack(job, ALL).find((step) => step.status === "out_for_delivery");
+    expect(manager?.jump).toBe(true);
+  });
+
+  it("needs the round-planning capability to pull a job back off a round", () => {
+    // Taking a job off a round un-books a call somebody planned, so the status
+    // control must not be a back door around Remove Assignment.
+    const job = { status: "assigned" as OrderStatus, deliveryRequired: DELIVERY };
+    const counter = buildStatusTrack(job, only("orders.status", "orders.manage"));
+    expect(counter.filter((step) => step.jump).map((step) => step.status))
+      .toEqual(["out_for_delivery"]);
+    expect(counter.find((step) => step.status === "ready_for_delivery")?.note)
+      .toMatch(/your role/i);
+
+    expect(capabilitiesForMove("assigned", "ready_for_delivery")).toContain("routes.write");
+    // Not needed for a move that leaves the assignment where it is.
+    expect(capabilitiesForMove("assigned", "out_for_delivery")).not.toContain("routes.write");
+    expect(capabilitiesForMove("in_progress", "ready_for_delivery")).not.toContain("routes.write");
+  });
+
+  it("knows which moves take a job off its round", () => {
+    // The same rule decides who may make the move and whether the action has to
+    // tidy up the emptied stop, so it is named once rather than written twice.
+    for (const from of ["assigned", "out_for_delivery"] as OrderStatus[]) {
+      for (const to of ["new", "in_progress", "ready_for_delivery"] as OrderStatus[]) {
+        expect(leavesTheRound(from, to), `${from} → ${to}`).toBe(true);
+      }
+      // Completing keeps the round that delivered it — that is how the business
+      // answers "who was holding that parcel?".
+      expect(leavesTheRound(from, "completed"), `${from} → completed`).toBe(false);
+      expect(leavesTheRound(from, "cancelled"), `${from} → cancelled`).toBe(false);
+    }
+    expect(leavesTheRound("assigned", "out_for_delivery")).toBe(false);
+    expect(leavesTheRound("ready_for_delivery", "in_progress")).toBe(false);
+  });
+
+  it("presses nothing for a role that holds none of it", () => {
+    const track = buildStatusTrack({ status: "in_progress", deliveryRequired: PICKUP }, NONE);
+    expect(track.some((step) => step.jump)).toBe(false);
+    expect(track.filter((step) => step.state !== "current").every((step) => step.note !== null))
+      .toBe(true);
+  });
+
+  it("gives a finished job a full track and no way off it", () => {
+    const track = buildStatusTrack({ status: "completed", deliveryRequired: PICKUP }, ALL);
+    expect(track.map((step) => step.state)).toEqual(["done", "done", "done", "current"]);
+    expect(track.some((step) => step.jump)).toBe(false);
+  });
+
+  it("gives a cancelled job no position on the track at all", () => {
+    // `cancelled` is not a stage, so nothing is current and nothing is done —
+    // the banner above the track is what says what happened to it.
+    const track = buildStatusTrack({ status: "cancelled", deliveryRequired: DELIVERY }, ALL);
+    expect(track.every((step) => step.state === "upcoming")).toBe(true);
+    expect(track.some((step) => step.jump)).toBe(false);
+  });
+
+  it("stops the whole track for a job in another laundry, and says which problem it is", () => {
+    // Not the same thing as a missing capability, and it must not read like one:
+    // every write filters `tenant_id`, so a step offered here would match no row
+    // and report success.
+    const track = buildStatusTrack(
+      { status: "in_progress", deliveryRequired: DELIVERY }, ALL, "It belongs to another laundry.",
+    );
+    expect(track.some((step) => step.jump)).toBe(false);
+    expect(track.find((step) => step.status === "new")?.note)
+      .toBe("It belongs to another laundry.");
+  });
+
+  it("only ever offers a step checkTransition would allow", () => {
+    // The track and the action must not disagree: a pressable step the action
+    // refuses is the button-that-always-fails this module exists to prevent.
+    for (const deliveryRequired of [DELIVERY, PICKUP]) {
+      for (const status of ORDER_STATUSES) {
+        for (const step of buildStatusTrack({ status, deliveryRequired }, ALL)) {
+          if (!step.jump) continue;
+          expect(checkTransition(status, step.status, deliveryRequired).ok,
+                 `${status} → ${step.status}`).toBe(true);
+        }
+      }
     }
   });
 });

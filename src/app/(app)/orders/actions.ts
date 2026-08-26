@@ -12,13 +12,15 @@ import {
 } from "@/lib/actions";
 import { parseOrderItems } from "./order-items";
 import {
-  DELIVERY_WINDOWS, ORDER_PRIORITIES, RECEIVED_VIA,
-  checkTransition, isOrderStatus, receivedInstant, validateItem,
+  DELIVERY_WINDOWS, ORDER_PRIORITIES, ORDER_STATUS_LABELS, RECEIVED_VIA,
+  STAGE_CONTROLS, capabilitiesForMove, checkTransition, isOrderStatus,
+  leavesTheRound, receivedInstant, validateItem,
   type OrderItemInput, type OrderStatus,
 } from "@/lib/domain/laundry-orders";
 import { businessToday, isClockTime, toInstant } from "@/lib/domain/timezone";
 import { logOrderActivity } from "@/lib/orders/activity";
 import { completeLaundryOrder } from "@/lib/orders/complete";
+import { retireStopIfEmpty } from "@/lib/runs/assign";
 
 /**
  * Writes for the laundry-jobs module.
@@ -226,15 +228,20 @@ async function loadOrder(
   supabase: Awaited<ReturnType<typeof createClient>>,
   id: string,
 ): Promise<
-  { id: string; order_number: string; status: OrderStatus; delivery_required: boolean; received_at: string } | null
+  {
+    id: string; order_number: string; status: OrderStatus; delivery_required: boolean;
+    received_at: string;
+    /** The round's call this job is riding on, so a move back into the plant can tidy it up. */
+    stop_id: string | null;
+  } | null
 > {
   const { data } = await supabase
     .from("laundry_orders")
-    .select("id, order_number, status, delivery_required, received_at")
+    .select("id, order_number, status, delivery_required, received_at, stop_id")
     .eq("id", id)
     .maybeSingle<{
       id: string; order_number: string; status: string;
-      delivery_required: boolean; received_at: string;
+      delivery_required: boolean; received_at: string; stop_id: string | null;
     }>();
   if (!data || !isOrderStatus(data.status)) return null;
   return { ...data, status: data.status };
@@ -466,15 +473,21 @@ const statusSchema = z.object({
 });
 
 /**
- * The plain status moves: in progress, ready for delivery, and the management
- * override that sends a job out without the driver pressing Start Route.
+ * The plain status moves, which since the status track landed means **any stage
+ * this job can be at**, in either direction — not just the next one.
  *
- * Completion and cancellation are not here — both capture more than a status and
- * live in their own actions below, so that "mark delivered" can never be reached
- * by posting `status=completed` at this one. Assignment is not here either: it
- * captures a driver and a date, and lives in `assignJobToDriver`. Posting
- * `status=assigned` at this action is refused outright, because it would create
- * exactly the row the brief forbids — an Assigned job with no assignment.
+ * Two targets are still refused here and are not an oversight. `completed`
+ * records who handed the laundry over and when, so it belongs to `completeOrder`
+ * and can never be reached by posting `status=completed` at this action;
+ * `assigned` captures a round and a delivery date, so it belongs to
+ * `assignJobToDriver` and posting it here would create exactly the row the
+ * constraints forbid — an Assigned job with no assignment. `cancelled` likewise
+ * carries a reason.
+ *
+ * Everything else is `checkTransition`'s to decide, and it is the same rule the
+ * track drew the step with and the same rule `guard_laundry_order_transition`
+ * enforces underneath. The button is a courtesy; this and the trigger are the
+ * boundary.
  */
 export async function advanceOrder(formData: FormData): Promise<void> {
   const session = await assertCapability("orders.status");
@@ -483,35 +496,43 @@ export async function advanceOrder(formData: FormData): Promise<void> {
 
   const target = parsed.data.status as OrderStatus;
   const detail = `/orders/${parsed.data.id}`;
-  if (target === "completed" || target === "cancelled") {
-    return fail(detail, "Use the delivery, collection or cancel action for that step.");
-  }
-  if (target === "assigned") {
-    return fail(detail, "Use Assign Driver to give this job to a driver and a delivery date.");
-  }
-  // Sending a job out without the driver having loaded it is a management
-  // override, and the capability on the action says so. Checked here as well as
-  // hidden on the page, because the button is a courtesy and this is the guard.
-  if (target === "out_for_delivery" && !can(session.role, "orders.manage")) {
-    return fail(detail,
-      "Jobs go out when the driver starts their route. Ask a manager if this one needs "
-      + "sending out from the office.");
+  if (STAGE_CONTROLS[target].via !== "jump") {
+    return fail(detail, STAGE_CONTROLS[target].where
+      ?? "Use the delivery, collection or cancel action for that step.");
   }
 
   const supabase = await createClient();
   const existing = await loadOrder(supabase, parsed.data.id);
   if (!existing) return fail(LIST, "That job could not be found.");
 
-  // `assigned → ready_for_delivery` is a legal transition, but it is Remove
-  // Assignment — it clears four columns besides the status, and it is dispatch's
-  // action. Routed there rather than allowed to strip an assignment silently
-  // through the status control.
-  if (target === "ready_for_delivery" && existing.status === "assigned") {
-    return fail(detail, "Use Remove Assignment to take this job off its driver.");
-  }
-
   const allowed = checkTransition(existing.status, target, existing.delivery_required);
   if (!allowed.ok) return fail(detail, allowed.reason);
+
+  // Who may make *this* move, source and target together — the second half is
+  // what stops the status control being a back door around Remove Assignment.
+  // Sending a job out is a management override of the round's own Start Route;
+  // pulling one back off a round un-books a call somebody planned. Checked here
+  // as well as drawn on the track, because the step is a courtesy and this is
+  // the guard.
+  for (const capability of capabilitiesForMove(existing.status, target)) {
+    if (can(session.role, capability)) continue;
+    if (capability === "orders.manage") {
+      return fail(detail,
+        "Jobs go out when the round starts its route. Ask a manager if this one needs "
+        + "sending out from the office.");
+    }
+    return fail(detail,
+      "Taking this job off its round un-books a call somebody planned, so your role cannot "
+      + `move it to ${ORDER_STATUS_LABELS[target].toLowerCase()}. Ask dispatch, or use `
+      + "Remove Assignment on the job's Delivery card.");
+  }
+
+  // A job pulled back into the plant leaves its call on the round, and a run
+  // that has lost its second stop must not read 1, 3, 4 on the round's phone —
+  // so the same tidy-up Remove Assignment does runs here, from the same helper.
+  // Read before the write, because the trigger clears `stop_id` with it.
+  const offTheRound = leavesTheRound(existing.status, target);
+  const strandedStop = offTheRound ? existing.stop_id : null;
 
   const { error } = await supabase
     .from("laundry_orders")
@@ -519,6 +540,8 @@ export async function advanceOrder(formData: FormData): Promise<void> {
     .eq("id", parsed.data.id)
     .eq("tenant_id", session.tenantId);
   if (error) return fail(detail, describeDbError(error));
+
+  if (strandedStop) await retireStopIfEmpty(supabase, session, strandedStop);
 
   await logOrderActivity(supabase, session, parsed.data.id, {
     activity_type: "status_changed",
@@ -533,7 +556,15 @@ export async function advanceOrder(formData: FormData): Promise<void> {
 
   revalidatePath(LIST);
   revalidatePath(detail);
-  return done(detail, `Job ${existing.order_number} is now ${target.replace(/_/g, " ")}.`);
+  // A status move can now take a job off a round, so the round's own day and the
+  // driver's copy of the job are stale as well. Same set `removeJobAssignment`
+  // refreshes, for the same reason.
+  if (offTheRound) {
+    revalidatePath("/my-runs");
+    revalidatePath(`/my-runs/jobs/${parsed.data.id}`);
+  }
+  return done(detail,
+    `Job ${existing.order_number} is now ${ORDER_STATUS_LABELS[target].toLowerCase()}.`);
 }
 
 /* ------------------------------------------------------------- completion */

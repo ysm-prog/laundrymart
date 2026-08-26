@@ -290,6 +290,12 @@ set — cancel a job, backdate a receipt, edit one already completed. **`super_a
 given back because the alternative was making a counter hand an Office manager, which is 31
 screens to do the one job their role is named for (§26, now closed). `orders.manage` stayed
 where it was: cancelling a job and backdating a receipt are not part of taking laundry in.
+**Since the status track landed, `orders.status` also buys the moves that used to be
+impossible rather than merely un-offered** — back a stage, forward two — but not the two that
+answer to somebody else: sending a job out from the office is still `orders.manage` (it steps
+around the round's own Start Route) and pulling one back off a round is still `routes.write` (it
+un-books a call dispatch planned). `capabilitiesForMove` is that rule, read by the track and
+re-checked by `advanceOrder`.
 `driver` and `board` hold none of them — counter jobs are not stops on a run — and
 `warehouse_operator` holds none either, having lost `orders.status` in 0025; the floor runs
 every warehouse stage and no longer walks the customer's job along behind it. **Restoring the
@@ -427,12 +433,23 @@ key remains the way to reset or re-assert them through the Auth API, but nothing
   nobody able to see why — is impossible however the row is written. An item with no
   `laundry_category` leaves the caller's own answer, because "this is a rented tablecloth" is not
   an answer to "what kind of laundry is this".
-- **A laundry job's seven statuses are enforced by `guard_laundry_order_transition`**, not just
-  by the screen: no skipping the middle, no going backwards, `completed`/`cancelled` terminal,
-  a customer pickup never reaches `assigned` or `out_for_delivery`, a delivery job must be
-  assigned to a driver before it goes out, and it cannot be completed off the shelf. The one
-  backwards edge is `assigned → ready_for_delivery`, which is Remove Assignment: the trigger
-  clears the four assignment columns and the stop with it, so no half-assignment can survive. The trigger stamps `completed_at`/`cancelled_at`, so no client can record a
+- **A laundry job's stage is picked, not walked** (`guard_laundry_order_transition`, rewritten by
+  `0042`). Until 2026-08-26 this was a linear table — one step, forwards, with
+  `assigned → ready_for_delivery` the single exception — and that shape is gone: the owner's
+  decision is that the stages are pickable in any order and in either direction, which is what
+  the status track on the job page draws. **Four rules survive, and they are the four that are
+  about the job's own facts rather than about the order things happened in**: a customer pickup
+  never reaches `assigned` or `out_for_delivery`; a job still in the plant is not given to a
+  round (the same sentence `checkAssignable` and `guard_laundry_order_assignment` already say);
+  a delivery job is assigned before it goes out, or it is on nobody's van and invisible to My
+  Runs; and a delivery job goes out before it is completed, or its delivery record is an account
+  of something that did not happen. **`completed` and `cancelled` stay terminal**, and that was
+  asked and answered rather than assumed — by then 0017's hook has moved the job to
+  `awaiting_review`, it may carry a frozen charge, and 0040's running draft may already have
+  billed it on a document the customer has been sent. Coming back into the plant from either
+  delivery stage clears the assignment and the stop, which 0031 did for its one edge and 0042
+  does for all six: without it `chk_laundry_orders_assignment_status` refuses the whole update.
+  The trigger stamps `completed_at`/`cancelled_at`, so no client can record a
   finished job with no finishing time. Overdue is **not** among the statuses — it is
   `due_date < today and status not in (completed, cancelled)`, computed every time it is
   asked, where `due_date` is a generated column (delivery date, or collection date for a
@@ -514,6 +531,23 @@ posts `return_to`, so a manager who adjusts a run from the round's day lands bac
 `/run` survives as the second tab ("At the depot") because it owns the offline outbox, the
 service worker and the unload inventory sweep, and is the one screen that must work with no
 signal.
+
+**A job's stage is a track, not a row of buttons** (2026-08-26). `/orders/:id` opens on
+*Where this job is up to* — the six stages as a dot-and-rail stepper, adopted from
+`ysm-prog/ysm-hub`'s own job detail (`.status-track`) so the two products read as one company's
+software, and pressable: any stage this job can be moved to is a submit button that posts
+`advanceOrder`. It replaced a card called *What happens next* that offered exactly one step at a
+time, which is why the title changed with it. Three things it does that YSM's does not: the steps
+are **form submits rather than click handlers**, because every screen here is an async server
+component and because the track then works with no JavaScript; the labels are **sentence case, not
+uppercase mono**, per §10b's 2026-08-13 sweep; and a step that **cannot** be pressed carries the
+sentence saying why — `Assigned` and `Completed` name the form that does capture a round and a
+date, or who handed the laundry over. A customer pickup is drawn with **four** stages rather than
+six, the two delivery-only ones left off rather than greyed, which is §29's rule about a chip
+nothing matches. Below `sm` the track wraps to three columns and its rails are hidden — YSM's own
+answer, and measuring is what showed it was needed: six columns at 320px leave each step 35px wide,
+under §10b's 36px floor. The rule behind every state is `buildStatusTrack` in
+`lib/domain/laundry-orders.ts`, pure and tested, so the component decides nothing.
 
 **The rail is three collapsible groups** (2026-08-24): "Day to day" open, "Customers & money"
 and "Set-up & reports" shut, Help pinned outside them — 12 flat rows down to 6 visible for an
@@ -779,6 +813,27 @@ renders no tab strip. Tested in `src/lib/__tests__/nav.test.ts`.
   inside its own transaction: a second open draft refused, a line on an issued
   invoice refused, and the cascade still deleting. Both halves were proved to
   fail without the fix rather than assumed to be doing something.
+- `0042_free_status_moves` — **a job's stage is picked, not walked.**
+  `guard_laundry_order_transition` rebuilt from 0031's body — carrying 0017's two
+  billing hooks and 0031's board clearing through verbatim, which is the trap
+  0031's own header records — with the linear table replaced by the four
+  data-coherence rules §4 lists, and the assignment clearing widened from one
+  edge to every move out of `assigned`/`out_for_delivery` into a plant stage.
+  **Adds no table, no column, no policy, no function and no capability; drops
+  nothing, and changes no row.** Self-asserting on the two hooks a rebuild from
+  an older ancestor would have dropped, on the board clearing, on the RPC-surface
+  revoke (`authenticated` named as well as `public, anon` — the trap 0019
+  recorded and 0036 shipped) and on the trigger still being a row-level BEFORE
+  UPDATE — that last one caught a defect in its own first draft, which had the
+  `tgtype` bits backwards. Then **behaviourally, against real rows in the
+  migration's own transaction**: two stages forward at once, straight back to
+  `new`, a job still in the plant refused a round, `out_for_delivery` back into
+  the plant clearing the assignment, a delivery job refused completion off the
+  shelf, and a cancelled job refused reopening. It **reuses** a laundry rather
+  than creating one, because `0041` refuses a second `tenants` insert wherever the
+  single-laundry switch is on; a fresh database has none and skips that half with
+  a notice, since `laundry_orders.test.sql` is the standing behavioural proof and
+  runs in the same CI job.
 - `0041_single_laundry` — **this deployment runs one laundry, and the database says
   so rather than the screen.** `single_laundry_mode()` (reads
   `platform_settings.settings->>'single_laundry'`), `guard_single_laundry()` and
@@ -858,7 +913,7 @@ Proofs in `supabase/tests/`: `rls_isolation`, `rls_coverage`, `driver_scope`,
 `job_billing`, `purchases_scope`, `supplier_payments_scope`, `import_helpers`,
 `import_activation`, `member_directory`, `boards_scope`, `item_master`,
 `audit_log_scope`, `run_sequence`, `accounts_scope`, `open_draft_invoices`,
-`single_laundry` (**478 assertions** across 26 files).
+`single_laundry` (**485 assertions** across 26 files).
 
 **`run-db-tests.sh` parses the output rather than trusting the exit code, and that is not
 pedantry.** `psql` exits 0 for a pgTAP file that runs to completion, and a failed assertion is a
@@ -1321,8 +1376,81 @@ the chase says *"reply if you need the invoice sent again"*, which is only true 
 sent it to.
 
 ## 11. Hosted project
-**One laundry, since 2026-08-26.** `0041_single_laundry` (`20260826053208`) is the ledger's last
-entry, and the deployment now holds a single tenant — `Adelaide Towel Service` — with the
+**There is one tenancy: `Adelaide Towel Service`.** The owner's instruction, 2026-08-26. It is
+the business — `ats.coreit.com.au`, its customers, its 647 invoices, its 254 items and its 268
+chart-of-accounts rows. **Every question about live data is a question about that tenant**, and
+nothing in this file should reach for a second one to explain a result.
+
+`Harbour Commercial Laundry` is the **demo seed** in `supabase/seed.sql`. It is not a laundry, not
+a customer and not a deployment target; it exists so `npm run seed:roles` has somewhere to put
+eleven test logins that cannot see the real business's records (§3a), and so the pgTAP proofs have
+a second tenant to be refused by. **Do not diagnose live behaviour against it and do not offer it
+as an answer.** Its rows are still on the project — deleting them is a separate decision that has
+not been taken, and would need the test logins rehoused first.
+
+The multi-tenancy *architecture* is unchanged and stays: `tenant_id` on every table, RLS keyed on
+`is_member()`, the admin client filtering by hand. One operating tenancy is a fact about today's
+data, not a licence to drop the boundary — §3 and §23 are untouched by this.
+
+**`0042_free_status_moves` was applied on 2026-08-26** (`20260826112650`) and is the ledger's last
+entry, 46 in all. A widening rather than a narrowing, and applied before the code merged for the
+same reason every release since 2026-08-18 records: the schema leads.
+
+- **Pre-flight, before anything was written:** the live `guard_laundry_order_transition` body
+  confirmed **identical to this repo's 0031** — stripped of comments and diffed line by line, 54
+  lines each, rather than eyeballed — so the rebuild could not silently revert an unmerged
+  branch's work. That is the trap 0031's own header records and the reason it is checked *before*
+  rather than after. The trigger was attached as a row-level BEFORE UPDATE,
+  `chk_laundry_orders_assignment_status` was present (the widened clearing depends on it), and
+  the switch `0041` guards was **on**, which is why the migration's behavioural block reuses a
+  laundry instead of creating one.
+- **The new guard is a strict superset of the old**, checked edge by edge: every move 0031's
+  linear table permitted, 0042 permits. So no live row and no in-flight job could be invalidated
+  by it, and there is nothing to back-fill.
+- **Rehearsed twice, in transactions that ended by raising.** The first aborted on the probe's own
+  wrong assumption — it expected the live job to be movable, and `LJ00007` is `completed` — which
+  is itself the useful finding. The read-back after that rollback is what proves the mechanism:
+  guard **still linear**, `authenticated` **still** able to execute it (so the revoke rolled back
+  too), **0** probe customers, boards or jobs, counts unchanged. A multi-statement call really is
+  one transaction, re-proved rather than taken from the 0040 note.
+- **The second rehearsal reported through its own aborting exception**, because a `raise notice`
+  does not come back through the API: `[pickup moved back to new] [pickup refused a round: t]
+  [pickup completed from new: completed, 0017 hook gave billing=awaiting_review] [cannot reopen:
+  t] [LJ00007 (invoiced) refused reopening: t]`.
+- **After the apply**, the live function body is **byte-identical to the repo file** —
+  `md5(prosrc)` compared against the same hash computed on a local Postgres built from
+  `supabase/migrations/`, which is stronger than reading it. It did not match on the first attempt:
+  the text typed into `apply_migration` differed from the file by **two characters in a comment**
+  (`Rule 2. Said` against `Rule 2, said`), found by bisecting prefix hashes, and the function was
+  re-created from the file's exact text until the hashes agreed. The ledger's stored statement
+  keeps the transcription; the object matches the repo.
+- **Proved as real sessions afterwards**, writes inside a transaction that was then aborted.
+  `customer-service@roles.example.com` moved a pickup **back** a stage — **1 row**, and it is the
+  row count that matters, because a restrictive policy refusing a caller writes **zero rows with
+  no error**, the silence this project has shipped twice. The same session then finished it
+  straight from `new` with `billing_status` landing on `awaiting_review`; was refused a van on an
+  unassigned job; and was refused reopening `LJ00007`. `board1@ats.example.com` moving an office
+  job touched **0** rows. `owner@roles.example.com` assigned a real board and pulled it back, and
+  the assignment cleared. Nothing survived the rollback.
+- **A live exposure was closed on the way through, and it was not this migration's.** Pre-flight
+  found `authenticated` **could execute** `guard_laundry_order_transition` at
+  `/rest/v1/rpc/…` — the trap 0019 recorded and 0036 shipped, sitting on this function since
+  0031's `create or replace` re-granted it. 0042 names `authenticated` in its revoke, so both it
+  and `anon` now read false. Inert in practice (SECURITY INVOKER: called outside a trigger it can
+  only error), which is exactly the argument for not publishing it.
+- **Advisors are 23**, unchanged: 22 documented SECURITY DEFINER helpers plus the auth
+  leaked-password toggle. `guard_laundry_order_transition` is **absent**, as it should be. **0**
+  `anon` table grants and **0** tables in `public` without RLS.
+- Counts before and after are the same: **1** laundry job (`LJ00007`), 509 customers, 5 boards,
+  647 invoices, 254 items, 268 accounts, 18 memberships, 1 tenant.
+
+**`LJ00007` is the job this change was reported on, and it is now `completed` /
+`invoice_generated`.** So the laundry has taken a job all the way through since the screenshot —
+and it is the case the terminal rule exists for: a job already on an invoice cannot be reopened,
+because the customer's document and ours would then disagree.
+
+**One laundry, since 2026-08-26.** `0041_single_laundry` (`20260826053208`) was the ledger's last
+entry until the above, and the deployment holds a single tenant — `Adelaide Towel Service` — with the
 `single_laundry` switch **on** in `platform_settings`.
 
 - **Pre-flight, before anything was written:** neither function nor the trigger existed, the
@@ -2196,8 +2324,12 @@ glossary gained **Draft invoice** and **Issue** and lost *Generate*.
   **Proved to catch the regression** by re-adding the insert branch and watching it fail, and
   guarded against passing vacuously: it first asserts the pattern matches the one insert that
   should be there.
-- 981 unit tests (was 974) and 478 pgTAP assertions unchanged — this adds no policy and no
-  migration; `git diff` over `supabase/` is empty. `verify` green.
+- 981 unit tests on the branch (was 974) and **991 with `Prod` merged in**, which brought the
+  status-track work and the removal of the charge editor's account picker. **This adds no pgTAP
+  assertion and no migration** — `git diff` over `supabase/` is empty against both parents; the
+  merged tree runs **485** assertions across 45 migrations, all of which are `Prod`'s (0042 among
+  them). `verify` green on both, and the whole DB job was run locally on a fresh Postgres 16 with
+  the seed on top: 0 failing assertions, 0 plan mismatches.
 - **Every new assertion was confirmed to fail without its fix** rather than assumed to be doing
   something: reverting `manual` to a null period fails four, restoring "raised" fails three, and
   re-opening the insert branch fails the structural guard.
@@ -2218,6 +2350,197 @@ authenticated screen was opened with real rows in it. **Before trusting it: take
 not "raised" — then confirm Money › Awaiting invoice shows nothing in "Approved, not yet on a
 draft", and that the invoice only appears in the register once you press Issue on the drafts
 board.**
+### 2026-08-26 · A job's stage is picked, not walked
+Reported from the deployed app on `LJ00007`, a customer pickup: the *What happens next* card
+offered **Mark ready for delivery** and **Cancel job**, and nothing else. The ask was YSM Hub's
+tasks design, so the user can pick any status. One migration (`0042`), **no new table, no new
+column, no new policy, no new function and no new capability; nothing dropped and no row
+changed.** §4 holds the rules, §6 the screen, §7 the migration.
+
+**The old shape was one step at a time, forwards.** `guard_laundry_order_transition` held a
+linear table and the card rendered whatever it returned, so a counter hand who marked a job ready
+by mistake had **no way back**, and a pickup that never needed the plant took two presses and two
+page loads to finish. That was the right shape while the card was a row of buttons; it is the
+wrong shape for a track.
+
+- **`ysm-prog/ysm-hub` has solved this one product over**, and its own note beside the control is
+  the half people do not discover: *"Click any step above to jump there — useful when a job has to
+  go back, e.g. In Repair → Awaiting Parts if a missing part turns up."* Same dot-and-rail stepper
+  here, in this app's tokens, with that sentence under it.
+- **Four rules survive, and the point is which four.** Every refusal left is about the job's own
+  facts rather than about the order things happened in: a customer pickup has no delivery to be
+  on; laundry still in the plant is not handed to a round; a delivery job is assigned before it
+  goes out, or it is on nobody's van and invisible to My Runs; and it goes out before it is
+  completed, or its delivery record is an account of something that did not happen. Not one of
+  them is "you cannot go backwards".
+- **`completed` and `cancelled` stay terminal, and that was put to the owner rather than
+  assumed.** By the time a job is completed, 0017's hook has moved it to `awaiting_review`, it may
+  carry a frozen `job_charge_snapshots` row, and 0040's running draft may already have billed it
+  on a document the customer has been sent. Reopening one is two accounts of the same work.
+- **The database is the boundary, so this needed a migration and not a screen.** `roles.ts` and
+  the card decide what is *offered*; `laundry_orders` is on `/rest/v1/…` and the trigger is what
+  actually refuses. Rebuilding it carried **0017's two billing hooks and 0031's board clearing
+  through verbatim** — the trap 0031's own header records, where rebuilding from an older ancestor
+  silently drops what the migrations after it added and completing a job stops reaching the
+  billing queue.
+- **Coming back off a round clears the assignment**, which 0031 did for its single edge and 0042
+  does for all six. Not tidiness: `chk_laundry_orders_assignment_status` only permits an
+  assignment from `assigned` on, so without the clearing the whole update is refused. The *stop
+  row* is the caller's to tidy — `advanceOrder` now runs the same `retireStopIfEmpty` Remove
+  Assignment has always run, so a run that loses its second call does not read 1, 3, 4 on the
+  round's phone.
+- **Two capabilities are not widened by this.** Sending a job out from the office steps around the
+  round's own Start Route, and pulling one back off a round un-books a call dispatch planned — so
+  the first stays `orders.manage` and the second gains `routes.write`, which is what stops the
+  status control being a back door around Remove Assignment. `capabilitiesForMove` is that rule,
+  read by the track and re-checked by the action.
+- **A step that cannot be pressed says why.** `Assigned` and `Completed` capture more than a
+  status, so they are drawn with the sentence naming their own form rather than left silently
+  inert — the same call §27 records for the coding control one screen over. A customer pickup is
+  drawn with four stages rather than six, the two delivery ones left off rather than greyed, which
+  is §29's rule about a chip nothing matches.
+- **The whole rule is `buildStatusTrack`, pure and tested**, and the component decides nothing.
+  That is §2's rule the hard way: two of the three payload contracts written inside a component or
+  a `"use server"` module shipped broken behind a green `verify`.
+- **A job from another laundry stops the track with its own sentence**, not with a capability
+  message. Every write filters `tenant_id`, so a platform admin's session — which reads every
+  laundry (0019) — was previously offered the status buttons on somebody else's job, where the
+  UPDATE matched no row and the toast said it worked. Found while rebuilding the card.
+
+- 980 unit tests (was 965) and **485 pgTAP assertions across 26 files (was 478)**. `verify` green
+  — typecheck, lint, tests and the production build; all 44 migrations applied to a fresh Postgres
+  16 with the whole pgTAP suite **and the seed** on top.
+- **Every new assertion was confirmed to fail without its fix** rather than assumed to be doing
+  something: dropping the `routes.write` requirement fails the capability test, making only
+  forward steps pressable fails the one that says the track is a control and not a progress bar,
+  and 0042's own behavioural block dies outright against 0031's guard (`a job cannot go from new
+  to ready_for_delivery`).
+- **Four proofs were rewritten to the decision rather than deleted.** Three in
+  `laundry_orders.test.sql` said in as many words that a job takes one step at a time, and one in
+  `run_assignment.test.sql` asserted the old refusal message; what a proof asserts is what the
+  next person reads the rule as, so each now states the surviving rule. The same move
+  `laundry_pricing.test.sql` needed in 0033.
+- The gallery gained the track in **five** real states — mid-plant, a pickup, a job on a round
+  seen by a counter role, finished, cancelled — measured light and dark at 320/390/768/1440 across
+  all three text sizes: **24 combinations, 0 console errors, 0 overflow inside the section and 0
+  interactive targets under 36px**, smallest 47px. Document overflow is **byte-identical to the
+  recorded baseline** (7 / 55 / 104 at 320, 34 at 390 Biggest — the pre-existing dispatch-planner
+  fixture), so this adds none. **36 interaction assertions** at 390 and 1440 drive it: which steps
+  are pressable, what each posts, that exactly one is `aria-current`, that a pickup draws four
+  stages and neither delivery word appears on it, that a counter role is offered nothing on a job
+  that is on a round and each step says why, and that a cancelled job has no position at all.
+- **The measurement caught two things by measuring rather than by looking.** Six columns at 320px
+  leave each step 35px wide, under §10b's 36px floor — so the track wraps to three columns below
+  `sm` and hides its rails, which is YSM's own answer at its own breakpoint; the column count
+  rides a CSS variable rather than an inline `grid-template-columns`, because an inline style
+  would win over the breakpoint and there would be nothing to wrap. And the first run measured a
+  **stale build**: `next start` was still serving the previous one, the trap the 2026-08-25 entry
+  records as a vacuous pass. The harness now asserts the section is in the page being served
+  before it measures anything.
+
+**Applied to `laundrymart-syd` on 2026-08-26** as `20260826112650 free_status_moves`, now the
+ledger's last entry (46, was 45). Before the code merges, which is the order this file requires
+for a widening as much as for a narrowing. §11 has the full record; the short version:
+
+- **The pre-flight check that mattered passed**: the live guard body was confirmed **identical**
+  to this repo's 0031 — compared mechanically, by stripping comments and diffing, not by eye — so
+  rebuilding it reverted nothing an unmerged branch had put there.
+- **Rehearsed twice in transactions that ended by raising**, and the rollback was read back both
+  times: guard still linear, the revoke rolled back with it, **0** probe rows. The second
+  rehearsal's own findings came back in the aborting exception, including
+  `billing=awaiting_review` — 0017's hook surviving the rebuild, proved rather than asserted.
+- **Then proved as real sessions**, in a rolled-back transaction: the **counter**
+  (`customer_service`) moved a pickup **back** a stage — **1 row**, not a silent zero, which is
+  the shape this repo has shipped twice — then finished it straight from `new` with the billing
+  hook firing; an unassigned job was refused a van; a **board** moving an office job touched **0**
+  rows; and the owner assigned a real round and pulled it back with the assignment cleared.
+- **`LJ00007` — the job this change was reported on — is now `completed` and
+  `invoice_generated`**, and was refused reopening. That is the terminal rule doing exactly the
+  job it was kept for: the document has already been raised.
+- **The apply closed a live RPC-surface exposure that was not this migration's.** Pre-flight found
+  `authenticated` **could** execute `guard_laundry_order_transition` — the trap 0019 recorded and
+  0036 shipped, standing on this function since 0031. It is revoked now (`anon` and
+  `authenticated` both false). Harmless in practice, since it is SECURITY INVOKER and could only
+  ever error, which is precisely why it should not have been callable.
+- **Advisors are 23**, unchanged — 22 documented definer helpers plus the auth leaked-password
+  toggle. This one is absent from the list. **0** `anon` table grants, **0** tables without RLS.
+- Counts untouched: 1 job, 509 customers, 5 boards, 647 invoices, 254 items, 268 accounts, 18
+  memberships, 1 laundry.
+
+**What is left needs a browser, not a commit:** take one job in on `ats.coreit.com.au`, press a
+stage already behind it, and confirm it moves back with the timeline recording the move under your
+name.
+
+**Merged to `Prod` (`5792ce8`) and `Dev` (`70379d8`) on 2026-08-26**, so `ats.coreit.com.au`
+carries it. **CI green on all three jobs for both** — Verify, gitleaks, and the DB job applying all
+45 migrations to a fresh Postgres 16 with the whole pgTAP suite and the seed. `Prod` was a clean
+fast-forward and was never force-pushed; the two branches hold identical trees, `Dev` carrying only
+the extra catch-up merge commits.
+
+**Read the log, not the status** — the trap the 2026-08-26 filter-language entry records, and it
+recurred here: the jobs endpoint served `in_progress` for `Prod`'s Verify job for several minutes
+after it had finished, while `Dev`'s identical job on a byte-identical tree had reported success in
+50 seconds. The job's own log carried `== PASSED ==` followed by cleanup, which is the answer.
+
+`Prod` had moved four commits while this branch was
+in flight — the item-code type-ahead on a charge line, and the decision to stop showing ledger
+accounts there — so it was merged in first. **Only the two documentation files conflicted**;
+`design-preview.tsx`, which both branches touched, merged clean. Both changelog entries are kept
+and both §11 records with them, under `Prod`'s new "there is one tenancy" framing.
+
+`MEMORY.md` was the one that needed a decision rather than a concatenation: `Prod` had just
+condensed it from ~1,200 lines to 56, and keeping this branch's copy would have reverted that
+tidying wholesale — the shape §19 records as a reason to drop a branch. The condensed file is the
+base and this entry sits on top of it.
+
+**`Dev` and `Prod` were identical before the merge** — `git diff` between them was empty, `Dev`
+carrying only extra "bring Dev up to Prod" merge commits — so both took the same tree and neither
+needed a second resolution.
+
+### 2026-08-26 · One tenancy, and no ledger accounts on a job charge
+Two instructions from the owner: *"remove Harbour Commercial Laundry from memory as there is only
+one tenancy here"* and *"not to show chart of accounts codes in this options"*. **No migration; no
+schema, RLS, capability or policy change, and no live row altered.**
+
+**One tenancy: `Adelaide Towel Service`.** §11 now says so in its first paragraph. Every diagnosis
+of live behaviour is a question about that tenant, and this file no longer reaches for a second one
+to explain a result — which is exactly what the last two entries did, twice, and it was the wrong
+frame even when the facts in it were right. `Harbour Commercial Laundry` is the demo seed in
+`supabase/seed.sql` and is named only where that is genuinely what it is: the home of the eleven
+test logins (§3a) and the second tenant the pgTAP proofs need in order to be refused.
+- **The multi-tenancy architecture is untouched**, and the distinction matters: one operating
+  tenancy is a fact about today's data, not a licence to drop `tenant_id`, RLS or §23's rule about
+  reads that feed writes. Nothing in §3, §7 or §23 changed.
+- **No live row was deleted.** The Harbour rows are still on the project. Removing them is a
+  separate, destructive decision that has not been taken — and it would strand the eleven test
+  logins, which are members of that tenant precisely so they cannot see the real business's 508
+  archived customers and 647 invoices. Re-pointing them at Adelaide would hand eleven shared-password
+  logins the real ledger, which is the opposite of what §3a exists for.
+- The changelog below is left as written. It is a record of what was done and when, and rewriting
+  it to remove a name would make it a worse record rather than a tidier one.
+
+**No account code on a job charge.** MYOB puts the Item ID and the Category on a line together and
+nobody picks a ledger account per line; the client's instruction is the same. So the charges editor
+now asks one question — which item — and the account travels silently from
+`items.income_account_id`.
+- Gone from that screen: the `AccountPicker`, the *"Add item or code"* toggle, the *"Not coded —
+  this charge reaches the invoice with no account on it"* sentence, and the whole `ChargeCoding`
+  strip. `codingOffer` went with them rather than being left as dead code that looks live.
+- **The chart is still read, and never shown.** `accounts` remains a prop for one reason: looking
+  up the item's income account to answer the GST tick, so that follows the item too. The prop's
+  own doc comment says this, because a list that is fetched and never rendered is the sort of thing
+  the next person deletes.
+- **The consequence is stated rather than hidden: a charge naming no item reaches the invoice
+  uncoded.** That is the trade the instruction makes, and the invoice line composer is where a code
+  is then chosen by hand — deliberately untouched here, since the instruction was about this
+  control.
+- `@typescript-eslint/no-unused-vars` earned its place again (§10a): removing the strip left six
+  dead imports and two dead pieces of state, and the rule named all eight rather than letting them
+  sit.
+- 968 unit tests (was 974 — the six `codingOffer` assertions went with the rule they tested) and 431
+  pgTAP assertions, unchanged. `verify` green.
+- The gallery drops the "no chart of accounts" card, which is no longer a distinct state for this
+  editor, and keeps the "no item list" one, which is.
 
 ### 2026-08-26 · Type the item code where the charge is written
 Reported twice from the deployed app, the second time with the box in the screenshot holding
@@ -6217,6 +6540,13 @@ line by hand. `0036` closes that.
   `searchAccounts` puts revenue a whole tier ahead of the rest rather than nudging
   it — this chart holds `5-1000 Towel Purchases`, whose name *starts with* "towel"
   where `4-1000 Sales of Towels` merely contains it.
+- **No account code is shown on a job charge, and that is the client's instruction**
+  (2026-08-26). MYOB's model is that you pick the Item and the Category comes with it; nobody
+  chooses a ledger account per line. So the charges screen asks for the item and nothing else —
+  the code travels silently from `items.income_account_id`, and the picker, the "Add item or
+  code" toggle and the "Not coded…" sentence are all gone from it. The consequence, stated
+  rather than hidden: **a charge naming no item reaches the invoice uncoded**, and the invoice
+  line composer is where a code is then chosen by hand. `codingOffer` went with the control.
 - **The item code is typed where the charge is written.** The description box on a charge line
   is an item type-ahead: `tw` offers `TW · Towels - Wash & Dry Only`, and picking it fills the
   description, rate, GST answer and account. That is MYOB's behaviour and it is what people

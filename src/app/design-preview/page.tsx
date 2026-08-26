@@ -16,7 +16,7 @@ import { CustomerEssentials, FormDisclosure } from "@/app/(app)/customers/custom
 import { EXCEPTION_REASONS } from "@/app/(app)/jobs/exception-reasons";
 import { navigationFor, type NavItem } from "@/lib/nav";
 import {
-  ORDER_STATUSES, isOverdue, summariseItems,
+  ORDER_STATUSES, buildStatusTrack, isOverdue, summariseItems,
 } from "@/lib/domain/laundry-orders";
 import { UNASSIGNED } from "@/app/(app)/routes/planner/plan";
 import { DateNav } from "@/app/(app)/my-runs/date-nav";
@@ -31,6 +31,7 @@ import {
   InvoiceSelection, type SelectableInvoice,
 } from "@/app/(app)/invoices/invoice-selection";
 import { PriceTable } from "@/app/(app)/invoices/prices/price-table";
+import { StatusTrack } from "@/app/(app)/orders/[id]/status-track";
 import {
   defaultPriceList, priceListFor, type LaundryPriceRow,
 } from "@/lib/domain/laundry-billing";
@@ -1098,33 +1099,24 @@ export default function DesignPreviewPage() {
               />
             </Card>
 
-            {/* The charge lines, now coded where they are made. The row states
-                worth looking at are all three at once: one carrying an item and
-                its account, one uncoded and saying so, and one added by hand —
-                because "is this coded?" has to be answerable without a click,
-                and an uncoded charge is the one that reaches the invoice needing
-                to be re-keyed. */}
+            {/* The charge lines, named from the item master. Typing a code into
+                the description finds the item; the item field under each row is
+                the same choice made deliberately. **No account code is shown**:
+                it travels from the item, the way MYOB's Category follows its
+                Item ID, so it is never a question asked here. */}
             <div id="job-charges-preview" className="space-y-6">
             <Card title="A job's charges"
-                  description="Editable right up until approval, and frozen the moment it is given. Each line can name an item and an account, so the invoice needs neither again.">
+                  description="Editable right up until approval, and frozen the moment it is given. Type an item code in the description to name the line — its rate, GST answer and account come with it.">
               <JobChargesEditor orderId="preview" initial={PREVIEW_CHARGES}
                                 items={PREVIEW_LINE_ITEMS} accounts={PREVIEW_CHART}
                                 action={async () => { "use server"; }} />
             </Card>
 
-            <Card title="A job's charges · no chart of accounts"
-                  description="A laundry that has not imported one. Nothing is blocked — the strip offers the item alone and says why there is no code.">
-              <JobChargesEditor orderId="preview-nochart" initial={PREVIEW_CHARGES}
-                                items={PREVIEW_LINE_ITEMS} accounts={[]}
-                                action={async () => { "use server"; }} />
-            </Card>
-
-            {/* The mirror image, and the state the real laundry was in until its
-                item master arrived: a full chart and nothing to pick from. The
-                control has to stop saying "item" here for the same reason it
-                stops saying "code" above. */}
+            {/* A laundry whose item master has not arrived. The description is
+                a plain box, because there is nothing to suggest — no dead
+                type-ahead, and nothing said about codes either way. */}
             <Card title="A job's charges · no item list"
-                  description="A chart of accounts and no items yet. The charge is coded by its account code, and the control offers only that.">
+                  description="No items on file yet. The description is plain text and the charge is priced by hand.">
               <JobChargesEditor orderId="preview-noitems" initial={PREVIEW_CHARGES}
                                 items={[]} accounts={PREVIEW_CHART}
                                 action={async () => { "use server"; }} />
@@ -1415,6 +1407,70 @@ export default function DesignPreviewPage() {
                 period={resolvePeriod(
                   { period: "custom", from: "2026-08-03", to: "2026-08-19" }, "2026-08-26", "all")}
                 presets={ACTIVITY_PERIOD_PRESETS} today="2026-08-26" label="Completed in"
+              />
+            </Card>
+          </section>
+
+          {/* The job status track — the whole reason `/orders/:id` is worth
+              looking at from a build box. Every state below is built by the
+              real `buildStatusTrack` against a different capability set, so
+              what is drawn here is what the screen will draw. */}
+          <section id="status-track-preview" className="space-y-4 border-t pt-8">
+            <PageHeader
+              title="Where this job is up to"
+              description="A job's stages, and the way to move between them — including backwards."
+            />
+
+            <Card title="A delivery job, mid-plant"
+                  description="Two stages behind it, both pressable: that is what makes it a control and not a progress bar. Assigned and Completed are drawn and explained rather than left inert.">
+              <StatusTrack
+                steps={buildStatusTrack(
+                  { status: "ready_for_delivery", deliveryRequired: true }, () => true,
+                )}
+                orderId="preview" action={async () => { "use server"; }}
+              />
+            </Card>
+
+            <Card title="A customer pickup"
+                  description="Four stages, not six. A step that can never apply is left off rather than drawn dead — the rule §29 already settles for a filter chip nothing matches.">
+              <StatusTrack
+                steps={buildStatusTrack(
+                  { status: "in_progress", deliveryRequired: false }, () => true,
+                )}
+                orderId="preview" action={async () => { "use server"; }}
+              />
+            </Card>
+
+            <Card title="On a round, seen by the counter"
+                  description="Holds orders.status and nothing else, so the send-out override and the way back off the round are both drawn with a reason instead of being pressable."
+            >
+              <StatusTrack
+                steps={buildStatusTrack(
+                  { status: "assigned", deliveryRequired: true },
+                  (capability) => capability === "orders.status",
+                )}
+                orderId="preview" action={async () => { "use server"; }}
+              />
+            </Card>
+
+            <Card title="Finished"
+                  description="Terminal, so the whole track is history and nothing on it can be pressed.">
+              <StatusTrack
+                steps={buildStatusTrack(
+                  { status: "completed", deliveryRequired: true }, () => true,
+                )}
+                orderId="preview" action={async () => { "use server"; }}
+              />
+            </Card>
+
+            <Card title="Cancelled"
+                  description="Not a stage of the work, so the job has no position on the track at all. The banner above it on the real page is what says what happened."
+            >
+              <StatusTrack
+                steps={buildStatusTrack(
+                  { status: "cancelled", deliveryRequired: true }, () => true,
+                )}
+                orderId="preview" action={async () => { "use server"; }}
               />
             </Card>
           </section>
