@@ -495,7 +495,8 @@ asked "did the production deploy go through?" there was no answer to read anywhe
 2026-08-26 merge record claimed one had completed without saying how that was established. Written
 explicitly as `false` rather than by deleting the key, so the file says the quiet was decided and
 then undone rather than never configured. The cost is the thing it was presumably set for: Vercel
-comments on pull requests again.
+comments on pull requests again. **Observed working the same day** — the Vercel status appears on
+`cc7da9f`, so this is a checked fact rather than a claim about what the setting ought to do.
 
 **The Vercel build command is `bash scripts/verify.sh || next build`, so a failing gate does not
 stop a deploy** — it falls through to a plain build and ships. That is deliberate (a deployment is
@@ -2388,6 +2389,31 @@ invoice goes, because this app has no counter-cash concept.
     which `job_charge_snapshots` already holds. Both embeds are unambiguous (one FK per hop),
     checked rather than assumed — this repo has shipped an ambiguous embed that was
     compile-clean and dead in production.
+- **A line amount sent to Xero already includes GST, and `LineAmountTypes` says so**
+  (2026-08-26). It said `"Exclusive"` from the day the payload was written, which was right while
+  `recalculate_invoice` added GST on top of the lines — and wrong from the moment
+  `0043_myob_invoice_lines` made the total *inclusive*. Xero was being asked to add 10% to a
+  figure that already carried it: a $72.70 line is $72.70 on our invoice and would have been
+  **$79.97** in the customer's books.
+  - **The invariant, not the string, is what is pinned.** `payloadTotal()` models *Xero's* sum —
+    it reads `LineAmountTypes` and adds tax under `Exclusive` — so it changes answer when the
+    basis changes. A helper that summed the lines regardless would agree with itself while Xero
+    billed 10% more, which is exactly the shape of the original defect. All three assertions were
+    confirmed to fail with the string flipped back.
+  - **Nothing was mis-posted.** This deployment has no `XERO_CLIENT_ID`, holds **0**
+    `xero_connections` rows and has never pushed an invoice, so the window closed before it opened.
+- **Two gaps in the same payload are known and deliberately still open**, because both need a
+  decision this session cannot make and neither can be tried against a real Xero from here:
+  - **Freight is not sent at all.** `invoices.freight_amount`/`freight_tax_code` (0043) are not in
+    `PayloadInvoice`, so an invoice carrying freight would push short by that amount. Inert today —
+    nothing in `src/` writes either column and no screen offers them — and adding it means choosing
+    a description and an account code for a line Xero has no dedicated field for.
+  - **Xero recomputes each line as `Quantity × UnitAmount`, and we sum instead.**
+    `consolidateChargeLines` deliberately sums the frozen charge amounts rather than recomputing,
+    so the invoice equals its audit trail to the cent; a merged line's stored amount can therefore
+    sit a cent from its own quantity times its own unit price. Closing it means sending
+    `LineAmount` explicitly, which Xero validates against the other two fields — worth doing on
+    the first real connection, not blind.
 - `summariseXeroError` in `lib/xero/errors.ts` is shared by all three pushes. It was a private
   copy in two of them and the void path would have made three, at which point they drift and the
   least-used one stops parsing the shape Xero actually sends.
@@ -2531,11 +2557,19 @@ a repair to this one.
   restoring the defect fails 7, grossing up on a GST-free line fails 3, and guessing that an
   unknown basis means exclusive fails 4 — including a pre-existing one about a zero list price.
 
-**The Xero half of this is untouched and still open.** `buildInvoicePayload` sends
-`LineAmountTypes: "Exclusive"` with a `unit_price` the database treats as inclusive, so Xero
-would add 10% on top of a figure that already contains it. Latent — no `xero_connections` row,
-nothing ever pushed — and genuinely a different question: `LineAmountTypes` is one field for the
-whole invoice, so a mixed-basis invoice cannot be expressed by flipping it. See the entry below.
+**The Xero half was closed independently on `Prod` while this was in flight, and the two agree.**
+That session flipped `buildInvoicePayload` to `LineAmountTypes: "Inclusive"`, so Xero extracts the
+tax from a line amount instead of adding to it — the entry below has it. **Its reasoning is what
+justifies this one**, and is worth reading beside it: `recalculate_invoice` totals `invoice_lines`
+**unconditionally inclusive**, regardless of any item's basis, so a *stored* invoice has one basis
+and never a mixture. `sell_price_basis` therefore describes how an item's **list price** is read
+at the moment a line is composed — which is exactly where this change converts it. Between them
+the model is consistent end to end: an exclusive list price is grossed up as it becomes a line,
+every stored line is inclusive, the totals extract the tax, and Xero is told so.
+
+This also retires a caution both entries first recorded — that a per-*item* basis could not be
+expressed through Xero's per-*document* field. It could, because the per-item basis never reaches
+a stored line.
 
 **Two smaller things stated rather than fixed.** An `optionalText` or `optionalUuid` field
 **cannot be cleared once set** anywhere in this app — clearing posts `""`, which those helpers
@@ -2546,7 +2580,7 @@ it behave differently on the same card. And `MYOB_Items_Register.xlsx` is not in
 container, so the fifteen column names above are the request's mapping rather than one read off
 the file — which is exactly why no importer was written.
 
-### 2026-08-26 · 0043 comes into the repo, and the Xero basis no longer matches it
+### 2026-08-26 · 0043 comes into the repo, and the Xero basis follows it
 The owner's instruction, after the merge record noted the hosted project carrying a migration
 this repository did not have. **No `src/` change; one migration file added, reconstructed rather
 than authored.**
@@ -2564,7 +2598,7 @@ customer is billed on the other is a defect shape this file already records more
 - **It changes nothing about production**, which has had it since 11:52 on 2026-08-26. What it
   changes is CI's database, which now matches.
 - **46 migrations, 485 pgTAP assertions, 0 failing, 0 plan mismatches** on a fresh Postgres 16
-  with the seed on top.
+  with the seed on top. **994 unit tests** (was 991 — the three that pin the Xero basis).
 
 **The suite passing over it is a vacuous pass, and saying so is the point.** **Nothing in
 `supabase/tests/` calls `recalculate_invoice`** — the only two mentions of invoice totals insert
@@ -2574,18 +2608,28 @@ taxable line returns subtotal 72.70, tax **6.61**, total 72.70; a line inserted
 `taxable = true, tax_code = 'FRE'` reads back **`taxable = false`**; and $11.00 of GST freight on
 top gives subtotal 93.70, tax 7.61, total 93.70.
 
-**A real inconsistency fell out of reading it, and it is reported rather than fixed.**
-`buildInvoicePayload` sends `LineAmountTypes: "Exclusive"` with `UnitAmount: line.unit_price`
-(`src/lib/xero/invoice-payload.ts:210`) — so Xero is told to add 10% **on top of** the very
-number the database now treats as already including it. A $72.70 line is $72.70 here and $79.97
-in Xero.
-- **Latent, not live:** this deployment has no `XERO_CLIENT_ID`, holds **0** `xero_connections`
-  rows, and has never pushed an invoice, so nothing has been mis-posted.
-- **Deliberately not fixed here**, because the one-word answer is probably not the right one.
-  `items.sell_price_basis` exists precisely so the basis can differ per item, while Xero's
-  `LineAmountTypes` is a property of the whole invoice — so a mixed-basis invoice cannot be
-  expressed by flipping that string, and guessing would trade a visible inconsistency for an
-  invisible one. It belongs with whoever designed the inclusive-price model.
+**A real inconsistency fell out of reading it, and it is now fixed** (same day, on the owner's
+instruction). `buildInvoicePayload` sent `LineAmountTypes: "Exclusive"` with
+`UnitAmount: line.unit_price` — so Xero was told to add 10% **on top of** the very number the
+database now treats as already including it. A $72.70 line is $72.70 here and would have been
+$79.97 in Xero.
+- **Latent throughout:** this deployment has no `XERO_CLIENT_ID`, holds **0** `xero_connections`
+  rows, and has never pushed an invoice, so nothing was ever mis-posted.
+- **`"Inclusive"` is right, and the reason it is right is checkable rather than argued.** Our
+  `invoices.total` *is* the sum of the line amounts (0043 takes the tax out of that sum rather
+  than adding to it), and under `Inclusive` Xero totals its lines the same way — under
+  `Exclusive` it is that sum plus tax, a different document. `payloadTotal()` states that as a
+  function and **models Xero's basis**, so it changes answer if the string changes; all three new
+  assertions were proved to fail with it flipped back.
+- **The caution recorded here first — that `items.sell_price_basis` makes the basis per-item
+  while Xero's setting is per-invoice — turned out not to apply**, and saying so is the point.
+  That column describes how an *item's list price* is to be read when a line is composed;
+  `recalculate_invoice` totals `invoice_lines` **unconditionally inclusive** regardless of it, so
+  a stored invoice has one basis and not a mixture. The right check was the arithmetic of the
+  document, not the vocabulary of the column.
+- **Two gaps in the same payload stay open and are recorded in §20**: freight is not sent at all,
+  and Xero recomputes `Quantity × UnitAmount` where we deliberately sum frozen amounts. Both are
+  inert today and both want the first real Xero connection rather than a blind guess.
 
 ### 2026-08-26 · A deploy says so on the commit that caused it
 `vercel.json` carried `"github": { "silent": true }`. **No migration, no schema change, nothing
@@ -2605,7 +2649,9 @@ Recorded here with its provenance rather than as a bare fact, because the proven
 point of the entry: this is a person reading a dashboard — not a commit status, not a check, and
 not anything a session like this one could re-derive. **It should also be the last confirmation
 that has to arrive that way.** With `silent` off, the next production deploy says so on the commit
-that caused it, where the question can be answered by looking rather than by asking.
+that caused it, where the question can be answered by looking rather than by asking — **and that
+half is confirmed too**: the Vercel status is on `cc7da9f`, the commit this entry was written on.
+So the setting does what it is here to do, and the dashboard is no longer the only place to look.
 
 - **Written as `false` rather than by deleting the key.** Removing it restores the same default,
   but leaves the file silent about a decision that was made twice — once to quieten Vercel and once
@@ -2613,12 +2659,20 @@ that caused it, where the question can be answered by looking rather than by ask
 - **The cost is what it was presumably set for**: Vercel will comment on pull requests again. That
   is the trade, and it is the owner's call, which is why it changed on being asked rather than
   being proposed as a tidy-up.
-- **This does not, on its own, let a session like this one check a deploy.** Two other things
-  blocked that and both remain: the raw GitHub API answers *"GitHub access is not enabled for this
-  session"* so the deployments endpoint is unreachable, and `ats.coreit.com.au` is refused by the
-  egress policy (`connect_rejected … 403 to CONNECT`, recorded by the proxy's own status endpoint).
-  What changes is that a **person** looking at the commit on GitHub can now see the deploy, which
-  is what was actually asked for.
+- **This does not, on its own, let a session like this one check a deploy**, and the routes were
+  walked rather than assumed so the next one need not repeat them. Every `api.github.com` path —
+  `commits/:sha/status`, `check-runs`, `deployments` — answers *"GitHub access is not enabled for
+  this session. An org admin must connect the Claude GitHub App for this organization."*, which is
+  an **authorization gap, not an egress block**, and a different obstacle from `ats.coreit.com.au`
+  being refused by the network policy. `github.com/…/deployments` is refused separately, by the
+  session's repo scoping. No GitHub MCP tool lists check runs or statuses for a ref;
+  `get_check_run` needs an id that only arrives by webhook.
+- **The one route that does return something is a false-negative trap, and it is worth naming.**
+  `github.com/…/commit/:sha` fetches `200` — the repo is public — and carries **no Vercel status**,
+  which reads as "Vercel posted nothing". It is not: that page carries **no CI check either**, on a
+  commit whose three jobs are verifiably green through the Actions API. The checks region is loaded
+  client-side, so absence there is evidence of nothing. Check the control before reporting the
+  absence.
 
 **A second thing came out of looking and is now written down rather than left in the file to be
 discovered.** The build command is `bash scripts/verify.sh || next build`: if the gate fails,

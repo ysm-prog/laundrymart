@@ -60,10 +60,14 @@ exclusive billed $100/$9.09 where the item says $110/$10.
 - Hint wording changed with it: "GST **has been** added to the item's price". Two tests pinning
   the old string were rewritten to the decision.
 
-**Still NOT fixed, and a different question:** `buildInvoicePayload` sends
-`LineAmountTypes: "Exclusive"` with an inclusive `unit_price`, so Xero would add 10% on top.
-Latent (nothing ever pushed). Per-*document* field vs per-*item* basis — cannot be fixed by
-flipping the string.
+**The Xero half is FIXED too**, independently on `Prod` while this was in flight —
+`buildInvoicePayload` now sends `LineAmountTypes: "Inclusive"`. **The two agree, and their
+reasoning is the same:** `recalculate_invoice` totals `invoice_lines` unconditionally inclusive
+regardless of any item's basis, so a *stored* line has one basis and never a mixture, and
+`sell_price_basis` only ever governs **composition** — which is where this change converts it.
+End to end: exclusive list price grossed up into the line, stored line inclusive, totals extract
+the tax, Xero told so. The old caution that a per-item basis could not go through a per-document
+field is retired: the per-item basis never reaches a stored line.
 
 **Also stated rather than fixed:** an `optionalText`/`optionalUuid` field cannot be *cleared*
 once set anywhere in this app (`""` → `undefined` → dropped by `JSON.stringify`). 0044's new
@@ -101,11 +105,18 @@ migration this repo lacked. **No `src/` change; one migration file, reconstructe
 - **The pgTAP pass over it is vacuous — nothing in `supabase/tests/` calls
   `recalculate_invoice`.** Proved by probe instead: $72.70 → 72.70 / **6.61** / 72.70;
   `tax_code='FRE'` forces `taxable=false`; freight totals right.
-- **Found and NOT fixed:** `buildInvoicePayload` sends `LineAmountTypes: "Exclusive"` with the
-  raw `unit_price`, so Xero would add 10% on top of a GST-inclusive figure — $72.70 here, $79.97
-  there. Latent (no Xero connection, nothing ever pushed). Not fixed because
-  `items.sell_price_basis` is per-item while Xero's setting is per-invoice, so flipping the
-  string is probably the wrong answer. Belongs with whoever designed the inclusive model.
+- **Found and then fixed (same day):** `buildInvoicePayload` sent `LineAmountTypes: "Exclusive"`
+  with the raw `unit_price`, so Xero would have added 10% on top of a GST-inclusive figure —
+  $72.70 here, $79.97 there. Now `"Inclusive"`. Latent throughout: no Xero connection, nothing
+  ever pushed.
+  - The earlier caution (`items.sell_price_basis` is per-item, so the basis might be mixed) **did
+    not apply**: that column is about reading an item's *list price*, while `recalculate_invoice`
+    totals `invoice_lines` unconditionally inclusive. One basis per document.
+  - `payloadTotal()` models **Xero's** arithmetic including the basis, so it changes answer if the
+    string is flipped — all three assertions proved to fail without the fix.
+  - **Still open, in §20:** freight is not sent at all (`invoices.freight_amount` is not in the
+    payload), and Xero recomputes `Quantity × UnitAmount` where we deliberately sum frozen
+    amounts, so a merged line can differ by a cent. Both inert; both want a real Xero connection.
 
 
 ## Previously: a job never becomes an invoice — it joins a draft
@@ -252,6 +263,12 @@ telling it whether the text it replaces was a search or a sentence.
   gate; read it, not the deploy. `github.silent` is `false` since 2026-08-26, so the deploy now
   reports itself on the commit — but a session like this still cannot read it: the raw GitHub API
   answers "GitHub access is not enabled for this session", and `ats.coreit.com.au` is refused by
-  the egress policy. Checking a deploy from here needs the Vercel dashboard or a `VERCEL_TOKEN`
-  plus `api.vercel.com` allowed — **so ask the owner and record the answer with its provenance**,
-  which is how the status-track release (`5792ce8`) was confirmed live on 2026-08-26.
+  the egress policy. **The GitHub half is an authorization gap, not an egress block** — every
+  `api.github.com` path answers *"GitHub access is not enabled for this session. An org admin must
+  connect the Claude GitHub App"* — so connecting that App is what would let a session here read a
+  deploy. Until then, ask the owner and record the answer with its provenance, which is how
+  `5792ce8` was confirmed live on 2026-08-26.
+- **`github.silent` is `false` and it works** — the Vercel status is on `cc7da9f`, checked. But do
+  not conclude it from `github.com/…/commit/:sha`: that page fetches 200 and carries **no** check
+  data at all, not even CI's, so an absent status there means nothing. Check a known-green control
+  before reporting an absence.

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   resolveAccountCode,
-  buildContact, buildInvoicePayload, canPushToXero,
+  buildContact, buildInvoicePayload, canPushToXero, payloadTotal,
   TAX_TYPE_EXEMPT, TAX_TYPE_TAXABLE,
 } from "@/lib/xero/invoice-payload";
 
@@ -82,6 +82,43 @@ describe("buildInvoicePayload", () => {
     expect(payload.InvoiceNumber).toBe("INV00042");
     expect(payload.Date).toBe("2026-08-01");
     expect(payload.DueDate).toBe("2026-08-31");
+  });
+
+  it("tells Xero the line amounts already include GST", () => {
+    // The defect this pins: it said "Exclusive" while `recalculate_invoice`
+    // computed inclusive totals (0043), so Xero was asked to add 10% on top of a
+    // figure that already carried it — a $72.70 line billed here as $72.70 and
+    // recorded there as $79.97.
+    const payload = buildInvoicePayload({ invoice: INVOICE, lines, customer: CUSTOMER });
+    expect(payload.LineAmountTypes).toBe("Inclusive");
+  });
+
+  it("comes to the same total Xero will, on the same arithmetic our invoice uses", () => {
+    // The invariant behind the string above, and the reason it is a function
+    // rather than a comment. Since 0043 our `invoices.total` is the plain sum of
+    // the line amounts — the GST is taken *out* of that sum, never added to it —
+    // and under `Inclusive` Xero totals its lines the same way. Under
+    // `Exclusive` it would be that sum plus tax, which is a different document.
+    const payload = buildInvoicePayload({ invoice: INVOICE, lines, customer: CUSTOMER });
+    // 120 × 1.20 = 144.00 taxable, plus an 8.50 exempt levy.
+    expect(payloadTotal(payload)).toBe(152.5);
+
+    // And the GST is inside that, not on top: 144.00 inclusive holds 13.09.
+    const gstInside = Math.round(144 * (0.1 / 1.1) * 100) / 100;
+    expect(gstInside).toBe(13.09);
+    expect(payloadTotal(payload)).toBe(152.5);
+  });
+
+  it("matches the migration's own worked example", () => {
+    // 0043 asserts that $72.70 GST-inclusive holds $6.61 of tax. The payload has
+    // to describe an invoice of $72.70, not one of $79.97.
+    const payload = buildInvoicePayload({
+      invoice: INVOICE,
+      lines: [{ description: "Towels", quantity: 1, unit_price: 72.7, taxable: true }],
+      customer: CUSTOMER,
+    });
+    expect(payloadTotal(payload)).toBe(72.7);
+    expect(Math.round(72.7 * (0.1 / 1.1) * 100) / 100).toBe(6.61);
   });
 
   it("carries GST per line, from the line's own taxable flag", () => {
