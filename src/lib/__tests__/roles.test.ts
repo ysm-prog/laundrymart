@@ -411,4 +411,28 @@ describe("the chart of accounts (0037)", () => {
       expect(can(role, "purchases.read")).toBe(true);
     }
   });
+
+  it("keeps the item master to the Owner and the Office manager", () => {
+    // The client's rule: the item list is the master reference the whole
+    // application resolves through, so it is maintained by two people rather
+    // than edited wherever somebody is standing. Pinned here because the roles
+    // that lost it — branch_manager and regional_manager — derive from
+    // TENANT_ALL, so the capability would come straight back if the block were
+    // dropped, and nothing else would notice.
+    expect(rolesWith("items.write").filter((r) => r !== "platform_admin"))
+      .toEqual(["super_admin", "operations_manager"]);
+  });
+
+  it("still lets everybody who names an item read the list", () => {
+    // The other half, and the one that breaks a screen if it is got wrong: a
+    // board reads item names off its run sheet, the plant runs batches keyed on
+    // them, and the counter picks them into a job. `0040` narrows the write and
+    // deliberately leaves the read alone.
+    for (const role of ["board", "driver", "warehouse_operator", "customer_service"] as const) {
+      expect(can(role, "items.write")).toBe(false);
+    }
+    for (const role of ["warehouse_operator", "dispatcher", "finance", "sales"] as const) {
+      expect(can(role, "items.read")).toBe(true);
+    }
+  });
 });

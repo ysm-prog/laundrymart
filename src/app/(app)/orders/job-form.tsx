@@ -8,6 +8,7 @@ import {
 import {
   Building2, CalendarClock, Check, Plus, Search, Shirt, Truck,
 } from "lucide-react";
+import { ItemPicker } from "@/components/coding-pickers";
 import { CustomerEssentials, FormDisclosure } from "@/app/(app)/customers/customer-form";
 import {
   DELIVERY_WINDOWS, DELIVERY_WINDOW_LABELS, ITEM_TYPES, ITEM_TYPE_LABELS,
@@ -17,7 +18,6 @@ import {
 } from "@/lib/domain/laundry-orders";
 import { businessToday, toZonedDate } from "@/lib/domain/timezone";
 import type { LaundryOrder, LaundryOrderItem } from "@/lib/db/types";
-import { itemLabel } from "@/lib/domain/items";
 
 /**
  * Taking laundry in, on one screen.
@@ -182,10 +182,6 @@ export function JobForm({
    * The item list as the picker needs it, labelled code-first and ordered by
    * code — the order it is scanned in, since staff look for TOW001 and read down.
    */
-  const itemOptions = useMemo(
-    () => catalogue.map((entry) => ({ id: entry.id, label: itemLabel(entry) })),
-    [catalogue],
-  );
   const itemById = useMemo(() => new Map(catalogue.map((entry) => [entry.id, entry])), [catalogue]);
 
   const itemsPayload = useMemo(() => JSON.stringify(
@@ -460,44 +456,51 @@ export function JobForm({
                 </div>
 
                 <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                  {/* **The item, by code.** Staff know TOW001 and type it; the
-                      nine kinds of laundry are the fallback beneath, for a
+                  {/* **The item, by code — the same picker the invoice composer
+                      and the job's charges use.** Staff know TOW001 and type it;
+                      the nine kinds of laundry are the fallback beneath, for a
                       laundry that has not set an item list up yet and for
                       anything the list does not cover. Picking an item fills the
                       kind in from the item master, which is also what the
                       database trigger does — so the two cannot disagree however
-                      the row is written. */}
-                  <label className="space-y-1 sm:col-span-2">
-                    <span className="block text-sm font-medium text-foreground">
-                      Item
-                    </span>
-                    {itemOptions.length > 0 ? (
-                      <select
-                        className={CONTROL}
-                        value={row.itemId}
-                        onChange={(event) => {
-                          const picked = itemById.get(event.target.value);
-                          patch(row.key, {
-                            itemId: event.target.value,
-                            // An item that says which kind of laundry it is sets
-                            // it; one that does not leaves the row's own answer.
-                            ...(picked?.laundry_category
-                              ? { itemType: picked.laundry_category }
-                              : {}),
-                          });
-                        }}
-                      >
-                        <option value="">Not on the item list</option>
-                        {itemOptions.map((option) => (
-                          <option key={option.id} value={option.id}>{option.label}</option>
-                        ))}
-                      </select>
+                      the row is written.
+
+                      This was a plain `<select>` until 2026-08-26, which was
+                      fine against the six demo items and unusable the moment a
+                      real master list arrived: Adelaide's is **254 rows**, and
+                      the counter would have been scrolling a dropdown to find
+                      `TW`. It is also the answer to "one reference everywhere" —
+                      an item is now chosen the same way on every screen that
+                      names one, rather than by a dropdown here and a type-ahead
+                      there. */}
+                  <div className="sm:col-span-2">
+                    {catalogue.length > 0 ? (
+                      <ItemPicker
+                        idPrefix={`laundry-${row.key}`}
+                        purpose="laundry"
+                        items={catalogue}
+                        chosen={itemById.get(row.itemId) ?? null}
+                        onChoose={(picked) => patch(row.key, {
+                          itemId: picked.id,
+                          // An item that says which kind of laundry it is sets
+                          // it; one that does not leaves the row's own answer.
+                          ...(picked.laundry_category
+                            ? { itemType: picked.laundry_category }
+                            : {}),
+                        })}
+                        onClear={() => patch(row.key, { itemId: "" })}
+                      />
                     ) : (
-                      <p className="text-sm text-muted-foreground">
-                        No items set up yet — choose a kind of laundry beside this.
-                      </p>
+                      <label className="space-y-1">
+                        <span className="block text-sm font-medium text-foreground">
+                          Item
+                        </span>
+                        <p className="text-sm text-muted-foreground">
+                          No items set up yet — choose a kind of laundry beside this.
+                        </p>
+                      </label>
                     )}
-                  </label>
+                  </div>
 
                   <label className="space-y-1">
                     <span className="block text-sm font-medium text-foreground">

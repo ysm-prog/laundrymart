@@ -37,13 +37,42 @@ export type CodingAccount = PickableAccount;
 
 /* -------------------------------------------------------------- the pickers */
 
-export function ItemPicker({
-  items, chosen, onChoose, onClear, idPrefix = "line",
+/**
+ * The least an item must carry to be pickable here. `CodingItem` satisfies it
+ * and adds what a *coded* line needs on top.
+ *
+ * The picker is generic over this rather than fixed to `CodingItem` so the job
+ * form can hand it the job catalogue — `{id, item_code, name, description,
+ * laundry_category}` — and get its own type back from `onChoose`, instead of
+ * either widening `CodingItem` (which would make `income_account_id` optional at
+ * the two call sites that depend on it) or making the job form fetch three
+ * columns it has no use for.
+ */
+export type PickerItem = PickableItem & { sell_price?: number | string | null };
+
+export function ItemPicker<T extends PickerItem>({
+  items, chosen, onChoose, onClear, idPrefix = "line", purpose = "coding",
 }: {
-  items: readonly CodingItem[];
-  chosen: CodingItem | null;
-  onChoose: (item: CodingItem) => void;
+  items: readonly T[];
+  chosen: T | null;
+  onChoose: (item: T) => void;
   onClear: () => void;
+  /**
+   * What this picker is choosing an item *for*, which changes two things.
+   *
+   * On an invoice line or a job charge (`coding`) the item genuinely brings its
+   * price, its GST answer and its account with it, so the results show
+   * `items.sell_price` and the hint says so.
+   *
+   * On a job's laundry row (`laundry`) none of that is true: what the customer
+   * pays comes from `laundry_prices`, per customer with a tenant default, and
+   * `items.sell_price` is a list price for a *sale* line. Showing it beside a
+   * bag of towels would be a second answer to "what is this worth" — the
+   * duplication this codebase argues against everywhere — and with 252 of
+   * Adelaide's 254 items carrying no sell price, "no price set" on a laundry row
+   * would read as "this job will not be billed", which is false.
+   */
+  purpose?: "coding" | "laundry";
   /**
    * Makes this picker's ids unique on the page.
    *
@@ -67,9 +96,13 @@ export function ItemPicker({
   return (
     <TypeAhead
       id={`${idPrefix}-item`} label="Item" placeholder="Search by code or name — TOW001"
-      hint="Type the code you know. The price, the GST and the account all come with it."
+      hint={purpose === "coding"
+        ? "Type the code you know. The price, the GST and the account all come with it."
+        : "Type the code you know. The kind of laundry comes with it."}
       query={query} onQuery={setQuery}
-      empty="No item matches that. Try another code, or switch to “Something else”."
+      empty={purpose === "coding"
+        ? "No item matches that. Try another code, or switch to “Something else”."
+        : "No item matches that. Try another code, or leave it blank and pick the kind of laundry."}
       results={matches.map((match) => ({
         key: match.id,
         primary: itemLabel(match),
@@ -82,9 +115,11 @@ export function ItemPicker({
          */
         secondary: [
           match.description,
-          Number(match.sell_price ?? 0) > 0
-            ? `$${Number(match.sell_price).toFixed(2)}`
-            : "no price set",
+          purpose === "coding"
+            ? (Number(match.sell_price ?? 0) > 0
+                ? `$${Number(match.sell_price).toFixed(2)}`
+                : "no price set")
+            : null,
         ].filter(Boolean).join(" · "),
         onPick: () => { onChoose(match); setQuery(""); },
       }))}

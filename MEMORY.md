@@ -1,7 +1,71 @@
 # MEMORY — working session handoff
 > Auto-loaded each session. Canonical state is CLAUDE.md; this is the live delta.
 
-## Latest: the Jay CT test data is deleted
+## Latest: the item master is one list, named one way, changed by two people
+2026-08-26, branch `claude/invoice-item-code-selection-vlwwb4`. One migration
+(`0040_item_master_write`) — no new table, no new column, no new trigger, nothing dropped
+but the policy it replaces, no row changed. CLAUDE.md §3, §7, §25 and the newest changelog
+entry have it.
+
+The client's instruction: the list they sent is the master, it is the only item reference
+anywhere for ATS, and the Owner and the Office manager maintain it.
+
+- **The option they asked for already existed; the boundary under it did not.** `roles.ts`
+  has gated `/items` on `items.write` all along. `items` carried 0002's permissive
+  `for all … using is_member(tenant_id)`, so **nothing gated the table**.
+- **Probed as one of Adelaide's own `board` logins**, rolled back: it read all 254,
+  **renamed `TW`**, **inserted** an item and **deleted** one. Control: `laundry_prices`
+  returned 0 to the same session, so 0033's gate held and this was `items` specifically.
+- **Fourth table to need this exact replacement** (0006→0017, 0018→0033, 0021→0036). It hid
+  the same way: six demo rows until the import. **An empty table is not a proof.**
+- **SELECT stays open to every member** — a board's run sheet, the plant's batches, the
+  counter's picker all name items. Only the write moved.
+- **`items.write` → Owner + Office manager**, an `ITEM_MASTER` block subtracted from the
+  `TENANT_ALL`-derived roles. `branch_manager`/`regional_manager` held it by not being
+  mentioned.
+
+**A proof was defending the hole, for the third time here.** `main_flow_scope.test.sql`
+asserted `lives_ok` on the *plant floor inserting an item* under "the floor still runs its
+own screens". `warehouse_operator` has never held `items.write`. Rewritten to the decision,
+the same move `laundry_pricing.test.sql` needed in 0033.
+
+**One reference, one way of naming it.** A job's laundry rows used a plain `<select>` while
+the invoice and charges used the type-ahead — unusable at 254 rows. `ItemPicker` is generic
+now, so the job form passes its own catalogue type; `purpose` is the only difference, and a
+laundry row shows **no price** (the rate is `laundry_prices`; 252 of 254 have no sell price,
+so "no price set" would read as "this will not be billed"). Tab renamed "Item types" →
+"Items".
+
+**The migration's own assertion caught a defect in the migration**: `can_write_items` was
+created PUBLIC-executable. Postgres grants EXECUTE to PUBLIC as a *built-in* default and
+`alter default privileges` (0011, 0029) is applied on top of it, not instead. Revoked by
+name, the way 0036 does. Fifth instance of that trap here.
+
+- 872 unit tests, **448 pgTAP assertions**, verify green, 40 migrations + suite + seed on a
+  fresh Postgres 16. Both new proof blocks confirmed to fail without 0040.
+- Gallery: the picker in both purposes, driven in a real browser — 10 assertions clean,
+  including no duplicate ids across two pickers and a guard that the section is in the page
+  *being served*.
+
+**Applied live** as `20260826030846`, the ledger's last entry. Read back as five real
+sessions, writes rolled back: the board, the warehouse operator and the counter all still
+**read** the list and their rename touches **0 rows** with the name unchanged, insert
+refused 42501; `owner@roles` (a real super_admin, **not** a platform admin) and the office
+manager both rename 1 row and insert successfully. 4 policies on `items`, one verb each,
+**0 permissive for-all**. Advisors 22 → 23, the addition being `can_write_items`.
+
+**The rehearsal needed a second attempt and the reason is worth keeping**: the first pass
+renamed by `item_code in ('TW','TOW001')` and the Owner's rename came back 0 rows — which
+reads as a refusal and was actually *no such code in Harbour*. Every probe now renames a row
+the session has just read back, so 0 rows can only mean refused.
+
+### Next
+Still never run end to end: take a job in → code a charge → approve → generate → confirm the
+line arrives already coded.
+
+---
+
+## Previous: the Jay CT test data is deleted
 2026-08-26, at the owner's instruction. **Live data deletion only — no migration, no schema, no code
 change.** 58 rows across 11 tables, all in Adelaide, all belonging to the two duplicate `Jay CT`
 customer records: 2 customers, 2 locations, LJ00002–LJ00006, 7 items, 31 activity rows, 4 stops,

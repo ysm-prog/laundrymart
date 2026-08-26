@@ -5,7 +5,7 @@
 -- layer underneath: a warehouse operator holding a real login and talking
 -- straight to PostgREST still cannot move a job or touch an invoice.
 begin;
-select plan(27);
+select plan(28);
 
 insert into auth.users (id, email) values
   ('66666666-6666-6666-6666-666666666666','driver@example.com'),
@@ -50,6 +50,12 @@ values ('d0000000-0000-0000-0000-00000000000b','aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaa
 insert into public.invoices (id, tenant_id, customer_id, invoice_number) values
   ('e0000000-0000-0000-0000-00000000000a','aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
    'c0000000-0000-0000-0000-00000000000a','INV00001');
+
+-- One item on the master list, so "the floor can still read it" below is a
+-- statement about the policy rather than about an empty table.
+insert into public.items (id, tenant_id, sku, item_code, name) values
+  ('11110000-0000-0000-0000-0000000000f1','aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+   'BT-WHT-01','TOW001','Bath Towel');
 
 set local role authenticated;
 
@@ -109,10 +115,26 @@ select throws_ok(
 
 -- Its own work is untouched: this is a restriction on the main flow, not a
 -- demotion of the role.
-select lives_ok(
+--
+-- **This assertion used to say the floor could INSERT an item, and that was a
+-- proof defending a hole.** `roles.ts` has never given `warehouse_operator`
+-- `items.write` — it holds `items.read` — so the statement succeeded only
+-- because `items` carried 0002's permissive `for all` and nothing gated the
+-- table. It read as "the floor still runs its own screens" while actually
+-- asserting that a plant hand could rewrite the master list every price, charge
+-- and invoice line resolves through. `0040` closes that, and this is rewritten
+-- to the decision rather than satisfied — the third time this repo has had to
+-- do that, after `laundry_pricing.test.sql` in 0033.
+--
+-- What the floor's screens genuinely need from `items` is the **read**, which
+-- 0040 deliberately leaves alone.
+select is((select count(*) from public.items)::int, 1,
+          'the floor still reads the item master its screens list');
+select throws_ok(
   $$ insert into public.items (tenant_id, sku, name)
      values ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','SKU-1','Bath Towel') $$,
-  'the floor still runs its own screens');
+  '42501', null,
+  'but it cannot add to the master list, which is the Owner''s and the Office manager''s');
 
 -- ---------------------------------------------------------- the counter -----
 -- **Reversed on 2026-08-24** (0034). This asserted that the counter could not

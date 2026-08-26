@@ -29,7 +29,7 @@ export default async function ItemsPage({ searchParams }: { searchParams: Promis
     <div className="space-y-6">
       <PageHeader
         title="Items"
-        description="Every item you handle, under the code your books already use. Prices here apply unless a customer’s contract sets its own."
+        description="Your master item list, under the codes your books use. Everything else in the app names an item from here — a job’s laundry, its charges, an invoice line and every report."
       />
       <ListControls
         action="/items"
@@ -82,7 +82,8 @@ async function ItemList({ params }: { params: Search }) {
     <DataTable
       rows={data ?? []}
       rowHref={(row) => `/items/${row.id}`}
-      empty={<EmptyState title="No items yet" description="Add the linen types you handle to start pricing agreements." />}
+      empty={<EmptyState title="No items yet"
+                         description="Add the items you handle, or import them from your accounting system. Everything else in the app names an item from this list." />}
       columns={[
         {
           // The code leads the row for the same reason it leads every label:

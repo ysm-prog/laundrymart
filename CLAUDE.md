@@ -238,6 +238,18 @@ constraint and is what the People picker and both membership actions validate ag
 Roles and capabilities are declared once in `src/lib/roles.ts` and drive the nav, page guards
 and action guards. **The financial ones (`pricing.*`, `billing.*`, `invoices.approve/send/bulk`)
 are backed by RLS as well and held by no operational role — see §20.**
+**`items.write` is the Owner's and the Office manager's alone** (2026-08-26). The item
+master is the reference the whole application resolves through — a job's laundry, all
+three pricing tiers, every charge, every invoice line and every report — so the client's
+rule is that it is maintained in one place by two people. Named in an `ITEM_MASTER` block
+and *subtracted* from the roles derived from `TENANT_ALL`, the same mechanism
+`JOB_TO_INVOICE` and `RUN_SEQUENCE` use and for the same reason: `branch_manager` and
+`regional_manager` held it until then purely by not being mentioned. **`items.read` stays
+with everybody who names an item** — a board, a driver, the counter, the plant floor —
+because taking the read away would empty My Runs and the warehouse. `can_write_items()` is
+the database's copy of the same sentence (`0040`), and it is the half that binds: before
+it, `roles.ts` gated the screens and **nothing gated the table**.
+
 `ROLE_PRESETS` names three of the eleven in an owner's words — Owner
 (`super_admin`), Office (`operations_manager`), Driver — and is **presentation only**: a preset
 carries a `role`, never a capability list, so there is exactly one answer to "what can this
@@ -668,6 +680,17 @@ renders no tab strip. Tested in `src/lib/__tests__/nav.test.ts`.
   from it is where the record lives. Five self-assertions, including that the
   writer stays SECURITY INVOKER and that the trigger function is not on the RPC
   surface.
+- `0040_item_master_write` — **the item master is the Owner's and the Office
+  manager's, and the database says so.** `can_write_items()`; 0002's permissive
+  `for all` on `items` replaced by explicit SELECT (every member) +
+  INSERT/UPDATE/DELETE on the gate. **Adds no table, no column, no trigger, and
+  changes no row.** SELECT stays open deliberately — a board reads item names off
+  its run sheet, the plant runs batches keyed on them, the counter picks them into
+  a job — so what moved is who may *change* the list, the same line 0025 drew on
+  the job tables. The `for all` is dropped rather than supplemented, because its
+  USING half grants SELECT too: **the fourth time** that shape has had to be
+  replaced (0006→0017, 0018→0033, 0021→0036). Six self-assertions, one of which
+  caught a defect in this very migration — see the note under 0011.
 - `0013_notifications` — `tenants.settings jsonb` (AD-3) and the `notifications` table
   (AD-4). Beware the numbering drift: the unmerged branch
   `claude/warehouse-inventory-flow-psooyq` carries its own `0012_return_count.sql`, which
@@ -1161,8 +1184,9 @@ activity.
 Deployed on Vercel at `ats.coreit.com.au`. All migrations through `0030_member_directory`
 applied (0014 on 2026-08-13, 0015 and 0016 on 2026-08-14, 0017, 0018, 0019 and 0025 on
 2026-08-16, 0026 and 0027 on 2026-08-17, 0030 on 2026-08-18), each verified by rolled-back probe
-rather than trusted. **Every migration through `0039_job_charge_codes` is applied**, and the ledger's last entry is
-`0039_job_charge_codes` (`20260826022128`, applied 2026-08-26), behind `0038_invoice_line_account`
+rather than trusted. **Every migration through `0040_item_master_write` is applied**, and the ledger's last entry is
+`0040_item_master_write` (`20260826030846`, applied 2026-08-26), behind `0039_job_charge_codes`
+(`20260826022128`, the same day), behind `0038_invoice_line_account`
 — whose file is in `supabase/migrations/` as of the 2026-08-26 merge and is a no-op against a
 database built from this repo, since 0036 already creates the column. Before those,
 `0033_laundry_prices_read`,
@@ -1815,6 +1839,113 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-08-26 · The item master is one list, named one way, changed by two people
+The client's instruction: the list they sent is the master, it is the only item
+reference anywhere for ATS, and the Owner and the Office manager can maintain it. One
+migration (`0040`), **no new table, no new column, no new trigger, nothing dropped but
+the policy it replaces, and no row changed**. §3 and §25 hold the design.
+
+**The option they asked for already existed in the screens — and the boundary under it
+did not.** `roles.ts` has gated `/items` on `items.write` since it was written, so the
+Owner and the Office manager could always add and edit. What nothing gated was the
+**table**: `items` carried 0002's `apply_tenant_policy`, a single permissive
+`for all … using is_member(tenant_id)`.
+
+- **Probed as one of Adelaide's own `board` logins before anything was written**, in a
+  transaction that was then aborted. A delivery round holding **no** `items` capability
+  read all **254** items, **renamed** `TW` — the code that laundry bills at $0.22 — to a
+  string of its own choosing, **inserted** an item nobody had approved, and **deleted**
+  one. The control in the same probe: `laundry_prices` returned **0** to that session
+  throughout, so 0033's gate was holding and this was `items` specifically.
+- **It hid the way all three of its predecessors hid.** Until 2026-08-26 this table held
+  six demo rows and Adelaide held none. **An empty table is not a proof** — the third time
+  this file has had to write that sentence, and the fourth table to need this exact
+  replacement: 0006 on `invoices` (0017), 0018 on `laundry_prices` (0033), 0021 on the six
+  payable tables (0036).
+- **The `for all` is dropped, not supplemented**, because its USING half grants SELECT as
+  well — a narrower write policy beside it would have left the old one as a second door.
+- **SELECT stays open to every member, deliberately.** A board reads item names off its
+  run sheet, the plant runs batches keyed on them, the counter picks them into a job, and
+  the pricer resolves a rate through them. What moved is who may *change* the list.
+- **`items.write` is now the Owner's and the Office manager's**, named in an `ITEM_MASTER`
+  block and subtracted from the `TENANT_ALL`-derived roles — the mechanism `JOB_TO_INVOICE`
+  and `RUN_SEQUENCE` already use. `branch_manager` and `regional_manager` held it purely by
+  not being mentioned, which is the trap this file has now recorded four times.
+
+**A proof was defending the hole, for the third time in this repo.**
+`main_flow_scope.test.sql` asserted `lives_ok` on the plant floor **inserting an item**,
+under the heading *"the floor still runs its own screens"*. `warehouse_operator` has never
+held `items.write` — it holds `items.read` — so that statement only ever succeeded because
+the table was open. It is rewritten to the decision rather than satisfied, the same move
+`laundry_pricing.test.sql` needed in 0033: the floor still **reads** the master list, and
+its insert is now refused.
+
+**One reference, one way of naming it.** A job's laundry rows picked an item from a plain
+`<select>`; the invoice composer and a job's charges used a code-first type-ahead. Two ways
+to name the same thing, and the dropdown stopped being usable the moment a real master list
+arrived — 254 rows to scroll for `TW`. `ItemPicker` is now generic over what it is picking,
+so the job form hands it the job catalogue and gets its own type back rather than either
+widening `CodingItem` or making the form fetch three columns it has no use for.
+**`purpose` is the only difference between the two uses**, and on a laundry row it shows
+**no price**: the rate comes from `laundry_prices`, `items.sell_price` is a list price for a
+*sale* line, and with 252 of 254 items carrying none, "no price set" beside a bag of towels
+would read as "this job will not be billed".
+
+**The tab is "Items" now, not "Item types"** — that label dated from nine kinds of laundry
+and reads as a set of categories, which is not where an owner would look for `TW`. The
+search group and the page copy follow it.
+
+- **The migration's own sixth assertion caught a defect in the migration.**
+  `can_write_items` was created **PUBLIC-executable** (`=X` in its ACL), so `anon` could
+  call it at `/rest/v1/rpc/can_write_items`. Postgres grants EXECUTE on a new function to
+  PUBLIC as a *built-in* default, and `alter default privileges` — which is what 0011 and
+  0029 use — is applied **on top of** that rather than instead of it. 0036 revokes its two
+  helpers by name for exactly this reason; the pattern is copied, and the assertion is why
+  it was not missed. The fifth instance of this trap in this repo.
+- 872 unit tests (was 870) and **448 pgTAP assertions (was 439)**. `verify` green; all
+  forty migrations applied to a fresh Postgres 16 with the whole suite and the seed on top.
+  **Both new proof blocks were confirmed to fail without `0040`** rather than assumed to be
+  doing something: `item_master` dies on the missing gate, and `main_flow_scope` fails on
+  the floor's insert *landing*.
+- The gallery gained the picker in both purposes, driven in a real browser: **10
+  assertions, all clean** — no duplicate DOM ids across two pickers on one page, every
+  label pointing at a control that exists, the laundry row showing no price where the
+  coding row shows one, choosing an item, no target under 36px, no overflow at 390px and no
+  console errors. The first assertion checks the section is in the page **being served**,
+  because a stale build answering is how a measurement run passed vacuously on 2026-08-25.
+
+**Applied to `laundrymart-syd` on 2026-08-26** as `20260826030846`, now the ledger's last
+entry. Rehearsed first the way §11 requires, and the rehearsal needed a second attempt for a
+reason worth keeping: the first pass renamed by `item_code in ('TW','TOW001')`, and the
+Owner's rename came back **0 rows** — which reads as a refusal and was in fact *no such code
+in Harbour*. A refusal and an unmatched row are the same result, so every probe now renames a
+row the session has **just read back**, where 0 rows can only mean refused.
+
+- **Read back as five real sessions**, writes inside a transaction that was then aborted.
+  `board1@ats.example.com` still reads its 254 items and its rename touches **0 rows** with
+  the name unchanged (`Toilet Paper - Quilton`) and its insert refused **42501**; the
+  warehouse operator and the counter the same on Harbour's 6. `owner@roles.example.com` — a
+  real `super_admin` who is **not** a platform admin, so `has_role` is being tested rather
+  than `is_platform_admin` — renames **1 row** and its insert **LANDS**, as does the office
+  manager's. Both halves proved: the refusals are real, and the gate does not lock out the
+  two roles that should have it.
+- **`items` now carries four policies, one verb each, and 0 permissive `for all`.**
+- **Nothing moved:** 254 Adelaide items, 6 Harbour, 268 accounts, 647 invoices, 0 probe rows
+  left behind, **0** `anon`-executable functions, **0** `anon` table grants and **0** tables
+  without RLS.
+- **Advisors 22 → 23**, the one addition being `can_write_items` — the documented definer
+  shape, internally scoped to `auth.uid()` through `has_role`, and the exact counterpart of
+  `can_write_purchases` already on the list. `guard_job_charge_account` and
+  `sync_invoice_line_account` are still absent, so 0039's and 0036's revokes are holding.
+
+**Merged to `Dev` and `Prod` on 2026-08-26.** `Prod` had moved six commits while this branch
+was in flight — the record of the Jay CT deletion — so it was merged in first; only the two
+documentation files conflicted and both entries are kept. The migration went on **before** the
+merge, so the schema led the code, which for a *narrowing* is the order that matters: the gate
+was live before any screen started telling a branch manager they could no longer edit an item.
+42 migrations applied to a fresh Postgres 16 with the whole pgTAP suite on top (**448
+assertions**, none failing) and 872 unit tests green.
+
 ### 2026-08-26 · The Jay CT test data is deleted
 The owner's instruction, on the records the entry below identified as test data. **No migration; no
 schema, RLS, capability, policy or code change** — this is a live data deletion and nothing else.
@@ -5009,6 +5140,26 @@ bag, under the code the business already uses (0032). Staff type TOW001.
   carries MYOB's figure for the two that have one and **nothing invented for the rest**; the
   item picker says "no price set" rather than showing a blank, because with 255 of 257 unpriced
   that is the ordinary case and a blank reads as free.
+- **One reference, and one way of naming it** (2026-08-26). Every screen that names an
+  item now uses the same code-first type-ahead: the invoice line composer, a job's
+  charges, and — since this change — a job's laundry rows, which had picked from a plain
+  `<select>`. That was fine against six demo items and unusable the moment a real master
+  list arrived, because Adelaide's is **254 rows** and the counter would have been
+  scrolling a dropdown to find `TW`. `ItemPicker` is generic over what it is picking, so
+  the job form hands it the job catalogue and gets its own type back; `purpose` is the
+  only difference between the two uses. On a **laundry** row it shows **no price**,
+  deliberately: what a customer pays comes from `laundry_prices`, `items.sell_price` is a
+  list price for a *sale* line, and with 252 of 254 items carrying none, "no price set"
+  beside a bag of towels would read as "this job will not be billed".
+- **The list is changed by two roles, and that is enforced underneath** (`0040`). `items`
+  carried 0002's permissive `for all … using is_member(tenant_id)` until 2026-08-26, so
+  `roles.ts` gated the screens and **nothing gated the table**. Proved as one of
+  Adelaide's own `board` logins: it read all 254, **renamed** `TW`, **inserted** an item
+  and **deleted** one. Read stays open to every member; write is `can_write_items()`.
+- **The nav tab is "Items", not "Item types".** That label dated from when the screen held
+  nine kinds of laundry; it now holds the business's own master list under the codes staff
+  type, and "Item types" reads as a small set of categories — which is exactly the thing an
+  owner would not go looking in for `TW`.
 - **Categories are set on the demo laundry only, and the real one's 254 items carry none.**
   Harbour's five laundry items carry a `laundry_category`; its laundry bag does not, on purpose,
   because a container the laundry lends is not laundry a customer hands in. `Adelaide Towel
