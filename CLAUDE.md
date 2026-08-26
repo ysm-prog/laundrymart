@@ -1376,6 +1376,22 @@ the chase says *"reply if you need the invoice sent again"*, which is only true 
 sent it to.
 
 ## 11. Hosted project
+**There is one tenancy: `Adelaide Towel Service`.** The owner's instruction, 2026-08-26. It is
+the business — `ats.coreit.com.au`, its customers, its 647 invoices, its 254 items and its 268
+chart-of-accounts rows. **Every question about live data is a question about that tenant**, and
+nothing in this file should reach for a second one to explain a result.
+
+`Harbour Commercial Laundry` is the **demo seed** in `supabase/seed.sql`. It is not a laundry, not
+a customer and not a deployment target; it exists so `npm run seed:roles` has somewhere to put
+eleven test logins that cannot see the real business's records (§3a), and so the pgTAP proofs have
+a second tenant to be refused by. **Do not diagnose live behaviour against it and do not offer it
+as an answer.** Its rows are still on the project — deleting them is a separate decision that has
+not been taken, and would need the test logins rehoused first.
+
+The multi-tenancy *architecture* is unchanged and stays: `tenant_id` on every table, RLS keyed on
+`is_member()`, the admin client filtering by hand. One operating tenancy is a fact about today's
+data, not a licence to drop the boundary — §3 and §23 are untouched by this.
+
 **`0042_free_status_moves` was applied on 2026-08-26** (`20260826112650`) and is the ledger's last
 entry, 46 in all. A widening rather than a narrowing, and applied before the code merged for the
 same reason every release since 2026-08-18 records: the schema leads.
@@ -2359,6 +2375,115 @@ for a widening as much as for a narrowing. §11 has the full record; the short v
 **What is left needs a browser, not a commit:** take one job in on `ats.coreit.com.au`, press a
 stage already behind it, and confirm it moves back with the timeline recording the move under your
 name.
+
+**Merged to `Dev` and `Prod` on 2026-08-26.** `Prod` had moved four commits while this branch was
+in flight — the item-code type-ahead on a charge line, and the decision to stop showing ledger
+accounts there — so it was merged in first. **Only the two documentation files conflicted**;
+`design-preview.tsx`, which both branches touched, merged clean. Both changelog entries are kept
+and both §11 records with them, under `Prod`'s new "there is one tenancy" framing.
+
+`MEMORY.md` was the one that needed a decision rather than a concatenation: `Prod` had just
+condensed it from ~1,200 lines to 56, and keeping this branch's copy would have reverted that
+tidying wholesale — the shape §19 records as a reason to drop a branch. The condensed file is the
+base and this entry sits on top of it.
+
+**`Dev` and `Prod` were identical before the merge** — `git diff` between them was empty, `Dev`
+carrying only extra "bring Dev up to Prod" merge commits — so both took the same tree and neither
+needed a second resolution.
+
+### 2026-08-26 · One tenancy, and no ledger accounts on a job charge
+Two instructions from the owner: *"remove Harbour Commercial Laundry from memory as there is only
+one tenancy here"* and *"not to show chart of accounts codes in this options"*. **No migration; no
+schema, RLS, capability or policy change, and no live row altered.**
+
+**One tenancy: `Adelaide Towel Service`.** §11 now says so in its first paragraph. Every diagnosis
+of live behaviour is a question about that tenant, and this file no longer reaches for a second one
+to explain a result — which is exactly what the last two entries did, twice, and it was the wrong
+frame even when the facts in it were right. `Harbour Commercial Laundry` is the demo seed in
+`supabase/seed.sql` and is named only where that is genuinely what it is: the home of the eleven
+test logins (§3a) and the second tenant the pgTAP proofs need in order to be refused.
+- **The multi-tenancy architecture is untouched**, and the distinction matters: one operating
+  tenancy is a fact about today's data, not a licence to drop `tenant_id`, RLS or §23's rule about
+  reads that feed writes. Nothing in §3, §7 or §23 changed.
+- **No live row was deleted.** The Harbour rows are still on the project. Removing them is a
+  separate, destructive decision that has not been taken — and it would strand the eleven test
+  logins, which are members of that tenant precisely so they cannot see the real business's 508
+  archived customers and 647 invoices. Re-pointing them at Adelaide would hand eleven shared-password
+  logins the real ledger, which is the opposite of what §3a exists for.
+- The changelog below is left as written. It is a record of what was done and when, and rewriting
+  it to remove a name would make it a worse record rather than a tidier one.
+
+**No account code on a job charge.** MYOB puts the Item ID and the Category on a line together and
+nobody picks a ledger account per line; the client's instruction is the same. So the charges editor
+now asks one question — which item — and the account travels silently from
+`items.income_account_id`.
+- Gone from that screen: the `AccountPicker`, the *"Add item or code"* toggle, the *"Not coded —
+  this charge reaches the invoice with no account on it"* sentence, and the whole `ChargeCoding`
+  strip. `codingOffer` went with them rather than being left as dead code that looks live.
+- **The chart is still read, and never shown.** `accounts` remains a prop for one reason: looking
+  up the item's income account to answer the GST tick, so that follows the item too. The prop's
+  own doc comment says this, because a list that is fetched and never rendered is the sort of thing
+  the next person deletes.
+- **The consequence is stated rather than hidden: a charge naming no item reaches the invoice
+  uncoded.** That is the trade the instruction makes, and the invoice line composer is where a code
+  is then chosen by hand — deliberately untouched here, since the instruction was about this
+  control.
+- `@typescript-eslint/no-unused-vars` earned its place again (§10a): removing the strip left six
+  dead imports and two dead pieces of state, and the rule named all eight rather than letting them
+  sit.
+- 968 unit tests (was 974 — the six `codingOffer` assertions went with the rule they tested) and 431
+  pgTAP assertions, unchanged. `verify` green.
+- The gallery drops the "no chart of accounts" card, which is no longer a distinct state for this
+  editor, and keeps the "no item list" one, which is.
+
+### 2026-08-26 · Type the item code where the charge is written
+Reported twice from the deployed app, the second time with the box in the screenshot holding
+`tw`: *"still cant find with item codes"*. **No migration; no schema, RLS, capability or
+workflow change.**
+
+**The first fix answered the wrong question, and that is the finding.** The entry below corrected
+a control that promised codes a laundry did not hold — a real defect, and not what was being
+asked. What the owner was actually doing was typing an item code into the **Description** box and
+expecting the item, the way MYOB behaves when you type an Item ID into a line. That box was plain
+free text, and the item search sat behind a small *"Add item or code"* link at the end of the row.
+So nothing happened, and the reasonable conclusion was that the codes were missing.
+
+- **The description box finds an item.** Typing `tw` offers `TW · Towels - Wash & Dry Only`;
+  Enter or a click fills the description, the rate, the GST answer and the account.
+  `searchItems` already ranked an exact code first — what was missing was a way to reach it.
+- **Free text still wins, and the component is shaped by that.** A charge is often "Bath towels
+  — 40 collected 14 Aug", which is in no item list. Suggestions appear only while the box has
+  focus, Escape dismisses them, and nothing is chosen without a deliberate Enter or click. Once
+  the row names an item there is nothing left to suggest and the list stops appearing.
+- **The item field is drawn open on every row**, not hidden behind the strip: the item is the
+  question asked (§27), and a control nobody finds is a control that does not exist. The account
+  stays a consequence inside the collapsible strip, which is now all that strip owns.
+- **`chargePatchForItem` is the one rule for what an item fills in**, pure and tested, so the two
+  entry points cannot drift. It refuses three ways, each a way a charge could quietly go wrong:
+  a description somebody wrote is kept, a rate somebody typed is kept, and an account chosen by
+  hand beats the item's. A **zero** list price is treated as *no price* rather than as free —
+  252 of Adelaide's 254 items carry none, because they are things the laundry buys.
+- **`descriptionIsQuery` is the distinction the rule cannot infer, and the browser caught it.**
+  The first run left the description reading `tow0` — "never overwrite what somebody typed" had
+  fired on text that was a *search*. Typing a code to find an item and typing a sentence to
+  describe a charge are different acts, so the caller says which it is holding. Exactly the
+  contradiction §27 records the invoice composer needing to resolve.
+- **Field ids are unique per editor, not just per row.** A row key is unique inside one editor;
+  two editors on one page — which the gallery renders — collided, pointing a label at another
+  editor's input. The duplicate-id defect §27 already records once on this screen.
+- 974 unit tests (was 962) and 431 pgTAP assertions (unchanged — this adds no policy). `verify`
+  green. **Driven in a real browser at 390 and 1440: 38 assertions, 0 console errors, 0 overflow,
+  the box 44px** — typing a code, Escape leaving the text alone, arrow keys, Enter filling from
+  the item, the posted payload carrying `source_item_id`, and free text still accepted.
+- **Three duplicate ids remain elsewhere on the gallery and are pre-existing** (`line-item`,
+  `line-item-hint`, `description`): they come from rendering three `InvoiceLineForm` fixtures on
+  one page, and a real invoice page has one. Recorded rather than swept into this change.
+
+**The tenant answer from the entry below still stands and is not a code change.** `LJ00006` is a
+**Harbour Commercial Laundry** job — the demo tenant, 6 items, **0** accounts. `TW`, `GTW`, `HTW`,
+`BT`, `Del`, `Capes`, `GL`, `SH`, `PC`, `TC` and the other 244 are **Adelaide Towel Service**'s,
+alongside its 261 postable accounts. Typing `tw` in Harbour will still find nothing, because
+nothing there is called that. Switch laundry in the account menu.
 
 ### 2026-08-26 · The dependency backlog, decided rather than left open
 Three pull requests had been sitting open against this repo. **No migration; nothing under `src/`
@@ -6309,6 +6434,22 @@ line by hand. `0036` closes that.
   `searchAccounts` puts revenue a whole tier ahead of the rest rather than nudging
   it — this chart holds `5-1000 Towel Purchases`, whose name *starts with* "towel"
   where `4-1000 Sales of Towels` merely contains it.
+- **No account code is shown on a job charge, and that is the client's instruction**
+  (2026-08-26). MYOB's model is that you pick the Item and the Category comes with it; nobody
+  chooses a ledger account per line. So the charges screen asks for the item and nothing else —
+  the code travels silently from `items.income_account_id`, and the picker, the "Add item or
+  code" toggle and the "Not coded…" sentence are all gone from it. The consequence, stated
+  rather than hidden: **a charge naming no item reaches the invoice uncoded**, and the invoice
+  line composer is where a code is then chosen by hand. `codingOffer` went with the control.
+- **The item code is typed where the charge is written.** The description box on a charge line
+  is an item type-ahead: `tw` offers `TW · Towels - Wash & Dry Only`, and picking it fills the
+  description, rate, GST answer and account. That is MYOB's behaviour and it is what people
+  reach for — the search used to sit behind an *"Add item or code"* link, so somebody typing a
+  code into the description saw nothing and concluded the codes were missing. Free text still
+  wins: suggestions are offered, Escape dismisses them, and nothing is chosen without a
+  deliberate Enter or click. `chargePatchForItem` is the single rule for what an item fills in,
+  shared with the row's own item field so the two cannot drift, and `descriptionIsQuery` is what
+  tells it whether the text it is replacing was a search or a sentence.
 - **A control never offers a route with nothing behind it, and that rule is now testable.**
   `codingOffer` (`lib/domain/coding.ts`) takes the two counts — sellable items, postable accounts
   — and returns what the control may promise plus what to say about an uncoded charge. A laundry
