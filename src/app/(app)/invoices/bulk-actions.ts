@@ -303,6 +303,15 @@ export async function placeSelectedJobs(formData: FormData): Promise<void> {
   const summary = `${counted(placedJobs, "job")} on ${counted(placedOn.size, "draft invoice")}.`
     + `${shape} Nothing has been issued or sent.${skipped}`;
 
+  // **Any job left behind is a failure, even where forty succeeded**, which is
+  // the opposite of what Issue Selected and Send Selected do with a partial
+  // batch — and deliberate. This action exists *only* to clear jobs that already
+  // failed to place once; a job that is still in the queue after somebody
+  // pressed the button for exactly that is the one thing that must not be
+  // reported in the success tone. `approveSelectedJobs` says the same about the
+  // same outcome, a few lines up, and for the same reason: the job has left the
+  // review list either way, so a draft that was never started looks exactly like
+  // one that was.
   return reasons.length > 0
     ? fail(QUEUE, summary)
     : done(QUEUE, summary, { href: DRAFTS, label: "Open drafts" });

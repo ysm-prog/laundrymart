@@ -2175,6 +2175,11 @@ ready to bill."*, the badge says *"On a draft invoice"*, and the job page carrie
 the Approve button saying what the button does and where the invoice is actually made. The
 glossary gained **Draft invoice** and **Issue** and lost *Generate*.
 
+- **Add to Draft reports a partial batch as a failure**, where Generate Selected reported it as
+  a success with a footnote — a user-visible change, and deliberate. This verb exists only to
+  clear jobs that already failed to place once, so a job still sitting in the queue after
+  somebody pressed it is the one outcome that must not wear the success tone.
+  `approveSelectedJobs` has said the same about the same outcome since the running draft landed.
 - **`generatesAutomatically` is gone rather than left beside its replacement.** It answered the
   same question as `sweptByMonthEndRun`, had **no caller in `src/`** and only its own test, and a
   second answer to one question is the duplication this file argues against everywhere else — the

@@ -29,6 +29,8 @@ not from a job, also a draft).
   invoice INV00042 … Issue it when you are ready to bill"; badge "Invoice generated" → "**On a
   draft invoice**"; a line under Approve says what it does. Glossary gained *Draft invoice* and
   *Issue*, lost *Generate*.
+- **Add to Draft fails a partial batch** (Generate Selected did not) — deliberate: this verb only
+  ever retries jobs that already failed, so one still in the queue must not read as success.
 - `generatesAutomatically` removed — same question as `sweptByMonthEndRun`, no caller in `src/`.
   Depot stamping kept asymmetric on purpose: customer's for a periodic draft, the job's for a
   period-less one (merging the branches nearly lost that).
