@@ -65,7 +65,31 @@ line arrives already coded.
 
 ---
 
-## Previous: the item list arrives, and 254 items are live in Adelaide
+## Previous: the Jay CT test data is deleted
+2026-08-26, at the owner's instruction. **Live data deletion only — no migration, no schema, no code
+change.** 58 rows across 11 tables, all in Adelaide, all belonging to the two duplicate `Jay CT`
+customer records: 2 customers, 2 locations, LJ00002–LJ00006, 7 items, 31 activity rows, 4 stops,
+1 frozen charge, RUN00002/3/4, and `INV00001` with its line and source-job link.
+
+- **Rehearsed in a block that could not commit first**, and the real run matched it exactly. The
+  runs were **checked** for stops belonging to another customer (the block aborts if any) rather
+  than assumed empty.
+- **Two DELETE guards bypassed deliberately and re-enabled in the same transaction** —
+  `guard_job_charge_snapshots_change` (refuses a frozen charge even for `super_admin`) and
+  `guard_laundry_order_items_change`. Both back at `tgenabled = 'O'`. `session_replication_role`
+  was **not** used: it would have turned FK enforcement off too. 0 orphans afterwards.
+- **The `Test` customer (`CUST00003`, `LJ00001`) was left alone** — not asked for.
+
+**Adelaide now:** 0 active customers, 508 archived, 1 laundry job, 1 run, 646 invoices. Harbour
+untouched. **No invoice on the project carries a line any more**, so the live end-to-end evidence
+for job → price → approve → generate is gone with `INV00001`; unit tests and pgTAP still cover it.
+The next run-through will be the first against a real customer.
+
+**Two claims merged an hour earlier are now corrected in §11** — they asserted INV00001 exists and
+that Jay CT was being left in place.
+
+
+## Previously: the item list arrives, and 254 items are live in Adelaide
 2026-08-26, branch `claude/invoice-item-code-selection-vlwwb4`. **No migration** — the
 reader, the pickers and a live data import. CLAUDE.md §11, §25, §27 and the newest
 changelog entry have it.
