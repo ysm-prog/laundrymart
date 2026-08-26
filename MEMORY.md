@@ -24,28 +24,34 @@ The next run-through will be the first against a real customer.
 **Two claims merged an hour earlier are now corrected in §11** — they asserted INV00001 exists and
 that Jay CT was being left in place.
 
-## Previously: the YSM Hub filter language, on every list
-2026-08-26, branch `claude/ysm-hub-style-filters-84bgd5`. **No migration** — the ledger's last
-entry is still `0038_invoice_line_account` and `git diff` over `supabase/` is empty. 837 unit
-tests (was 806) — **843 with `Prod` merged in** — and `verify` green.
 
-- **`components/filters.tsx` + `lib/filters.ts` are the new surface**: `FilterChips`,
-  `ToggleChips`, `PeriodFilter`, `FilterSummary`, with the rules pure and tested beside them.
-  `ListControls` composes chips → fields → summary. CLAUDE.md **§29** is the design.
-- **Ten canonical period presets** in `lib/domain/dates.ts` (`resolvePeriod` is the one reader of
-  `?period=&from=&to=`). `this_fy` is the Australian financial year.
-- **Every list page reviewed.** Filters added where there were none — the billing queue, Drivers,
-  Vehicles, Boards, Stock, the plant, Problems, People, Sites, Public holidays, the bell — preset
-  chips added to Collections and Deliveries, and the ten `ListControls` pages given chips, a
-  Clear and a filtered-vs-empty empty state. `/billing`'s own `period-filter.tsx` is deleted in
-  favour of the shared one.
-- **Four defects the gallery caught**, all in CLAUDE.md's entry: `cx(CONTROL, "w-auto")` has
-  never worked (→ `CONTROL_AUTO`, ten call sites were rendering full width), `ListControls`
-  hard-coded `id="q"`, two Clear links, and a `rem` `min-w` floor that scaled with the text.
+## Previously: merged to Prod and Dev — the filter language is live
+2026-08-26. **PR [#30](https://github.com/ysm-prog/laundrymart/pull/30) → `Prod` (`8510154`), PR
+[#32](https://github.com/ysm-prog/laundrymart/pull/32) → `Dev` (`2bcd4fe`)**, identical trees, CI
+green on all three jobs for both (verify, gitleaks, and the DB job: 40 migrations, 431 pgTAP
+assertions and the seed against a fresh Postgres 16). 843 unit tests.
 
-**Not opened with real rows.** No Supabase credentials here. First thing to check on
-`ats.coreit.com.au`: Money › Awaiting invoice → press "Not priced yet" and confirm the chip's
-count matches the rows under it.
+- **Nothing to apply to Supabase.** `git diff` over `supabase/` is empty and the ledger's last
+  entry is still `0038_invoice_line_account`.
+- **What landed:** the YSM Hub filter language on every list — `components/filters.tsx`
+  (`FilterChips`, `ToggleChips`, `PeriodFilter`, `FilterSummary`) with the rules pure and tested in
+  `lib/filters.ts`, ten canonical period presets in `lib/domain/dates.ts` behind `resolvePeriod`,
+  and `ListControls` composing chips → fields → summary. CLAUDE.md **§29** is the design.
+- **Eleven screens had no filter at all** before this, the billing queue among them. Four defects
+  the gallery caught are in CLAUDE.md's entry — the biggest being that **`cx(CONTROL, "w-auto")`
+  has never worked** (ten call sites rendering full width; `CONTROL_AUTO` now).
+
+**Two process faults on the way out, neither in the code.** The first merge commit recorded **only
+one parent** — a `git checkout` mid-merge cleared `MERGE_HEAD`, so the commit had the right tree
+and no link to `Prod`; GitHub marked the PR conflicted, and **a conflicted PR has no merge ref, so
+CI never ran on it**. Redone from the pre-merge commit, tree proved byte-identical. Second:
+GitHub's **check-runs API served a stale `in_progress`** for a job that had finished four minutes
+earlier — read the run's jobs endpoint, not the check, before calling a job stuck.
+
+**Still open and needing a login, not a commit:** open Money › Awaiting invoice on
+`ats.coreit.com.au`, press **"Not priced yet"**, and confirm the chip's count matches the rows
+under it. Also still open from before: take a real run through Adjust Run → Save & Lock Run as
+`owner@roles.example.com`, and the Xero coding ladder has never met real data.
 
 ## Previously: Adjust Run merged, and verified against the live database
 2026-08-26. **`Prod` = `f8eb138` (PR #26), `Dev` = `6c1dd4c` (PR #27)**, identical trees, CI green on
