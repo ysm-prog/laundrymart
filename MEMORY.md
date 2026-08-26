@@ -1,7 +1,50 @@
 # MEMORY — working session handoff
 > Auto-loaded each session. Canonical state is CLAUDE.md; this is the live delta.
 
-## Latest: the item master is one list, named one way, changed by two people
+## Latest: what kind of laundry each item is
+2026-08-26, branch `claude/invoice-item-code-selection-vlwwb4`. **No migration** — one pure
+rule (`src/lib/domain/laundry-category.ts`), its tests, and a live data write. CLAUDE.md §25
+and the newest changelog entry have it.
+
+**125 of Adelaide's 254 items now carry a `laundry_category`; the other 129 are deliberately
+null** — chemicals, gloves, cups, machine parts, washroom paper and fees, all things the
+laundry buys.
+
+- **A rule, not a one-off UPDATE**, because `laundry_category` is what
+  `sync_laundry_item_type` derives `item_type` from, and `item_type` is what all three pricing
+  tiers and every report match on. This answer decides what a customer is charged.
+- **It refuses to guess.** A wrong category prices work at another kind's rate with nothing on
+  screen to explain it; a missing one leaves the item exactly as it was.
+- Towel family is one bucket (`towels`) — face washers, tea towels, glass cloths, salon and gym
+  towels — matching how Harbour's tea towel was already filed.
+
+**Five traps, all pinned by tests confirmed to fail without their guard:** a bath sheet is a
+bath towel not bedding; their `4-` "hand towels" are washroom paper; `Toilet Paper 2Ply 400
+Sheet` matches the generic sheet rule; *Lost Towels* / *New Towels — dozen* name linen while
+being a charge and a sale; and a container bag is not laundry while **`Towels Per Bag` and
+`Sleeping Bags` are** — the last found by dry-running the 254 rows, because a blanket `bag`
+exclusion had silently swallowed four real items. **A false exclusion is the quiet way this
+goes wrong**: the row just stays uncategorised.
+
+**Three left for a person, named not skipped:** `29927` and `50761`, truncated by MYOB at 30
+characters before the word that would place them (their siblings are tea towels), and `18662
+Terry Nappies`, which is laundry and fits none of the nine kinds.
+
+- 885 unit tests (was 872), 448 pgTAP assertions, verify green.
+- **Applied live**, rehearsed first, behind six assertions. Read back as `board1@ats.example.com`:
+  254 items, 125 categorised, every spot-check code correct. **No job was re-categorised** —
+  `sync_laundry_item_type` fires on `laundry_order_items`, not `items`, so the 5 existing job item
+  rows still read `towels`.
+
+### Next
+1. Not merged to `Dev`/`Prod` yet.
+2. Adelaide still holds **0** `laundry_prices` — the categories are in place, the rates are not.
+3. Still never run end to end: take a job in → code a charge → approve → generate → confirm the
+   line arrives already coded.
+
+---
+
+## Previous: the item master is one list, named one way, changed by two people
 2026-08-26, branch `claude/invoice-item-code-selection-vlwwb4`. One migration
 (`0040_item_master_write`) — no new table, no new column, no new trigger, nothing dropped
 but the policy it replaces, no row changed. CLAUDE.md §3, §7, §25 and the newest changelog
