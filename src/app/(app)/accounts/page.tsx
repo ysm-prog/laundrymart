@@ -8,6 +8,7 @@ import { can } from "@/lib/roles";
 import { Card, DataTable, EmptyState, Eyebrow, PageHeader, SkeletonRows } from "@/components/ui";
 import { Field, Input, Select, SubmitButton } from "@/components/form";
 import { ListControls } from "@/components/list-controls";
+import { FilterChips } from "@/components/filters";
 import { createAccount } from "./actions";
 import { ACCOUNT_TYPES } from "./account-types";
 
@@ -31,6 +32,23 @@ export default async function AccountsPage({ searchParams }: { searchParams: Pro
         action="/accounts"
         q={params.q}
         placeholder="Search by code or name…"
+        params={params}
+        filterKeys={["q", "type"]}
+        chips={
+          /* Income leads because a sales invoice is coded to one, and it is the
+             tier `resolveAccountCode` searches first. The rest stay in the select
+             beside it — a bookkeeper offsetting against an expense account is
+             doing their job, so the escape hatch is one control away. */
+          <FilterChips
+            basePath="/accounts" params={params} name="type" label="Account type"
+            allLabel="Every account"
+            options={[
+              { value: "Income", label: "Income" },
+              { value: "Expense", label: "Expense" },
+              { value: "Bank", label: "Bank" },
+            ]}
+          />
+        }
         filters={[{
           name: "type", label: "Type", value: params.type,
           options: [

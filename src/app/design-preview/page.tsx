@@ -58,7 +58,9 @@ import { notFound } from "next/navigation";
 import { SequenceBoard, type SequenceStop } from "@/app/(app)/runs/sequence-board";
 import { MoveToBoard } from "@/app/(app)/runs/move-to-board";
 import { consolidateChargeLines } from "@/lib/domain/invoice-consolidation";
-import { PeriodFilter } from "@/app/(app)/billing/period-filter";
+import { FilterChips, FilterSummary, PeriodFilter, ToggleChips } from "@/components/filters";
+import { ListControls } from "@/components/list-controls";
+import { ACTIVITY_PERIOD_PRESETS, BILLING_PERIOD_PRESETS, resolvePeriod } from "@/lib/domain/dates";
 import { money } from "@/lib/format";
 import { QuickActions } from "@/components/quick-actions";
 
@@ -1130,8 +1132,14 @@ export default function DesignPreviewPage() {
 
             <Card title="Billing period"
                   description="Quick filters, defaulting to last month — the month you are standing in bills nothing on the 1st and says so in a way that reads as “all done”.">
-              <PeriodFilter basePath="/design-preview" start="2026-08-01" end="2026-08-31"
-                            today="2026-09-03" />
+              <PeriodFilter
+                basePath="/design-preview"
+                params={{ period: "last_month" }}
+                period={resolvePeriod({ period: "last_month" }, "2026-09-03", "last_month")}
+                presets={BILLING_PERIOD_PRESETS}
+                today="2026-09-03"
+                label="Billing period"
+              />
             </Card>
 
             <Card title="Invoice summary"
@@ -1218,6 +1226,119 @@ export default function DesignPreviewPage() {
             `board` gets three, and the point of showing it is that a narrow
             role must not be left with an empty card or a lonely single tile.
           */}
+
+          {/* --------------------------------------------------------------
+            The filter language, which is the one thing every list page shares.
+
+            Here because it is a *composition*: `ListControls` renders chips,
+            fields and a summary together, and the three go wrong in ways only
+            a rendered page shows — a chip row that wraps into six rows on a
+            phone, a Clear link that disappears when it is needed, a count that
+            says "1 batchs". Every real list page is an async server component
+            reading Supabase, so none of them render here.
+
+            Four states, because the interesting ones are the edges: filtered
+            (Clear showing, "showing 3 of 47"), unfiltered (no Clear, a plain
+            count), a multi-select group mid-selection, and the period picker
+            with Custom open.
+          */}
+          <section id="filters-preview" className="space-y-4 border-t pt-8">
+            <PageHeader
+              title="Filtering a list"
+              description="Chips for the one or two questions a list is usually narrowed by, fields for the long tail, and a line saying how much is hidden."
+            />
+
+            <Card title="Filtered" description="Two chips pressed and a search term typed: Clear appears, and the summary says how much of the list is hidden.">
+              <ListControls
+                action="/design-preview"
+                q="towel"
+                params={{ q: "towel", status: "active", period: "this_month" }}
+                filterKeys={["q", "status", "period", "from", "to"]}
+                placeholder="Business name or customer number…"
+                chips={
+                  <>
+                    <FilterChips
+                      basePath="/design-preview"
+                      params={{ q: "towel", status: "active", period: "this_month" }}
+                      name="status" label="Customer status" allLabel="All customers"
+                      allCount={47}
+                      options={[
+                        { value: "active", label: "Active", count: 31 },
+                        { value: "prospect", label: "Prospect", count: 4 },
+                        { value: "on_hold", label: "On hold", count: 2 },
+                        { value: "inactive", label: "Inactive", count: 10 },
+                      ]}
+                    />
+                    <PeriodFilter
+                      basePath="/design-preview"
+                      params={{ q: "towel", status: "active", period: "this_month" }}
+                      period={resolvePeriod({ period: "this_month" }, "2026-08-26", "all")}
+                      presets={ACTIVITY_PERIOD_PRESETS} today="2026-08-26"
+                      label="Taken in" hideCustomWhenPreset
+                    />
+                  </>
+                }
+                summary={
+                  <FilterSummary basePath="/design-preview" shown={3} total={47}
+                                 noun="customer" filtered />
+                }
+              />
+            </Card>
+
+            <Card title="Nothing filtered" description="No Clear link, because there is nothing to clear — and a plain count rather than “showing 47 of 47”.">
+              <ListControls
+                action="/design-preview"
+                params={{}}
+                filterKeys={["q", "status"]}
+                placeholder="Business name or customer number…"
+                chips={
+                  <FilterChips
+                    basePath="/design-preview" params={{}} name="status"
+                    label="Customer status" allLabel="All customers" allCount={47}
+                    options={[
+                      { value: "active", label: "Active", count: 31 },
+                      { value: "prospect", label: "Prospect", count: 4 },
+                    ]}
+                  />
+                }
+                summary={
+                  <FilterSummary basePath="/design-preview" shown={47} noun="customer"
+                                 filtered={false} />
+                }
+              />
+            </Card>
+
+            <Card title="Several at once"
+                  description="A multi-select group, for the questions a single choice cannot ask — “what is still wet?” is washing and drying together.">
+              <ToggleChips
+                basePath="/design-preview" params={{ stage: "washing,drying" }}
+                name="stage" label="Batch stage" allLabel="Every stage" allCount={18}
+                options={[
+                  { value: "received", label: "Counted in", count: 2 },
+                  { value: "washing", label: "Washing", count: 5 },
+                  { value: "drying", label: "Drying", count: 3 },
+                  { value: "folding", label: "Folding", count: 4 },
+                  { value: "packing", label: "Packing", count: 1 },
+                  { value: "ready_for_dispatch", label: "Ready to go out", count: 3 },
+                ]}
+              />
+              <p className="mt-3 text-2xs text-muted-foreground">
+                A stage nothing is in is left off rather than drawn as a chip promising zero rows.
+              </p>
+            </Card>
+
+            <Card title="A period, with Custom open"
+                  description="The escape hatch is always last, and the resolved window is printed beside the chips — “This financial year” is a claim a reader should not have to take on trust.">
+              <PeriodFilter
+                basePath="/design-preview"
+                params={{ period: "custom", from: "2026-08-03", to: "2026-08-19" }}
+                period={resolvePeriod(
+                  { period: "custom", from: "2026-08-03", to: "2026-08-19" }, "2026-08-26", "all")}
+                presets={ACTIVITY_PERIOD_PRESETS} today="2026-08-26" label="Completed in"
+              />
+            </Card>
+          </section>
+
           <section id="quick-actions-preview" className="space-y-4 border-t pt-8">
             <PageHeader
               title="What do you want to do?"
@@ -1339,19 +1460,22 @@ const PREVIEW_CHART: LineFormAccount[] = [
 const PREVIEW_QUEUE: QueueRow[] = [
   {
     id: "job-1", orderNumber: "LJ00042", customerId: "cust-1",
-    customerName: "Harbourview Hotel", billingMethod: "monthly_consolidated",
+    customerName: "Harbourview Hotel",
+    billingMethod: "Monthly consolidated", billingMethodValue: "monthly_consolidated",
     completedAt: "2026-08-14T04:20:00Z", chargeCount: 3, subtotal: 184.5,
     hasRateCard: true,
   },
   {
     id: "job-2", orderNumber: "LJ00043", customerId: "cust-2",
-    customerName: "Bondi Surf Club", billingMethod: "invoice_per_job",
+    customerName: "Bondi Surf Club",
+    billingMethod: "One invoice per job", billingMethodValue: "invoice_per_job",
     completedAt: "2026-08-15T22:10:00Z", chargeCount: 1, subtotal: 42,
     hasRateCard: false,
   },
   {
     id: "job-3", orderNumber: "LJ00044", customerId: "cust-3",
-    customerName: "City Gym — Alexandria", billingMethod: "monthly_consolidated",
+    customerName: "City Gym — Alexandria",
+    billingMethod: "Monthly consolidated", billingMethodValue: "monthly_consolidated",
     completedAt: "2026-08-16T01:05:00Z", chargeCount: 0, subtotal: 0,
     hasRateCard: false,
   },
