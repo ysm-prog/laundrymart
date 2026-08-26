@@ -56,6 +56,59 @@ describe("consolidationKey", () => {
   });
 });
 
+describe("consolidationKey · the account (0039)", () => {
+  it("keeps two accounts apart, even for the same item at the same rate", () => {
+    // The failure this prevents: two charges for the same towels, one coded to
+    // 4-1100 and one overridden to 4-1200, merged into one line — which posts
+    // the whole amount to whichever account happened to be first.
+    expect(consolidationKey(charge({ gl_account_id: "acct-a" })))
+      .not.toBe(consolidationKey(charge({ gl_account_id: "acct-b" })));
+  });
+
+  it("treats an uncoded charge as its own bucket, not as any account", () => {
+    expect(consolidationKey(charge({ gl_account_id: null })))
+      .not.toBe(consolidationKey(charge({ gl_account_id: "acct-a" })));
+    // Absent and explicitly null are the same absence — the payload can spell it
+    // either way and neither should split a line in two.
+    expect(consolidationKey(charge({ gl_account_id: null })))
+      .toBe(consolidationKey(charge({})));
+  });
+
+  it("still merges two charges that agree about the account", () => {
+    expect(consolidationKey(charge({ gl_account_id: "acct-a" })))
+      .toBe(consolidationKey(charge({ gl_account_id: "acct-a" })));
+  });
+});
+
+describe("consolidateChargeLines · the account (0039)", () => {
+  it("carries the account onto the rolled-up line", () => {
+    const lines = consolidateChargeLines([
+      entry("j1", "LJ00001", "2026-08-01", { gl_account_id: "acct-a" }),
+      entry("j2", "LJ00002", "2026-08-02", { gl_account_id: "acct-a" }),
+    ]);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]!.gl_account_id).toBe("acct-a");
+    expect(lines[0]!.merged).toBe(true);
+    expect(lines[0]!.quantity).toBe(20);
+  });
+
+  it("splits a line when the two charges code differently", () => {
+    const lines = consolidateChargeLines([
+      entry("j1", "LJ00001", "2026-08-01", { gl_account_id: "acct-a" }),
+      entry("j2", "LJ00002", "2026-08-02", { gl_account_id: "acct-b" }),
+    ]);
+    expect(lines).toHaveLength(2);
+    expect(lines.map((line) => line.gl_account_id)).toEqual(["acct-a", "acct-b"]);
+    // And the money still adds up to what the charges said.
+    expect(lines.reduce((sum, line) => sum + line.amount, 0)).toBe(30);
+  });
+
+  it("is null on a line whose charges carry no account", () => {
+    const lines = consolidateChargeLines([entry("j1", "LJ00001", "2026-08-01")]);
+    expect(lines[0]!.gl_account_id).toBeNull();
+  });
+});
+
 describe("consolidateChargeLines", () => {
   it("rolls three jobs' towels into one line carrying the total", () => {
     const lines = consolidateChargeLines([

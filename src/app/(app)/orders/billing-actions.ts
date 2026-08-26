@@ -116,7 +116,7 @@ export async function updateJobCharges(formData: FormData): Promise<void> {
   const charges = parseJobCharges(formData.get("charges"));
   if (!charges.ok) return fail(back, charges.problem);
 
-  const saved = await saveJobCharges(supabase, job.id, charges.lines);
+  const saved = await saveJobCharges(supabase, session.tenantId, job.id, charges.lines);
   if (!saved.ok) return fail(back, saved.error);
 
   await logOrderActivity(supabase, session, job.id, {

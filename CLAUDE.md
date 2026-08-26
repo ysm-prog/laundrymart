@@ -639,6 +639,18 @@ renders no tab strip. Tested in `src/lib/__tests__/nav.test.ts`.
   all six payable tables. Applying both failed outright (`42710: policy "gl_accounts_read" …
   already exists`), so 0036's gate stands and this file asserts against it instead. `items.income_account_id` is
   likewise 0036's; this file no longer re-adds it. See §27.
+- `0039_job_charge_codes` — **code the charge where the charge is decided.**
+  `job_charge_snapshots.gl_account_id`, a partial index, `guard_job_charge_account()`
+  and its trigger, and `save_job_charge_snapshot()` re-created to carry the column.
+  **Adds no table, drops nothing and changes no row.** Deliberately **no backfill**:
+  `guard_job_charge_snapshot` refuses every UPDATE on a frozen row, so one would be
+  refused and take the migration with it — the live frozen charge keeps a null
+  account, which is the truth. One column and not two: `invoice_lines` keeps both
+  the link and an `account_code` snapshot because an invoice is a record of what a
+  customer was told; a job charge is internal provenance and the invoice raised
+  from it is where the record lives. Five self-assertions, including that the
+  writer stays SECURITY INVOKER and that the trigger function is not on the RPC
+  surface.
 - `0013_notifications` — `tenants.settings jsonb` (AD-3) and the `notifications` table
   (AD-4). Beware the numbering drift: the unmerged branch
   `claude/warehouse-inventory-flow-psooyq` carries its own `0012_return_count.sql`, which
@@ -693,7 +705,7 @@ Proofs in `supabase/tests/`: `rls_isolation`, `rls_coverage`, `driver_scope`,
 `run_assignment`, `archive_records`, `laundry_pricing`, `platform_admin`, `main_flow_scope`,
 `job_billing`, `purchases_scope`, `supplier_payments_scope`, `import_helpers`,
 `import_activation`, `member_directory`, `boards_scope`, `item_master`,
-`audit_log_scope`, `run_sequence`, `accounts_scope` (**431 assertions**).
+`audit_log_scope`, `run_sequence`, `accounts_scope` (**439 assertions**).
 
 **`run-db-tests.sh` parses the output rather than trusting the exit code, and that is not
 pedantry.** `psql` exits 0 for a pgTAP file that runs to completion, and a failed assertion is a
@@ -1606,6 +1618,62 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-08-26 · Code the charge where the charge is made
+The client's own comparison: MYOB puts the **Item ID** and the **Category** (its
+name for the account code) on an invoice line at the moment the line is written, so
+the invoice never asks twice. This app asked twice. One migration (`0039`), no new
+table, no new role, no new capability, nothing dropped and no row changed. §27 holds
+the design.
+
+- **The gap was not a convenience, and the live data said so.** A charge added by
+  hand on a job carried no item and could carry no account, so
+  `invoice_lines.gl_account_id` — resolved from `source_item_id → items.income_account_id`
+  — came out null and the code was re-keyed on the invoice. Counted before anything
+  was written: `Adelaide Towel Service` holds **1** frozen job charge and **0** of
+  them carry an item. That laundry has no rate card and no price list, so *every*
+  charge it raises is hand-added: the coding feature was, for the one real business
+  using it, entirely inert.
+- **Each charge row now names an item and an account**, with the same code-first
+  type-ahead the invoice composer uses — picking an item brings its price, its GST
+  answer and its account with it, and never overwrites a description somebody wrote.
+  The strip is collapsed to one readable line per row, so "is this coded?" is
+  answerable without a click and an uncoded charge says exactly what will happen to
+  it.
+- **The pickers are now shared** (`components/coding-pickers.tsx`). Two copies of the
+  same search would drift — which is precisely what happened to the item form,
+  built twice in one afternoon on two branches that then disagreed about tenancy.
+- **`saveJobCharges` is the one place a charge gets its code.** Both writers pass
+  through it, so the pricer and the review screen code identically; an account
+  already on the charge wins, because choosing one by hand is a deliberate override.
+- **The account joined the consolidation key**, for the same reason unit price and
+  `taxable` are in it: two charges for one item coded to different accounts must stay
+  two lines, or the whole amount posts to whichever came first.
+
+**Two defects found by driving the screen rather than reading it**, which is the
+argument for §10b's gallery rule:
+- every charge row rendered the **same DOM ids** (`line-item`, `line-account`), so
+  each row's `<label>` pointed at the first row's box and a screen reader would
+  announce the wrong field. The pickers take an `idPrefix` now. A duplicate id is
+  invisible to a typecheck, a unit test and a screenshot alike.
+- the first fixture set had all three rows uncoded, so the gallery could not show the
+  state that matters. It now carries one row coded from its item, one coded straight
+  to an account and one deliberately uncoded — the three real states.
+
+- 802 unit tests (was 792) and **439 pgTAP assertions (was 431)**. `verify` green; all
+  thirty-nine migrations applied to a fresh Postgres 16 with the whole suite and the
+  seed on top. The new assertions were **confirmed to fail without `0039`** rather
+  than assumed to be doing something.
+- The gallery gained the charges editor in two states (a full chart, and none) and was
+  measured light and dark at 320/390/768/1440 across all three text sizes: **24
+  combinations, 0 console errors, 0 overflow inside either section and 0 interactive
+  targets under 36px**. Document overflow is **byte-identical to the recorded
+  baseline**, so this adds none. Twelve interaction assertions drive the whole path.
+
+**Not applied to `laundrymart-syd`.** `0039` is in the repo and the ledger's last live
+entry is still `0038_invoice_line_account`. **Before trusting it: apply 0039, code one
+charge on a job, approve it, generate the invoice and confirm the line arrives already
+coded** — that last step is the whole point of the change.
+
 ### 2026-08-25 · Two branches, one chart of accounts: reconciled
 `claude/invoice-item-code-selection-vlwwb4` and `claude/code-review-requirements-ns6bav` were
 built the same afternoon, both applied migrations to `laundrymart-syd`, and **both independently
@@ -4324,6 +4392,27 @@ line by hand. `0036` closes that.
   has mapped `account_code` to `AccountCode` from the day it was written and nothing
   selected the column, so every pushed line has landed in Xero's default sales
   account. One word in one `select`.
+- **The code is chosen on the *charge*, not just on the invoice line** (`0039`). MYOB
+  puts the Item ID and the Category on the line as it is written; this app split that
+  across the job's Charges screen — where the price is agreed and frozen — and the
+  invoice composer. Only the second half could carry a code, so a hand-added charge
+  reached the invoice uncoded and somebody re-keyed it there. Worse than an
+  inconvenience: `invoice_lines.gl_account_id` was resolved from
+  `source_item_id → items.income_account_id`, and a hand-added charge has no item, so
+  it could not be coded at the job stage **at all**. Measured before it was built:
+  `Adelaide Towel Service` held **1** frozen charge and **0** carried an item, because
+  that laundry has no rate card and no price list — every charge it raises is
+  hand-added, so the feature was inert for the one real business using it.
+  - **`saveJobCharges` is the single place a charge gets its code**, and both writers
+    come through it — the automatic pricer and the review screen's own save — so a
+    priced line and a hand-picked one are coded identically and neither caller can
+    forget. A charge that already names an account keeps it: choosing a code by hand
+    is a deliberate override of whatever the item says.
+  - **The account is part of the consolidation key**, for the same reason unit price
+    and `taxable` are. Two charges for the same item coded to different accounts must
+    stay two lines, or the whole amount posts to whichever account came first.
+  - Generation prefers the charge's own account and falls back to the item's — the
+    same precedence `lib/xero/push.ts` uses on the line.
 - **The composer defaults to the mode that produces a coded line with the least
   work**, which is not simply "item": `Adelaide Towel Service` holds 268 accounts and
   **zero items** today, so falling to free text would make the default route the one

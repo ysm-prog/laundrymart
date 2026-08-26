@@ -1,7 +1,44 @@
 # MEMORY — working session handoff
 > Auto-loaded each session. Canonical state is CLAUDE.md; this is the live delta.
 
-## Latest: two branches reconciled, both merged
+## Latest: code the charge where the charge is made
+2026-08-26, branch `claude/invoice-item-code-selection-vlwwb4`. One migration
+(`0039_job_charge_codes`) — no new table, no new role, no new capability, nothing
+dropped, no row changed. CLAUDE.md §7, §27 and the newest changelog entry have it.
+
+The client's comparison: MYOB puts **Item ID** and **Category** (the account code) on
+the line as it is written. This app asked twice — a charge added by hand on a job
+carried no item and *could* carry no account, so the invoice line came out uncoded and
+somebody re-keyed it. Counted first: Adelaide holds **1** frozen charge, **0** with an
+item, and has no rate card and no price list — so every charge it raises is hand-added
+and the coding feature was inert for the one real business using it.
+
+- Each charge row names an item and an account, same code-first type-ahead as the
+  invoice composer. Pickers are now **shared** (`components/coding-pickers.tsx`).
+- **`saveJobCharges` is the one place a charge gets its code** — both writers pass
+  through it. An account already on the charge wins (a hand override is deliberate).
+- **The account is part of the consolidation key**, like unit price and `taxable`:
+  two charges for one item coded differently must not merge into one line.
+- Generation prefers the charge's account, item as fallback — same precedence as
+  `lib/xero/push.ts`.
+
+**Found by driving it:** every row rendered the same DOM ids, so each row's label
+pointed at the first row's box. Pickers take an `idPrefix` now. Invisible to
+typecheck, unit tests and screenshots alike.
+
+- 802 unit tests, **439 pgTAP assertions**, verify green, whole suite + seed on a
+  fresh Postgres 16. New assertions confirmed to fail without 0039.
+- Gallery: 24 combinations, 0 console errors, 0 overflow, 0 targets under 36px,
+  document overflow byte-identical to baseline. 12 interaction assertions.
+
+### Next
+**`0039` is NOT applied to `laundrymart-syd`** — the ledger's last live entry is
+`0038_invoice_line_account`. Apply it, then code one charge on a job, approve, generate
+the invoice, and confirm the line arrives already coded. That last step is the point.
+
+---
+
+## Previous: two branches reconciled, both merged
 2026-08-25. `claude/invoice-item-code-selection-vlwwb4` (account codes on an invoice) and
 `claude/code-review-requirements-ns6bav` (run sequencing + Xero codes) were built the same
 afternoon, both applied migrations to `laundrymart-syd`, and **both gated `gl_accounts`**.

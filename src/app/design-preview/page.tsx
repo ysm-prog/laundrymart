@@ -1052,11 +1052,27 @@ export default function DesignPreviewPage() {
               />
             </Card>
 
+            {/* The charge lines, now coded where they are made. The row states
+                worth looking at are all three at once: one carrying an item and
+                its account, one uncoded and saying so, and one added by hand —
+                because "is this coded?" has to be answerable without a click,
+                and an uncoded charge is the one that reaches the invoice needing
+                to be re-keyed. */}
+            <div id="job-charges-preview" className="space-y-6">
             <Card title="A job's charges"
-                  description="Editable right up until approval, and frozen the moment it is given.">
+                  description="Editable right up until approval, and frozen the moment it is given. Each line can name an item and an account, so the invoice needs neither again.">
               <JobChargesEditor orderId="preview" initial={PREVIEW_CHARGES}
+                                items={PREVIEW_LINE_ITEMS} accounts={PREVIEW_CHART}
                                 action={async () => { "use server"; }} />
             </Card>
+
+            <Card title="A job's charges · no chart of accounts"
+                  description="A laundry that has not imported one. Nothing is blocked — the coding strip simply says so.">
+              <JobChargesEditor orderId="preview-nochart" initial={PREVIEW_CHARGES}
+                                items={PREVIEW_LINE_ITEMS} accounts={[]}
+                                action={async () => { "use server"; }} />
+            </Card>
+            </div>
 
             {/* Adding a line, three ways. The client keeps their books against a
                 chart of accounts and every sale has to land on one, so a line can
@@ -1367,8 +1383,9 @@ const PREVIEW_CHARGES: EditableCharge[] = [
     key: "c1", description: "Bath towels — 120", charge_type: "wash_only",
     quantity: 120, unit_price: 1.1, taxable: true,
     source_agreement_id: "agr-1", source_agreement_line_id: "line-1",
-    source_item_id: null, source_laundry_item_type: "bath_towels",
+    source_item_id: "i1", source_laundry_item_type: "bath_towels",
     pricing_model: "per_item",
+    gl_account_id: "g2",
   },
   {
     key: "c2", description: "Sheets — 40 (price list)", charge_type: "wash_only",
@@ -1376,6 +1393,7 @@ const PREVIEW_CHARGES: EditableCharge[] = [
     source_agreement_id: null, source_agreement_line_id: null,
     source_item_id: null, source_laundry_item_type: "sheets",
     pricing_model: "per_item",
+    gl_account_id: "g6",
   },
   {
     key: "c3", description: "Fuel levy (5%)", charge_type: "fuel_levy",
@@ -1383,5 +1401,6 @@ const PREVIEW_CHARGES: EditableCharge[] = [
     source_agreement_id: "agr-1", source_agreement_line_id: null,
     source_item_id: null, source_laundry_item_type: null,
     pricing_model: "percentage",
+    gl_account_id: null,
   },
 ];
