@@ -1167,7 +1167,7 @@ export default function DesignPreviewPage() {
             <Card title="Add a line to an invoice"
                   description="An item, an account code, or free text. The code follows the item; a line with no code is legal and counted.">
               <InvoiceLineForm
-                invoiceId="preview" items={PREVIEW_LINE_ITEMS} accounts={PREVIEW_CHART}
+                invoiceId="preview" items={PREVIEW_LINE_ITEMS} accounts={PREVIEW_CHART} gstRate={0.1}
                 action={async () => { "use server"; }}
               />
             </Card>
@@ -1175,7 +1175,7 @@ export default function DesignPreviewPage() {
             <Card title="No chart of accounts yet"
                   description="A laundry that has not imported one. Nothing is blocked — items and free text still work.">
               <InvoiceLineForm
-                invoiceId="preview-empty" items={PREVIEW_LINE_ITEMS} accounts={[]}
+                invoiceId="preview-empty" items={PREVIEW_LINE_ITEMS} accounts={[]} gstRate={0.1}
                 action={async () => { "use server"; }}
               />
             </Card>
@@ -1183,7 +1183,7 @@ export default function DesignPreviewPage() {
             <Card title="No items yet"
                   description="The real laundry's state today — 268 accounts, no item list. It opens on the code, because that is the route that still produces a coded line.">
               <InvoiceLineForm
-                invoiceId="preview-no-items" items={[]} accounts={PREVIEW_CHART}
+                invoiceId="preview-no-items" items={[]} accounts={PREVIEW_CHART} gstRate={0.1}
                 action={async () => { "use server"; }}
               />
             </Card>

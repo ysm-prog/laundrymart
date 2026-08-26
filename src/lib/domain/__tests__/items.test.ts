@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
-  MAX_ITEM_CODE, PRICE_BASIS_OPTIONS, checkItemCode, itemLabel, itemMatches,
-  priceBasisHint, searchItems, sellPriceLabel, type PickableItem,
+  GST_RATE_FALLBACK, MAX_ITEM_CODE, PRICE_BASIS_OPTIONS, checkItemCode, itemLabel,
+  itemMatches, lineRateFromItem, priceBasisHint, searchItems, sellPriceLabel,
+  type PickableItem,
 } from "@/lib/domain/items";
 
 const item = (over: Partial<PickableItem> = {}): PickableItem => ({
@@ -124,7 +125,11 @@ describe("sellPriceLabel", () => {
 describe("priceBasisHint", () => {
   it("says which of the two things the price on screen means", () => {
     expect(priceBasisHint("inclusive", true)).toBe("This price includes GST");
-    expect(priceBasisHint("exclusive", true)).toBe("GST is added to this price");
+    // **Past tense, and that is the whole point.** `lineRateFromItem` has already
+    // grossed the rate up by the time this is read, so "GST is added to this
+    // price" — which is what this said until the rate was fixed — would describe
+    // something the invoice was never going to do.
+    expect(priceBasisHint("exclusive", true)).toBe("GST has been added to the item's price");
   });
 
   it("says nothing when the item has no basis on it", () => {
@@ -153,7 +158,7 @@ describe("priceBasisHint", () => {
 
   it("reads the basis however it was cased or spaced", () => {
     expect(priceBasisHint(" Inclusive ", true)).toBe("This price includes GST");
-    expect(priceBasisHint("EXCLUSIVE", true)).toBe("GST is added to this price");
+    expect(priceBasisHint("EXCLUSIVE", true)).toBe("GST has been added to the item's price");
   });
 
   it("recognises exactly the two values the picker offers and the database allows", () => {
@@ -166,5 +171,79 @@ describe("priceBasisHint", () => {
       expect(priceBasisHint(option.value, true)).not.toBeNull();
     }
     expect(PRICE_BASIS_OPTIONS.map((option) => option.value)).toEqual(["inclusive", "exclusive"]);
+  });
+});
+
+describe("lineRateFromItem", () => {
+  /*
+   * The under-billing this rule exists to stop. An invoice line amount is
+   * GST-inclusive (0043's `recalculate_invoice` extracts the tax *out* of it),
+   * so an item stating its price the other way round has to be converted before
+   * it becomes a line rate — or the line is short by exactly the GST.
+   */
+  it("grosses an exclusive item's price up into an inclusive line rate", () => {
+    expect(lineRateFromItem(100, "exclusive", true, 0.1)).toBe(110);
+    expect(lineRateFromItem("66.09", "exclusive", true, 0.1)).toBe(72.7);
+  });
+
+  it("bills the whole GST, which is what the defect was losing", () => {
+    // $100 listed ex-GST used to reach the line as 100 and total 100 with $9.09
+    // found inside it. It now totals 110 with $10 on top — a difference of the
+    // entire GST component, on every line naming an exclusive item.
+    const wrong = 100;
+    const right = lineRateFromItem(100, "exclusive", true, 0.1);
+    expect(right - wrong).toBeCloseTo(10, 10);
+  });
+
+  it("leaves an inclusive price exactly as it is", () => {
+    expect(lineRateFromItem(72.7, "inclusive", true, 0.1)).toBe(72.7);
+  });
+
+  it("leaves a price with no basis exactly as it is", () => {
+    // All 254 of this laundry's imported items, because the MYOB inventory
+    // export carries no basis. This is the ordinary path and it must behave
+    // exactly as it did before the rule existed.
+    expect(lineRateFromItem(3.2, null, true, 0.1)).toBe(3.2);
+    expect(lineRateFromItem(3.2, undefined, true, 0.1)).toBe(3.2);
+    expect(lineRateFromItem(3.2, "   ", true, 0.1)).toBe(3.2);
+  });
+
+  it("never guesses at a basis it does not recognise", () => {
+    // Inventing an answer here moves money — `taxableFromTaxCode`'s reason,
+    // applied to the one rule that decides what a customer is charged.
+    expect(lineRateFromItem(100, "Inclusive of GST", true, 0.1)).toBe(100);
+    expect(lineRateFromItem(100, "gross", true, 0.1)).toBe(100);
+  });
+
+  it("adds nothing on a line that carries no GST", () => {
+    // A FRE or N-T line has no GST, so the two bases describe one number.
+    expect(lineRateFromItem(100, "exclusive", false, 0.1)).toBe(100);
+  });
+
+  it("adds nothing when the laundry charges no GST", () => {
+    expect(lineRateFromItem(100, "exclusive", true, 0)).toBe(100);
+    expect(lineRateFromItem(100, "exclusive", true, Number.NaN)).toBe(100);
+  });
+
+  it("rounds to the cent, because that is what the column stores", () => {
+    // `invoice_lines.unit_price` and `job_charge_snapshots.unit_price` are both
+    // numeric(12,2), so rounding here is said out loud rather than discovered.
+    expect(lineRateFromItem(0.95, "exclusive", true, 0.1)).toBe(1.05);
+    expect(lineRateFromItem(1.005, "exclusive", true, 0.1)).toBe(1.11);
+  });
+
+  it("reads a numeric-as-string price, which is what PostgREST sends", () => {
+    expect(lineRateFromItem("100.00", "exclusive", true, 0.1)).toBe(110);
+  });
+
+  it("treats an absent or unparseable price as nothing", () => {
+    expect(lineRateFromItem(null, "exclusive", true, 0.1)).toBe(0);
+    expect(lineRateFromItem(undefined, "inclusive", true, 0.1)).toBe(0);
+    expect(lineRateFromItem("not a price", "exclusive", true, 0.1)).toBe(0);
+  });
+
+  it("agrees with the rate a laundry that has not been read falls back to", () => {
+    expect(GST_RATE_FALLBACK).toBe(0.1);
+    expect(lineRateFromItem(100, "exclusive", true, GST_RATE_FALLBACK)).toBe(110);
   });
 });

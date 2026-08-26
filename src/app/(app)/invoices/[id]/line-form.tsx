@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { CHARGE_TYPE_LABELS } from "@/lib/domain/pricing";
 import { accountLabel, taxableFromTaxCode } from "@/lib/domain/accounts";
-import { priceBasisHint } from "@/lib/domain/items";
+import { lineRateFromItem, priceBasisHint } from "@/lib/domain/items";
 import { CONTROL, cx, Eyebrow } from "@/components/ui";
 import { Field, Select, SubmitButton, useFieldControl } from "@/components/form";
 import {
@@ -44,11 +44,18 @@ const MODES: ReadonlyArray<{ value: Mode; label: string; hint: string }> = [
 ];
 
 export function InvoiceLineForm({
-  invoiceId, items, accounts, action,
+  invoiceId, items, accounts, gstRate, action,
 }: {
   invoiceId: string;
   items: readonly LineFormItem[];
   accounts: readonly LineFormAccount[];
+  /**
+   * The laundry's own GST rate, for grossing an item's price up when the item
+   * states it GST-exclusive. Passed in rather than assumed at 10%: this number
+   * decides what a customer is billed, and a constant here would be a second
+   * answer to a question `tenants.gst_rate` already holds.
+   */
+  gstRate: number;
   /**
    * `addInvoiceLine`, passed in rather than imported. The same arrangement
    * `InvoiceSelection` and `JobChargesEditor` use, and for the same reason: it is
@@ -111,8 +118,6 @@ export function InvoiceLineForm({
   function chooseItem(chosen: LineFormItem) {
     setItemId(chosen.id);
     if (!typed) setDescription(chosen.name);
-    const price = Number(chosen.sell_price ?? 0);
-    setUnitPrice(Number.isFinite(price) && price > 0 ? price.toFixed(2) : "0");
     // The item's own account is the whole reason picking an item produces a code.
     setAccountId(chosen.income_account_id);
     // The item's tax code first, then the account's. An item saying FRE where its
@@ -123,6 +128,19 @@ export function InvoiceLineForm({
       : null;
     const answer = fromItem ?? fromAccount;
     if (answer !== null) setTaxable(answer);
+
+    /*
+     * **The rate is the item's price as a LINE rate, which is not always the
+     * same number.** A line amount is GST-inclusive (0043), so an item stating
+     * its price GST-exclusive is grossed up here — otherwise the line bills
+     * short by exactly the GST and nothing on the screen says so.
+     *
+     * Resolved after the GST answer above, because whether GST applies is half
+     * of what decides the rate: on a FRE line there is nothing to add.
+     */
+    const willBeTaxable = answer ?? taxable;
+    const price = lineRateFromItem(chosen.sell_price, chosen.sell_price_basis, willBeTaxable, gstRate);
+    setUnitPrice(Number.isFinite(price) && price > 0 ? price.toFixed(2) : "0");
   }
 
   function chooseAccount(chosen: LineFormAccount, fillDescription: boolean) {

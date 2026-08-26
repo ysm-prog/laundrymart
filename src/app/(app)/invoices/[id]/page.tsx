@@ -1,6 +1,7 @@
 import { Suspense } from "react";
 import { notFound } from "next/navigation";
 import { requireCapability } from "@/lib/auth/context";
+import { GST_RATE_FALLBACK, tenantGstRate } from "@/lib/gst";
 import { createClient } from "@/lib/supabase/server";
 import { can } from "@/lib/roles";
 import { counted, date, money, today } from "@/lib/format";
@@ -127,7 +128,7 @@ export default async function InvoiceDetailPage({
       <div className="grid gap-6 xl:grid-cols-3">
         <div className="space-y-6 xl:col-span-2">
           <Suspense fallback={<SkeletonRows rows={5} />}>
-            <Lines invoiceId={id} editable={editable} />
+            <Lines invoiceId={id} editable={editable} tenantId={session.tenantId} />
             <ServiceBreakdown invoiceId={id} tenantId={session.tenantId} />
           </Suspense>
 
@@ -376,16 +377,24 @@ async function ServiceBreakdown({ invoiceId, tenantId }: { invoiceId: string; te
   );
 }
 
-async function Lines({ invoiceId, editable }: { invoiceId: string; editable: boolean }) {
+async function Lines({
+  invoiceId, editable, tenantId,
+}: {
+  invoiceId: string;
+  editable: boolean;
+  /** §23, and it decides money: the GST rate below is read for this laundry. */
+  tenantId: string;
+}) {
   const supabase = await createClient();
 
   /*
-   * Three reads, and two of them only when the composer is going to be drawn.
-   * A sent invoice is a record, not a form: loading the item list and the whole
-   * chart of accounts to render a read-only table would be a few hundred rows
-   * fetched for nothing on every view of every historical invoice.
+   * Four reads, and three of them only when the composer is going to be drawn.
+   * A sent invoice is a record, not a form: loading the item list, the whole
+   * chart of accounts and the GST rate to render a read-only table would be a
+   * few hundred rows fetched for nothing on every view of every historical
+   * invoice.
    */
-  const [{ data }, catalogue, chart] = await Promise.all([
+  const [{ data }, catalogue, chart, gstRate] = await Promise.all([
     supabase
       .from("invoice_lines")
       .select("id, invoice_id, description, charge_type, quantity, unit_price, amount, taxable, "
@@ -394,6 +403,7 @@ async function Lines({ invoiceId, editable }: { invoiceId: string; editable: boo
       .returns<InvoiceLine[]>(),
     editable ? loadItemCatalogue() : Promise.resolve([]),
     editable ? loadChartOfAccounts() : Promise.resolve([]),
+    editable ? tenantGstRate(supabase, tenantId) : Promise.resolve(GST_RATE_FALLBACK),
   ]);
 
   const lines = data ?? [];
@@ -461,7 +471,7 @@ async function Lines({ invoiceId, editable }: { invoiceId: string; editable: boo
 
       {editable ? (
         <InvoiceLineForm invoiceId={invoiceId} items={catalogue} accounts={chart}
-                         action={addInvoiceLine} />
+                         gstRate={gstRate} action={addInvoiceLine} />
       ) : null}
     </Card>
   );

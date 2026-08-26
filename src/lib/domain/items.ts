@@ -11,6 +11,20 @@
  * keystroke, not after scrolling a list ordered by something else.
  */
 
+import { round2 } from "./pricing";
+
+/**
+ * The GST rate to assume when a laundry's own row has not been read.
+ *
+ * 10%, which `tenants.gst_rate` has defaulted to since 0001. It lives in this
+ * pure module rather than beside the reader in `lib/gst.ts` deliberately:
+ * `coding.ts` needs it and is imported by a client component, so reaching for a
+ * module that names the server Supabase client — even as a type — is the trap §2
+ * records `plan.ts` falling into, which typechecks, lints and tests clean and
+ * fails only at `next build`.
+ */
+export const GST_RATE_FALLBACK = 0.1;
+
 /** MYOB truncates an item number at 30 characters, so nothing longer can be real. */
 export const MAX_ITEM_CODE = 30;
 
@@ -178,23 +192,10 @@ export const PRICE_BASIS_OPTIONS: ReadonlyArray<{ value: PriceBasis; label: stri
  * This does **not** feed the GST checkbox. The item's own tax code beats its
  * account's and that precedence is untouched; this only explains the price.
  *
- * ---------------------------------------------------------------------------
- * **Known, and not fixed here: `exclusive` is a promise the totals do not keep.**
- * `addInvoiceLine` stores `amount = quantity × unit_price`, and 0043's
- * `recalculate_invoice` then treats every line amount as GST-**inclusive** and
- * extracts the tax out of it (`total = sub`, `tax = sub × rate/(1+rate)`). So an
- * exclusive-basis item priced at $100 bills $100 with $9.09 of GST inside it,
- * where the item says it should bill $110 with $10 on top — a shortfall of the
- * whole GST component.
- *
- * It is latent rather than live: `sell_price_basis` is null on all 254 imported
- * rows, so no item can produce this sentence today. Left alone on purpose,
- * because the fix is a decision about the totals and not a one-word change —
- * `sell_price_basis` is per *item* while an invoice's basis is per *document*
- * (Xero's `LineAmountTypes` is one field for the whole invoice, which CLAUDE.md
- * §18 already records as the mirror image of this problem), so a mixed-basis
- * invoice cannot be expressed by flipping anything. Whoever designs the
- * inclusive-price model owns it.
+ * **The exclusive sentence is past tense on purpose.** `lineRateFromItem` below
+ * has already added the GST by the time this is read, so "GST is added to this
+ * price" — which is what this said until the rate was grossed up — would be
+ * describing something the invoice was never going to do.
  */
 export function priceBasisHint(
   basis: string | null | undefined, taxable: boolean,
@@ -202,6 +203,54 @@ export function priceBasisHint(
   if (!taxable) return null;
   const answer = basis?.trim().toLowerCase();
   if (answer === "inclusive") return "This price includes GST";
-  if (answer === "exclusive") return "GST is added to this price";
+  if (answer === "exclusive") return "GST has been added to the item's price";
   return null;
+}
+
+/**
+ * The item's price, as a **line rate**.
+ *
+ * **An invoice line amount is GST-inclusive.** That is 0043's decision, not a
+ * choice made here: `recalculate_invoice` totals a line as `total = sub` and
+ * extracts the tax out of it (`tax = sub × rate/(1+rate)`), so whatever is
+ * stored in `unit_price` is what the customer pays, tax and all. An item whose
+ * `sell_price_basis` is `exclusive` states its price the other way round, so it
+ * has to be converted before it becomes a line rate — otherwise the two
+ * disagree and the line is short by exactly the GST.
+ *
+ * **This was a real under-billing and it is worth stating plainly.** Until this
+ * rule existed, both places that turn an item into money — the invoice line
+ * composer and `chargePatchForItem` — took `items.sell_price` verbatim. An
+ * exclusive-basis item listed at $100 therefore billed $100 with $9.09 of GST
+ * found *inside* it, where the item says it should bill $110 with $10 on top:
+ * the customer under-charged by the whole GST component, on a frozen charge in
+ * the job case, with nothing on any screen to show it had happened.
+ *
+ * Three cases where the price passes through untouched, and each is a decision:
+ *
+ * - **No basis stated.** All 254 of this laundry's imported items, because the
+ *   MYOB inventory export carries no basis (§25). This is the ordinary path and
+ *   it must behave exactly as it did before the rule existed — so an unknown
+ *   basis is never guessed at, for `taxableFromTaxCode`'s reason: inventing an
+ *   answer here silently moves money.
+ * - **Not taxable.** A `FRE` or `N-T` line carries no GST, so there is nothing
+ *   to add and the two bases describe the same number.
+ * - **A zero or negative rate**, which is what a laundry with GST switched off
+ *   would have.
+ *
+ * Rounded to the cent through `round2`, because `invoice_lines.unit_price` and
+ * `job_charge_snapshots.unit_price` are both `numeric(12,2)` — so rounding here
+ * is what the database will store anyway, said out loud rather than discovered.
+ */
+export function lineRateFromItem(
+  sellPrice: number | string | null | undefined,
+  basis: string | null | undefined,
+  taxable: boolean,
+  gstRate: number,
+): number {
+  const price = Number(sellPrice ?? 0);
+  if (!Number.isFinite(price)) return 0;
+  if (!taxable) return price;
+  if (!Number.isFinite(gstRate) || gstRate <= 0) return price;
+  return basis?.trim().toLowerCase() === "exclusive" ? round2(price * (1 + gstRate)) : price;
 }

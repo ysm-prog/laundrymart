@@ -13,6 +13,7 @@ import { Badge, Card, DataTable, EmptyState, Notice } from "@/components/ui";
 import { ConfirmSubmit } from "@/components/confirm-submit";
 import { SubmitButton } from "@/components/form";
 import { JobChargesEditor } from "./job-charges-editor";
+import { GST_RATE_FALLBACK, tenantGstRate } from "@/lib/gst";
 import {
   approveJobCharges, markJobNotBillable, priceJobCharges, reopenJobCharges, updateJobCharges,
 } from "../billing-actions";
@@ -43,14 +44,16 @@ export async function ChargesCard({
   const supabase = await createClient();
   const editable = chargesAreEditable(billingStatus) && can(role, "billing.write");
 
-  const [charges, rateCard, items, accounts] = await Promise.all([
+  const [charges, rateCard, items, accounts, gstRate] = await Promise.all([
     loadJobCharges(supabase, orderId),
     loadRateCard(supabase, customerId),
     // Only when the charges can still be changed. A frozen job is a record, and
-    // fetching an item list and a chart of accounts to render one would be a few
-    // hundred rows read for nothing on every view of every historical job.
+    // fetching an item list, a chart of accounts and the GST rate to render one
+    // would be a few hundred rows read for nothing on every view of every
+    // historical job.
     editable ? loadCodingItems(supabase, tenantId) : Promise.resolve([]),
     editable ? loadCodingAccounts(supabase, tenantId) : Promise.resolve([]),
+    editable ? tenantGstRate(supabase, tenantId) : Promise.resolve(GST_RATE_FALLBACK),
   ]);
 
   const subtotal = jobChargeSubtotal(charges);
@@ -105,6 +108,7 @@ export async function ChargesCard({
         <>
           <JobChargesEditor
             orderId={orderId}
+            gstRate={gstRate}
             action={updateJobCharges}
             initial={charges.map((row) => ({
               key: row.id,
@@ -275,7 +279,9 @@ async function loadCodingItems(
 ): Promise<CodingItem[]> {
   const { data } = await supabase
     .from("items")
-    .select("id, item_code, name, description, laundry_category, sell_price, tax_code, income_account_id")
+    .select("id, item_code, name, description, laundry_category, sell_price, "
+            // The basis is what decides whether this price is already GST-inclusive.
+            + "sell_price_basis, tax_code, income_account_id")
     .eq("tenant_id", tenantId)
     .is("deleted_at", null)
     .eq("status", "active")

@@ -12,6 +12,7 @@
  */
 
 import { taxableFromTaxCode } from "./accounts";
+import { GST_RATE_FALLBACK, lineRateFromItem } from "./items";
 
 /* ------------------------------------------------------------------ *
  * Choosing an item fills the rest of the charge.
@@ -32,6 +33,8 @@ export type ItemChoice = {
   id: string;
   name: string;
   sell_price?: number | string | null;
+  /** Whether `sell_price` already contains GST (0043). Absent on all 254 today. */
+  sell_price_basis?: string | null;
   tax_code?: string | null;
   income_account_id?: string | null;
 };
@@ -75,14 +78,32 @@ export type ChargePatch = {
  * `accountTaxCode` is the tax code of the item's own income account, looked up
  * by the caller — the item's own code wins, and the account answers only where
  * the item is silent.
+ *
+ * **`gstRate` is what turns the item's price into a charge rate.** A charge
+ * feeds an invoice line, and a line amount is GST-inclusive (0043) — so an item
+ * stating its price GST-*exclusive* is grossed up by `lineRateFromItem` before
+ * it lands here. Getting that wrong on this screen is worse than on the invoice
+ * composer, because approval **freezes** the number: the customer would be
+ * under-charged by the whole GST component on a row nobody can edit afterwards.
+ * It defaults to `GST_RATE_FALLBACK`'s 10% so a caller that has not read the
+ * laundry's rate still behaves the way this function did before it existed.
  */
 export function chargePatchForItem(
   row: ChargeSnapshot,
   item: ItemChoice,
-  options: { accountTaxCode?: string | null; descriptionIsQuery?: boolean } = {},
+  options: {
+    accountTaxCode?: string | null;
+    descriptionIsQuery?: boolean;
+    gstRate?: number;
+  } = {},
 ): ChargePatch {
-  const price = Number(item.sell_price ?? 0);
   const taxable = taxableFromTaxCode(item.tax_code) ?? taxableFromTaxCode(options.accountTaxCode);
+  // `taxable` is null where neither the item nor its account has an opinion, and
+  // the row keeps whatever it already had. A charge is taxable by default in this
+  // app, so an unstated answer grosses up — the same direction the composer takes.
+  const price = lineRateFromItem(
+    item.sell_price, item.sell_price_basis, taxable ?? true, options.gstRate ?? GST_RATE_FALLBACK,
+  );
   const takesName = options.descriptionIsQuery || !row.description.trim();
 
   return {

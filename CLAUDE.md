@@ -2455,8 +2455,9 @@ to a line, and the totals maths is untouched.
   real schema rather than by eye: all 39 exist, and the `Item` type and the select list are
   the same 39, so no field is typed as present and never fetched.
 
-- 1001 unit tests (was 991) and **485 pgTAP assertions across 26 files, unchanged** — this adds
-  no policy and no capability, so it adds no proof; its own eight self-assertions are the proof.
+- **1019 unit tests** (was 991 — 1001 for the item fields, 18 more for the GST fix) and **485
+  pgTAP assertions across 26 files, unchanged**: this adds no policy and no capability, so it
+  adds no proof, and its own eight self-assertions are the proof.
   `verify` green — typecheck, lint, tests and the production build; all 44 migrations applied to
   a fresh Postgres 16 with the whole pgTAP suite and the seed on top.
 - **Every new assertion was confirmed to fail without its fix** rather than assumed to be doing
@@ -2465,8 +2466,10 @@ to a line, and the totals maths is untouched.
   making the rule guess at an unrecognised basis (2).
 - The composer is in `/design-preview` with the four real states across its fixtures — priced
   per carton and inclusive, a unit on a non-taxable line, exclusive with no unit, and neither,
-  which is every one of Adelaide's 254 items today. **36 interaction assertions at 390 and 1440,
-  0 failures, 0 console errors, 0 overflow inside the section, nothing under 36px.** The harness
+  which is every one of Adelaide's 254 items today. **40 interaction assertions at 390 and 1440,
+  0 failures, 0 console errors, 0 overflow inside the section, nothing under 36px** — including
+  the fix itself seen on screen: TT001 lists 0.95 GST-exclusive and the field fills **1.05**,
+  while TOW010's GST-free 1.80 passes through untouched. The harness
   asserts the section is in the page *being served* before measuring anything, because a stale
   build answering is how the 2026-08-25 run passed vacuously.
 
@@ -2488,17 +2491,51 @@ tax-inclusive, save, and check the list shows `$0.22 / ea` — then add that ite
 invoice line and confirm the unit shows beside the quantity and "This price includes GST" under
 the price.**
 
-**One thing found and deliberately not fixed, per the request's own instruction.** An item whose
-`sell_price_basis` is `exclusive` will be **under-billed by the whole GST component**:
+**The under-billing this change first reported is now fixed, at the owner's instruction.** An
+item whose `sell_price_basis` is `exclusive` was **short-charged by the whole GST component**:
 `addInvoiceLine` stores `amount = quantity × unit_price`, and 0043's `recalculate_invoice`
-treats every line amount as GST-**inclusive** and extracts the tax out of it — so $100
-exclusive bills $100 with $9.09 inside it where the item says $110 with $10 on top. Latent
-rather than live (no item carries a basis, so no line can produce it today), and left alone
-because the fix is a decision about the totals rather than a one-word change:
-`sell_price_basis` is per *item* while an invoice's basis is per *document* — Xero's
-`LineAmountTypes` is one field for the whole invoice — so a mixed-basis invoice cannot be
-expressed by flipping anything. It is the mirror image of the inconsistency the entry below
-records, and it belongs with whoever designed the inclusive-price model.
+treats every line amount as GST-**inclusive** and extracts the tax out of it — so $100 exclusive
+billed $100 with $9.09 found *inside* it where the item says $110 with $10 on top.
+
+**The fix does not touch the totals maths, and that is the point.** A line amount being
+GST-inclusive is 0043's decision, not an accident, so what was wrong was the *conversion* into a
+line rate and not the arithmetic over it. `lineRateFromItem` grosses an exclusive price up at the
+moment an item becomes money, and the totals, the schema and every stored row are untouched. The
+alternative — a per-line basis column and a re-created `recalculate_invoice` — would reverse
+0043 and re-price every invoice, which is a decision about the inclusive-price model rather than
+a repair to this one.
+- **Both call sites, because there were two.** The invoice line composer, and
+  `chargePatchForItem` on a job's Charges screen — the second being the worse of the two, since
+  approval **freezes** that number and the customer would be short-charged on a row nobody can
+  edit afterwards.
+- **Three paths pass through untouched**, each a decision: **no basis stated** (all 254 of this
+  laundry's items, so the ordinary path cannot move); **not taxable** (a `FRE` or `N-T` line has
+  no GST, so both bases describe one number, and grossing up there would *over*-charge); and a
+  zero or negative rate. An unrecognised basis is never guessed at — `taxableFromTaxCode`'s
+  reason, applied to the rule that decides what a customer pays.
+- **`tenants.gst_rate` is read rather than 10% assumed**, because this number decides money and a
+  constant would be a second answer to a question that column already holds. `GST_RATE_FALLBACK`
+  lives in `lib/domain/items.ts` and not beside its reader in `lib/gst.ts`: `coding.ts` needs it
+  and is imported by a client component, so reaching a module that names the server Supabase
+  client — even as a type — is the trap §2 records `plan.ts` falling into, which typechecks,
+  lints and tests clean and fails only at `next build`.
+- **The exclusive sentence changed with the behaviour**, from "GST is added to this price" to
+  "GST has been added to the item's price". The first was written when the basis was merely
+  descriptive; once the rate is grossed up it describes something the invoice was never going to
+  do. The two assertions pinning the old wording were **rewritten to the decision** rather than
+  satisfied — the same move `laundry_pricing.test.sql` needed in 0033.
+- Nothing on the deployment changes shape: `sell_price_basis` is null on all 254 items, so no
+  line can take the new path until somebody sets one. This is a correctness fix landing ahead of
+  the data that would exercise it.
+- **18 new tests, and the fix was confirmed to be the thing they catch** rather than assumed:
+  restoring the defect fails 7, grossing up on a GST-free line fails 3, and guessing that an
+  unknown basis means exclusive fails 4 — including a pre-existing one about a zero list price.
+
+**The Xero half of this is untouched and still open.** `buildInvoicePayload` sends
+`LineAmountTypes: "Exclusive"` with a `unit_price` the database treats as inclusive, so Xero
+would add 10% on top of a figure that already contains it. Latent — no `xero_connections` row,
+nothing ever pushed — and genuinely a different question: `LineAmountTypes` is one field for the
+whole invoice, so a mixed-basis invoice cannot be expressed by flipping it. See the entry below.
 
 **Two smaller things stated rather than fixed.** An `optionalText` or `optionalUuid` field
 **cannot be cleared once set** anywhere in this app — clearing posts `""`, which those helpers
@@ -6867,15 +6904,20 @@ bag, under the code the business already uses (0032). Staff type TOW001.
     true — the same call `taxableFromTaxCode` makes about a code it does not know.
     And it does not feed the GST checkbox: the item's own tax code still beats its
     account's, untouched.
-  - **Known and not fixed: `exclusive` is a promise the totals do not keep.**
-    `addInvoiceLine` stores `amount = quantity × unit_price` and 0043's
-    `recalculate_invoice` treats every line amount as GST-**inclusive**, extracting
-    the tax out of it. So an exclusive-basis item priced at $100 bills $100 with
-    $9.09 inside it where the item says $110 with $10 on top. Latent — no item
-    carries a basis — and left to whoever owns the inclusive-price model, because
-    `sell_price_basis` is per *item* while Xero's `LineAmountTypes` is per
-    *document*, so a mixed-basis invoice cannot be expressed by flipping anything.
-    The mirror image of the inconsistency §18's 2026-08-26 entry already records.
+  - **An exclusive price is grossed up before it becomes a rate**, and until
+    2026-08-26 it was not — which short-charged the customer by the whole GST
+    component. A line amount is GST-inclusive (0043's `recalculate_invoice`
+    extracts the tax *out* of it), so an item stating its price the other way
+    round has to be converted or the line is short by exactly the GST.
+    `lineRateFromItem` is that conversion, shared by the invoice line composer
+    and `chargePatchForItem` — the second mattering more, because approval
+    **freezes** a job charge. It reads `tenants.gst_rate` rather than assuming
+    10%, and passes a price through untouched on all three paths that carry no
+    GST: no basis stated (every one of the 254), a `FRE`/`N-T` line, or a laundry
+    charging no GST. **The totals maths is untouched**: what was wrong was the
+    conversion into a line rate, not the arithmetic over it, and the alternative
+    — a per-line basis column and a re-created `recalculate_invoice` — would
+    reverse 0043 and re-price every invoice.
 
 - **The open question is above this work, not inside it.** This app posts invoices and payments
   to **Xero** (§20) while MYOB is a one-off migration source (`docs/IMPORT-MYOB.md`). An item

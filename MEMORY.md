@@ -43,11 +43,27 @@ changed.** All fifteen fields are null on all 254 imported rows.
   and `priceBasisHint` are pure and tested; the hint is **null on a non-taxable line**, because
   both sentences are claims about GST.
 
-**Found and NOT fixed, as instructed:** an `exclusive`-basis item is **under-billed by the whole
-GST component** — `addInvoiceLine` stores `quantity × unit_price` and 0043's
-`recalculate_invoice` extracts GST *out of* that, so $100 exclusive bills $100/$9.09 where the
-item says $110/$10. Latent (no item carries a basis). Same shape as the Xero one below and the
-same reason to leave it: basis is per-*item*, `LineAmountTypes` is per-*document*.
+**The under-billing is FIXED** (owner's instruction, after it was first reported and left). An
+`exclusive`-basis item short-charged by the whole GST component — `addInvoiceLine` stores
+`quantity × unit_price` and 0043's `recalculate_invoice` extracts GST *out of* that, so $100
+exclusive billed $100/$9.09 where the item says $110/$10.
+- **`lineRateFromItem`** grosses an exclusive price up at the moment an item becomes money.
+  **The totals maths is untouched** — a line amount being GST-inclusive is 0043's decision, so
+  the conversion was wrong, not the arithmetic. A per-line basis column would reverse 0043 and
+  re-price every invoice; do not.
+- **Both call sites**: the invoice composer and `chargePatchForItem` (worse — approval *freezes*
+  that number). Untouched on all three no-GST paths: no basis (all 254 items), FRE/N-T, rate 0.
+  An unknown basis is never guessed at.
+- Reads `tenants.gst_rate` via `lib/gst.ts`. **`GST_RATE_FALLBACK` lives in
+  `lib/domain/items.ts`, not beside its reader** — `coding.ts` needs it and reaches the client
+  bundle, so importing a module naming the server client is the §2 `next build` trap.
+- Hint wording changed with it: "GST **has been** added to the item's price". Two tests pinning
+  the old string were rewritten to the decision.
+
+**Still NOT fixed, and a different question:** `buildInvoicePayload` sends
+`LineAmountTypes: "Exclusive"` with an inclusive `unit_price`, so Xero would add 10% on top.
+Latent (nothing ever pushed). Per-*document* field vs per-*item* basis — cannot be fixed by
+flipping the string.
 
 **Also stated rather than fixed:** an `optionalText`/`optionalUuid` field cannot be *cleared*
 once set anywhere in this app (`""` → `undefined` → dropped by `JSON.stringify`). 0044's new
