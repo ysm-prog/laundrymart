@@ -33,11 +33,18 @@ migration this repo lacked. **No `src/` change; one migration file, reconstructe
 - **The pgTAP pass over it is vacuous — nothing in `supabase/tests/` calls
   `recalculate_invoice`.** Proved by probe instead: $72.70 → 72.70 / **6.61** / 72.70;
   `tax_code='FRE'` forces `taxable=false`; freight totals right.
-- **Found and NOT fixed:** `buildInvoicePayload` sends `LineAmountTypes: "Exclusive"` with the
-  raw `unit_price`, so Xero would add 10% on top of a GST-inclusive figure — $72.70 here, $79.97
-  there. Latent (no Xero connection, nothing ever pushed). Not fixed because
-  `items.sell_price_basis` is per-item while Xero's setting is per-invoice, so flipping the
-  string is probably the wrong answer. Belongs with whoever designed the inclusive model.
+- **Found and then fixed (same day):** `buildInvoicePayload` sent `LineAmountTypes: "Exclusive"`
+  with the raw `unit_price`, so Xero would have added 10% on top of a GST-inclusive figure —
+  $72.70 here, $79.97 there. Now `"Inclusive"`. Latent throughout: no Xero connection, nothing
+  ever pushed.
+  - The earlier caution (`items.sell_price_basis` is per-item, so the basis might be mixed) **did
+    not apply**: that column is about reading an item's *list price*, while `recalculate_invoice`
+    totals `invoice_lines` unconditionally inclusive. One basis per document.
+  - `payloadTotal()` models **Xero's** arithmetic including the basis, so it changes answer if the
+    string is flipped — all three assertions proved to fail without the fix.
+  - **Still open, in §20:** freight is not sent at all (`invoices.freight_amount` is not in the
+    payload), and Xero recomputes `Quantity × UnitAmount` where we deliberately sum frozen
+    amounts, so a merged line can differ by a cent. Both inert; both want a real Xero connection.
 
 
 ## Previously: a job never becomes an invoice — it joins a draft
