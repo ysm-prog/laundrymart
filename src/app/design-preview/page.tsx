@@ -16,7 +16,7 @@ import { CustomerEssentials, FormDisclosure } from "@/app/(app)/customers/custom
 import { EXCEPTION_REASONS } from "@/app/(app)/jobs/exception-reasons";
 import { navigationFor, type NavItem } from "@/lib/nav";
 import {
-  ORDER_STATUSES, isOverdue, summariseItems,
+  ORDER_STATUSES, buildStatusTrack, isOverdue, summariseItems,
 } from "@/lib/domain/laundry-orders";
 import { UNASSIGNED } from "@/app/(app)/routes/planner/plan";
 import { DateNav } from "@/app/(app)/my-runs/date-nav";
@@ -31,6 +31,7 @@ import {
   InvoiceSelection, type SelectableInvoice,
 } from "@/app/(app)/invoices/invoice-selection";
 import { PriceTable } from "@/app/(app)/invoices/prices/price-table";
+import { StatusTrack } from "@/app/(app)/orders/[id]/status-track";
 import {
   defaultPriceList, priceListFor, type LaundryPriceRow,
 } from "@/lib/domain/laundry-billing";
@@ -1405,6 +1406,70 @@ export default function DesignPreviewPage() {
                 period={resolvePeriod(
                   { period: "custom", from: "2026-08-03", to: "2026-08-19" }, "2026-08-26", "all")}
                 presets={ACTIVITY_PERIOD_PRESETS} today="2026-08-26" label="Completed in"
+              />
+            </Card>
+          </section>
+
+          {/* The job status track — the whole reason `/orders/:id` is worth
+              looking at from a build box. Every state below is built by the
+              real `buildStatusTrack` against a different capability set, so
+              what is drawn here is what the screen will draw. */}
+          <section id="status-track-preview" className="space-y-4 border-t pt-8">
+            <PageHeader
+              title="Where this job is up to"
+              description="A job's stages, and the way to move between them — including backwards."
+            />
+
+            <Card title="A delivery job, mid-plant"
+                  description="Two stages behind it, both pressable: that is what makes it a control and not a progress bar. Assigned and Completed are drawn and explained rather than left inert.">
+              <StatusTrack
+                steps={buildStatusTrack(
+                  { status: "ready_for_delivery", deliveryRequired: true }, () => true,
+                )}
+                orderId="preview" action={async () => { "use server"; }}
+              />
+            </Card>
+
+            <Card title="A customer pickup"
+                  description="Four stages, not six. A step that can never apply is left off rather than drawn dead — the rule §29 already settles for a filter chip nothing matches.">
+              <StatusTrack
+                steps={buildStatusTrack(
+                  { status: "in_progress", deliveryRequired: false }, () => true,
+                )}
+                orderId="preview" action={async () => { "use server"; }}
+              />
+            </Card>
+
+            <Card title="On a round, seen by the counter"
+                  description="Holds orders.status and nothing else, so the send-out override and the way back off the round are both drawn with a reason instead of being pressable."
+            >
+              <StatusTrack
+                steps={buildStatusTrack(
+                  { status: "assigned", deliveryRequired: true },
+                  (capability) => capability === "orders.status",
+                )}
+                orderId="preview" action={async () => { "use server"; }}
+              />
+            </Card>
+
+            <Card title="Finished"
+                  description="Terminal, so the whole track is history and nothing on it can be pressed.">
+              <StatusTrack
+                steps={buildStatusTrack(
+                  { status: "completed", deliveryRequired: true }, () => true,
+                )}
+                orderId="preview" action={async () => { "use server"; }}
+              />
+            </Card>
+
+            <Card title="Cancelled"
+                  description="Not a stage of the work, so the job has no position on the track at all. The banner above it on the real page is what says what happened."
+            >
+              <StatusTrack
+                steps={buildStatusTrack(
+                  { status: "cancelled", deliveryRequired: true }, () => true,
+                )}
+                orderId="preview" action={async () => { "use server"; }}
               />
             </Card>
           </section>

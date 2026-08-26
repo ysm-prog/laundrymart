@@ -9,14 +9,14 @@ import {
 } from "@/lib/directory";
 import {
   DELIVERY_WINDOW_LABELS, PRIORITY_LABELS, RECEIVED_VIA_LABELS,
-  actionsFor, describeItem, isOrderStatus, isOverdue,
+  actionsFor, buildStatusTrack, describeItem, isOrderStatus, isOverdue,
   type DeliveryWindow, type OrderPriority, type ReceivedVia,
 } from "@/lib/domain/laundry-orders";
 import { businessToday } from "@/lib/domain/timezone";
 import { isBillingStatus } from "@/lib/domain/billing";
 import type { LaundryOrder, LaundryOrderActivity, LaundryOrderItem } from "@/lib/db/types";
 import {
-  Badge, Button, ButtonLink, Card, DataTable, EmptyState, Eyebrow,
+  Badge, ButtonLink, Card, DataTable, EmptyState, Eyebrow,
   Notice, PageHeader, SkeletonRows, StatusBadge, humanise,
 } from "@/components/ui";
 import { Select, SubmitButton } from "@/components/form";
@@ -24,6 +24,7 @@ import { ConfirmSubmit } from "@/components/confirm-submit";
 import { CompleteJob } from "../complete-job";
 import { ChargesCard } from "./charges-card";
 import { DispatchCard } from "./dispatch-card";
+import { StatusTrack } from "./status-track";
 import { advanceOrder, assignOrder, cancelOrder, completeOrder } from "../actions";
 
 export const dynamic = "force-dynamic";
@@ -116,8 +117,27 @@ export default async function JobDetailPage({
 
   // What this job's state allows, narrowed to what this person may do. Both
   // halves are re-checked in the action — a hidden button is a courtesy.
-  const available = actionsFor(order.status, delivery)
-    .filter((action) => can(session.role, action.capability));
+  //
+  // Only the actions that open a form: finishing a job records who handed it
+  // over and when, and cancelling one carries a reason. The plain status moves
+  // are steps on the track, so a button for each of them here would be the same
+  // choice offered twice — and with free movement there can be four at once.
+  const available = foreign ? [] : actionsFor(order.status, delivery)
+    .filter((action) => action.confirms && can(session.role, action.capability));
+
+  // The track. `foreign` stops it rather than a capability check, because the
+  // problem is which laundry this job belongs to and not what this person may
+  // do — and every write here filters `tenant_id`, so a step offered on somebody
+  // else's job would match no row and report success. (Before the track, the
+  // status buttons did exactly that.)
+  const track = buildStatusTrack(
+    { status: order.status, deliveryRequired: delivery },
+    (capability) => can(session.role, capability),
+    foreign
+      ? "This job belongs to another laundry — switch laundry in the account menu to move it."
+      : undefined,
+  );
+  const canJump = track.some((step) => step.jump);
 
   const customerAddress = [
     customer?.billing_address_line1, customer?.billing_suburb,
@@ -163,9 +183,17 @@ export default async function JobDetailPage({
       ) : null}
 
       {/* --------------------------------------------------------- actions --- */}
-      {available.length > 0 ? (
-        <Card title="What happens next">
-          <div className="flex flex-wrap items-start gap-2">
+      {/* The job's stages, and the way to move between them. Adopted from
+          `ysm-prog/ysm-hub`'s job detail — see `status-track.tsx`. It replaced
+          a row of buttons offering exactly one step at a time, which is why
+          this card is no longer called "What happens next": the answer to that
+          question is now drawn rather than listed, and the next step is not the
+          only thing on offer. */}
+      <Card title="Where this job is up to">
+        <StatusTrack steps={track} orderId={order.id} action={advanceOrder} />
+
+        {available.length > 0 || canJump ? (
+          <div className="mt-5 flex flex-wrap items-center gap-x-3 gap-y-2 border-t pt-4">
             {available.map((action) => {
               if (action.key === "cancel") {
                 return (
@@ -183,39 +211,42 @@ export default async function JobDetailPage({
                   </form>
                 );
               }
-              if (action.confirms) {
-                return (
-                  <CompleteJob
-                    key={action.key}
-                    action={completeOrder}
-                    orderId={order.id}
-                    delivered={delivery}
-                    staff={staff}
-                    defaultStaffId={defaultStaffId(staff, order.assigned_to, session.userId)}
-                  />
-                );
-              }
               return (
-                <form key={action.key} action={advanceOrder}>
-                  <input type="hidden" name="id" value={order.id} />
-                  <input type="hidden" name="status" value={action.to} />
-                  <Button variant={action.to === "cancelled" ? "danger" : "primary"}>
-                    {action.label}
-                  </Button>
-                </form>
+                <CompleteJob
+                  key={action.key}
+                  action={completeOrder}
+                  orderId={order.id}
+                  delivered={delivery}
+                  staff={staff}
+                  defaultStaffId={defaultStaffId(staff, order.assigned_to, session.userId)}
+                />
               );
             })}
+            {canJump ? (
+              /* YSM Hub says the same thing beside its own track, and it is the
+                 half people do not discover: the track goes backwards. Without
+                 the sentence a stage already passed just looks like history. */
+              <p className="text-xs text-muted-foreground">
+                Press any stage above to move this job there — including back, if it was
+                moved on by mistake.
+              </p>
+            ) : null}
           </div>
-        </Card>
-      ) : (
+        ) : null}
+      </Card>
+
+      {/* Only when there is genuinely nothing to do, and never for a cancelled
+          job — the danger banner at the top of the page has already said that,
+          and saying it twice reads as two different facts. */}
+      {available.length === 0 && !canJump && order.status !== "cancelled" ? (
         <Notice tone="info">
-          {order.status === "completed"
-            ? "This job is finished. Nothing further to do."
-            : order.status === "cancelled"
-              ? "This job was cancelled."
-              : "Your role cannot move this job to its next step."}
+          {foreign
+            ? "This job belongs to another laundry. Switch laundry in the account menu to work on it."
+            : order.status === "completed"
+              ? "This job is finished. Nothing further to do."
+              : "Your role cannot move this job to another stage."}
         </Notice>
-      )}
+      ) : null}
 
       {/* ------------------------------------------------------- charges --- */}
       {/* The money, for the roles that hold money capabilities. Above the

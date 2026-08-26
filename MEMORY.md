@@ -16,7 +16,43 @@ logins — which live there precisely so they cannot read the real business's re
 **The multi-tenancy architecture stays.** One operating tenancy is a fact about today's data, not
 a reason to drop `tenant_id`, RLS, or §23's rule that a read feeding a write names its tenant.
 
-## Latest: no ledger accounts on a job charge
+## Latest: a job's stage is picked, not walked
+2026-08-26, branch `claude/tasks-design-ysm-hub-loe44p`. **One migration (`0042`), applied to
+`laundrymart-syd` as `20260826112650 free_status_moves`.** CLAUDE.md §4 (rules), §6 (screen),
+§7 (migration) and §11 (the apply) hold it.
+
+Reported on `LJ00007`: the *What happens next* card offered one step forward and Cancel, and
+nothing else, because `guard_laundry_order_transition` held a linear table. `/orders/:id` now opens
+on a **status track** adopted from `ysm-prog/ysm-hub`'s job detail — the stages as a dot-and-rail
+stepper, every stage this job can reach pressable, forwards or back.
+
+- **Four rules survive, none of them "you cannot go backwards"**: a pickup has no delivery to be
+  on; laundry still in the plant is not given to a round; a delivery job is assigned before it goes
+  out; and it goes out before it is completed. `completed`/`cancelled` stay terminal — the owner
+  was asked, and `LJ00007` is now `completed` + `invoice_generated`, which is the case it protects.
+- **The guard was rebuilt from 0031's body**, so 0017's two billing hooks and 0031's board clearing
+  survive verbatim. Clearing widened from one edge to all six moves back into the plant.
+- **`buildStatusTrack` is the rule**, pure and tested; the component decides nothing.
+- **Two capabilities not widened**: sending out stays `orders.manage`, pulling a job off a round
+  gains `routes.write` (`leavesTheRound` / `capabilitiesForMove`), so the status control is not a
+  back door around Remove Assignment. `advanceOrder` also runs `retireStopIfEmpty`.
+- Found on the way: a platform admin was offered the status buttons on **another laundry's** job,
+  where the tenant-filtered UPDATE matched no row and the toast said it worked.
+- 981 unit tests, **485 pgTAP assertions**, `verify` green. Four proofs asserting the old one-step
+  rule were rewritten to the decision rather than deleted.
+
+**Applied and proved as real sessions** (rolled back): the counter moved a pickup **back** a stage
+— **1 row**, not the silent zero a restrictive policy writes — finished it from `new` with the
+0017 hook firing, was refused a van unassigned and refused reopening `LJ00007`; a board touched 0
+rows; the owner assigned a real round and pulled it back with the assignment cleared. The applied
+body was proved **byte-identical to the repo file** by `md5(prosrc)`. Advisors 23, unchanged. The
+apply also closed a live RPC-surface exposure that was not this migration's — `authenticated`
+could execute the guard (the 0019/0036 trap, standing since 0031 re-granted it).
+
+**Left, and it needs a browser:** take a job in on `ats.coreit.com.au`, press a stage already
+behind it, and confirm it moves back with the timeline recording it under your name.
+
+## Before that: no ledger accounts on a job charge
 2026-08-26, branch `claude/code-review-requirements-ns6bav`. **No migration.**
 
 The client's instruction: MYOB puts the Item ID and the Category on a line together, and nobody
@@ -31,7 +67,7 @@ picks a ledger account per line. So the job charges editor now asks **one** ques
   composer is where a code is chosen by hand, and it was deliberately left alone.
 - 968 unit tests, 431 pgTAP assertions, `verify` green.
 
-## Before it: the item code is typed where the charge is written
+## And before that: the item code is typed where the charge is written
 The description box on a charge line is an item type-ahead — `tw` offers
 `TW · Towels - Wash & Dry Only`, and picking it fills the description, rate, GST and account.
 Free text still wins: suggestions only while focused, Escape dismisses, nothing chosen without a
