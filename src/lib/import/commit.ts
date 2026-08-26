@@ -19,6 +19,77 @@ import type { ExistingParties, ImportPlan } from "@/lib/domain/myob";
 
 type Client = Awaited<ReturnType<typeof createClient>>;
 
+/** The ordinary path: one upsert per batch on a real unique index. */
+async function writeByUpsert(
+  supabase: Client, tenantId: string, table: ImportPlan["tables"][number],
+): Promise<number> {
+  let rows = 0;
+  for (let at = 0; at < table.rows.length; at += BATCH) {
+    const batch = table.rows.slice(at, at + BATCH).map((row) => ({ ...row, tenant_id: tenantId }));
+    const { error } = await supabase
+      .from(table.table)
+      .upsert(batch, { onConflict: table.conflict, ignoreDuplicates: false });
+    if (error) {
+      throw new Error(
+        `${table.label}: ${error.message} (rows ${at + 1}–${at + batch.length} of ${table.rows.length})`,
+      );
+    }
+    rows += batch.length;
+  }
+  return rows;
+}
+
+/**
+ * Read what is there, update by id, insert the rest.
+ *
+ * For a table whose uniqueness is an expression index, which PostgREST cannot
+ * name in `on_conflict=` — see `PlannedTable.matchBy`. Every read and write here
+ * still goes through the RLS-bound client, and the read names its tenant anyway
+ * (§23) because a platform admin's session reads every laundry and an id matched
+ * across the boundary would update somebody else's row.
+ */
+async function writeByMatch(
+  supabase: Client, tenantId: string, table: ImportPlan["tables"][number],
+): Promise<number> {
+  const match = table.matchBy!;
+  const fold = (value: unknown) =>
+    match.caseInsensitive ? String(value ?? "").toLowerCase() : String(value ?? "");
+
+  const { data: existing, error: readError } = await supabase
+    .from(table.table)
+    .select(`id, ${match.column}`)
+    .eq("tenant_id", tenantId)
+    .is("deleted_at", null)
+    .returns<Array<Record<string, unknown> & { id: string }>>();
+  if (readError) throw new Error(`${table.label}: ${readError.message}`);
+
+  const idByKey = new Map<string, string>();
+  for (const row of existing ?? []) idByKey.set(fold(row[match.column]), row.id);
+
+  let written = 0;
+  const inserts: Record<string, unknown>[] = [];
+  for (const row of table.rows) {
+    const id = idByKey.get(fold(row[match.column]));
+    if (id === undefined) { inserts.push({ ...row, tenant_id: tenantId }); continue; }
+    const { error } = await supabase
+      .from(table.table).update(row).eq("id", id).eq("tenant_id", tenantId);
+    if (error) throw new Error(`${table.label}: ${error.message} (updating ${row[match.column]})`);
+    written += 1;
+  }
+
+  for (let at = 0; at < inserts.length; at += BATCH) {
+    const batch = inserts.slice(at, at + BATCH);
+    const { error } = await supabase.from(table.table).insert(batch);
+    if (error) {
+      throw new Error(
+        `${table.label}: ${error.message} (rows ${at + 1}–${at + batch.length} of ${inserts.length})`,
+      );
+    }
+    written += batch.length;
+  }
+  return written;
+}
+
 /** Rows per request. Small enough that a failure names a findable batch. */
 const BATCH = 400;
 /** Rows per page when reading existing parties back. */
@@ -62,20 +133,9 @@ export async function commitPlan(
   const written: CommitResult["written"] = [];
 
   for (const table of plan.tables) {
-    let rows = 0;
-    for (let at = 0; at < table.rows.length; at += BATCH) {
-      const batch = table.rows.slice(at, at + BATCH)
-        .map((row) => ({ ...row, tenant_id: tenantId }));
-      const { error } = await supabase
-        .from(table.table)
-        .upsert(batch, { onConflict: table.conflict, ignoreDuplicates: false });
-      if (error) {
-        throw new Error(
-          `${table.label}: ${error.message} (rows ${at + 1}–${at + batch.length} of ${table.rows.length})`,
-        );
-      }
-      rows += batch.length;
-    }
+    const rows = table.matchBy
+      ? await writeByMatch(supabase, tenantId, table)
+      : await writeByUpsert(supabase, tenantId, table);
     written.push({ table: table.table, label: table.label, rows });
   }
 

@@ -1618,6 +1618,68 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-08-26 · The item list arrives, and it brings codes but not prices
+The client sent their MYOB inventory export with an updated requirement: pick the
+**ItemCode and price**, not the account code. Half of that is now built and the
+other half cannot come from this file — which is the finding, not an excuse. No
+migration; no schema, RLS, capability or workflow change.
+
+- **The item leads and the account follows.** That is how MYOB works — you choose
+  the Item ID and the Category comes with it — and it is how the coding strip now
+  reads: the item is the question asked, the account is shown beneath it as a
+  consequence, with "Use a different account" for the cases an item cannot answer.
+  Nobody sits and picks a ledger account per line any more.
+- **The price cannot come from this export, and the numbers say so plainly.** It
+  carries a selling price on **2 of 257** items ($2 on `42469`, $0.95 on `Mop`).
+  Every sellable service code is blank — `TW`, `GTW`, `HTW`, `BT`, `Del`, `Capes`,
+  `GL`. That is not a broken export: most of these are things the laundry *buys*.
+  So the rate keeps coming from `laundry_prices`, per customer with a tenant
+  default, which is where it has always lived and where their own rates already
+  are — their MYOB invoice bills `TW` at $0.22, a customer rate, not a list price.
+  The picker now says **"no price set"** instead of leaving a blank, because with
+  255 of 257 unpriced that is the ordinary case and a blank reads as free.
+- **The importer §25 deliberately withheld is built**, because the file finally
+  arrived to read. The inspection paid for itself on the first column: **the code
+  staff type is `Item Number`, not `Item ID`** — the latter is MYOB's internal row
+  number, and reading it would have imported 257 items nobody could find.
+
+**Four things in the real file that would otherwise have landed in front of staff**,
+each found by reading the 257 rows rather than anticipated:
+- **16 codes carry a stray backslash** (`2-B201\_PK100`) — markdown escaping leaked
+  into the export. Unescaped, because that is a code nothing will ever match.
+- **2 rows are GUIDs with no name.** Dropped, and named in the problem list.
+- **1 duplicate differs only in case** (`5A-LAUNDRYSE200`), which our
+  case-insensitive unique index would have refused at the insert. Caught by the
+  reader instead, so the message names a row rather than a constraint.
+- **58 names are truncated at exactly 30 characters** — MYOB's field width, not a
+  fault here. Imported as they are and **counted**, so the ones that matter can be
+  fixed rather than silently accepted.
+
+**A defect proved against a real database, not reasoned about.** `items` is unique
+on `(tenant_id, lower(item_code))` and partial, so PostgREST's `on_conflict=` cannot
+name it and Postgres refuses the statement outright:
+
+    42P10: there is no unique or exclusion constraint matching the ON CONFLICT
+           specification
+
+Every item import would have failed at request time, where no typecheck and no unit
+test can see it. `PlannedTable.matchBy` is the remedy — read, update by id, insert
+the rest — and it is the same call `laundry_prices` already documents for the same
+reason.
+
+- **`MAX_ITEM_CODE` went 20 → 30.** Their real codes reach 23
+  (`2-GLOVECLASTRAPF_PK1000`), so the old cap would have refused a code they type
+  every week. 30 is MYOB's own field width.
+- **`tax_code` and `is_sell`/`is_buy` are not inferred.** MYOB's Included/Excluded
+  answers "does the price include GST", not "which ledger code applies"; the
+  sell/buy split is not in this export at all. Every item imports as both, which is
+  what 0032 says those booleans are for. Guessing either would have put a wrong
+  answer on 254 items — the mistake §25 exists to prevent.
+- 819 unit tests (was 802), 439 pgTAP assertions, `verify` green. The reader was
+  **run against the real file**: 254 items, 3 rows skipped with reasons, longest
+  code 23, and all 254 then inserted into a fresh Postgres 16 against the real
+  schema to prove the planned rows are what the table accepts.
+
 ### 2026-08-26 · Code the charge where the charge is made
 The client's own comparison: MYOB puts the **Item ID** and the **Category** (its
 name for the account code) on an invoice line at the moment the line is written, so
@@ -4292,10 +4354,42 @@ bag, under the code the business already uses (0032). Staff type TOW001.
   the exact item beats a line for its category; within the price list, the same. The card still
   beats the list however specific the list is, because somebody negotiated it. `priceListFor`
   excludes per-item rows, so a rate agreed for TOW001 can never answer for every kind of towel.
-- **The MYOB importer is not built, and that is the correct state.** The client's own note says
-  the developer should inspect the real export rather than assume its field names; guessing is
-  how the dropped-column bug in the bills import happened. `MYOB_KINDS` still lists eight kinds
-  and items is not one. The columns are here and waiting for the file.
+- **The MYOB item importer exists now, and only because the real export was read.** This said
+  for months that it was deliberately unbuilt, on the client's own note that the developer
+  should inspect the export rather than assume its field names — guessing is how the
+  dropped-column bug in the bills import happened. The file arrived on 2026-08-26 and the
+  inspection earned its keep immediately: **the code staff type is `Item Number`, not
+  `Item ID`** — that second column is MYOB's internal row number (239, 229, 265), and reading
+  it would have imported 257 items nobody could find. `myob/inventory.ts` holds the rules,
+  tested against the real 257 rows; `readInventoryFile` is the shell that fits them to the
+  existing import screen. Four things it cleans, each measured rather than anticipated: 16
+  codes carrying a stray backslash (`2-B201\_PK100` → `2-B201_PK100`), 2 nameless GUID rows of
+  sync debris, 1 duplicate differing only in case, and 58 names truncated at MYOB's
+  30-character field width — imported as they are, but **counted and reported** so somebody can
+  fix the ones that matter. Nothing is dropped silently.
+  - **`items` is written by reading first, not by upserting.** `uq_items_code` is on
+    `(tenant_id, lower(item_code))` and partial, so PostgREST's `on_conflict=` cannot name it
+    and Postgres refuses the statement outright with **42P10**. Proved against a real database
+    rather than reasoned about, because it fails at request time where no typecheck and no unit
+    test can see it. The remedy is the one `laundry_prices` already documents — read, update by
+    id, insert the rest — and `PlannedTable.matchBy` is that path.
+  - **`tax_code` and `is_sell`/`is_buy` are deliberately not inferred.** MYOB's
+    Included/Excluded says whether the *price* includes GST, a different question from which
+    ledger code applies; and the sell/buy split is simply not in this export. Every item
+    imports as both, which is what 0032 says those booleans are for. MYOB's Items List
+    [Summary] export carries the real flags, and this reader gains two columns when it lands.
+  - **`MAX_ITEM_CODE` is 30, not 20.** This business's real codes reach 23
+    (`2-GLOVECLASTRAPF_PK1000`), so the old cap would have refused a code they type every week.
+    30 is MYOB's own field width.
+- **An item's code comes from MYOB; its price does not.** The inventory export carries a
+  selling price on **2 of 257** items — the rest are things the laundry *buys*, and even the
+  sellable service codes (`TW`, `GTW`, `HTW`, `BT`, `Del`, `Capes`, `GL`) are blank. So what a
+  customer is charged stays in `laundry_prices`, per customer with a tenant default, which is
+  where this app has always kept it and where the client's own rates already live — their MYOB
+  invoice bills `TW` at $0.22, a customer rate rather than a list price. `items.sell_price`
+  carries MYOB's figure for the two that have one and **nothing invented for the rest**; the
+  item picker says "no price set" rather than showing a blank, because with 255 of 257 unpriced
+  that is the ordinary case and a blank reads as free.
 - **Categories are set on the demo laundry only, because the real one has no items.**
   `Adelaide Towel Service` holds **zero** `items` rows — its item master is exactly what the
   unbuilt MYOB import would fill. Harbour's five laundry items carry a category; its laundry bag

@@ -2,6 +2,7 @@ import { ident, partyNumber, round, termsDays } from "./values";
 import type {
   Account, Bill, Credit, Invoice, Order, Party, Problem, Remittance, ReportParty,
 } from "./readers";
+import type { InventoryItem } from "./inventory";
 
 /**
  * Everything the uploaded files add up to, worked out before anything is
@@ -24,6 +25,7 @@ export type ParsedFiles = {
   report?: ReportParty[];
   invoices?: Invoice[];
   remittances?: Remittance[];
+  inventory?: InventoryItem[];
 };
 
 /** Parties the tenant already holds, so their numbers survive a re-import. */
@@ -38,6 +40,22 @@ export type PlannedTable = {
   /** Column list for the upsert's conflict target. */
   conflict: string;
   rows: Record<string, unknown>[];
+  /**
+   * Match on this column by **reading first** instead of upserting.
+   *
+   * For a table whose uniqueness is an *expression* index — `items` is unique on
+   * `(tenant_id, lower(item_code)) where deleted_at is null` — PostgREST's
+   * `on_conflict=` cannot name it, and Postgres refuses the statement outright:
+   *
+   *     42P10: there is no unique or exclusion constraint matching the
+   *            ON CONFLICT specification
+   *
+   * Proved against a real database rather than reasoned about, because it fails
+   * at request time and no typecheck or unit test can see it. The remedy is the
+   * one `laundry_prices` already documents: read what is there, update by id and
+   * insert the rest, and never infer an index through `on_conflict`.
+   */
+  matchBy?: { column: string; caseInsensitive?: boolean };
 };
 
 export type ImportPlan = {
@@ -105,6 +123,7 @@ export function buildPlan(
   const accounts = files.accounts ?? [];
   const report = files.report ?? [];
   const remittances = files.remittances ?? [];
+  const inventory = files.inventory ?? [];
   const invoices = (files.invoices ?? [])
     .filter((invoice) => invoiceScope === "all" || invoice.outstanding);
 
@@ -235,6 +254,39 @@ export function buildPlan(
       code: account.code, name: account.name, account_type: account.type,
       tax_code: account.taxCode, is_linked: account.linked, is_header: account.header,
       level: account.level, current_balance: account.balance,
+    })),
+  });
+
+  // ----------------------------------------------------------------- items ---
+  // Upserted on the code, so a re-import corrects an item rather than making a
+  // second one — the same `conflict` the chart of accounts uses, and the reason
+  // the code and not MYOB's internal row number is the natural key.
+  //
+  // **`sell_price` is 0 where MYOB holds none, and that is not the same as free.**
+  // What a customer is charged lives in `laundry_prices` — per customer with a
+  // tenant default — which is where this app has always kept it and where the
+  // client's own per-customer rates already are. The column carries MYOB's price
+  // for the two items that have one and nothing invented for the rest.
+  //
+  // `is_sell`/`is_buy` are both true because the export says nothing about the
+  // split; `tax_code` is left null because MYOB's Included/Excluded answers a
+  // different question (does the price include GST) than ours does (which ledger
+  // code applies). Neither is guessed at — see `myob/inventory.ts`.
+  add({
+    table: "items", label: "Items", conflict: "tenant_id,item_code",
+    // `uq_items_code` is on `lower(item_code)` and partial, so this table is
+    // matched by reading rather than upserted. See `matchBy` above.
+    matchBy: { column: "item_code", caseInsensitive: true },
+    rows: inventory.map((item) => ({
+      item_code: item.code,
+      sku: item.code,
+      name: item.name,
+      sell_price: item.sellPrice ?? 0,
+      is_sell: true,
+      is_buy: true,
+      myob_item_id: item.myobItemId,
+      myob_item_code: item.code,
+      status: "active",
     })),
   });
 
