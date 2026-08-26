@@ -19,12 +19,14 @@ import {
   count, describeDbError, done, fail, firstIssue, money, optionalText,
   optionalUuid, requiredDate, returnTo, toObject,
 } from "@/lib/actions";
+import { counted } from "@/lib/format";
 import { loadInvoiceForPdf } from "@/lib/pdf/invoice-data";
 import { pushInvoiceToXero } from "@/lib/xero/push";
 import { pushPaymentToXero } from "@/lib/xero/push-payment";
 import { pushVoidToXero } from "@/lib/xero/push-void";
 import { accountForLine, incomeAccountsForItems } from "@/lib/invoices/account-coding";
 import { generateInvoicesForJobs } from "@/lib/invoices/from-jobs";
+import { findOrOpenDraft, removeJobFromDraft } from "@/lib/invoices/open-draft";
 import { issueOneInvoice } from "@/lib/invoices/issue";
 import {
   markInvoiceJobsPaid, releaseVoidedInvoiceJobs, sendInvoice,
@@ -158,15 +160,37 @@ export async function generateInvoices(formData: FormData): Promise<void> {
   let created = 0;
   let skipped = 0;
   let contractsBilled = 0;
+  // Which *documents* this run touched. Both halves now write onto the same
+  // per-customer draft, so counting "contract invoices" and "job invoices"
+  // separately would report two where the customer receives one.
+  const touched = new Set<string>();
 
   for (const [customerId, contracts] of byCustomer) {
-    const { data: existing } = await supabase
-      .from("invoices").select("id")
+    // **Has this customer's contracts already been billed for this window?**
+    // Asked of the *lines* rather than of the invoice type, because since 0040
+    // the contract charges and the month's job charges share one document —
+    // `invoice_type` can no longer answer it, and `origin` can. The legacy
+    // `recurring` shape is still recognised beside it, so a period billed by the
+    // code that shipped before this is not billed a second time.
+    const { data: periodInvoices } = await supabase
+      .from("invoices").select("id, invoice_type")
+      .eq("tenant_id", session.tenantId)
       .eq("customer_id", customerId)
-      .eq("invoice_type", "recurring")
       .eq("period_start", start).eq("period_end", end)
-      .maybeSingle();
-    if (existing) { skipped += 1; continue; }
+      .neq("status", "void")
+      .returns<Array<{ id: string; invoice_type: string }>>();
+
+    if ((periodInvoices ?? []).some((row) => row.invoice_type === "recurring")) {
+      skipped += 1; continue;
+    }
+    if ((periodInvoices ?? []).length > 0) {
+      const { count: contractLines } = await supabase
+        .from("invoice_lines").select("id", { count: "exact", head: true })
+        .eq("tenant_id", session.tenantId)
+        .in("invoice_id", (periodInvoices ?? []).map((row) => row.id))
+        .eq("origin", "contract");
+      if ((contractLines ?? 0) > 0) { skipped += 1; continue; }
+    }
 
     const contractLines = new Map(
       contracts.map((agreement) => [agreement.id, linesByAgreement.get(agreement.id) ?? []]),
@@ -264,10 +288,6 @@ export async function generateInvoices(formData: FormData): Promise<void> {
 
     if (draft.length === 0) { skipped += 1; continue; }
 
-    const { data: invoiceNumber, error: numberError } = await supabase
-      .rpc("next_number", { t: session.tenantId, k: "invoice", p: "INV" });
-    if (numberError) return fail("/invoices", describeDbError(numberError));
-
     const terms = consolidate(
       contracts.map((agreement) => Number(agreement.payment_terms_days ?? 14)),
       Number(customerById.get(customerId)?.payment_terms_days ?? 14),
@@ -283,26 +303,32 @@ export async function generateInvoices(formData: FormData): Promise<void> {
       null,
     );
 
-    const { data: invoice, error } = await supabase
-      .from("invoices")
-      .insert({
-        tenant_id: session.tenantId,
-        created_by: session.userId,
-        customer_id: customerId,
-        depot_id: depotId,
-        invoice_number: invoiceNumber as string,
-        invoice_type: "recurring",
-        status: "draft",
-        issue_date: end,
-        due_date: addDays(end, terms),
-        period_start: start,
-        period_end: end,
+    // **The contract charges go on the customer's draft for this period, not on
+    // an invoice of their own.** `CLAUDE.md` §4 has said "one invoice per
+    // customer per period, carrying every contract they hold and every laundry
+    // job they had completed in it" since the recurring run was written, and the
+    // code did not do it: this half wrote a `recurring` invoice and the jobs half
+    // below wrote a second, `consolidated` one. A customer with a contract and
+    // counter laundry received two documents for one month. Nothing was billed
+    // twice — the month was simply split.
+    //
+    // The header values below are used only if this call is what *opens* the
+    // draft. When the month's approvals already opened one, its header stands:
+    // rewriting the terms on an invoice somebody may have looked at, because a
+    // second writer arrived with its own opinion, is not an improvement.
+    const opened = await findOrOpenDraft(
+      supabase, session,
+      {
+        id: customerId,
         payment_terms_days: terms,
+        depot_id: depotId,
         purchase_order_number: purchaseOrder,
-      })
-      .select("id")
-      .single();
-    if (error) return fail("/invoices", describeDbError(error));
+      },
+      { start, end },
+      end,
+    );
+    if (!opened.ok) return fail("/invoices", opened.error);
+    const invoiceId = opened.draft.id;
 
     // Same rule as the per-job generator, from the same module: a line that names
     // an item is coded to that item's income account, and everything else is
@@ -311,11 +337,18 @@ export async function generateInvoices(formData: FormData): Promise<void> {
       supabase, session.tenantId, draft.map((entry) => entry.line.itemId),
     );
 
+    // After whatever is already on the draft, so the invoice reads laundry first
+    // and the contract charges under it. `rebuildJobLines` re-sequences these
+    // again the next time a job joins, which is what keeps the order stable.
+    const { count: existingLines } = await supabase
+      .from("invoice_lines").select("id", { count: "exact", head: true })
+      .eq("invoice_id", invoiceId).eq("tenant_id", session.tenantId);
+
     const { error: lineError } = await supabase.from("invoice_lines").insert(
       draft.map((entry, index) => ({
         tenant_id: session.tenantId,
         created_by: session.userId,
-        invoice_id: invoice.id,
+        invoice_id: invoiceId,
         item_id: entry.line.itemId ?? null,
         gl_account_id: accountForLine(entry.line.itemId, accountByItem),
         agreement_id: entry.agreementId,
@@ -327,14 +360,18 @@ export async function generateInvoices(formData: FormData): Promise<void> {
         unit_price: entry.line.unitPrice,
         amount: entry.line.amount,
         taxable: entry.line.taxable,
-        sequence: index + 1,
+        // Not `job`: nothing may re-derive these from a frozen job charge, and
+        // `rebuildJobLines` deletes exactly the lines marked `job`.
+        origin: "contract",
+        sequence: (existingLines ?? 0) + index + 1,
       })),
     );
     if (lineError) return fail("/invoices", describeDbError(lineError));
 
-    const { error: totalError } = await supabase.rpc("recalculate_invoice", { p_invoice: invoice.id });
+    const { error: totalError } = await supabase.rpc("recalculate_invoice", { p_invoice: invoiceId });
     if (totalError) return fail("/invoices", describeDbError(totalError));
 
+    touched.add(invoiceId);
     created += 1;
     contractsBilled += contracts.length;
   }
@@ -367,28 +404,41 @@ export async function generateInvoices(formData: FormData): Promise<void> {
     .limit(1000)
     .returns<Array<{ id: string }>>();
 
+  // **The same window, so both halves meet on one draft.** Without the period
+  // the jobs would find their own from each customer's billing method — which is
+  // the calendar month, and therefore the same answer whenever the operator runs
+  // a whole month, and a *different* one the moment they run 5–20 August. The
+  // window they chose is the window they are billing.
   const jobRun = await generateInvoicesForJobs(
     supabase, session, (periodJobs ?? []).map((row) => row.id),
-    { issueDate: end, respectManual: true },
+    { issueDate: end, respectManual: true, period: { start, end } },
   );
+
+  for (const entry of jobRun.created) touched.add(entry.invoiceId);
 
   await recordAudit(session, {
     entity: "invoice", action: "generate",
-    summary: `${created} contract invoice(s) and ${jobRun.created.length} job invoice(s) for ${start} – ${end}`,
+    summary: `${touched.size} invoice(s) for ${start} – ${end}`
+      + ` — ${contractsBilled} contract(s) and`
+      + ` ${jobRun.created.reduce((sum, entry) => sum + entry.jobIds.length, 0)} approved job(s)`,
     metadata: {
-      start, end, created, skipped, contracts: contractsBilled,
-      jobInvoices: jobRun.created.length, jobsSkipped: jobRun.skipped.length,
+      start, end, invoices: touched.size, customersBilled: created, skipped,
+      contracts: contractsBilled,
+      jobs: jobRun.created.reduce((sum, entry) => sum + entry.jobIds.length, 0),
+      jobsSkipped: jobRun.skipped.length,
     },
   });
   revalidatePath("/invoices");
   revalidatePath("/invoices/awaiting");
+  revalidatePath("/invoices/drafts");
 
-  // Said separately rather than added together: "3 invoices" made of two
-  // different things, counted as one number, is the kind of summary somebody
-  // reconciles against and finds wrong.
+  // Counted in **documents**, because that is what the customer receives and
+  // what the owner is checking. Before the running draft this said "N contract
+  // invoices and M job invoices", which was two numbers for one month and, for a
+  // customer holding both, literally two invoices.
   const jobCount = jobRun.created.reduce((sum, entry) => sum + entry.jobIds.length, 0);
-  const jobNote = jobRun.created.length > 0
-    ? ` Also billed ${jobRun.created.length} invoice(s) from ${jobCount} approved job(s).`
+  const jobNote = jobCount > 0
+    ? ` ${counted(jobCount, "approved job")} billed onto them.`
     : "";
 
   // A job the run could not bill is reported rather than left silent — it is the
@@ -407,7 +457,7 @@ export async function generateInvoices(formData: FormData): Promise<void> {
 
   const skippedNote = skipped > 0 ? ` ${skipped} customer(s) skipped.` : "";
 
-  if (created === 0 && jobRun.created.length === 0) {
+  if (touched.size === 0) {
     return fail("/invoices",
       `Nothing to invoice — ${skipped} customer(s) were already billed for that period, `
       + `and no approved job was waiting.${jobSkipNote}`,
@@ -417,16 +467,15 @@ export async function generateInvoices(formData: FormData): Promise<void> {
   // Said in customers and contracts rather than in rows: the operator's question
   // is "did everyone get billed", and a consolidated invoice covering two
   // contracts should say so rather than looking like one contract was missed.
-  const covers = contractsBilled > created ? ` covering ${contractsBilled} contract(s)` : "";
-  const summary = created === 0
-    ? jobNote.trim()
-    : `Created ${created} draft invoice(s)${covers}.${skippedNote}${jobNote}`;
+  const covers = contractsBilled > 0 ? ` covering ${counted(contractsBilled, "contract")}` : "";
+  const summary = `${counted(touched.size, "draft invoice")} for ${start} to ${end}`
+    + `${covers}.${skippedNote}${jobNote} Nothing has been sent yet.`;
 
   // An unbillable job is a fact the operator has to act on, so it is said as a
   // failure with the screen that fixes it — the invoices were still created.
   return skippedJobs.length > 0
     ? fail("/invoices", `${summary}${jobSkipNote}`, queueLink)
-    : done("/invoices", summary);
+    : done("/invoices", summary, { href: "/invoices/drafts", label: "Open drafts" });
 }
 
 export async function createManualInvoice(formData: FormData): Promise<void> {
@@ -499,6 +548,22 @@ export async function addInvoiceLine(formData: FormData): Promise<void> {
   const backTo = `/invoices/${parsed.data.invoice_id}`;
   const supabase = await createClient();
 
+  // 0040's `guard_invoice_line_draft_only` is the boundary and refuses this
+  // outright; this is the sentence in front of it. Worth having both: the guard
+  // covers a request made outside the app, and the check covers a stale page
+  // whose Add button is still on screen after somebody else issued the invoice.
+  const { data: parent } = await supabase
+    .from("invoices").select("status")
+    .eq("id", parsed.data.invoice_id).eq("tenant_id", session.tenantId)
+    .maybeSingle<{ status: string }>();
+  if (!parent) return fail(backTo, "That invoice could not be found.");
+  if (parent.status !== "draft") {
+    return fail(backTo, parent.status === "void"
+      ? "This invoice is void. Its lines are a record of what was said and cannot change."
+      : "This invoice is no longer a draft, so its lines cannot change. "
+        + "Raise a credit note if it was wrong.");
+  }
+
   const { count: existing } = await supabase
     .from("invoice_lines").select("id", { count: "exact", head: true })
     .eq("invoice_id", parsed.data.invoice_id);
@@ -515,6 +580,10 @@ export async function addInvoiceLine(formData: FormData): Promise<void> {
     tenant_id: session.tenantId,
     created_by: session.userId,
     amount: lineAmount(parsed.data.quantity, parsed.data.unit_price),
+    // Stated rather than left to the column default, because this is the whole
+    // meaning of the value: a typed line is one `rebuildJobLines` may never
+    // delete, however many jobs join the draft afterwards.
+    origin: "manual",
     sequence: (existing ?? 0) + 1,
   });
   if (error) return fail(backTo, describeDbError(error));
@@ -540,6 +609,17 @@ export async function removeInvoiceLine(formData: FormData): Promise<void> {
 
   const backTo = `/invoices/${parsed.data.invoice_id}`;
   const supabase = await createClient();
+
+  const { data: parent } = await supabase
+    .from("invoices").select("status")
+    .eq("id", parsed.data.invoice_id).eq("tenant_id", session.tenantId)
+    .maybeSingle<{ status: string }>();
+  if (parent && parent.status !== "draft") {
+    return fail(backTo,
+      "This invoice is no longer a draft, so its lines cannot change. "
+      + "Raise a credit note if it was wrong.");
+  }
+
   const { error } = await supabase
     .from("invoice_lines").delete()
     .eq("id", parsed.data.id).eq("tenant_id", session.tenantId);
@@ -548,6 +628,53 @@ export async function removeInvoiceLine(formData: FormData): Promise<void> {
   await supabase.rpc("recalculate_invoice", { p_invoice: parsed.data.invoice_id });
   revalidatePath(backTo);
   return done(backTo, "Line removed.");
+}
+
+/**
+ * Take one job back off a draft.
+ *
+ * The reverse gear the running draft needs. Voiding is the other way back and it
+ * releases *every* job on the invoice — fine for a per-job invoice, and quite
+ * wrong for a draft carrying eleven good jobs and one that should not be there.
+ *
+ * `invoices.write` and drafts only. The rule and the writes are in
+ * `lib/invoices/open-draft.ts`; everything here is what the operator reads back.
+ */
+export async function removeJobFromInvoice(formData: FormData): Promise<void> {
+  const session = await assertCapability("invoices.write");
+  const parsed = z.object({
+    invoice_id: z.string().uuid(),
+    order_id: z.string().uuid(),
+  }).safeParse(toObject(formData));
+  if (!parsed.success) return fail("/invoices", firstIssue(parsed.error));
+
+  const back = returnTo(formData, `/invoices/${parsed.data.invoice_id}`);
+  const supabase = await createClient();
+
+  const result = await removeJobFromDraft(
+    supabase, session, parsed.data.invoice_id, parsed.data.order_id,
+  );
+  if (!result.ok) return fail(back, result.error);
+
+  await recordAudit(session, {
+    entity: "invoice", entityId: parsed.data.invoice_id, action: "update",
+    summary: `${result.orderNumber} taken off ${result.invoiceNumber}`,
+    metadata: { order_id: parsed.data.order_id, remaining: result.remaining },
+  });
+
+  revalidatePath(back);
+  revalidatePath(`/invoices/${parsed.data.invoice_id}`);
+  revalidatePath("/invoices/drafts");
+  revalidatePath("/invoices/awaiting");
+
+  // The job is back in the queue and that is the next thing to do with it, so
+  // the toast carries the screen it is on.
+  const left = result.remaining === 0
+    ? " That invoice now bills no jobs."
+    : ` ${counted(result.remaining, "job")} left on it.`;
+  return done(back,
+    `${result.orderNumber} is off ${result.invoiceNumber} and back in the billing queue.${left}`,
+    { href: "/invoices/awaiting", label: "Awaiting invoice" });
 }
 
 export async function issueInvoice(formData: FormData): Promise<void> {

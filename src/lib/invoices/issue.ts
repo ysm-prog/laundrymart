@@ -3,6 +3,8 @@ import type { Session } from "@/lib/auth/context";
 import { recordAudit } from "@/lib/audit";
 import { describeDbError } from "@/lib/actions";
 import { pushInvoiceToXero } from "@/lib/xero/push";
+import { addDays } from "@/lib/domain/dates";
+import { businessToday } from "@/lib/domain/timezone";
 
 /**
  * Issuing one invoice — the single implementation.
@@ -22,6 +24,15 @@ import { pushInvoiceToXero } from "@/lib/xero/push";
  *   3. Xero, **after** the invoice is issued and never as a precondition. A
  *      refusal leaves it issued with `xero_push_error` set and a Retry beside
  *      it. The money record is this database's; Xero is a copy of it.
+ *
+ * **An invoice is dated the day it is issued.** Step 2 re-stamps `issue_date`
+ * and re-derives `due_date` from it, which is a change from the behaviour that
+ * shipped before the running draft: generation wrote both and issuing left them
+ * alone. That was survivable while a draft lived for minutes. A draft is now
+ * *designed* to sit open for a month — opened on the 3rd with 14-day terms, it
+ * would otherwise reach the customer on the 31st already a fortnight overdue.
+ * Which period the invoice covers is not lost by this: `period_start` and
+ * `period_end` carry it, and they are what the invoice prints.
  */
 
 type Client = Awaited<ReturnType<typeof createClient>>;
@@ -35,9 +46,24 @@ export async function issueOneInvoice(
 ): Promise<IssueResult> {
   await supabase.rpc("recalculate_invoice", { p_invoice: invoiceId });
 
+  // Read the terms back rather than trusting a caller: the due date has to be
+  // derived from what this invoice actually promises, and a form field is not
+  // evidence of it.
+  const { data: terms } = await supabase
+    .from("invoices")
+    .select("payment_terms_days")
+    .eq("id", invoiceId).eq("tenant_id", session.tenantId)
+    .maybeSingle<{ payment_terms_days: number | null }>();
+
+  const issuedOn = businessToday();
   const { data, error } = await supabase
     .from("invoices")
-    .update({ status: "issued", issued_at: new Date().toISOString() })
+    .update({
+      status: "issued",
+      issued_at: new Date().toISOString(),
+      issue_date: issuedOn,
+      due_date: addDays(issuedOn, Number(terms?.payment_terms_days ?? 14)),
+    })
     .eq("id", invoiceId).eq("tenant_id", session.tenantId).eq("status", "draft")
     .select("id");
   if (error) return { ok: false, error: describeDbError(error) };

@@ -63,6 +63,8 @@ import { ListControls } from "@/components/list-controls";
 import { ACTIVITY_PERIOD_PRESETS, BILLING_PERIOD_PRESETS, resolvePeriod } from "@/lib/domain/dates";
 import { money } from "@/lib/format";
 import { QuickActions } from "@/components/quick-actions";
+import { DraftCard } from "@/app/(app)/invoices/drafts/draft-card";
+import type { DraftSummary } from "@/lib/invoices/open-draft";
 
 export const metadata = { title: "Design preview" };
 
@@ -1030,6 +1032,23 @@ export default function DesignPreviewPage() {
               planner's whole board. The pages that host them are async server
               components reading Supabase, so this gallery is the only place
               their layout and their empty states can be looked at at all. */}
+          {/* The running draft. Laid out as it is on the board — two columns from
+              `sm`, so twelve customers read as a grid rather than as twelve
+              screens of scrolling. */}
+          <section id="open-drafts-preview" className="space-y-4 border-t pt-8">
+            <PageHeader
+              title="Open drafts"
+              description="One invoice per customer per billing period, collecting each job as it is approved. Issue one whenever you are ready."
+            />
+            <div className="grid gap-4 sm:grid-cols-2">
+              {PREVIEW_OPEN_DRAFTS.map(({ draft, stage }) => (
+                <DraftCard key={draft.id} draft={draft} stage={stage} mayIssue
+                           issueAction={async () => { "use server"; }}
+                           returnTo="/invoices/drafts" />
+              ))}
+            </div>
+          </section>
+
           <section id="billing-review-preview" className="space-y-6 border-t pt-8">
             <PageHeader
               title="Awaiting invoice"
@@ -1504,6 +1523,63 @@ const PREVIEW_QUEUE: QueueRow[] = [
  * detail worth looking at: a draft can legitimately total nothing, and a
  * sendable invoice can carry the "already sent" label.
  */
+/**
+ * The open-drafts board, in the three states that matter.
+ *
+ * The one worth looking at is **Collecting**: it is the ordinary state of a
+ * running draft for most of a month, it is the only card that says a number
+ * which is not final, and it is the state the reader has no other way to
+ * recognise — a draft that is still filling up looks exactly like one that is
+ * finished and waiting to be issued.
+ */
+const PREVIEW_OPEN_DRAFTS: Array<{
+  draft: DraftSummary; stage: "ready" | "collecting" | "none";
+}> = [
+  {
+    stage: "collecting",
+    draft: {
+      id: "draft-1", invoiceNumber: "INV00341", customerId: "c1",
+      customerName: "Harbourview Hotel",
+      periodStart: "2026-08-01", periodEnd: "2026-08-31",
+      jobCount: 7, lineCount: 5, total: 1284.5,
+      createdAt: "2026-08-03T09:00:00Z", updatedAt: "2026-08-24T04:10:00Z",
+    },
+  },
+  {
+    stage: "ready",
+    draft: {
+      id: "draft-2", invoiceNumber: "INV00338", customerId: "c2",
+      customerName: "Bondi Surf Club",
+      periodStart: "2026-07-01", periodEnd: "2026-07-31",
+      jobCount: 3, lineCount: 4, total: 462,
+      createdAt: "2026-07-04T09:00:00Z", updatedAt: "2026-07-30T22:15:00Z",
+    },
+  },
+  {
+    // Opened by an approval and then emptied — the job was taken back off. It
+    // keeps its number rather than being deleted, and says there is nothing to
+    // issue instead of offering a button that could only be refused.
+    stage: "collecting",
+    draft: {
+      id: "draft-3", invoiceNumber: "INV00342", customerId: "c3",
+      customerName: "City Gym — Alexandria",
+      periodStart: "2026-08-01", periodEnd: "2026-08-31",
+      jobCount: 0, lineCount: 0, total: 0,
+      createdAt: "2026-08-19T02:00:00Z", updatedAt: null,
+    },
+  },
+  {
+    stage: "none",
+    draft: {
+      id: "draft-4", invoiceNumber: "INV00340", customerId: "c4",
+      customerName: "Quay Bistro",
+      periodStart: null, periodEnd: null,
+      jobCount: 1, lineCount: 2, total: 88.4,
+      createdAt: "2026-08-22T01:00:00Z", updatedAt: null,
+    },
+  },
+];
+
 const PREVIEW_DRAFTS: SelectableInvoice[] = [
   { id: "inv-1", invoiceNumber: "INV00311", customerName: "Harbourview Hotel", total: 1284.5, status: "draft" },
   { id: "inv-2", invoiceNumber: "INV00312", customerName: "Bondi Surf Club", total: 42, status: "draft" },

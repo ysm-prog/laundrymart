@@ -88,12 +88,18 @@ export async function generateCustomerPeriodInvoice(formData: FormData): Promise
   revalidatePath("/invoices");
 
   const skipped = result.skipped.length > 0 ? ` ${result.skipped.length} job(s) were skipped.` : "";
+  // **Raised or added to** — since the running draft landed, the second is the
+  // common answer here: the month's approvals have usually opened the customer's
+  // invoice for this window already, and this button puts whatever is left onto
+  // it. Reporting "raised" either way would tell somebody a new document exists
+  // when it does not.
+  const verb = invoice.opened ? "raised for" : "updated for";
   return done(
     back,
-    `${invoice.invoiceNumber} raised for ${detail.businessName} — `
-    + `${invoice.jobIds.length} job(s), ${new Intl.NumberFormat("en-AU", {
+    `${invoice.invoiceNumber} ${verb} ${detail.businessName} — `
+    + `${invoice.jobIds.length} job(s) added, ${new Intl.NumberFormat("en-AU", {
       style: "currency", currency: "AUD",
-    }).format(invoice.total)}.${skipped}`,
+    }).format(invoice.total)} on it now.${skipped}`,
     { href: `/invoices/${invoice.invoiceId}`, label: "Open the invoice" },
   );
 }

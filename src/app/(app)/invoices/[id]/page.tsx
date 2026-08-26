@@ -8,6 +8,9 @@ import { CHARGE_TYPE_LABELS, type ChargeType } from "@/lib/domain/pricing";
 import { formatIso } from "@/lib/domain/dates";
 import { uncodedLineCount } from "@/lib/domain/accounts";
 import { loadInvoiceBreakdown } from "@/lib/invoices/breakdown";
+import { describePeriod } from "@/lib/domain/billing-period";
+import { loadInvoiceSourceJobs } from "@/lib/invoices/open-draft";
+import { BILLING_STATUS_LABELS, isBillingStatus } from "@/lib/domain/billing";
 import type { Invoice, InvoiceLine, Payment } from "@/lib/db/types";
 import {
   Button, ButtonLink, Card, DataTable, EmptyState, Notice,
@@ -20,7 +23,7 @@ import { PrintButton } from "@/components/print-button";
 import { emailIsConfigured } from "@/lib/email/send";
 import {
   addInvoiceLine, createCreditNote, emailInvoice, issueInvoice, recordPayment,
-  removeInvoiceLine, voidInvoice,
+  removeInvoiceLine, removeJobFromInvoice, voidInvoice,
 } from "../actions";
 
 export const dynamic = "force-dynamic";
@@ -59,6 +62,16 @@ export default async function InvoiceDetailPage({
   const editable = writable && invoice.status === "draft";
   const emailConfigured = emailIsConfigured();
 
+  // The running draft, told apart from every other draft the same way
+  // `uq_invoices_open_draft` tells them apart: a consolidated draft carrying a
+  // period is the one approvals are still joining.
+  const collecting = invoice.status === "draft"
+    && invoice.invoice_type === "consolidated"
+    && Boolean(invoice.period_start && invoice.period_end);
+  const period = invoice.period_start && invoice.period_end
+    ? describePeriod({ start: invoice.period_start, end: invoice.period_end })
+    : null;
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -86,6 +99,18 @@ export default async function InvoiceDetailPage({
         </Notice>
       ) : null}
 
+      {/* A running draft says so, because the number on screen is not final and
+          the reader has no other way to tell: it looks exactly like an invoice
+          that is finished and waiting to be issued. */}
+      {collecting ? (
+        <Notice tone="info" title="Still collecting">
+          Every job {invoice.customers?.business_name ?? "this customer"} has approved
+          {period ? ` for ${period}` : ""} is being added to this invoice. Issue it whenever you
+          are ready — you do not have to wait for the end of the period, and the invoice will be
+          dated the day you issue it.
+        </Notice>
+      ) : null}
+
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Stat label="Subtotal" value={money(invoice.subtotal)} />
         <Stat label="GST" value={money(invoice.tax_amount)} />
@@ -94,69 +119,87 @@ export default async function InvoiceDetailPage({
               tone={Number(invoice.balance) > 0 ? "warning" : "success"} />
       </div>
 
-      <Card title="Details">
-        <dl className="grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
-          <Meta label="Bill to" value={invoice.customers?.business_name ?? "—"} />
-          <Meta label="ABN" value={invoice.customers?.abn ?? "—"} />
-          <Meta label="Issued" value={date(invoice.issue_date)} />
-          <Meta label="Due" value={date(invoice.due_date)} />
-          <Meta label="Period" value={invoice.period_start
-            ? `${date(invoice.period_start)} – ${date(invoice.period_end)}` : "—"} />
-          <Meta label="PO number" value={invoice.purchase_order_number ?? "—"} />
-          <Meta label="Terms" value={`${invoice.payment_terms_days} days`} />
-          <Meta label="Email" value={invoice.customers?.billing_email ?? "—"} />
-        </dl>
-      </Card>
+      {/* **Two columns from `xl`, not one long scroll (§10b).** An invoice is
+          read as "what is on it" beside "what do I do with it", and stacking the
+          lines, the breakdown, the payments, the credit notes and five action
+          cards into a single column made a page nobody reaches the bottom of.
+          Below `xl` it stacks in exactly the order it did before. */}
+      <div className="grid gap-6 xl:grid-cols-3">
+        <div className="space-y-6 xl:col-span-2">
+          <Suspense fallback={<SkeletonRows rows={5} />}>
+            <Lines invoiceId={id} editable={editable} />
+            <ServiceBreakdown invoiceId={id} tenantId={session.tenantId} />
+          </Suspense>
 
-      <Suspense fallback={<SkeletonRows rows={5} />}>
-        <Lines invoiceId={id} editable={editable} />
-        <ServiceBreakdown invoiceId={id} tenantId={session.tenantId} />
-      </Suspense>
+          <Suspense fallback={<SkeletonRows rows={3} />}>
+            <Payments invoice={invoice} writable={writable} />
+          </Suspense>
 
-      <Suspense fallback={<SkeletonRows rows={3} />}>
-        <Payments invoice={invoice} writable={writable} />
-      </Suspense>
+          <Suspense fallback={null}>
+            <CreditNotes invoiceId={id} />
+          </Suspense>
+        </div>
 
-      {writable ? (
-        <div className="grid gap-4 lg:grid-cols-2 print:hidden">
-          <Card
-            title="Send to customer"
-            description={invoice.emailed_at
-              ? `Last sent ${date(invoice.emailed_at)} to ${invoice.emailed_to ?? "the customer"}.`
-              : "Emails the PDF as an attachment."}
-          >
-            {invoice.status === "draft" ? (
-              <Notice tone="info">Issue the invoice before sending — a draft can still change.</Notice>
-            ) : invoice.status === "void" ? (
-              <Notice tone="warning">A void invoice cannot be sent.</Notice>
-            ) : !emailConfigured ? (
-              <Notice tone="warning" title="No email provider configured">
-                Set <code>RESEND_API_KEY</code> and <code>INVOICE_FROM_EMAIL</code> to send from
-                the app. The PDF can still be downloaded and attached by hand.
-              </Notice>
-            ) : (
-              <form action={emailInvoice} className="flex flex-wrap items-end gap-3">
-                <input type="hidden" name="id" value={id} />
-                <Field label="Send to" name="to"
-                       hint={invoice.customers?.billing_email
-                         ? "Leave blank to use the customer's billing email."
-                         : "This customer has no billing email on file."}>
-                  <Input name="to" type="email"
-                         placeholder={invoice.customers?.billing_email ?? "accounts@customer.com.au"} />
-                </Field>
-                <SubmitButton>Email invoice</SubmitButton>
-              </form>
-            )}
+        <div className="space-y-6">
+          <Card title="Details">
+            <dl className="grid gap-3 text-sm sm:grid-cols-2 xl:grid-cols-1">
+              <Meta label="Bill to" value={invoice.customers?.business_name ?? "—"} />
+              <Meta label="ABN" value={invoice.customers?.abn ?? "—"} />
+              <Meta label="Issued" value={date(invoice.issue_date)} />
+              <Meta label="Due" value={date(invoice.due_date)} />
+              <Meta label="Period" value={period
+                ?? (invoice.period_start
+                  ? `${date(invoice.period_start)} – ${date(invoice.period_end)}` : "—")} />
+              <Meta label="PO number" value={invoice.purchase_order_number ?? "—"} />
+              <Meta label="Terms" value={`${invoice.payment_terms_days} days`} />
+              <Meta label="Email" value={invoice.customers?.billing_email ?? "—"} />
+            </dl>
           </Card>
 
-          <Card title="Issue and void">
-            <div className="flex flex-wrap gap-2">
-              {invoice.status === "draft" ? (
-                <form action={issueInvoice}>
-                  <input type="hidden" name="id" value={id} />
-                  <Button variant="primary">Issue invoice</Button>
-                </form>
-              ) : null}
+          <Suspense fallback={null}>
+            <SourceJobs invoiceId={id} tenantId={session.tenantId} editable={editable} />
+          </Suspense>
+
+          {writable ? (
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-1 print:hidden">
+              <Card
+                title="Send to customer"
+                description={invoice.emailed_at
+                  ? `Last sent ${date(invoice.emailed_at)} to ${invoice.emailed_to ?? "the customer"}.`
+                  : "Emails the PDF as an attachment."}
+              >
+                {invoice.status === "draft" ? (
+                  <Notice tone="info">Issue the invoice before sending — a draft can still change.</Notice>
+                ) : invoice.status === "void" ? (
+                  <Notice tone="warning">A void invoice cannot be sent.</Notice>
+                ) : !emailConfigured ? (
+                  <Notice tone="warning" title="No email provider configured">
+                    Set <code>RESEND_API_KEY</code> and <code>INVOICE_FROM_EMAIL</code> to send from
+                    the app. The PDF can still be downloaded and attached by hand.
+                  </Notice>
+                ) : (
+                  <form action={emailInvoice} className="flex flex-wrap items-end gap-3">
+                    <input type="hidden" name="id" value={id} />
+                    <Field label="Send to" name="to"
+                           hint={invoice.customers?.billing_email
+                             ? "Leave blank to use the customer's billing email."
+                             : "This customer has no billing email on file."}>
+                      <Input name="to" type="email"
+                             placeholder={invoice.customers?.billing_email ?? "accounts@customer.com.au"} />
+                    </Field>
+                    <SubmitButton>Email invoice</SubmitButton>
+                  </form>
+                )}
+              </Card>
+
+              <Card title="Issue and void">
+                <div className="flex flex-wrap gap-2">
+                  {invoice.status === "draft" ? (
+                    <form action={issueInvoice}>
+                      <input type="hidden" name="id" value={id} />
+                      <Button variant="primary">Issue invoice</Button>
+                    </form>
+                  ) : null}
             </div>
             {invoice.status !== "void" ? (
               <form action={voidInvoice} className="mt-4 border-t pt-4">
@@ -189,11 +232,72 @@ export default async function InvoiceDetailPage({
           </Card>
         </div>
       ) : null}
-
-      <Suspense fallback={null}>
-        <CreditNotes invoiceId={id} />
-      </Suspense>
+        </div>
+      </div>
     </div>
+  );
+}
+
+/**
+ * The jobs this invoice bills, and the way to take one back off.
+ *
+ * **The reverse gear a running draft needs.** Voiding is the other way back and
+ * it releases *every* job on the invoice — which is fine for a per-job invoice
+ * and quite wrong for a draft carrying eleven good jobs and one that should not
+ * be there. Removing one puts it back in the billing queue with its charges
+ * still frozen, and rebuilds the invoice's lines without it.
+ *
+ * Shown on every invoice, not just a draft: "which work is this?" is the first
+ * question asked of an issued invoice too. The controls are what disappear.
+ */
+async function SourceJobs({
+  invoiceId, tenantId, editable,
+}: {
+  invoiceId: string; tenantId: string; editable: boolean;
+}) {
+  const supabase = await createClient();
+  const jobs = await loadInvoiceSourceJobs(supabase, tenantId, invoiceId);
+  if (jobs.length === 0) return null;
+
+  return (
+    <Card title="Jobs on this invoice"
+          description={counted(jobs.length, "job")}>
+      <ul className="divide-y">
+        {jobs.map((job) => (
+          <li key={job.orderId} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2.5">
+            <div className="min-w-0 flex-1">
+              <ButtonLink href={`/orders/${job.orderId}`} variant="ghost" size="sm">
+                {job.orderNumber}
+              </ButtonLink>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                {job.completedAt ? formatIso(job.completedAt.slice(0, 10)) : "No completion date"}
+                {" · "}
+                {isBillingStatus(job.billingStatus)
+                  ? BILLING_STATUS_LABELS[job.billingStatus]
+                  : job.billingStatus}
+              </p>
+            </div>
+            <span className="text-sm font-semibold tabular-nums">{money(job.total)}</span>
+            {editable ? (
+              <form action={removeJobFromInvoice} className="print:hidden">
+                <input type="hidden" name="invoice_id" value={invoiceId} />
+                <input type="hidden" name="order_id" value={job.orderId} />
+                <input type="hidden" name="return_to" value={`/invoices/${invoiceId}`} />
+                <SubmitButton variant="dangerGhost" size="md" pendingLabel="Removing…">
+                  Remove
+                </SubmitButton>
+              </form>
+            ) : null}
+          </li>
+        ))}
+      </ul>
+      {editable ? (
+        <p className="mt-3 border-t pt-3 text-xs text-muted-foreground">
+          Removing a job puts it back in the billing queue with its charges still frozen. The
+          lines above are rebuilt without it.
+        </p>
+      ) : null}
+    </Card>
   );
 }
 
