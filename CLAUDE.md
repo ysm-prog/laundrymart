@@ -1004,9 +1004,11 @@ demote the other and lock the tenant out of its own People screen.
 Deployed on Vercel at `ats.coreit.com.au`. All migrations through `0030_member_directory`
 applied (0014 on 2026-08-13, 0015 and 0016 on 2026-08-14, 0017, 0018, 0019 and 0025 on
 2026-08-16, 0026 and 0027 on 2026-08-17, 0030 on 2026-08-18), each verified by rolled-back probe
-rather than trusted. **Every migration through `0036_invoice_account_codes` is applied**, and the
-ledger's last four entries are `0033_laundry_prices_read`, `0034_counter_takes_jobs`,
-`0035_audit_log_read` and `0036_invoice_account_codes`. 0020–0024 are the renumbered branch migrations, already live under their original
+rather than trusted. **Every migration through `0039_job_charge_codes` is applied**, and the ledger's last entry is
+`0039_job_charge_codes` (`20260826022128`, applied 2026-08-26), behind `0038_invoice_line_account`
+— the file for which is still not in `supabase/migrations/` and is a no-op against a database
+built from this repo (see the note below). Before those, `0033_laundry_prices_read`,
+`0034_counter_takes_jobs`, `0035_audit_log_read` and the two `0036`s. 0020–0024 are the renumbered branch migrations, already live under their original
 names (§7).
 
 **`0036_run_sequence_control` and `0037_account_and_item_codes` were applied on 2026-08-25**, in
@@ -1699,7 +1701,10 @@ that had not rolled back could not have doubled the list.
   260 would have been the tenancy failure — and the same session still reads **0** accounts, **0**
   invoices and **0** prices, so 0036's gate and the billing narrowing both survived the write.
 - **Nothing else moved:** 268 accounts, 647 invoices, 6 jobs, and Harbour's 6 items all exactly
-  as recorded.
+  as recorded — measured at 02:07. **Five minutes later another session deleted Adelaide's test
+  data** (2 customers, 5 jobs, 1 invoice, the 1 frozen charge and the paperwork under them), so
+  the job and invoice figures here are a reading of that moment rather than the state today. The
+  254 items were not touched. The 0039 entry above has the detail.
 - **The pickers now filter `is_sell`, and that was a gap in the app rather than in the file.**
   Nothing in `src/` had ever narrowed an item picker to what the laundry sells, so the flag 0032
   added was decorative. It is the lever now — inert on this import, since the export carries no
@@ -1762,10 +1767,45 @@ argument for §10b's gallery rule:
   targets under 36px**. Document overflow is **byte-identical to the recorded
   baseline**, so this adds none. Twelve interaction assertions drive the whole path.
 
-**Not applied to `laundrymart-syd`.** `0039` is in the repo and the ledger's last live
-entry is still `0038_invoice_line_account`. **Before trusting it: apply 0039, code one
-charge on a job, approve it, generate the invoice and confirm the line arrives already
-coded** — that last step is the whole point of the change.
+**Applied to `laundrymart-syd` on 2026-08-26** as `20260826022128`, now the ledger's last entry.
+Rehearsed first the way §11 requires, and the pre-flight carried the check that mattered: the
+live `save_job_charge_snapshot` body was confirmed **identical** to 0017's — compared
+mechanically rather than by eye, by stripping this migration's two additions and diffing — so
+rebuilding it dropped nothing. That is the 2026-08-20 trap, checked before rather than after.
+
+- **Eleven verifications after the apply**, the six behavioural ones against real rows in a
+  transaction that was then aborted: a real income account **accepted** (`4-1000`), a heading
+  refused (*"that is a heading, not an account you can code to"*), another laundry's account
+  refused (*"that account belongs to another business"*), an unknown account refused, an
+  **uncoded charge still legal** — the free-text line the client asked for — and re-costing a
+  coded charge not re-judging the code. Column, trigger and index all present; the writer still
+  SECURITY INVOKER and carrying the column.
+- **No new security advisor**, which is the check 0036 failed: `guard_job_charge_account` is a
+  SECURITY DEFINER trigger function and is **absent** from the list, so the
+  `public, anon, authenticated` revoke held. `save_job_charge_snapshot` is INVOKER and so is not
+  on it either. The list stands at 21 documented definer helpers plus the auth
+  leaked-password toggle.
+- **There was nothing to backfill, and less than expected.** The pre-flight counted **1** frozen
+  charge; by the time the migration went on there were **0** — see the note below.
+
+**Another session deleted Adelaide's test data while this was in flight, and it is recorded here
+because several figures above are now stale.** At 02:12:59, between the item import and this
+apply, a scoped cleanup ran against `laundrymart-syd` from outside this session. Its own
+rehearsal line names the scope: **2 customers and their 2 locations, 5 laundry jobs, 7 job items,
+31 activity rows, 4 stops, 3 runs, 1 invoice with its line and source-job link, and the 1 frozen
+`job_charge_snapshots` row.** It left *"active customers 0, archived 508, jobs 1, runs 1, invoices
+646"* in Adelaide, which is exactly what the tenant reads now. It was deliberate and rehearsed,
+not an accident, and **the 254 imported items were not touched**.
+
+Two consequences worth carrying forward: §27's motivating measurement — *Adelaide holds 1 frozen
+job charge and 0 carry an item* — was true when it was written and is now **0 charges**, so the
+argument stands on the reasoning rather than on a live row; and Adelaide is down to **LJ00001**,
+the cross-tenant job §11 records as deliberately left alone, so the end-to-end run below starts
+from a job that has yet to be taken in.
+
+**Before trusting it: code one charge on a job, approve it, generate the invoice and confirm the
+line arrives already coded** — that last step is the whole point of the change, and it has still
+not been run.
 
 ### 2026-08-25 · Two branches, one chart of accounts: reconciled
 `claude/invoice-item-code-selection-vlwwb4` and `claude/code-review-requirements-ns6bav` were

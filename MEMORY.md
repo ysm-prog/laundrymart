@@ -38,13 +38,21 @@ unchanged.
   neither. So the item picker works today and the *account* is still chosen per line until
   somebody codes the items. Owner's next step, not something the import could answer.
 
+**`0039` is applied** (`20260826022128`, the ledger's last entry). Eleven verifications,
+six of them behavioural against real rows in an aborted transaction; **no new security
+advisor**, so the `public, anon, authenticated` revoke on the definer trigger function
+held — the check 0036 failed.
+
+**Another session deleted Adelaide's test data at 02:12:59**, between the import and the
+0039 apply: 2 customers, 5 jobs, 1 invoice, the 1 frozen charge and the paperwork under
+them. Deliberate and rehearsed, not an accident, and **the 254 items were untouched**.
+Adelaide is down to LJ00001. So §27's motivating count (1 frozen charge, 0 with an item)
+is now 0 charges — the argument stands on the reasoning, not on a live row.
+
 ### Next
-1. **`0039` is NOT applied to `laundrymart-syd`** — the ledger's last live entry is
-   `0038_invoice_line_account`.
-2. **The last four commits are on the feature branch only** — not merged to `Dev` or `Prod`.
-3. End to end, never yet run: code one charge on a job → approve → generate the invoice →
-   confirm the line arrives already coded; then push one invoice and watch `AccountCode`
-   populate for the first time.
+End to end, still never run: take a job in → code one charge → approve → generate the
+invoice → confirm the line arrives already coded; then push one invoice and watch
+`AccountCode` populate for the first time.
 
 ---
 
