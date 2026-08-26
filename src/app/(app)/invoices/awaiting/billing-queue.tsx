@@ -6,10 +6,15 @@ import { counted, money } from "@/lib/format";
 import { formatMoney } from "@/lib/domain/pricing";
 import { Badge, Button } from "@/components/ui";
 import { SubmitButton } from "@/components/form";
-import { approveSelectedJobs, generateSelectedInvoices, priceSelectedJobs } from "../bulk-actions";
+import { approveSelectedJobs, placeSelectedJobs, priceSelectedJobs } from "../bulk-actions";
 
 /**
- * Select → Price Selected / Approve Selected, and Select → Generate Selected.
+ * Select → Price Selected / Approve Selected, and Select → Add to Draft.
+ *
+ * **The second mode used to be Generate Selected**, which turned the ticked jobs
+ * straight into invoices — the one route by which a job became an invoice with
+ * no draft in between. It puts them on their customers' drafts now, so the only
+ * way a job's money reaches a customer is a draft somebody issues.
  *
  * The selection is held here and posted as one form with a `selected` checkbox
  * group, so **one press is one request**. That is the difference the brief asks
@@ -49,7 +54,7 @@ export function BillingQueue({
   rows, mode, canAct, canPrice = false,
 }: {
   rows: QueueRow[];
-  mode: "approve" | "generate";
+  mode: "approve" | "place";
   canAct: boolean;
   /** `billing.write` + `invoices.bulk` — pricing is a separate capability from approving. */
   canPrice?: boolean;
@@ -70,11 +75,11 @@ export function BillingQueue({
   const chosenValue = chosen.reduce((sum, row) => sum + row.subtotal, 0);
 
   return (
-    <form action={mode === "approve" ? approveSelectedJobs : generateSelectedInvoices}>
+    <form action={mode === "approve" ? approveSelectedJobs : placeSelectedJobs}>
       <div className="overflow-x-auto">
         <table className="w-full min-w-[46rem] text-sm">
           <caption className="sr-only">
-            {mode === "approve" ? "Jobs awaiting review" : "Jobs ready to invoice"}
+            {mode === "approve" ? "Jobs awaiting review" : "Approved, not yet on a draft"}
           </caption>
           <thead className="border-b text-left text-muted-foreground">
             <tr>
@@ -183,17 +188,17 @@ export function BillingQueue({
           {canAct ? (
             <SubmitButton
               size="md"
-              pendingLabel={mode === "approve" ? "Approving…" : "Generating…"}
+              pendingLabel={mode === "approve" ? "Approving…" : "Adding…"}
             >
               {mode === "approve"
                 ? `Approve selected${selected.size ? ` (${selected.size})` : ""}`
-                : `Generate selected${selected.size ? ` (${selected.size})` : ""}`}
+                : `Add to draft${selected.size ? ` (${selected.size})` : ""}`}
             </SubmitButton>
           ) : (
             <span className="text-sm text-muted-foreground">
               {mode === "approve"
                 ? "Approving jobs in bulk needs the approve and bulk permissions."
-                : "Generating invoices in bulk needs the invoice and bulk permissions."}
+                : "Putting jobs on a draft in bulk needs the invoice and bulk permissions."}
             </span>
           )}
         </div>

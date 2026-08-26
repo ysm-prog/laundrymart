@@ -6,6 +6,11 @@
  * touch at exactly one point: **finishing the work puts a job in front of a
  * person, and never bills anybody.**
  *
+ * `invoice_generated` is a job's money sitting on a **draft**, not an invoice a
+ * customer has: approving places the charges, issuing the draft is what creates
+ * the invoice, and sending it is what the customer sees. There is no path from a
+ * job to an invoice that skips the draft.
+ *
  *   operational   new → in_progress → ready_for_delivery → assigned
  *                     → out_for_delivery → completed
  *   financial     pending → awaiting_review → approved → invoice_generated
@@ -37,7 +42,10 @@ export const BILLING_STATUS_LABELS: Record<BillingStatus, string> = {
   pending: "Not yet billable",
   awaiting_review: "Awaiting review",
   approved: "Approved",
-  invoice_generated: "Invoice generated",
+  // Not "Invoice generated". Approving puts the charges on a draft, and a label
+  // saying an invoice was generated is what made that read as though pressing
+  // Approve had created one.
+  invoice_generated: "On a draft invoice",
   invoice_sent: "Invoice sent",
   paid: "Paid",
   not_billable: "Not billable",
@@ -47,8 +55,8 @@ export const BILLING_STATUS_LABELS: Record<BillingStatus, string> = {
 export const BILLING_STATUS_BLURBS: Record<BillingStatus, string> = {
   pending: "The work is not finished, so there is nothing to bill yet.",
   awaiting_review: "The work is done. Check the charges, then approve them.",
-  approved: "The charges are locked in and this job is ready to be invoiced.",
-  invoice_generated: "An invoice exists. It has not been sent to the customer.",
+  approved: "The charges are locked in. This job is ready to join its customer\u2019s draft.",
+  invoice_generated: "The charges are on a draft invoice. Nothing has been issued or sent.",
   invoice_sent: "The invoice has been emailed to the customer.",
   paid: "The invoice covering this job has been paid in full.",
   not_billable: "This job will not be billed.",
@@ -132,7 +140,8 @@ export function checkBillingTransition(
     if ((from === "invoice_generated" || from === "invoice_sent") && context.onAnInvoice !== false) {
       return {
         ok: false,
-        reason: "This job is still on an invoice. Void that invoice to release the job.",
+        reason: "This job is still on an invoice. Take it off that draft, or void the "
+          + "invoice if it has already been issued — either releases the job.",
       };
     }
   }
@@ -140,8 +149,9 @@ export function checkBillingTransition(
     if (from === "invoice_generated" || from === "invoice_sent") {
       return {
         ok: false,
-        reason: "This job has been invoiced. Void the invoice if the charges were wrong — "
-          + "that releases the job to be billed again.",
+        reason: "This job is on an invoice. Take it off that draft if the charges were "
+          + "wrong, or void the invoice if it has already been issued — either releases "
+          + "the job to be billed again.",
       };
     }
     return {
@@ -193,19 +203,26 @@ export const BILLING_METHODS = [
 export type BillingMethod = (typeof BILLING_METHODS)[number];
 
 export const BILLING_METHOD_LABELS: Record<BillingMethod, string> = {
-  invoice_per_job: "One invoice per job",
+  invoice_per_job: "One invoice per job",  // one draft per job, issued one at a time
   weekly_consolidated: "Weekly consolidated",
   fortnightly_consolidated: "Fortnightly consolidated",
   monthly_consolidated: "Monthly consolidated",
   manual: "Manual",
 };
 
+/**
+ * What each method means, in the owner's words.
+ *
+ * Every one of them collects on a **draft** — approving a job never creates an
+ * invoice — so what differs is how many jobs share a draft, and (for `manual`)
+ * whether the month-end run picks the customer up on its own.
+ */
 export const BILLING_METHOD_BLURBS: Record<BillingMethod, string> = {
-  invoice_per_job: "Every approved job becomes its own invoice.",
-  weekly_consolidated: "One invoice a week, carrying every job approved in it.",
-  fortnightly_consolidated: "One invoice a fortnight, carrying every job approved in it.",
-  monthly_consolidated: "One invoice a month, carrying every job approved in it.",
-  manual: "Nothing is generated automatically — you choose what to invoice, and when.",
+  invoice_per_job: "Every approved job opens a draft of its own.",
+  weekly_consolidated: "One draft a week, carrying every job approved in it.",
+  fortnightly_consolidated: "One draft a fortnight, carrying every job approved in it.",
+  monthly_consolidated: "One draft a month, carrying every job approved in it.",
+  manual: "One draft a month, but left out of the month-end run — you issue it yourself.",
 };
 
 export function isBillingMethod(value: string): value is BillingMethod {
@@ -217,13 +234,10 @@ export function isConsolidated(method: BillingMethod): boolean {
   return method.endsWith("_consolidated");
 }
 
-/**
- * Whether a bulk generation run should pick this customer up on its own.
- *
- * `manual` is the one that does not, and that is its entire meaning: somebody
- * decides each time. It is emphatically not "never bill them" — a manual
- * customer is still invoiced, just never without a person choosing to.
+/*
+ * Whether the month-end run picks a customer up on its own is
+ * `sweptByMonthEndRun`, in `billing-period.ts`, beside the period rule it travels
+ * with. There was a `generatesAutomatically` here saying the same thing to nobody
+ * — no caller in `src/`, only its own test — and two answers to one question is
+ * the duplication this codebase argues against everywhere else.
  */
-export function generatesAutomatically(method: BillingMethod): boolean {
-  return method !== "manual";
-}

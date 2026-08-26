@@ -2,10 +2,11 @@ import type { createClient } from "@/lib/supabase/server";
 import type { Session } from "@/lib/auth/context";
 import { recordAudit } from "@/lib/audit";
 import { describeDbError } from "@/lib/actions";
-import { addDays } from "@/lib/domain/dates";
 import { toZonedDate } from "@/lib/domain/timezone";
 import { isBillingMethod, type BillingMethod } from "@/lib/domain/billing";
-import { billingPeriodFor, type BillingPeriod } from "@/lib/domain/billing-period";
+import {
+  billingPeriodFor, sweptByMonthEndRun, type BillingPeriod,
+} from "@/lib/domain/billing-period";
 import { groupJobsForInvoicing } from "@/lib/domain/invoice-grouping";
 import { findOrOpenDraft, rebuildJobLines, type DraftCustomer } from "@/lib/invoices/open-draft";
 import { logOrderActivity } from "@/lib/orders/activity";
@@ -21,11 +22,20 @@ import { loadChargesForJobs } from "@/lib/orders/job-billing";
  * `invoice_source_jobs` row per job — so switching a customer from per-job to
  * monthly is a column change and never a schema change.
  *
- *     Job ─────────────────────────► Invoice              (invoice_per_job)
- *
  *     Job 1 ┐
- *     Job 2 ├──────────────────────► the customer's       (…_consolidated)
- *     Job 3 ┘                        OPEN DRAFT for the period
+ *     Job 2 ├──────────────────────► the customer's OPEN DRAFT ──► issue
+ *     Job 3 ┘                        for the period
+ *
+ *     Job ─────────────────────────► its own DRAFT ─────────────► issue
+ *                                    (invoice_per_job)
+ *
+ * **A job never becomes an invoice. It joins a draft, and a draft becomes an
+ * invoice when somebody issues it.** That is the whole rule, and both shapes
+ * above obey it: what differs is how many jobs share a draft, not whether one
+ * exists. Every draft here is opened by `lib/invoices/open-draft.ts` — this
+ * module inserts no invoice of its own, which it used to do for any group with
+ * no period (a per-job customer, a `manual` one), and which is what let pressing
+ * Approve mint a whole invoice document straight off a job.
  *
  * **Since 0040 a consolidated group joins the customer's running draft** rather
  * than always inserting a new invoice. That single word — join, not insert — is
@@ -33,7 +43,7 @@ import { loadChargesForJobs } from "@/lib/orders/job-billing";
  * consolidated customer got one invoice per *button press*, so approving a job
  * on the 3rd and another on the 11th produced two August invoices. Nothing was
  * billed twice (`uq_invoice_source_jobs_once` saw to that); the month was simply
- * split across two documents. `lib/invoices/open-draft.ts` holds the draft.
+ * split across two documents.
  *
  * **Generating never sends.** Nothing in this file emails anybody; the invoice
  * lands as a draft, and `invoice_sent` is reached only through the send action.
@@ -92,15 +102,15 @@ export type GenerationResult = {
 type CustomerRow = DraftCustomer & { billing_method: string };
 
 /**
- * Put a group of jobs onto an invoice — an existing open draft when the group
- * has a period, a brand-new invoice when it does not.
+ * Put a group of jobs onto a draft — the customer's running one where the group
+ * has a period, a freshly opened one where it does not.
  *
  * The order of writes matters and is chosen so a failure never leaves a job
  * looking billed when it is not:
  *
  *   1. refuse early if the group's jobs carry no charges at all, so an empty
  *      draft is never opened;
- *   2. resolve the invoice — join the running draft, or insert one;
+ *   2. resolve the draft — join the running one, or open one;
  *   3. `invoice_source_jobs`, which is where the "billed once" constraint bites;
  *   4. the lines, re-derived from the **frozen snapshots** of every job the
  *      invoice now bills and never re-priced;
@@ -126,46 +136,29 @@ async function placeGroupOnInvoice(
 
   const singleJob = group.jobs.length === 1 && group.method === "invoice_per_job";
 
-  let invoiceId: string;
-  let invoiceNumber: string;
-  let opened: boolean;
-
-  if (group.period) {
-    const draft = await findOrOpenDraft(supabase, session, customer, group.period, issueDate);
-    if (!draft.ok) return { ok: false, error: draft.error };
-    invoiceId = draft.draft.id;
-    invoiceNumber = draft.draft.invoiceNumber;
-    opened = draft.draft.opened;
-  } else {
-    const { data: nextNumber, error: numberError } = await supabase
-      .rpc("next_number", { t: session.tenantId, k: "invoice", p: "INV" });
-    if (numberError) return { ok: false, error: describeDbError(numberError) };
-
-    const terms = Number(customer.payment_terms_days ?? 14);
-    const { data: invoice, error } = await supabase
-      .from("invoices")
-      .insert({
-        tenant_id: session.tenantId,
-        created_by: session.userId,
-        customer_id: group.customerId,
-        depot_id: group.jobs.find((job) => job.depot_id)?.depot_id ?? customer.depot_id,
-        invoice_number: nextNumber as string,
-        // The type says which shape produced it, which is what makes a register
-        // readable when a customer holds both kinds.
-        invoice_type: singleJob ? "per_job" : "consolidated",
-        status: "draft",
-        issue_date: issueDate,
-        due_date: addDays(issueDate, terms),
-        payment_terms_days: terms,
-        purchase_order_number: customer.purchase_order_number,
-      })
-      .select("id, invoice_number")
-      .single();
-    if (error) return { ok: false, error: describeDbError(error) };
-    invoiceId = invoice.id;
-    invoiceNumber = invoice.invoice_number;
-    opened = true;
-  }
+  // **One door.** Whether this is a running monthly draft, a fortnightly one or
+  // a per-job customer's single document, it is opened by `open-draft.ts` and it
+  // is opened as a `draft`. This branch used to insert an invoice here instead
+  // whenever the group had no period, which is what let Approve mint a whole
+  // invoice straight off a job.
+  const draft = await findOrOpenDraft(
+    supabase, session,
+    // **Deliberately the customer's own depot for a periodic draft**, and the
+    // job's for a period-less one. That is what each branch did before they were
+    // merged, and the asymmetry is right: a draft carrying a month of work has no
+    // one job to take a site from, so the first one's would be arbitrary — while
+    // a document raised for a single job should say where that job was done.
+    group.period
+      ? customer
+      : { ...customer, depot_id: group.jobs.find((job) => job.depot_id)?.depot_id ?? customer.depot_id },
+    group.period, issueDate,
+    // Only a per-job *customer* gets the per-job shape. A consolidated customer
+    // whose job has no completion date also arrives here with no period, and
+    // must not be turned into a per-job invoice by that accident.
+    singleJob ? "per_job" : "consolidated",
+  );
+  if (!draft.ok) return { ok: false, error: draft.error };
+  const { id: invoiceId, invoiceNumber, opened } = draft.draft;
 
   // Claim the jobs before writing anything else. This is the row the unique
   // index guards, so a concurrent run that got here first makes this fail —
@@ -265,6 +258,13 @@ export async function generateInvoicesForJobs(
   orderIds: readonly string[],
   options: {
     issueDate: string;
+    /**
+     * Leave `manual` customers out — a scheduled-style sweep over everything,
+     * where nobody has chosen these particular jobs. Off for anything a person
+     * pressed, approval included: a job that landed on no draft would sit in the
+     * queue with no way onto an invoice at all, since a job can no longer be
+     * turned into one directly.
+     */
     respectManual?: boolean;
     /**
      * The window every consolidated group is billed into, overriding each job's
@@ -321,12 +321,14 @@ export async function generateInvoicesForJobs(
   );
 
   // A scheduled run leaves `manual` customers alone; a person who explicitly
-  // selected the jobs has already made the decision `manual` is asking for, so
-  // their selection is honoured. That difference is the entire meaning of the
-  // setting, and it is the caller who knows which case this is.
+  // approved or selected the jobs has already made the decision `manual` is
+  // asking for, so their selection is honoured. That difference is all the
+  // setting means now, and it is the caller who knows which case this is. The
+  // rule itself is `sweptByMonthEndRun`, stated in `lib/domain/` so a unit test
+  // can reach it.
   const eligible = options.respectManual
     ? approved.filter((job) => {
-        if (methodByCustomer.get(job.customer_id) !== "manual") return true;
+        if (sweptByMonthEndRun(methodByCustomer.get(job.customer_id))) return true;
         result.skipped.push({ orderId: job.id, orderNumber: job.order_number, reason: "billed manually" });
         return false;
       })
@@ -335,11 +337,13 @@ export async function generateInvoicesForJobs(
   /**
    * Which draft each job belongs on.
    *
-   * A per-job customer never has one — their job *is* the invoice. Otherwise the
-   * caller's explicit window wins, and failing that the job finds its own from
-   * its completion date. **Resolved in the business timezone**: a job finished at
-   * 09:00 Adelaide on 1 September is a September job, and composing that boundary
-   * in UTC would put it on August's invoice, silently.
+   * A per-job customer never has a window — their job *is* the draft, opened
+   * once and joined by nothing. Otherwise the caller's explicit window wins, and
+   * failing that the job finds its own from its completion date — `manual`
+   * included, which is what stops a manual customer collecting a fresh document
+   * per press. **Resolved in the business timezone**: a job finished at 09:00
+   * Adelaide on 1 September is a September job, and composing that boundary in
+   * UTC would put it on August's invoice, silently.
    */
   const periodOf = (job: BillableJob, method: BillingMethod): BillingPeriod | null => {
     if (method === "invoice_per_job") return null;

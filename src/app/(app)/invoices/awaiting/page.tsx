@@ -44,11 +44,13 @@ const PRICED_OPTIONS = [
  * bulk action:
  *
  *   **Awaiting review** — the charges need checking. `Select → Approve Selected`.
- *   **Approved**        — the price is frozen. `Select → Generate Selected`.
+ *   **Approved**        — approved, but on no draft. `Select → Add to Draft`.
  *
- * Generating does not send. An invoice raised from here lands as a draft in the
- * register, and the customer hears nothing until somebody sends it — which is a
- * separate screen, a separate action and a separate capability.
+ * **Nothing on this screen creates an invoice**, which is the change from what
+ * it used to be: the second group's verb was Generate Selected, and it turned
+ * the ticked jobs into invoices there and then. A job joins its customer's draft
+ * here; the draft becomes an invoice on the drafts board, when somebody issues
+ * it, and the customer hears nothing until it is sent after that.
  *
  * Gated on `billing.read`, and the tables behind it are gated independently:
  * `job_charge_snapshots` is readable only through `can_read_billing()`, so an
@@ -202,8 +204,8 @@ export default async function AwaitingInvoicePage({
       <div className="grid gap-3 sm:grid-cols-3">
         <Stat label="Awaiting review" value={String(awaiting.length)}
               hint={unpriced > 0 ? `${unpriced} not priced yet` : "All priced"} />
-        <Stat label="Approved, not invoiced" value={String(approved.length)}
-              hint={approved.length > 0 ? "Billed manually, or held back" : "Nothing held back"}
+        <Stat label="Approved, not on a draft" value={String(approved.length)}
+              hint={approved.length > 0 ? "Add them to a draft" : "All on a draft"}
               tone={approved.length > 0 ? "warning" : "default"} />
         <Stat label="Approved value" value={money(approvedValue)}
               hint={filtered ? "Before GST, filtered" : "Before GST"} />
@@ -292,10 +294,10 @@ export default async function AwaitingInvoicePage({
       </Card>
 
       <Card
-        title="Approved, not on an invoice"
-        description="Approving normally puts a job straight onto the customer\u2019s draft. A job
-                     sits here when that customer is billed manually, or when the invoice could
-                     not be raised \u2014 generating puts it on one."
+        title="Approved, not on a draft"
+        description="Approving puts a job straight onto its customer\u2019s draft invoice, so this
+                     is normally empty. A job sits here only when that could not be done \u2014
+                     adding it to a draft is how it gets there."
       >
         {approved.length === 0 ? (
           <EmptyState
@@ -303,13 +305,13 @@ export default async function AwaitingInvoicePage({
             description={filtered
               ? "Try a wider date range, or clear the filters above."
               : "Approved jobs go straight onto their customer\u2019s draft invoice, so this "
-                + "list is empty unless one was held back."}
+                + "list is empty unless one could not be placed."}
             action={<Link href="/invoices/drafts" className="text-sm text-primary hover:underline">Open drafts</Link>}
           />
         ) : (
           <BillingQueue
             rows={approved}
-            mode="generate"
+            mode="place"
             canAct={can(session.role, "invoices.write") && can(session.role, "invoices.bulk")}
           />
         )}
@@ -318,10 +320,11 @@ export default async function AwaitingInvoicePage({
       </div>
 
       <p className="text-sm text-muted-foreground">
-        A customer&rsquo;s billing method decides the shape of what is generated:{" "}
+        A customer&rsquo;s billing method decides how many drafts their work collects on:{" "}
         <Badge tone="neutral">{BILLING_STATUS_LABELS.approved}</Badge> jobs for a per-job customer
-        each become their own invoice, and a consolidated customer&rsquo;s jobs are rolled onto one.
-        Set it on the customer&rsquo;s Billing &amp; pricing section.
+        each open a draft of their own, and a consolidated customer&rsquo;s jobs share one for the
+        period. Either way it is a draft until somebody issues it. Set the method on the
+        customer&rsquo;s Billing &amp; pricing section.
       </p>
     </div>
   );

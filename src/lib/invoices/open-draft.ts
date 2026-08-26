@@ -29,7 +29,14 @@ import { loadChargesForJobs } from "@/lib/orders/job-billing";
  * `uq_invoice_source_jobs_once` saw to that — the month was simply split across
  * two documents.
  *
- * Three rules run through everything here:
+ * **This module is the only way an invoice comes into existence from a job.**
+ * `from-jobs.ts` used to insert one itself whenever a group had no period — a
+ * per-job customer, or a `manual` one — so pressing Approve could mint a whole
+ * invoice document straight off a job. There is one door now, and everything it
+ * opens is a `draft`: the job's money reaches a customer only when somebody
+ * issues that draft.
+ *
+ * Four rules run through everything here:
  *
  * - **The draft is found in the database, not remembered.** `uq_invoices_open_draft`
  *   (0040) is what makes "one open draft" a fact; the lookup below is the fast
@@ -42,6 +49,9 @@ import { loadChargesForJobs } from "@/lib/orders/job-billing";
  * - **Nothing here re-prices anything.** Every number comes from
  *   `job_charge_snapshots`, frozen at approval. This module moves money onto a
  *   document; it never decides what the money is.
+ * - **A draft without a period is still a draft.** A per-job customer's job is
+ *   its own document, so there is no window to key it on and nothing to find —
+ *   it opens, once, and is issued from the drafts board like every other.
  */
 
 type Client = Awaited<ReturnType<typeof createClient>>;
@@ -101,10 +111,20 @@ export async function findOrOpenDraft(
   supabase: Client,
   session: Session,
   customer: DraftCustomer,
-  period: BillingPeriod,
+  period: BillingPeriod | null,
   issueDate: string,
+  /**
+   * `per_job` opens a document for one job and nothing else — a per-job
+   * customer's shape. It is passed rather than derived because only the caller
+   * knows *why* there is no period: a per-job customer has none by design, and a
+   * job with no completion date has none by accident, and those must not produce
+   * the same kind of invoice.
+   */
+  shape: "consolidated" | "per_job" = "consolidated",
 ): Promise<{ ok: true; draft: OpenDraft } | { ok: false; error: string }> {
-  const existing = await findOpenDraft(supabase, session.tenantId, customer.id, period);
+  const existing = period
+    ? await findOpenDraft(supabase, session.tenantId, customer.id, period)
+    : null;
   if (existing) {
     return { ok: true, draft: { id: existing.id, invoiceNumber: existing.invoice_number, opened: false } };
   }
@@ -125,7 +145,9 @@ export async function findOrOpenDraft(
       // `consolidated` and not `recurring`, because after 0040 one invoice can
       // hold both job charges and contract charges and one type cannot describe
       // both. Which is which is a property of the *line* now (`origin`).
-      invoice_type: "consolidated",
+      // `per_job` is the one exception and says the opposite: this document was
+      // opened for a single job and no second one will join it.
+      invoice_type: shape,
       status: "draft",
       // Provisional while the draft is open, and re-stamped the day it is
       // actually issued — see `issueOneInvoice`. A draft opened on the 3rd with
@@ -135,14 +157,17 @@ export async function findOrOpenDraft(
       due_date: addDays(issueDate, terms),
       payment_terms_days: terms,
       purchase_order_number: customer.purchase_order_number,
-      period_start: period.start,
-      period_end: period.end,
+      period_start: period?.start ?? null,
+      period_end: period?.end ?? null,
     })
     .select("id, invoice_number")
     .maybeSingle<{ id: string; invoice_number: string }>();
 
   if (error) {
-    if (error.code === "23505") {
+    // Only the periodic shape can lose this race: `uq_invoices_open_draft` is
+    // partial on both period ends, so a period-less draft is outside it and a
+    // 23505 there is some other constraint entirely.
+    if (error.code === "23505" && period) {
       const winner = await findOpenDraft(supabase, session.tenantId, customer.id, period);
       if (winner) {
         return { ok: true, draft: { id: winner.id, invoiceNumber: winner.invoice_number, opened: false } };

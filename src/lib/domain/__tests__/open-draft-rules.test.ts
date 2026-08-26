@@ -4,7 +4,7 @@ import {
   jobInvoiceLines, type ChargeEntry, type ConsolidatableCharge,
 } from "@/lib/domain/invoice-consolidation";
 import { billingPeriodFor } from "@/lib/domain/billing-period";
-import { describePlacementOutcome, HELD_FOR_MANUAL } from "@/lib/domain/placement";
+import { describePlacementOutcome } from "@/lib/domain/placement";
 import type { BillingMethod } from "@/lib/domain/billing";
 
 /**
@@ -75,6 +75,30 @@ describe("grouping onto a period", () => {
     );
     expect(groups).toHaveLength(2);
     expect(groups.every((g) => g.period === null)).toBe(true);
+  });
+
+  it("puts a manual customer's month on one draft too", () => {
+    // The defect this closes. `manual` used to have no period, so both jobs fell
+    // into one period-less group whose only shape was "insert a new invoice" —
+    // and a second press did it again. A person still chooses when it goes out;
+    // what they were never choosing was a fresh document each time.
+    const groups = groupJobsForInvoicing(
+      [job("1", "acme", "2026-08-03"), job("2", "acme", "2026-08-19")],
+      methods({ acme: "manual" }),
+      periodOf,
+    );
+    expect(groups).toHaveLength(1);
+    expect(groups[0]!.period).toEqual({ start: "2026-08-01", end: "2026-08-31" });
+  });
+
+  it("gives a period to every method except per-job", () => {
+    // A period is what there is a draft to look up *by*, so a method answering
+    // null is a method whose jobs can only ever open a new document. Exactly one
+    // may do that, and it does it once per job rather than once per press.
+    const periodless = (["monthly_consolidated", "weekly_consolidated",
+      "fortnightly_consolidated", "manual", "invoice_per_job"] as const)
+      .filter((method) => periodOf(job("1", "acme", "2026-08-14"), method) === null);
+    expect(periodless).toEqual(["invoice_per_job"]);
   });
 
   it("splits a weekly customer by week where a monthly one is not split", () => {
@@ -229,28 +253,36 @@ describe("jobInvoiceLines", () => {
 /* ------------------------------------------------------- what is said back */
 
 describe("describePlacementOutcome", () => {
-  it("says raised the first time and added-to afterwards", () => {
+  it("says started the first time and added-to afterwards", () => {
     const base = { kind: "placed" as const, invoiceId: "i", invoiceNumber: "INV00042", total: 22 };
     expect(describePlacementOutcome({ ...base, opened: true, period: "August 2026" }))
-      .toBe(" Draft invoice INV00042 raised for August 2026.");
+      .toBe(" Started draft invoice INV00042 for August 2026. Issue it when you are ready to bill.");
     expect(describePlacementOutcome({ ...base, opened: false, period: "August 2026" }))
       .toBe(" Added to draft invoice INV00042 for August 2026.");
+  });
+
+  it("never claims an invoice was raised", () => {
+    // The word this screen must not use. Approving puts money on a draft, and
+    // "raised" is what made pressing Approve read as though it had created an
+    // invoice — which is the complaint this change answers.
+    const base = { kind: "placed" as const, invoiceId: "i", invoiceNumber: "INV00042", total: 22 };
+    for (const opened of [true, false]) {
+      for (const period of ["August 2026", null]) {
+        expect(describePlacementOutcome({ ...base, opened, period }))
+          .not.toMatch(/raised|invoice created/i);
+      }
+    }
   });
 
   it("leaves the period out when there is none", () => {
     expect(describePlacementOutcome({
       kind: "placed", invoiceId: "i", invoiceNumber: "INV00042",
       opened: true, total: 22, period: null,
-    })).toBe(" Draft invoice INV00042 raised.");
+    })).toBe(" Started draft invoice INV00042. Issue it when you are ready to bill.");
   });
 
-  it("says why a manual customer's job was held rather than reporting a failure", () => {
-    expect(describePlacementOutcome({ kind: "held", reason: HELD_FOR_MANUAL }))
-      .toContain("billed manually");
-  });
-
-  it("says the job is not on an invoice when the placement failed", () => {
+  it("says the job is not on a draft when the placement failed", () => {
     expect(describePlacementOutcome({ kind: "failed", reason: "already on another invoice." }))
-      .toBe(" It is not on an invoice yet — already on another invoice.");
+      .toBe(" It is not on a draft invoice yet — already on another invoice.");
   });
 });

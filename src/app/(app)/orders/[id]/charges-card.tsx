@@ -157,6 +157,22 @@ export async function ChargesCard({
               />
             </form>
           </div>
+
+          {/* Said beside the button, because the button is where it was
+              misread. Approving looks like the moment an invoice appears — it is
+              not, and a reviewer who believes it is has no reason to go and
+              issue the draft. */}
+          {canApprove ? (
+            <p className="mt-3 text-sm text-muted-foreground">
+              Approving freezes these charges and adds them to this customer&rsquo;s draft
+              invoice for the period. It does not create an invoice &mdash; you do that by
+              issuing the draft on{" "}
+              <Link href="/invoices/drafts" className="text-primary hover:underline">
+                Open drafts
+              </Link>
+              .
+            </p>
+          ) : null}
         </>
       ) : (
         <>

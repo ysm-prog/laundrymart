@@ -66,7 +66,8 @@ import {
  * That half groups by the customer's own `billing_method` — one invoice per job,
  * or one weekly/fortnightly/monthly — which is why switching a customer between
  * those shapes is a column and not a second code path. A customer set to
- * `manual` is deliberately left alone here: this is a sweep, not somebody's
+ * `manual` is deliberately left alone here — `sweptByMonthEndRun`, and now the
+ * whole of what that setting means: this is a sweep, not somebody's
  * explicit selection, and "manual" means a person decides each time.
  *
  * A customer with no contract at all is still invoiced when they handed laundry
@@ -381,7 +382,8 @@ export async function generateInvoices(formData: FormData): Promise<void> {
   // and phase 7's whole point is that both end up on invoices without a second
   // billing system. Approved jobs completed inside the period are swept here,
   // grouped by each customer's own `billing_method`, and written by the same
-  // shared generator the queue's Generate Selected uses.
+  // shared generator an approval uses — so a swept job and an approved one land
+  // on the same draft rather than on two documents.
   //
   // `respectManual` is on: this is a scheduled-style run over everything, not a
   // person's explicit selection, so a customer set to `manual` is left for

@@ -1,7 +1,53 @@
 # MEMORY — working session handoff
 > Auto-loaded each session. Canonical state is CLAUDE.md; this is the live delta.
 
-## Latest: the item code is typed where the charge is written
+## Latest: a job never becomes an invoice — it joins a draft
+2026-08-26, branch `claude/invoice-creation-job-workflow-11mobw`. Reported from the deployed app:
+*"you allowed to create a invoice from Job by clicking on Approve button but it shouldn't, it
+always should go to draft invoice and only create invoice from draft always."* **No migration; no
+schema, RLS, capability or policy change.**
+
+**The report was right and two doors were open.** The running draft made approval place charges
+on the customer's open draft — for a `*_consolidated` customer only.
+- **`invoice_per_job`**: `placeGroupOnInvoice` branched on "no billing period" and **inserted an
+  invoice itself**, so one Approve press raised a whole document.
+- **`manual`**: reached no draft at all, so its jobs waited for **Generate Selected** — a button
+  whose whole job was turning selected jobs straight into invoices.
+
+**One door now, and structurally so.** `lib/invoices/open-draft.ts` is the only module in `src/`
+that inserts an invoice for a job, and everything it opens is `status: 'draft'`. The codebase
+holds exactly **two** invoice inserts — that one, and `createManualInvoice` (a hand-raised blank,
+not from a job, also a draft).
+- **`manual` collects on a monthly draft now.** Its `null` period *was* the defect: no window
+  means no draft to look up, so every press opened another document. What it still buys is
+  `sweptByMonthEndRun` — the scheduled run leaves them alone.
+- **`invoice_per_job`** still means one invoice per job, as a `per_job` **draft** per job. Only a
+  per-job *customer* gets that shape; a consolidated customer with no `completed_at` must not.
+- **Generate Selected → Add to Draft**, kept only as the retry path for a placement that failed
+  (approval freezes charges whatever happens next), routed through `placeApprovedJobs`.
+- **Wording was half the defect**: "Draft invoice INV00042 **raised**" → "**Started** draft
+  invoice INV00042 … Issue it when you are ready to bill"; badge "Invoice generated" → "**On a
+  draft invoice**"; a line under Approve says what it does. Glossary gained *Draft invoice* and
+  *Issue*, lost *Generate*.
+- `generatesAutomatically` removed — same question as `sweptByMonthEndRun`, no caller in `src/`.
+  Depot stamping kept asymmetric on purpose: customer's for a periodic draft, the job's for a
+  period-less one (merging the branches nearly lost that).
+- `one-door.test.ts` reads the **sources** and fails if a second insert appears (`lib/invoices/*`
+  → `lib/env` is unimportable from vitest). Proved to catch the regression, and guarded against
+  passing vacuously.
+- 981 unit tests (was 974). 478 pgTAP unchanged; `git diff` over `supabase/` empty. `verify`
+  green. 14 browser assertions at 390/1440, 0 console errors, 0 overflow.
+
+**Live shape unchanged:** all **509** customers are `monthly_consolidated`, **0** `per_job`
+invoices exist, so neither closed door was in use. Forward-looking narrowing, checked against the
+database rather than assumed.
+
+**Before trusting it:** take a job in on `ats.coreit.com.au`, approve it, confirm the toast says
+*Started draft invoice…* (not "raised"), that "Approved, not yet on a draft" is empty, and that
+the invoice reaches the register only after Issue on the drafts board.
+
+
+## Previously: the item code is typed where the charge is written
 2026-08-26, branch `claude/code-review-requirements-ns6bav`. Reported twice; the second screenshot
 had `tw` sitting in the Description box. **No migration.**
 

@@ -2,7 +2,7 @@ import type { createClient } from "@/lib/supabase/server";
 import type { Session } from "@/lib/auth/context";
 import { businessToday } from "@/lib/domain/timezone";
 import { describePeriod } from "@/lib/domain/billing-period";
-import { HELD_FOR_MANUAL, type Placement } from "@/lib/domain/placement";
+import { type Placement } from "@/lib/domain/placement";
 import { approveJob } from "@/lib/orders/job-billing";
 import { generateInvoicesForJobs, type GeneratedInvoice } from "@/lib/invoices/from-jobs";
 
@@ -20,12 +20,18 @@ import { generateInvoicesForJobs, type GeneratedInvoice } from "@/lib/invoices/f
  *                 (job-billing.ts)       open draft for the period
  *                                        (from-jobs.ts → open-draft.ts)
  *
+ * What approval never does is *create an invoice*. It puts money on a draft; the
+ * draft becomes an invoice when somebody issues it, on the drafts board, and
+ * nowhere else.
+ *
  * Two rules, and the second is the one worth defending:
  *
- * - **`manual` is not placed.** That billing method already means "nobody
- *   decides but a person", so it is the opt-out, and it needs no second
- *   tenant-level switch beside it. `respectManual` is what expresses that, and
- *   it is the same flag the month-end sweep passes for the same reason.
+ * - **Every approval places, whatever the customer's billing method.** There is
+ *   no longer any way to turn a job into an invoice directly, so a job that
+ *   landed on no draft would sit in the queue with nowhere to go. `manual` used
+ *   to be held back here; what that setting buys now is
+ *   `sweptByMonthEndRun` — the scheduled run leaves such a customer alone, and
+ *   the person pressing Approve is the person `manual` was asking for.
  * - **A failed placement never un-approves the job.** Approval is the freeze and
  *   it either happened or it did not. If the draft cannot be opened, the job
  *   stays `approved`, sits in the queue exactly as it did before this existed,
@@ -90,9 +96,10 @@ export async function placeApprovedJobs(
 
   const run = await generateInvoicesForJobs(supabase, session, orderIds, {
     issueDate: businessToday(),
-    // The whole meaning of `manual`: this is not somebody choosing what to
-    // invoice, it is the consequence of an approval.
-    respectManual: true,
+    // Deliberately off. An approval *is* a person choosing to bill this work —
+    // the decision `manual` asks for — and with the job→invoice door closed a
+    // job held back here would have no route onto an invoice at all.
+    respectManual: false,
   });
 
   for (const entry of run.created) {
@@ -106,10 +113,7 @@ export async function placeApprovedJobs(
   const reasonByJob = new Map(run.skipped.map((entry) => [entry.orderId, entry.reason]));
   for (const id of orderIds) {
     if (byJob.has(id)) continue;
-    const reason = reasonByJob.get(id) ?? "nothing was invoiced";
-    byJob.set(id, reason === "billed manually"
-      ? { kind: "held", reason: HELD_FOR_MANUAL }
-      : { kind: "failed", reason: `${reason}.` });
+    byJob.set(id, { kind: "failed", reason: `${reasonByJob.get(id) ?? "nothing was invoiced"}.` });
   }
 
   return byJob;
