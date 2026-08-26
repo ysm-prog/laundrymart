@@ -16,7 +16,31 @@ logins — which live there precisely so they cannot read the real business's re
 **The multi-tenancy architecture stays.** One operating tenancy is a fact about today's data, not
 a reason to drop `tenant_id`, RLS, or §23's rule that a read feeding a write names its tenant.
 
-## Latest: a job never becomes an invoice — it joins a draft
+## Latest: 0043 is in the repo, and the Xero basis disagrees with it
+2026-08-26, branch `claude/invoice-creation-job-workflow-11mobw`. The owner asked for the live
+migration this repo lacked. **No `src/` change; one migration file, reconstructed not authored.**
+
+- **`0043_myob_invoice_lines`** — MYOB's line columns (`discount_percent`, `unit_label`,
+  `tax_code`) on `invoice_lines` and `job_charge_snapshots`, `selling_unit` /
+  `items_per_selling_unit` / `sell_price_basis` on `items`, freight on `invoices`,
+  `sync_tax_code_taxable()`, and **`recalculate_invoice()` re-created**.
+- **The re-create is a money change, not an additive one.** 0006 adds GST on top
+  (`total = sub + tax`); 0043 treats the line as **GST-inclusive** and extracts it
+  (`total = sub`). Without the file, CI's database billed differently from production.
+- **Byte-identical to what ran live**, md5-verified against the ledger
+  (`63e12d194b94fd82c793947d579842a0`). Only the header is ours. **If the authoring branch lands,
+  this path conflicts and theirs wins.**
+- **The pgTAP pass over it is vacuous — nothing in `supabase/tests/` calls
+  `recalculate_invoice`.** Proved by probe instead: $72.70 → 72.70 / **6.61** / 72.70;
+  `tax_code='FRE'` forces `taxable=false`; freight totals right.
+- **Found and NOT fixed:** `buildInvoicePayload` sends `LineAmountTypes: "Exclusive"` with the
+  raw `unit_price`, so Xero would add 10% on top of a GST-inclusive figure — $72.70 here, $79.97
+  there. Latent (no Xero connection, nothing ever pushed). Not fixed because
+  `items.sell_price_basis` is per-item while Xero's setting is per-invoice, so flipping the
+  string is probably the wrong answer. Belongs with whoever designed the inclusive model.
+
+
+## Previously: a job never becomes an invoice — it joins a draft
 2026-08-26, branch `claude/invoice-creation-job-workflow-11mobw`. Reported from the deployed app:
 *"you allowed to create a invoice from Job by clicking on Approve button but it shouldn't, it
 always should go to draft invoice and only create invoice from draft always."* **No migration; no

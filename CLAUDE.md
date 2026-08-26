@@ -826,6 +826,36 @@ renders no tab strip. Tested in `src/lib/__tests__/nav.test.ts`.
   inside its own transaction: a second open draft refused, a line on an issued
   invoice refused, and the cascade still deleting. Both halves were proved to
   fail without the fix rather than assumed to be doing something.
+- `0043_myob_invoice_lines` — **GST inside the price, and the columns a MYOB
+  invoice line carries.** Three columns each on `invoice_lines` and
+  `job_charge_snapshots` (`discount_percent`, `unit_label`, `tax_code`), three on
+  `items` (`selling_unit`, `items_per_selling_unit`, `sell_price_basis`), two on
+  `invoices` (`freight_amount`, `freight_tax_code`), `sync_tax_code_taxable()`
+  with a trigger on each of the two line tables, and **`recalculate_invoice()`
+  re-created**. Adds no table, drops nothing, and changes no stored value: every
+  column is nullable or `not null default`.
+  - **The re-created function is the part that is not additive, and it is a money
+    change.** 0006 added GST on top of the lines (`total = sub + tax`); this
+    treats a line amount as **GST-inclusive** and extracts the tax out of it
+    (`total = sub`, `tax = sub * rate/(1+rate)`). Proved against a fresh database
+    rather than read: a single $72.70 taxable line comes back subtotal 72.70,
+    tax **6.61**, total 72.70 — the worked example the migration asserts on
+    itself. Freight rides on the invoice rather than as a line and is taxed by
+    its own code.
+  - **`taxable` is now derived from `tax_code` and can no longer disagree with
+    it.** `GST` sets it, `FRE` and `N-T` clear it, and no code leaves the
+    caller's own answer alone. Checked behaviourally: a line inserted as
+    `taxable = true, tax_code = 'FRE'` reads back `taxable = false`.
+  - **Authored on a branch that has not reached this repo**, applied live on
+    2026-08-26 (`20260826115214`), and the file here was **reconstructed from the
+    statements the ledger recorded** — byte-identical, verified by md5
+    (`63e12d194b94fd82c793947d579842a0`) rather than by eye. What is missing is
+    that author's prose, not any of their SQL. If their branch lands, this path
+    conflicts and theirs is the one to keep.
+  - **Nothing in the pgTAP suite calls `recalculate_invoice`**, so the suite
+    passing over this migration is a *vacuous* pass with respect to the one thing
+    it changes. Said plainly because this repo has shipped that mistake twice:
+    the totalling above was proved by direct probe instead.
 - `0042_free_status_moves` — **a job's stage is picked, not walked.**
   `guard_laundry_order_transition` rebuilt from 0031's body — carrying 0017's two
   billing hooks and 0031's board clearing through verbatim, which is the trap
@@ -2268,6 +2298,47 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-08-26 · 0043 comes into the repo, and the Xero basis no longer matches it
+The owner's instruction, after the merge record noted the hosted project carrying a migration
+this repository did not have. **No `src/` change; one migration file added, reconstructed rather
+than authored.**
+
+**Why it mattered enough to do.** CI builds a fresh database from `supabase/migrations/` alone,
+so while `0043_myob_invoice_lines` was live and absent here, that database **computed invoice
+totals differently from production**. 0006's `recalculate_invoice` adds GST on top of the lines
+(`total = sub + tax`); 0043's treats a line amount as **GST-inclusive** and extracts the tax out
+of it (`total = sub`, `tax = sub × rate/(1+rate)`). A proof passing against one basis while a
+customer is billed on the other is a defect shape this file already records more than once.
+
+- **The file is byte-identical to what ran on the project**, verified by md5 against the ledger
+  (`63e12d194b94fd82c793947d579842a0`) rather than by eye — the DDL was reassembled from the
+  recorded statements and hashed back. Only the header is this session's, and it says so.
+- **It changes nothing about production**, which has had it since 11:52 on 2026-08-26. What it
+  changes is CI's database, which now matches.
+- **46 migrations, 485 pgTAP assertions, 0 failing, 0 plan mismatches** on a fresh Postgres 16
+  with the seed on top.
+
+**The suite passing over it is a vacuous pass, and saying so is the point.** **Nothing in
+`supabase/tests/` calls `recalculate_invoice`** — the only two mentions of invoice totals insert
+`total` by hand — so 485 green assertions say nothing whatever about the one thing this migration
+changes. It was proved by direct probe against the fresh database instead: a single $72.70
+taxable line returns subtotal 72.70, tax **6.61**, total 72.70; a line inserted
+`taxable = true, tax_code = 'FRE'` reads back **`taxable = false`**; and $11.00 of GST freight on
+top gives subtotal 93.70, tax 7.61, total 93.70.
+
+**A real inconsistency fell out of reading it, and it is reported rather than fixed.**
+`buildInvoicePayload` sends `LineAmountTypes: "Exclusive"` with `UnitAmount: line.unit_price`
+(`src/lib/xero/invoice-payload.ts:210`) — so Xero is told to add 10% **on top of** the very
+number the database now treats as already including it. A $72.70 line is $72.70 here and $79.97
+in Xero.
+- **Latent, not live:** this deployment has no `XERO_CLIENT_ID`, holds **0** `xero_connections`
+  rows, and has never pushed an invoice, so nothing has been mis-posted.
+- **Deliberately not fixed here**, because the one-word answer is probably not the right one.
+  `items.sell_price_basis` exists precisely so the basis can differ per item, while Xero's
+  `LineAmountTypes` is a property of the whole invoice — so a mixed-basis invoice cannot be
+  expressed by flipping that string, and guessing would trade a visible inconsistency for an
+  invisible one. It belongs with whoever designed the inclusive-price model.
+
 ### 2026-08-26 · A deploy says so on the commit that caused it
 `vercel.json` carried `"github": { "silent": true }`. **No migration, no schema change, nothing
 under `src/`** — one boolean in one config file. §5 holds the reasoning.
@@ -2426,11 +2497,17 @@ whole pgTAP suite and the seed. **Nothing to apply**: this adds no migration and
 
 **One thing the read-back turned up that is not this branch's, and is recorded rather than
 glossed:** the hosted project's ledger carries **`0043_myob_invoice_lines`** (`20260826115214`),
-applied at 11:52, whose file is in **no branch of this repo**. The same situation §11 records for
-`0015_import_activation`, the two `0017`s and `0038`. It is additive and harmless to this work —
-every column it adds to `invoice_lines`, `job_charge_snapshots`, `invoices` and `items` is either
-nullable or `not null default`, so the inserts here name none of them and still succeed, checked
-against the applied statements rather than assumed. It is that session's to merge.
+applied at 11:52, whose file was in **no branch of this repo**. The same situation §11 records for
+`0015_import_activation`, the two `0017`s and `0038`.
+
+> **Corrected the same day, and the correction is the part worth reading.** This paragraph called
+> it *"additive and harmless"*, on the strength of every **column** it adds being nullable or
+> `not null default` — which is true, and was not the whole file. It also **re-creates
+> `recalculate_invoice()`**, moving invoice totals from GST-exclusive to GST-inclusive, which is a
+> money change and the opposite of harmless. The first read stopped at the columns because the
+> first 2,500 characters were all that had been fetched. **The file is in the repo now** (see the
+> entry at the top of this section and its §7 record); the lesson is that "additive" is a claim
+> about a whole migration, and a truncated read cannot support it.
 ### 2026-08-26 · A job's stage is picked, not walked
 Reported from the deployed app on `LJ00007`, a customer pickup: the *What happens next* card
 offered **Mark ready for delivery** and **Cancel job**, and nothing else. The ask was YSM Hub's
