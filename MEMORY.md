@@ -49,6 +49,10 @@ body was proved **byte-identical to the repo file** by `md5(prosrc)`. Advisors 2
 apply also closed a live RPC-surface exposure that was not this migration's — `authenticated`
 could execute the guard (the 0019/0036 trap, standing since 0031 re-granted it).
 
+**Merged**: `Prod` `5792ce8` (clean fast-forward), `Dev` `70379d8`, identical trees, CI green on all
+three jobs for both. `Prod`'s Verify job reported a stale `in_progress` for minutes after finishing —
+read the job log, not the status.
+
 **Left, and it needs a browser:** take a job in on `ats.coreit.com.au`, press a stage already
 behind it, and confirm it moves back with the timeline recording it under your name.
 

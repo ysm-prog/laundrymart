@@ -2376,7 +2376,18 @@ for a widening as much as for a narrowing. §11 has the full record; the short v
 stage already behind it, and confirm it moves back with the timeline recording the move under your
 name.
 
-**Merged to `Dev` and `Prod` on 2026-08-26.** `Prod` had moved four commits while this branch was
+**Merged to `Prod` (`5792ce8`) and `Dev` (`70379d8`) on 2026-08-26**, so `ats.coreit.com.au`
+carries it. **CI green on all three jobs for both** — Verify, gitleaks, and the DB job applying all
+45 migrations to a fresh Postgres 16 with the whole pgTAP suite and the seed. `Prod` was a clean
+fast-forward and was never force-pushed; the two branches hold identical trees, `Dev` carrying only
+the extra catch-up merge commits.
+
+**Read the log, not the status** — the trap the 2026-08-26 filter-language entry records, and it
+recurred here: the jobs endpoint served `in_progress` for `Prod`'s Verify job for several minutes
+after it had finished, while `Dev`'s identical job on a byte-identical tree had reported success in
+50 seconds. The job's own log carried `== PASSED ==` followed by cleanup, which is the answer.
+
+`Prod` had moved four commits while this branch was
 in flight — the item-code type-ahead on a charge line, and the decision to stop showing ledger
 accounts there — so it was merged in first. **Only the two documentation files conflicted**;
 `design-preview.tsx`, which both branches touched, merged clean. Both changelog entries are kept
