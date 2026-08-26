@@ -2612,6 +2612,28 @@ read as the feature not working.
 `ats.coreit.com.au`, press the `—` on the `LJ00007 — fuel` line and give it an account; set
 Money › Charge accounts › Other to the same account; then approve a second job for that
 customer and confirm the fuel line comes back coded without anybody touching it.**
+
+**Merged to `Prod` (`15caace`) on 2026-08-26**, a clean fast-forward — `Prod` was never
+force-pushed. CI green on all three jobs: Verify, gitleaks, and the DB job applying all **48**
+migrations to a fresh Postgres 16 with the whole pgTAP suite (**504 assertions**) and the seed.
+
+- **`Prod` moved twice while this was in flight and was merged in each time** rather than
+  rebased over. First six commits carrying `0044_item_master_detail` — hence the two 0044s —
+  then a Dependabot bump of four production dependencies (`next` 16.3.2, `resend` 6.22.0,
+  `@react-pdf/renderer` 4.7.0, `lucide-react` 1.33.0). The bump was re-verified rather than
+  waved through: `npm ci` clean and the whole gate green on the new versions.
+- **Only the two documentation files and one source file conflicted**, and on that source file
+  **both sides were right about different things**. Both branches had independently threaded a
+  `tenantId` into `Lines` — `Prod` to read the laundry's GST rate, this branch for §23's rule
+  that a read feeding a write names its tenant. The resolution is the union: their fourth read
+  and their two extra item columns, with the tenant filter on both loaders.
+- **Read the log, not the status — the fifth time this file records it.** The Verify job
+  reported `in_progress` from both the runs and the jobs endpoint long after finishing, and its
+  log was 404 while that lasted; it carries `== PASSED ==` at 23:36:51 followed by cleanup. The
+  other two jobs had completed at 23:35:52 and 23:35:55 while the *run* still showed an
+  `updated_at` of 23:35:39.
+- **`Dev` is 6 commits behind and has not been touched**, because the instruction was Prod. It
+  wants a catch-up merge — the staleness the 2026-08-16 entry records as a standing problem.
 ### 2026-08-26 · An item says what MYOB says about it, and the line says what the price means
 The owner opened all 257 of Adelaide's active items in MYOB one at a time and captured
 every field on the item page. Nine had nowhere to live in this schema, and two of those
