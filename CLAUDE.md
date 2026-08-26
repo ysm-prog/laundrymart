@@ -1005,6 +1005,57 @@ role change refuse the last `admin.write` holder — with two administrators eac
 demote the other and lock the tenant out of its own People screen.
 
 ## 11. Hosted project
+**Verified against `laundrymart-syd` on 2026-08-26 after the Adjust Run merge, and there was nothing
+to apply.** The branch adds no migration, so this was a conformance check rather than a deployment:
+does the live database carry everything the merged code calls?
+
+- **Every one of the repo's 40 migrations is live**, checked by **object** rather than by ledger name
+  — six of them sit in the ledger under their pre-renumbering names (`optional_inspection`,
+  `0012_return_count`, `purchases`, `supplier_payments`, `import_helpers`,
+  `0015_import_activation`), so a name diff alone reports six false gaps. `production_batches.route_id`,
+  `production_batch_lines.driver_quantity`, `gl_accounts`/`suppliers`/`supplier_bills`,
+  `supplier_payments` and `import_activation_state` are all present. The live ledger has 41 entries to
+  the repo's 40 because `0015_import_activation_grants` was applied separately.
+- **Everything Adjust Run calls at request time exists and is shaped right**: `apply_run_sequence()`
+  (SECURITY **INVOKER**, so RLS and both guards still apply), `can_write_run_sequence()`,
+  `compact_run_sequence()` (SECURITY **DEFINER**, safe by construction — §28),
+  `daily_routes.sequence_locked/_version/_updated_by/_updated_at` (which `loadRunDay` selects, so
+  their absence would 500 the page), and `jobs.sequence`. The triggers are attached under
+  `guard_jobs_sequence` and `guard_daily_routes_sequence_control` — **the trigger names differ from
+  their function names**, which is worth writing down: a probe looking for `guard_job_sequence` in
+  `pg_trigger` reports it missing and is wrong. `guard_job_sequence` is correctly **not** executable
+  by `authenticated` (the trap 0019 and 0036 both record) while `apply_run_sequence` is.
+- **The feature was then proved end to end as real sessions**, on Adelaide's Board 1 for 2026-08-28 —
+  the first time the lock/adjust/save cycle has run against real rows. In one block that ends by
+  raising, so **nothing could commit**: a `board` was refused **42501** *"only the owner or an
+  operations manager can change a run's order"*; a `dispatcher` (a real member re-roled inside the
+  block) was refused identically; an `operations_manager` **saved**, version 1 → 2, and the two stops
+  really swapped; and a stale page replaying version 1 got the concurrency sentence. Read back after
+  the rollback: version **1**, still locked, order unchanged, the borrowed membership back to `board`,
+  and **0** audit rows written.
+- **Advisors are 22** — the 21 documented SECURITY DEFINER helpers plus the auth leaked-password
+  toggle. `sync_invoice_line_account` is still **absent** from the list, so the 2026-08-25 live revoke
+  is holding. **0** `anon` table grants and **0** tables in `public` without RLS.
+- Counts as read: 648 invoices, 10 laundry jobs, 6 Adelaide memberships. Both are up on the last
+  record (647 / 8) because the laundry has been using the app.
+
+**One data issue found, and it is the owner's to decide rather than this session's.** `Adelaide Towel
+Service` holds **two customer records both named `Jay CT`** — `CUST00509` (`f529d68b`) and `CUST00510`
+(`476d9761`) — created **0.65 seconds apart** on 2026-08-20, each with its own `customer_locations`
+row at the same address, *11 Frazer avenue Gulfview Height 5096*. That is why Board 1's 28 August run
+carries two stops at one address and why the Run order card shows "Jay CT" at both position 1 and
+position 2: `findOrCreateStop` keys on (tenant, run, **customer**) and is behaving correctly — as far
+as the database is concerned these are two customers, so the van is booked to call twice.
+- The work is split across them: `CUST00509` carries LJ00002/3/4/5, three stops and **one invoice**;
+  `CUST00510` carries LJ00006 and one stop.
+- **Not merged here.** Merging two customer records on a live business means repointing jobs, stops,
+  locations and an invoice, and it cannot be undone by a second migration — the same call the
+  2026-08-20 entry made about `LJ00001`: a record about a customer is the owner's, not a bug's
+  leftover. The ids are above if they decide to.
+- `SubmitButton` already disables on `useFormStatus().pending`, so the ordinary double-click is
+  guarded; 0.65s apart is consistent with a double submit **before hydration** or with two deliberate
+  creations. Not chased further, because guessing at a cause is how a fix lands on the wrong thing.
+
 `laundrymart-syd` · ref `xujhwljrmogenhvqpkrf` · ap-southeast-2 (Sydney) · org `ysm-prog`.
 Deployed on Vercel at `ats.coreit.com.au`. All migrations through `0030_member_directory`
 applied (0014 on 2026-08-13, 0015 and 0016 on 2026-08-14, 0017, 0018, 0019 and 0025 on
@@ -1699,9 +1750,20 @@ workflow change**, and no role gained or lost anything.
   attribute matched no rule. The harness now asserts the root font size actually moved
   (16 → 18.4 → 20.8px) and the recorded overflow numbers reappeared the moment it did.
 
-**Not opened with real rows in it.** This container has no Supabase credentials, so the card was
-proved through the component gallery, the payload assertions, the source-level gate and the build
-— not by being looked at behind the auth gate. **Before trusting it: sign in as
+**Merged to `Prod` (`f8eb138`, PR #26) and `Dev` (`6c1dd4c`, PR #27) on 2026-08-26**, CI green on all
+three jobs for both. No migration went with it, so nothing was outstanding to apply — §11 records the
+conformance check that proves it, including that every object the merged code calls at request time
+is live and correctly shaped.
+
+**The boundary is now proved against real rows**, which is what the 2026-08-25 entry left open: on
+Adelaide's Board 1 for 28 August, in a block that ends by raising so nothing can commit, a board and
+a dispatcher were both refused **42501** with the sentence, an `operations_manager` saved and the two
+stops really swapped (version 1 → 2), and a stale replay got the concurrency message. The rollback
+was read back clean.
+
+**Still not opened behind the auth gate.** This container has no Supabase credentials, so the *card*
+was proved through the component gallery, the payload assertions, the source-level gate and the
+build — the database half above is proved, the browser half is not. **Before trusting it: sign in as
 `owner@roles.example.com` on `ats.coreit.com.au`, open My Runs for Board 1 on a day with two
 stops, press Adjust Run, swap 1 and 2, and press Save & Lock Run** — the run should re-lock in the
 new order, the toast should read "Run sequence updated successfully. The run has been locked.",
