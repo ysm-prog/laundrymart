@@ -1,7 +1,77 @@
 # MEMORY — working session handoff
 > Auto-loaded each session. Canonical state is CLAUDE.md; this is the live delta.
 
-## Latest: the coding control stopped promising codes that are not there
+## Latest: Adelaide Towel Service is the only laundry
+2026-08-26, branch `claude/adelaide-towel-single-tenant-tbyy06`. Mostly a **live data change**;
+one migration (`0041`) keeps it that way. No new table, column, policy or capability; nothing
+dropped and no row's meaning changed. CLAUDE.md §11 has the read-backs, §7 the migration, §3a the
+consequence for the test logins.
+
+**`Harbour Commercial Laundry` is deleted** — 186 rows across 27 tables, one `delete from tenants`
+with all 51 cascading FKs still enforced. Snapshotted first to
+`docs/archive/harbour-demo-tenant-2026-08-26.json`, so it is reversible by data and not only by
+`supabase/seed.sql`. Two guard triggers (`guard_production_batch_lines_change`,
+`guard_laundry_order_items_change`) had to be disabled to let the cascade through and were
+re-enabled in the same transaction — the Jay CT lesson, five days on.
+
+**Twelve Adelaide rows went with it, and that is the part beyond the ask.** Every Adelaide row
+that *pointed into* Harbour blocked the cascade, and every one was an artefact of the 2026-08-18
+cross-tenant bug or the 2026-08-16 delivery session: `LJ00001` + its item + 6 activity rows, stop
+`JOB00001`, `RUN00001`, and the project's only `deliveries`/`delivery_lines` pair. All against
+Harbour's customer `Test`. **Adelaide now has 0 laundry jobs and 0 runs** — honest, since its whole
+job history was test activity. Found by sweeping *every* FK between two tenant-scoped tables for
+disagreeing `tenant_id`s: nine such references existed, in both directions.
+
+**The twelve `@roles.example.com` profiles are members of the real laundry now** (owner's call), so
+each role can still be signed in as. **This reverses a property §11 used to prove** — they were
+Harbour-only, so the 508 real customers were outside all of them. Re-proved as six real sessions
+instead: counter/driver/board read **0** invoices, **0** accounts, **0** audit rows; owner/auditor
+read 646/268/41; finance reads the money and 0 audit. `driver@` and `board@` got a `Test Driver`
+and `TESTBOARD` row in Adelaide, or `current_driver_id()`/`current_board_id()` would be null and
+both logins would work with empty screens. **The shared password is a live credential now** —
+replace it via People › Email sign-in link.
+
+**The 1,154 archived records are restored** through `set_records_archived(…, false)` as a real
+owner session: 508 customers, 646 invoices readable again.
+
+**`0041` exists because the screen is not the boundary.** `tenants` carries 0019's
+`tenants_platform` policy, so a platform admin could POST a second laundry straight to
+`/rest/v1/tenants`. `guard_single_laundry` refuses with 42501; the action's check is the readable
+sentence in front. A **switch** (`platform_settings.settings.single_laundry`), not a removal,
+because the ask was "for now" — one press on Platform › Settings turns it off, no deploy.
+**Absent means off**, which is load-bearing: the seed creates a laundry and the proofs create two.
+**INSERT only, and only the second** — renaming, suspending and deleting stay writable, and the
+first laundry is always allowed.
+
+**934 unit tests (was 928), 478 pgTAP assertions across 26 files (was 469/25), `verify` green**,
+43 migrations against a fresh Postgres 16 with the suite and seed. **940/478 with `Prod` merged
+in**, which brought the coding-control fix. The seed applying on top is the real check here: it
+creates a laundry, so passing is "absent means off" proved rather than asserted. New assertions proved to fail
+without the fix: the proof dies outright without 0041, and `z.coerce.boolean()` in place of the
+checkbox preprocessor fails the stray-value test.
+
+**Applied live before the merge.** Rehearsed in a transaction that ended by raising; the rollback
+read back clean, the real run matched it exactly, ten assertions passed. After: **1 tenant**, 18
+logins, 508 customers, 646 invoices, 254 items, 268 accounts, 1,515 bills, 5 boards, 2 drivers,
+0 jobs, 0 runs. Advisors **23**, unchanged — both new functions are revoked from `authenticated`
+so neither is on the list. 0 anon table grants, 0 tables without RLS. Refusal proved as a real
+platform admin: 42501 with the sentence, while a rename still touched its row.
+
+**Two things left for the owner, not the code.** Adelaide's only depot (`ADL`) is **inactive** —
+set that way deliberately by `darshan@` at 01:57 on 2026-08-26 — and all eight site pickers filter
+`status = 'active'`, so adding a customer/driver/board/vehicle/contract currently offers no site.
+One press on Settings › Sites. And Adelaide still holds **0 laundry prices**. One `run-media`
+object under the old tenant's prefix survives: Supabase refuses a direct delete on
+`storage.objects`.
+
+**Not verified behind the auth gate** — no Supabase credentials here. Before trusting it: sign in
+as `owner@roles.example.com` on `ats.coreit.com.au`, check Platform shows "This laundry" with no
+Add form, and that Customers lists the 508 that came back.
+
+## Previously: the coding control stopped promising codes that are not there
+
+> **Superseded in its data, not its fix.** `Harbour Commercial Laundry` and `LJ00006` were deleted
+> later the same day (see the entry above). The rule and its tests stand.
 2026-08-26, branch `claude/code-review-requirements-ns6bav`. Reported from the deployed app —
 *"I still can't get the codes here"* on `LJ00006`'s charges. **No migration.**
 

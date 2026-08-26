@@ -28,10 +28,32 @@ export default async function PlatformSettingsPage() {
     <div className="space-y-6">
       <PageHeader
         title="Settings"
-        description="Defaults a new laundry starts with. Each laundry can change its own afterwards — nothing here overrides a choice an owner has already made."
+        description="How this deployment is set up, and the defaults a new laundry starts with. Each laundry can change its own afterwards — nothing here overrides a choice an owner has already made."
       />
 
       <form action={savePlatformSettings} className="space-y-6">
+        {/* First, because it is the only switch here that changes what this
+            deployment *is* rather than what a new laundry starts with. */}
+        <Card
+          title="This deployment"
+          description="Whether the system runs one business or several."
+        >
+          <Checkbox
+            name="single_laundry"
+            label="Run one laundry only — refuse a second"
+            defaultChecked={settings.single_laundry}
+          />
+          {/* Deliberately state-neutral: this sentence has to stay true whether
+              the box is ticked or not, so it says what the switch does rather
+              than what it is currently set to. */}
+          <p className="mt-2 text-xs text-muted-foreground">
+            While this is on, a second laundry is refused in the database as well as on the
+            Laundries screen, so one cannot be added by any route. Turning it off restores the
+            Add&nbsp;a&nbsp;laundry form and changes nothing else — records belonging to
+            different laundries are kept apart by the same rules either way.
+          </p>
+        </Card>
+
         <Card
           title="New laundry defaults"
           description="Applied when you add a laundry on the Laundries screen. Existing ones are untouched."
