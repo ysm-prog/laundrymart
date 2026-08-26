@@ -263,6 +263,13 @@ async function loadCodingItems(
     .eq("tenant_id", tenantId)
     .is("deleted_at", null)
     .eq("status", "active")
+    // An item the laundry only *buys* is not something a customer is charged
+    // for. Inert on the MYOB import — that export carries no sell/buy flag, so
+    // every imported row is both (see `myob/inventory.ts`) — but it is the lever
+    // an owner has: untick "I sell this" on the drums of detergent and the fan
+    // shafts and they stop being offered here, without deleting stock records
+    // the plant still needs.
+    .eq("is_sell", true)
     .order("item_code", { nullsFirst: false })
     .limit(500)
     .returns<CodingItem[]>();

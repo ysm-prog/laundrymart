@@ -1058,6 +1058,11 @@ accounts (268 rows) belongs to **Adelaide**, which holds **no items**; the six i
 filling in first. And all **647 invoices carry 0 `invoice_lines`** — they came from the import as
 headers — so there is nothing yet for the Xero line coding to act on.
 
+**The first half of that was closed on 2026-08-26: Adelaide holds 254 items.** They came from the
+client's MYOB inventory export, so the chart and the item list are now in the same laundry and an
+item can be coded to an account without anything else arriving first. The second half stands —
+those 647 invoices still carry no lines. See the 2026-08-26 entry for the import itself.
+
 **`0031_boards` and `0032_item_master` were applied on 2026-08-20**, in that order, each
 verified before the next. **`0033_laundry_prices_read` followed the same day.**
 
@@ -1207,8 +1212,9 @@ Advisors stayed at **18** — 0033 adds no function.
 - **Item categories.** The five Harbour items that are laundry a customer hands in carry a
   `laundry_category` (apron → `uniforms`, bath towel → `bath_towels`, hand towel → `hand_towels`,
   tea towel → `towels`, table cloth → `linen`). `LB-STD-01` is deliberately left null: a laundry
-  bag is a container the laundry lends, not laundry. Adelaide has **no items at all**, so there
-  was nothing to categorise there.
+  bag is a container the laundry lends, not laundry. Adelaide had **no items at all** then, so
+  there was nothing to categorise there; it holds 254 since 2026-08-26 and **none carries a
+  category**, because the MYOB export does not say which of them is laundry a customer hands in.
 - **The first price list on the project.** There were **zero** `laundry_prices` rows and **zero**
   rate cards, so "Price this job" could only ever answer *nothing came back priced* — correct, and
   inert for every job in both laundries. Harbour now carries a tenant default for all nine kinds.
@@ -1289,8 +1295,9 @@ on rather than the code's:
 
 **Still to do in the app, not the database:** invite one person into Adelaide who is not a platform
 administrator, enter its price list, and set `laundry_category` on the items that are laundry a
-customer hands in (§25) — Adelaide holds no `items` rows at all, so that one waits on the item
-master arriving. Creating and linking the boards is **done**.
+customer hands in (§25). Creating and linking the boards is **done**, and the item master is
+**done** — 254 items since 2026-08-26, which is what the third of those was waiting on. All 254
+arrived uncategorised and marked both sold and bought, because the export says neither.
 
 For **0030** that was: pre-flight (function absent, **0** `anon`-executable functions so the
 migration's own assertion would pass, 0 `anon` table grants, 15 memberships, 2 platform admins);
@@ -1679,6 +1686,30 @@ reason.
   **run against the real file**: 254 items, 3 rows skipped with reasons, longest
   code 23, and all 254 then inserted into a fresh Postgres 16 against the real
   schema to prove the planned rows are what the table accepts.
+
+**Imported to `laundrymart-syd` on 2026-08-26, and Adelaide holds 254 items.** Rehearsed first
+the way §11 requires: the whole insert plus seven assertions in a transaction that was then
+aborted, so the numbers below were known before anything was committed. Then applied for real
+behind the same assertions plus one more — that the table still started empty — so a rollback
+that had not rolled back could not have doubled the list.
+
+- **Read back as a real Adelaide session** (`board1@ats.example.com`, a `board` membership in
+  that laundry and nowhere else): **254 items**, 2 priced, longest code 23, and `TW`, `GTW`,
+  `HTW`, `BT` and `Del` all reading back with their names. Harbour's 6 are **not** among them —
+  260 would have been the tenancy failure — and the same session still reads **0** accounts, **0**
+  invoices and **0** prices, so 0036's gate and the billing narrowing both survived the write.
+- **Nothing else moved:** 268 accounts, 647 invoices, 6 jobs, and Harbour's 6 items all exactly
+  as recorded.
+- **The pickers now filter `is_sell`, and that was a gap in the app rather than in the file.**
+  Nothing in `src/` had ever narrowed an item picker to what the laundry sells, so the flag 0032
+  added was decorative. It is the lever now — inert on this import, since the export carries no
+  sell/buy flag and every row arrived true, but an owner who unticks "I sell this" on the
+  detergent and the fan shafts takes them out of both coding pickers without deleting stock
+  records the plant still needs.
+- **Every one of the 254 arrived with no `laundry_category` and no `income_account_id`**, which
+  is the honest state: the export says neither. So the item picker works today and the account
+  still has to be chosen per line until somebody codes the items — recorded in §25 as the
+  owner's next step, not as something the import could have answered.
 
 ### 2026-08-26 · Code the charge where the charge is made
 The client's own comparison: MYOB puts the **Item ID** and the **Category** (its
@@ -4390,10 +4421,21 @@ bag, under the code the business already uses (0032). Staff type TOW001.
   carries MYOB's figure for the two that have one and **nothing invented for the rest**; the
   item picker says "no price set" rather than showing a blank, because with 255 of 257 unpriced
   that is the ordinary case and a blank reads as free.
-- **Categories are set on the demo laundry only, because the real one has no items.**
-  `Adelaide Towel Service` holds **zero** `items` rows — its item master is exactly what the
-  unbuilt MYOB import would fill. Harbour's five laundry items carry a category; its laundry bag
-  does not, on purpose, because a container the laundry lends is not laundry a customer hands in.
+- **Categories are set on the demo laundry only, and the real one's 254 items carry none.**
+  Harbour's five laundry items carry a `laundry_category`; its laundry bag does not, on purpose,
+  because a container the laundry lends is not laundry a customer hands in. `Adelaide Towel
+  Service` held **zero** `items` rows until 2026-08-26 and now holds **254**, imported from the
+  client's MYOB inventory export — **all of them uncategorised**, because that export says nothing
+  about which of them is laundry a customer hands in. That is the owner's to fill in, and until
+  they do those items price through the rate card and the price list exactly as they did before:
+  `laundry_category` feeds `sync_laundry_item_type`, which only ever *derives* a kind of laundry
+  and never overrides the caller's own answer.
+- **All 254 are marked both sold and bought, because the export carries neither flag.** The two
+  coding pickers (the job's Charges card and the invoice line composer) filter on `is_sell`, so
+  the lever exists: untick "I sell this" on the drums of detergent, the gloves and the fan shafts
+  and they stop being offered on a sale without deleting stock records the plant still needs.
+  Inert on the imported data, since every row arrived true. MYOB's *Items List [Summary]* export
+  carries the real flags; when it arrives the reader gains two columns and no new rules.
 - **An item now carries where its money lands** (0037): `income_account_id` points at a row in
   the chart of accounts, and `xero_item_code` is the item's code in Xero. Both nullable and both
   null, so an item nobody has coded behaves exactly as it did before. The Owner can add to the
@@ -4508,9 +4550,12 @@ line by hand. `0036` closes that.
   - Generation prefers the charge's own account and falls back to the item's — the
     same precedence `lib/xero/push.ts` uses on the line.
 - **The composer defaults to the mode that produces a coded line with the least
-  work**, which is not simply "item": `Adelaide Towel Service` holds 268 accounts and
-  **zero items** today, so falling to free text would make the default route the one
-  that produces uncoded lines, for the one laundry with a chart to code to.
+  work**, which is item where there is an item list and the account code where there
+  is only a chart. That fallback was not hypothetical: `Adelaide Towel Service` held
+  268 accounts and **zero items** until 2026-08-26, so opening on free text would have
+  made the default route the one that produces uncoded lines, for the one laundry with
+  a chart to code to. With its 254 items imported the composer now opens on the item
+  there — the same rule, a different answer, because the data moved.
 - **What is not built: an importer for this file.** The uploaded workbook is an
   `.xlsx` whose headers are `Code | Name | Type | Tax code | Level | Current balance ($)`,
   while `readAccounts` (0023) expects a **CSV** with `Tax Code`, `Linked` and
