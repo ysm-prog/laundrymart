@@ -73,9 +73,18 @@ export function ItemPicker({
       results={matches.map((match) => ({
         key: match.id,
         primary: itemLabel(match),
+        /*
+         * **"No price set" is said out loud, not left blank.** The client's own
+         * MYOB inventory export carries a selling price on **2 of 257** items,
+         * so an item with none is the ordinary case here, not the exception —
+         * and a blank where a price should be reads as "free" or as a screen
+         * still loading. Naming it tells the operator the rate is theirs to type.
+         */
         secondary: [
           match.description,
-          Number(match.sell_price ?? 0) > 0 ? `$${Number(match.sell_price).toFixed(2)}` : null,
+          Number(match.sell_price ?? 0) > 0
+            ? `$${Number(match.sell_price).toFixed(2)}`
+            : "no price set",
         ].filter(Boolean).join(" · "),
         onPick: () => { onChoose(match); setQuery(""); },
       }))}

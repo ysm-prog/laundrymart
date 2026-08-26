@@ -314,7 +314,15 @@ function ChargeCoding({
       </div>
 
       {open ? (
-        <div className="mt-2 grid gap-3 rounded-xl border bg-surface-muted/40 p-3 sm:grid-cols-2">
+        <div className="mt-2 space-y-3 rounded-xl border bg-surface-muted/40 p-3">
+          {/*
+            **The item leads and the account follows.** MYOB works this way and so
+            does the client's instruction: you pick the Item ID and the Category
+            comes with it — nobody sits and chooses a ledger account per line. So
+            the item is the question asked, and the account is shown underneath as
+            its *consequence*, editable for the cases the item cannot answer (a
+            recharge, a levy, an item nobody has coded yet).
+          */}
           {items.length > 0 ? (
             <ItemPicker
               idPrefix={`charge-${row.key}`}
@@ -323,12 +331,40 @@ function ChargeCoding({
               onClear={() => onChange({ source_item_id: null })}
             />
           ) : null}
-          <AccountPicker
-            idPrefix={`charge-${row.key}`}
-            accounts={accounts} chosen={account} noChart={accounts.length === 0}
-            onChoose={chooseAccount}
-            onClear={() => onChange({ gl_account_id: null })}
-          />
+
+          {accounts.length > 0 ? (
+            <div className={items.length > 0 ? "border-t pt-3" : undefined}>
+              {account && item && item.income_account_id === account.id ? (
+                // The ordinary case: the item answered it, so this is a
+                // statement rather than a question. One line, no picker.
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-xs text-muted-foreground">
+                    Codes to <span className="font-mono text-foreground">{accountLabel(account)}</span>
+                    {" "}— from the item
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => onChange({ gl_account_id: null })}
+                    className="min-h-11 rounded-lg px-3 text-sm underline underline-offset-4"
+                  >
+                    Use a different account
+                  </button>
+                </div>
+              ) : (
+                <AccountPicker
+                  idPrefix={`charge-${row.key}`}
+                  accounts={accounts} chosen={account} noChart={false}
+                  onChoose={chooseAccount}
+                  onClear={() => onChange({ gl_account_id: null })}
+                />
+              )}
+            </div>
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              No chart of accounts on file, so nothing can be coded yet. The item and
+              the price still apply.
+            </p>
+          )}
         </div>
       ) : null}
     </div>
