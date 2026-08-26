@@ -145,3 +145,10 @@ telling it whether the text it replaces was a search or a sentence.
 - A rule stated inside a component or a `"use server"` module is a rule no test can reach. This
   repo has shipped that broken behind a green `verify` three times.
 - `npm run verify` needs a `.env.local`; placeholders are enough for typecheck/lint/test/build.
+- **A Vercel deploy is not the gate.** `vercel.json` builds with `bash scripts/verify.sh ||
+  next build`, so a failing gate falls through to a plain build and still ships. CI holds the
+  gate; read it, not the deploy. `github.silent` is `false` since 2026-08-26, so the deploy now
+  reports itself on the commit — but a session like this still cannot read it: the raw GitHub API
+  answers "GitHub access is not enabled for this session", and `ats.coreit.com.au` is refused by
+  the egress policy. Checking a deploy from here needs the Vercel dashboard or a `VERCEL_TOKEN`
+  plus `api.vercel.com` allowed.

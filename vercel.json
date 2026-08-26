@@ -3,7 +3,7 @@
   "regions": ["syd1"],
   "git": { "deploymentEnabled": { "Prod": true, "Dev": true } },
   "buildCommand": "bash scripts/verify.sh || next build",
-  "github": { "silent": true },
+  "github": { "silent": false },
   "crons": [
     {
       "path": "/api/notifications/sweep",
