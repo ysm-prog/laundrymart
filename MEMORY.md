@@ -1,7 +1,31 @@
 # MEMORY — working session handoff
 > Auto-loaded each session. Canonical state is CLAUDE.md; this is the live delta.
 
-## Latest: the emails look like the rest of it, and the chase cannot fire blind
+## Latest: the dependency backlog, decided rather than left open
+2026-08-26, branch `claude/adelaide-towel-single-tenant-tbyy06` (restarted from `Prod` — its
+earlier PRs are merged). Three pull requests had been sitting open. **No migration; nothing under
+`src/` or `supabase/` changed.** CLAUDE.md §10a holds the pin evidence.
+
+- **#21 merged to `Prod` (`2d0783f`)** — `next` 16.3.0 → 16.3.1, `resend` 6.18.1 → 6.20.0.
+  Verified before merging, not waved through: `resend` is the transport every email now goes
+  through and the templates had been rewritten onto it hours earlier. Merged with Prod locally,
+  `npm ci` clean, full gate green (965 tests) on the new versions; CI then repeated it.
+- **#22 closed, its safe third taken in #45.** **Both pins were re-tested rather than defended
+  from the note.** TS 7 → `typescript-eslint does not support TS 7.0`, raised from the copy
+  **nested inside `eslint-config-next`** (so no root override lifts it — that is which package has
+  to move first). ESLint 10 → `TypeError: scopeManager.addGlobals is not a function` on every
+  file. Each fails alone, so the pair fails too. `eslint-config-next` → `^16.3.1` (resolves 16.3.3)
+  lints clean; lockfile compared as **package sets**, not line count: 2 version changes, **0 added,
+  0 removed**.
+- **#17 closed** — §19 records the owner dropping `feature/job-billing-workflow` on 2026-08-17.
+  Branch left on the remote per that convention; closing the PR is what stops it reading as
+  pending work.
+
+**Still open and still the owner's:** nothing has ever been sent from this deployment (0
+`emailed_to`, 0 `auth.one_time_tokens`), and Adelaide's only depot (`ADL`) is `inactive` — set
+deliberately on 2026-08-26 — so every site picker in the app currently offers nothing.
+
+## Previously: the emails look like the rest of it, and the chase cannot fire blind
 2026-08-26, branch `claude/adelaide-towel-single-tenant-tbyy06`. Wiring Resend for PROD in YSM
 Hub's language with the Core IT credit. **No migration** — `git diff` over `supabase/` is empty.
 CLAUDE.md §10d holds the design.
