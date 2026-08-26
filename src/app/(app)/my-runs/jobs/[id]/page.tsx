@@ -13,32 +13,32 @@ import {
 import {
   formatAdelaideDate, formatAdelaideDateTime, getAdelaideToday, isCalendarDate,
 } from "@/lib/domain/timezone";
-import { driverById, loadDriverJob } from "@/lib/runs/my-runs";
+import { boardById, loadBoardJob } from "@/lib/runs/my-runs";
 import { markJobDelivered } from "../../actions";
 
 export const metadata = { title: "Job" };
 export const dynamic = "force-dynamic";
 
 /**
- * The driver's view of a job: everything they need, nothing they can change.
+ * The round's view of a job: everything it needs, nothing it can change.
  *
  * A deliberately separate screen from `/orders/:id`, which is the counter's and
  * the manager's — that page carries the status controls, the assignment
  * controls, the cancel action, the edit link and the whole activity trail, and a
- * driver should not be surrounded by editing forms while standing at a door.
+ * round should not be surrounded by editing forms while standing at a door.
  * This one is read-only by construction: it renders no form except the single
  * "Mark Delivered", and there is nothing on it to press that changes what was
  * agreed with the customer.
  *
  * The read-only-ness is not enforced *here*, though, and that is the point.
  * `/orders/:id/edit` is gated on `orders.write`, `cancelOrder` on
- * `orders.manage`, `assignJobToDriver` on `routes.write`, and a driver holds
+ * `orders.manage`, `assignJobToBoard` on `routes.write`, and a board holds
  * none of them — so opening those URLs by hand or posting to those actions is
  * refused by the guards those screens already have. Since 0016, RLS refuses even
- * the read unless the job is assigned to this driver. This page is a kindness on
+ * the read unless the job is on this round. This page is a kindness on
  * top of several real boundaries, not a substitute for one.
  */
-export default async function DriverJobPage({
+export default async function BoardJobPage({
   params, searchParams,
 }: {
   params: Promise<{ id: string }>;
@@ -49,13 +49,13 @@ export default async function DriverJobPage({
   const session = await requireCapability("routes.read");
 
   const supabase = await createClient();
-  const job = await loadDriverJob(supabase, session.tenantId, id);
+  const job = await loadBoardJob(supabase, session.tenantId, id);
 
   // Not found *or* not theirs — RLS makes those the same answer, which is the
   // right one to give: a 404 tells an attacker nothing a 403 would not.
   if (!job) notFound();
 
-  // The day to come back to is the one the driver was looking at. It falls back
+  // The day to come back to is the one the round was looking at. It falls back
   // to the job's own assigned date rather than to today, so completing a job on
   // a day you navigated to never bounces you to this morning.
   const backDate = date && isCalendarDate(date)
@@ -63,8 +63,8 @@ export default async function DriverJobPage({
     : job.assigned_delivery_date ?? getAdelaideToday();
   const backTo = `/my-runs?date=${backDate}`;
 
-  const driver = job.assigned_driver_id
-    ? await driverById(supabase, session.tenantId, job.assigned_driver_id)
+  const board = job.assigned_board_id
+    ? await boardById(supabase, session.tenantId, job.assigned_board_id)
     : null;
 
   const finished = job.status === "completed" || job.status === "cancelled";
@@ -148,7 +148,7 @@ export default async function DriverJobPage({
             <Fact label="Assigned delivery date">
               {formatAdelaideDate(job.assigned_delivery_date, "long")}
             </Fact>
-            <Fact label="Assigned to">{driver?.full_name ?? "Not assigned"}</Fact>
+            <Fact label="Assigned to">{board?.name ?? "Not assigned"}</Fact>
             <Fact label="Delivery window">
               {job.delivery_window
                 ? humanise(job.delivery_window)
@@ -199,11 +199,11 @@ export default async function DriverJobPage({
                 rows={2}
                 placeholder="Left with reception"
                 className="min-h-11 w-full rounded-lg border border-strong bg-surface px-3 py-2
-                           text-sm shadow-xs focus:border-primary focus:outline-none
+                           text-sm shadow-xs focus:border-primary
                            focus:ring-2 focus:ring-primary/25"
               />
               {/* The date and the time are the system's to record, not the
-                  driver's to type: it is happening now, at the door. */}
+                  round's to type: it is happening now, at the door. */}
               <p className="text-sm text-muted-foreground">
                 Delivered today, {formatAdelaideDate(getAdelaideToday(), "medium")}. The time and
                 your name are recorded automatically.

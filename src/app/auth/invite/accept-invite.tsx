@@ -30,8 +30,19 @@ import { Notice } from "@/components/ui";
  */
 type Stage = "checking" | "ready" | "expired" | "saved";
 
+/**
+ * A sign-in link and an invitation land here alike — see the page beside this.
+ * The only difference is the words: one is news, the other is something the
+ * person asked for a minute ago, and a dead link has a different remedy in each
+ * case (ask whoever invited you, versus ask for another yourself).
+ */
 export function AcceptInvite() {
   const [stage, setStage] = useState<Stage>("checking");
+  // Read once, on the first render, because `settle()` takes the tokens out of
+  // the address bar as soon as it succeeds — after that the parameter is gone.
+  const [recovery] = useState(() =>
+    typeof window !== "undefined"
+    && new URL(window.location.href).searchParams.get("type") === "recovery");
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -110,16 +121,24 @@ export function AcceptInvite() {
   }
 
   if (stage === "checking") {
-    return <p className="text-sm text-muted-foreground">Checking your invitation…</p>;
+    return (
+      <p className="text-sm text-muted-foreground">
+        {recovery ? "Signing you in…" : "Checking your invitation…"}
+      </p>
+    );
   }
 
   if (stage === "expired") {
     return (
       <div className="space-y-4">
-        <Notice tone="danger" title="That invitation link has expired">
-          Invitation links can only be used once, and they do not last forever. Ask whoever
-          invited you to send a new one — or, if you have signed in here before, use the
-          sign-in page as usual.
+        <Notice tone="danger"
+                title={recovery ? "That sign-in link has expired" : "That invitation link has expired"}>
+          {recovery
+            ? "Sign-in links can only be used once, and they do not last long. Ask for another"
+              + " from the sign-in page — it takes a moment."
+            : "Invitation links can only be used once, and they do not last forever. Ask whoever"
+              + " invited you to send a new one — or, if you have signed in here before, use the"
+              + " sign-in page as usual."}
         </Notice>
         <Link href="/login"
               className="inline-flex min-h-11 items-center justify-center rounded-lg border
@@ -164,8 +183,8 @@ export function AcceptInvite() {
                            hover:brightness-110 disabled:opacity-60">
           {saving ? "Saving…" : "Save and continue"}
         </button>
-        {/* Safe to skip: the invitation has already signed them in, and the
-            sign-in page can email them a link any time after that. */}
+        {/* Safe to skip either way: the link has already signed them in, and the
+            sign-in page can email them another any time after that. */}
         <a href="/dashboard"
            className="inline-flex min-h-11 items-center px-1 text-sm text-muted-foreground
                       hover:underline">

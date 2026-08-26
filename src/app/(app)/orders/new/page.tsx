@@ -27,7 +27,7 @@ export default async function NewJobPage({
 }) {
   const params = await searchParams;
   const session = await requireCapability("orders.write");
-  const { customers, drivers, staff, truncated } = await loadJobFormData(params.customer);
+  const { customers, catalogue, drivers, staff, truncated } = await loadJobFormData(params.customer);
 
   return (
     /* Capped at ~1040px: an entry form stretched across a 1900px monitor puts
@@ -61,6 +61,7 @@ export default async function NewJobPage({
         action={createOrder}
         customerAction={createCustomer}
         customers={customers}
+        catalogue={catalogue}
         drivers={drivers}
         staff={staff}
         defaultCustomerId={params.customer}

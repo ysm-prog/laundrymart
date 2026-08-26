@@ -21,7 +21,7 @@ export default async function RouteTemplatesPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Weekly runs" eyebrow="Route templates"
+        title="Weekly runs"
         description="The repeating week: which customers one driver visits, in what order, on which days. Today’s runs are built from these."
       />
 

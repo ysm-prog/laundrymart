@@ -35,6 +35,7 @@ const styles = StyleSheet.create({
   tableHeader: { flexDirection: "row", backgroundColor: "#f3f4f6", paddingVertical: 5, paddingHorizontal: 6 },
   tableRow: { flexDirection: "row", paddingVertical: 5, paddingHorizontal: 6, borderBottomWidth: 1, borderBottomColor: "#f3f4f6" },
   colDescription: { flex: 4 },
+  colCode: { flex: 1.2 },
   colType: { flex: 1.6 },
   colNumber: { flex: 1.2, textAlign: "right" },
   colAmount: { flex: 1.4, textAlign: "right" },
@@ -42,6 +43,13 @@ const styles = StyleSheet.create({
   totalRow: { flexDirection: "row", justifyContent: "space-between", paddingVertical: 2 },
   grandTotal: { flexDirection: "row", justifyContent: "space-between", paddingTop: 5, marginTop: 4, borderTopWidth: 1, borderTopColor: "#111827" },
   notes: { marginTop: 22 },
+  breakdown: { marginTop: 22 },
+  breakdownWeek: { marginTop: 8 },
+  breakdownWeekHead: { flexDirection: "row", justifyContent: "space-between", borderBottomWidth: 1, borderBottomColor: "#e5e7eb", paddingBottom: 2 },
+  breakdownJob: { marginTop: 3, paddingLeft: 6 },
+  breakdownRow: { flexDirection: "row", justifyContent: "space-between" },
+  breakdownItemRow: { flexDirection: "row", justifyContent: "space-between", paddingLeft: 10 },
+  breakdownTotals: { marginTop: 10, padding: 6, backgroundColor: "#f3f4f6" },
   footer: { position: "absolute", bottom: 28, left: 44, right: 44, fontSize: 8, color: "#6b7280", textAlign: "center" },
   voided: { marginTop: 10, padding: 6, backgroundColor: "#fef2f2", color: "#991b1b", fontFamily: "Helvetica-Bold" },
 });
@@ -53,7 +61,7 @@ function auDate(value: string | null): string {
 }
 
 export function InvoiceDocument({ data }: { data: InvoicePdfData }) {
-  const { tenant, customer, invoice, lines } = data;
+  const { tenant, customer, invoice, lines, breakdown } = data;
   const currency = invoice.currency || "AUD";
   const cash = (value: number) => formatMoney(Number(value ?? 0), currency);
   const gstPercent = Math.round(tenant.gstRate * 1000) / 10;
@@ -113,6 +121,12 @@ export function InvoiceDocument({ data }: { data: InvoicePdfData }) {
 
         <View style={styles.tableHeader}>
           <Text style={[styles.text, styles.bold, styles.colDescription]}>Description</Text>
+          {/*
+            The account code, for the bookkeeper on the other end. It is the
+            column that turns a PDF into something that can be keyed straight
+            into a ledger, which is the whole point of coding a line at all.
+          */}
+          <Text style={[styles.text, styles.bold, styles.colCode]}>Code</Text>
           <Text style={[styles.text, styles.bold, styles.colType]}>Charge</Text>
           <Text style={[styles.text, styles.bold, styles.colNumber]}>Qty</Text>
           <Text style={[styles.text, styles.bold, styles.colNumber]}>Unit</Text>
@@ -129,6 +143,8 @@ export function InvoiceDocument({ data }: { data: InvoicePdfData }) {
               <Text style={[styles.text, styles.colDescription]}>
                 {line.description}{line.taxable ? "" : " (GST free)"}
               </Text>
+              {/* Blank, not a dash: an uncoded line is normal on a customer's copy. */}
+              <Text style={[styles.text, styles.colCode]}>{line.account_code ?? ""}</Text>
               <Text style={[styles.text, styles.colType]}>
                 {CHARGE_TYPE_LABELS[line.charge_type] ?? line.charge_type}
               </Text>
@@ -165,6 +181,60 @@ export function InvoiceDocument({ data }: { data: InvoicePdfData }) {
             </>
           ) : null}
         </View>
+
+        {/* The audit trail behind a rolled-up invoice. Rendered only when the
+            invoice really covers several jobs — on a per-job invoice the lines
+            above already are the detail, and repeating them reads as an error. */}
+        {breakdown.jobCount > 1 ? (
+          <View style={styles.breakdown} break={breakdown.weeks.length > 3}>
+            <Text style={styles.label}>SERVICE BREAKDOWN</Text>
+            <Text style={[styles.text, styles.muted]}>
+              What was processed on this invoice — {breakdown.jobCount} jobs.
+            </Text>
+            {breakdown.weeks.map((week) => (
+              <View key={week.weekStart ?? "undated"} style={styles.breakdownWeek} wrap={false}>
+                <View style={styles.breakdownWeekHead}>
+                  <Text style={[styles.text, styles.bold]}>
+                    {week.weekStart ? `Week of ${week.weekStart}` : "No completion date"}
+                  </Text>
+                  <Text style={[styles.text, styles.bold]}>{cash(week.total)}</Text>
+                </View>
+                {week.jobs.map((job) => (
+                  <View key={job.jobId} style={styles.breakdownJob}>
+                    <View style={styles.breakdownRow}>
+                      <Text style={[styles.text, styles.muted]}>
+                        {job.date ?? "—"} · {job.orderNumber}
+                      </Text>
+                      <Text style={styles.text}>{cash(job.total)}</Text>
+                    </View>
+                    {job.items.map((item, index) => (
+                      <View key={`${job.jobId}-${index}`} style={styles.breakdownItemRow}>
+                        <Text style={[styles.text, styles.muted]}>{item.description}</Text>
+                        <Text style={[styles.text, styles.muted]}>
+                          {Number(item.quantity).toLocaleString("en-AU")}
+                        </Text>
+                      </View>
+                    ))}
+                  </View>
+                ))}
+              </View>
+            ))}
+
+            {breakdown.totals.length > 0 ? (
+              <View style={styles.breakdownTotals} wrap={false}>
+                <Text style={[styles.text, styles.bold]}>Total for the period</Text>
+                {breakdown.totals.map((total) => (
+                  <View key={total.key} style={styles.breakdownRow}>
+                    <Text style={styles.text}>{total.description}</Text>
+                    <Text style={styles.text}>
+                      {Number(total.quantity).toLocaleString("en-AU")}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            ) : null}
+          </View>
+        ) : null}
 
         {invoice.notes ? (
           <View style={styles.notes}>

@@ -6,9 +6,10 @@ import {
   Badge, ButtonLink, CONTROL, Eyebrow, FormSection, Notice, cx, humanise,
 } from "@/components/ui";
 import {
-  Building2, CalendarClock, Check, ClipboardList, MessageSquareText, Plus, Search, Shirt, Truck,
+  Building2, CalendarClock, Check, Plus, Search, Shirt, Truck,
 } from "lucide-react";
-import { CustomerEssentials } from "@/app/(app)/customers/customer-form";
+import { ItemPicker } from "@/components/coding-pickers";
+import { CustomerEssentials, FormDisclosure } from "@/app/(app)/customers/customer-form";
 import {
   DELIVERY_WINDOWS, DELIVERY_WINDOW_LABELS, ITEM_TYPES, ITEM_TYPE_LABELS,
   ORDER_PRIORITIES, PRIORITY_LABELS, QUANTITY_TYPES, QUANTITY_TYPE_LABELS,
@@ -57,6 +58,8 @@ export type JobStaff = { id: string; label: string; role: string };
 
 type ItemRow = {
   key: number;
+  /** The item master row, or "" for a row entered as a bare kind of laundry. */
+  itemId: string;
   itemType: string;
   customDescription: string;
   quantityType: "exact" | "bulk_lot";
@@ -71,6 +74,7 @@ const QUICK_CREATE_FORM = "job-customer-quick-create";
 function blankItem(key: number): ItemRow {
   return {
     key,
+    itemId: "",
     itemType: "towels",
     customDescription: "",
     quantityType: "exact",
@@ -91,7 +95,7 @@ function numberOrNull(value: string): number | null {
 
 export function JobForm({
   action, customerAction, customers, drivers, staff,
-  order, items, defaultCustomerId, canBackdate, returnPath,
+  order, items, catalogue = [], defaultCustomerId, canBackdate, returnPath,
 }: {
   action: (formData: FormData) => Promise<void>;
   /** The existing `createCustomer` action — this module adds no customer flow. */
@@ -101,6 +105,14 @@ export function JobForm({
   staff: JobStaff[];
   order?: LaundryOrder;
   items?: LaundryOrderItem[];
+  /**
+   * The laundry's item master, code-first. Empty for a laundry that has not set
+   * one up, which is why the kind-of-laundry select stays.
+   */
+  catalogue?: Array<{
+    id: string; item_code: string | null; name: string;
+    description?: string | null; laundry_category: string | null;
+  }>;
   defaultCustomerId?: string;
   /** `orders.manage` — only they may record a job as arriving on an earlier day. */
   canBackdate: boolean;
@@ -138,6 +150,7 @@ export function JobForm({
     if (!items?.length) return [blankItem(0)];
     return items.map((item, index) => ({
       key: index,
+      itemId: item.item_id ?? "",
       itemType: item.item_type,
       customDescription: item.custom_description ?? "",
       quantityType: item.quantity_type === "bulk_lot" ? "bulk_lot" : "exact",
@@ -165,8 +178,15 @@ export function JobForm({
     ].some((field) => field?.toLowerCase().includes(term))).slice(0, 12);
   }, [customers, query]);
 
+  /**
+   * The item list as the picker needs it, labelled code-first and ordered by
+   * code — the order it is scanned in, since staff look for TOW001 and read down.
+   */
+  const itemById = useMemo(() => new Map(catalogue.map((entry) => [entry.id, entry])), [catalogue]);
+
   const itemsPayload = useMemo(() => JSON.stringify(
     rows.map((row) => ({
+      item_id: row.itemId || null,
       item_type: row.itemType,
       custom_description: row.customDescription.trim() || null,
       quantity_type: row.quantityType,
@@ -436,11 +456,58 @@ export function JobForm({
                 </div>
 
                 <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  {/* **The item, by code — the same picker the invoice composer
+                      and the job's charges use.** Staff know TOW001 and type it;
+                      the nine kinds of laundry are the fallback beneath, for a
+                      laundry that has not set an item list up yet and for
+                      anything the list does not cover. Picking an item fills the
+                      kind in from the item master, which is also what the
+                      database trigger does — so the two cannot disagree however
+                      the row is written.
+
+                      This was a plain `<select>` until 2026-08-26, which was
+                      fine against the six demo items and unusable the moment a
+                      real master list arrived: Adelaide's is **254 rows**, and
+                      the counter would have been scrolling a dropdown to find
+                      `TW`. It is also the answer to "one reference everywhere" —
+                      an item is now chosen the same way on every screen that
+                      names one, rather than by a dropdown here and a type-ahead
+                      there. */}
+                  <div className="sm:col-span-2">
+                    {catalogue.length > 0 ? (
+                      <ItemPicker
+                        idPrefix={`laundry-${row.key}`}
+                        purpose="laundry"
+                        items={catalogue}
+                        chosen={itemById.get(row.itemId) ?? null}
+                        onChoose={(picked) => patch(row.key, {
+                          itemId: picked.id,
+                          // An item that says which kind of laundry it is sets
+                          // it; one that does not leaves the row's own answer.
+                          ...(picked.laundry_category
+                            ? { itemType: picked.laundry_category }
+                            : {}),
+                        })}
+                        onClear={() => patch(row.key, { itemId: "" })}
+                      />
+                    ) : (
+                      <label className="space-y-1">
+                        <span className="block text-sm font-medium text-foreground">
+                          Item
+                        </span>
+                        <p className="text-sm text-muted-foreground">
+                          No items set up yet — choose a kind of laundry beside this.
+                        </p>
+                      </label>
+                    )}
+                  </div>
+
                   <label className="space-y-1">
                     <span className="block text-sm font-medium text-foreground">
-                      Item type
+                      Kind of laundry
                     </span>
                     <select className={CONTROL} value={row.itemType}
+                            disabled={Boolean(itemById.get(row.itemId)?.laundry_category)}
                             onChange={(event) => patch(row.key, { itemType: event.target.value })}>
                       {ITEM_TYPES.map((value) => (
                         <option key={value} value={value}>{ITEM_TYPE_LABELS[value]}</option>
@@ -523,16 +590,22 @@ export function JobForm({
             how to wash it, the other is what came in the bag. Same
             `special_instructions` column it has always written to, and its own
             section now because it is the one free-text answer on the form. */}
-        <FormSection title="Instructions"
-                     description="Anything the plant needs to know before it goes in."
-                     icon={<MessageSquareText className="size-[1.15rem]" />}>
+        {/* Folded away rather than removed. Every field in here and in "Job
+            management" below is optional, and the ordinary counter job needs
+            none of them — but they were on screen for every job, which made the
+            form twice as long as the work it was recording. Neither disclosure
+            contains a `required` field, which is the thing that would make this
+            unsafe: a required control inside a closed <details> fails native
+            validation with nothing for the browser to focus. */}
+        <FormDisclosure summary="Washing instructions"
+                        hint="Only if the plant needs to know something special">
           <Field label="Machine instructions" name="special_instructions"
                  hint="Directions to the door go under Delivery instructions instead.">
             <Textarea name="special_instructions" rows={3}
                       defaultValue={order?.special_instructions}
                       placeholder="Separate the whites; no fabric softener." />
           </Field>
-        </FormSection>
+        </FormDisclosure>
 
         {/* ------------------------------------------------------- delivery --- */}
         <FormSection title="Delivery"
@@ -629,8 +702,8 @@ export function JobForm({
         </FormSection>
 
         {/* ------------------------------------------ priority + assignment --- */}
-        <FormSection title="Job management" description="Priority, and who is looking after it."
-                     icon={<ClipboardList className="size-[1.15rem]" />}>
+        <FormDisclosure summary="Priority, and who is looking after it"
+                        hint="Leave both alone unless this one is urgent">
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Priority" name="priority">
               <Select name="priority" defaultValue={order?.priority ?? "normal"}
@@ -646,12 +719,12 @@ export function JobForm({
             </Field>
           </div>
           {editing ? null : (
-            <p className="mt-3 text-xs text-muted-foreground">
+            <p className="mt-3 text-sm text-muted-foreground">
               New jobs always start as <Badge>New</Badge> and are given their job number
               automatically. There is nothing else to set.
             </p>
           )}
-        </FormSection>
+        </FormDisclosure>
 
         <FormActions>
           <SubmitButton pendingLabel={editing ? "Saving…" : "Creating…"}>

@@ -60,12 +60,29 @@ export const viewport: Viewport = {
   ],
 };
 
-// Applied before paint so a dark-mode user never sees a white flash.
-const THEME_BOOTSTRAP = `
+/*
+ * Applied before paint, so neither preference is ever visibly corrected after
+ * the page has drawn — a dark-mode user sees no white flash, and somebody
+ * reading at the largest size never watches the text jump.
+ *
+ * Both live in `localStorage` rather than in a cookie (which is how the rail's
+ * collapsed state travels). They have to be applied to `<html>` itself: `rem`
+ * resolves against the root element and nothing else, so a text size written
+ * onto a wrapper further down would scale nothing at all. Reading a cookie here
+ * would mean calling `cookies()` in the root layout, which opts the entire
+ * application into dynamic rendering to answer a question about text size.
+ */
+const APPEARANCE_BOOTSTRAP = `
 try {
   var stored = localStorage.getItem("theme");
   var dark = stored ? stored === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
   if (dark) document.documentElement.classList.add("dark");
+} catch (e) {}
+try {
+  var size = localStorage.getItem("textSize");
+  if (size === "large" || size === "xlarge") {
+    document.documentElement.setAttribute("data-text-size", size);
+  }
 } catch (e) {}
 `;
 
@@ -75,7 +92,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           className={`${instrumentSans.variable} ${instrumentSerif.variable} ${jetbrainsMono.variable}`}
           suppressHydrationWarning>
       <head>
-        <script dangerouslySetInnerHTML={{ __html: THEME_BOOTSTRAP }} />
+        <script dangerouslySetInnerHTML={{ __html: APPEARANCE_BOOTSTRAP }} />
       </head>
       <body>
         <a href="#main"

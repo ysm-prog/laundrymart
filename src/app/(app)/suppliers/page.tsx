@@ -7,6 +7,7 @@ import {
   Card, DataTable, EmptyState, PageHeader, SkeletonRows, StatusBadge,
 } from "@/components/ui";
 import { ListControls, Pagination, pageFrom, rangeFor } from "@/components/list-controls";
+import { FilterChips } from "@/components/filters";
 
 export const metadata = { title: "Suppliers" };
 export const dynamic = "force-dynamic";
@@ -27,14 +28,19 @@ export default async function SuppliersPage({ searchParams }: { searchParams: Pr
         action="/suppliers"
         q={params.q}
         placeholder="Search suppliers…"
-        filters={[{
-          name: "status", label: "Status", value: params.status,
-          options: [
-            { value: "active", label: "Active" },
-            { value: "inactive", label: "Inactive" },
-            { value: "archived", label: "Archived" },
-          ],
-        }]}
+        params={params}
+        filterKeys={["q", "status"]}
+        chips={
+          <FilterChips
+            basePath="/suppliers" params={params} name="status" label="Supplier status"
+            allLabel="All suppliers"
+            options={[
+              { value: "active", label: "Active" },
+              { value: "inactive", label: "Inactive" },
+              { value: "archived", label: "Archived" },
+            ]}
+          />
+        }
       />
       <Suspense key={JSON.stringify(params)} fallback={<SkeletonRows rows={8} />}>
         <SupplierList params={params} />

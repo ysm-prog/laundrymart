@@ -9,32 +9,58 @@ import {
   SkeletonStats, Stat, humanise,
 } from "@/components/ui";
 import { Field, Input, Select, SubmitButton } from "@/components/form";
+import { ListControls } from "@/components/list-controls";
+import { FilterSummary, PeriodFilter, ToggleChips } from "@/components/filters";
+import { isFiltered, parseMulti } from "@/lib/filters";
+import { ACTIVITY_PERIOD_PRESETS, resolvePeriod } from "@/lib/domain/dates";
+import { businessToday } from "@/lib/domain/timezone";
 import { CIRCULATING_STATES, INVENTORY_STATES, MOVEMENT_REASONS } from "./states";
 import { moveStock } from "./actions";
 
 export const metadata = { title: "Stock" };
 export const dynamic = "force-dynamic";
 
-export default async function InventoryPage() {
+/**
+ * Two lists on one screen, so two filters — and deliberately **one** search box.
+ *
+ * `state` narrows the holdings table (where is my linen?) and `q`/`reason`/
+ * `period` narrow the movement history (what happened to it?). The holdings
+ * table gets chips and no box of its own: two search fields on one page, both
+ * spelled `q`, would be one value with two controls disagreeing about it — and
+ * the second would have carried a duplicate DOM id, so its label would point at
+ * the first.
+ */
+type Search = {
+  q?: string; state?: string; reason?: string; period?: string; from?: string; to?: string;
+};
+const STOCK_KEYS = ["state"] as const;
+const MOVEMENT_KEYS = ["q", "reason", "period", "from", "to"] as const;
+
+export default async function InventoryPage({
+  searchParams,
+}: {
+  searchParams: Promise<Search>;
+}) {
   const session = await requireCapability("inventory.read");
+  const params = await searchParams;
 
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Stock" eyebrow="Inventory"
+        title="Stock"
         description="How much of each item you have, where it is, and every movement that put it there."
       />
 
-      <Suspense fallback={<SkeletonStats />}>
-        <Position />
+      <Suspense key={`stock:${JSON.stringify(params)}`} fallback={<SkeletonStats />}>
+        <Position params={params} />
       </Suspense>
 
       <Suspense fallback={<SkeletonRows rows={5} />}>
         <Replenishment />
       </Suspense>
 
-      <Suspense fallback={<SkeletonRows rows={6} />}>
-        <Movements />
+      <Suspense key={`moves:${JSON.stringify(params)}`} fallback={<SkeletonRows rows={6} />}>
+        <Movements params={params} />
       </Suspense>
 
       {can(session.role, "inventory.write") ? (
@@ -46,7 +72,7 @@ export default async function InventoryPage() {
   );
 }
 
-async function Position() {
+async function Position({ params }: { params: Search }) {
   const supabase = await createClient();
   const { data } = await supabase
     .from("inventory_pools")
@@ -76,7 +102,16 @@ async function Position() {
     });
   }
 
-  const detailRows = [...detail.values()].sort((a, b) => b.quantity - a.quantity);
+  const allDetail = [...detail.values()].sort((a, b) => b.quantity - a.quantity);
+
+  // The tiles are deliberately computed above from every pool, filtered or not:
+  // "in circulation" is a fact about the laundry, not about what is on screen.
+  const states = parseMulti(params.state, INVENTORY_STATES);
+  const detailRows = states.length
+    ? allDetail.filter((row) => states.includes(row.state))
+    : allDetail;
+  const stockFiltered = isFiltered(params, STOCK_KEYS);
+  const stateCount = (state: string) => allDetail.filter((row) => row.state === state).length;
 
   return (
     <div className="space-y-4">
@@ -88,9 +123,27 @@ async function Position() {
       </div>
 
       <Card title="Stock by item and state">
+        <div className="mb-4 flex flex-col gap-3">
+          <ToggleChips
+            basePath="/inventory" params={params} name="state" label="Where the stock is"
+            allLabel="Everywhere" allCount={allDetail.length}
+            options={INVENTORY_STATES
+              // Twelve states, and a laundry is usually only using five. A chip
+              // for a state holding nothing promises rows it cannot show.
+              .filter((state) => stateCount(state) > 0)
+              .map((state) => ({
+                value: state, label: humanise(state), count: stateCount(state),
+              }))}
+          />
+          <FilterSummary basePath="/inventory" shown={detailRows.length} total={allDetail.length}
+                         noun="holding" filtered={stockFiltered} />
+        </div>
         <DataTable
           rows={detailRows}
-          empty={<EmptyState title="No stock recorded yet"
+          empty={stockFiltered
+            ? <EmptyState title="No stock matches those filters"
+                          description="Try another state, or clear the filters above." />
+            : <EmptyState title="No stock recorded yet"
                              description="Record a purchase movement to bring stock into the system." />}
           columns={[
             { header: "Item", cell: (row) => row.item },
@@ -147,7 +200,7 @@ async function Replenishment() {
   );
 }
 
-async function Movements() {
+async function Movements({ params }: { params: Search }) {
   const supabase = await createClient();
   const { data } = await supabase
     .from("inventory_movements")
@@ -160,11 +213,61 @@ async function Movements() {
       items: { name: string; sku: string } | null;
     }>>();
 
+  const all = data ?? [];
+  const period = resolvePeriod(params, businessToday(), "all");
+  const reasons = parseMulti(params.reason, MOVEMENT_REASONS);
+  const term = params.q?.trim().toLowerCase();
+  const rows = all.filter((row) => {
+    if (term && !`${row.items?.name ?? ""} ${row.items?.sku ?? ""}`.toLowerCase().includes(term)) {
+      return false;
+    }
+    if (reasons.length && !reasons.includes(row.reason)) return false;
+    if (period.range) {
+      const day = row.occurred_at.slice(0, 10);
+      if (day < period.range.start || day > period.range.end) return false;
+    }
+    return true;
+  });
+  const filtered = isFiltered(params, MOVEMENT_KEYS);
+  const reasonCount = (reason: string) => all.filter((row) => row.reason === reason).length;
+
   return (
     <Card title="Recent movements" description="Every state change, newest first.">
+      <ListControls
+        action="/inventory"
+        q={params.q}
+        params={params}
+        filterKeys={MOVEMENT_KEYS}
+        placeholder="Item name or code…"
+        chips={
+          <>
+            <ToggleChips
+              basePath="/inventory" params={params} name="reason" label="Why it moved"
+              allLabel="Every reason" allCount={all.length}
+              options={MOVEMENT_REASONS
+                .filter((reason) => reasonCount(reason) > 0)
+                .map((reason) => ({
+                  value: reason, label: humanise(reason), count: reasonCount(reason),
+                }))}
+            />
+            <PeriodFilter
+              basePath="/inventory" params={params} period={period}
+              presets={ACTIVITY_PERIOD_PRESETS} today={businessToday()} label="Moved in"
+              hideCustomWhenPreset
+            />
+          </>
+        }
+        summary={
+          <FilterSummary basePath="/inventory" shown={rows.length} total={all.length}
+                         noun="movement" filtered={filtered} />
+        }
+      />
       <DataTable
-        rows={data ?? []}
-        empty={<EmptyState title="No movements recorded yet" />}
+        rows={rows}
+        empty={filtered
+          ? <EmptyState title="No movements match those filters"
+                        description="Try another reason or a wider period, or clear the filters above." />
+          : <EmptyState title="No movements recorded yet" />}
         columns={[
           { header: "When", cell: (row) => dateTime(row.occurred_at) },
           { header: "Item", cell: (row) => row.items?.name ?? "Unknown item" },

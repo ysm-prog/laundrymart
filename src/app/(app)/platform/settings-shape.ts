@@ -14,7 +14,7 @@ import { z } from "zod";
  */
 export const platformSettingsSchema = z.object({
   /** What a laundry created from the Laundries screen starts with. */
-  default_timezone: z.string().trim().min(3).default("Australia/Sydney"),
+  default_timezone: z.string().trim().min(3).default("Australia/Adelaide"),
   default_gst_rate: z.coerce.number().min(0).max(1).default(0.1),
   /**
    * Whether a newly created laundry starts with customer emails switched on.
@@ -25,6 +25,26 @@ export const platformSettingsSchema = z.object({
     // An unchecked HTML checkbox posts nothing at all, so absence is `false`
     // rather than "leave it alone" — the same rule every other checkbox in the
     // app follows.
+    (value) => value === "on" || value === "true" || value === true,
+    z.boolean(),
+  ).default(false),
+  /**
+   * Whether this deployment runs one laundry and refuses a second.
+   *
+   * Unlike the two above it is **not** a default a new laundry starts with —
+   * it is a statement about the deployment itself, which is why it sits in its
+   * own card on the settings screen rather than under "New laundry defaults".
+   *
+   * The switch is only the readable half. `guard_single_laundry` (0041) is the
+   * boundary, and it reads this same key: `tenants` carries 0019's
+   * `tenants_platform` policy, so a platform admin can POST one straight to
+   * `/rest/v1/tenants` without going near the screen. One answer, one flip.
+   *
+   * Defaults to **false**, and that is load-bearing rather than tidy: the seed
+   * creates a laundry and the pgTAP proofs create two, so a mode that defaulted
+   * on would take the whole suite down with it.
+   */
+  single_laundry: z.preprocess(
     (value) => value === "on" || value === "true" || value === true,
     z.boolean(),
   ).default(false),

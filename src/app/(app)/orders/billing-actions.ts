@@ -13,8 +13,10 @@ import { jobChargeSubtotal } from "@/lib/domain/job-pricing";
 import { money } from "@/lib/format";
 import { logOrderActivity } from "@/lib/orders/activity";
 import {
-  approveJob, loadJobCharges, loadJobForBilling, priceJobFromRateCard, saveJobCharges,
+  loadJobCharges, loadJobForBilling, priceAndSaveJob, saveJobCharges,
 } from "@/lib/orders/job-billing";
+import { approveAndPlaceJob } from "@/lib/orders/approve";
+import { describePlacementOutcome } from "@/lib/domain/placement";
 import { parseJobCharges } from "./job-charges";
 
 /**
@@ -39,6 +41,7 @@ import { parseJobCharges } from "./job-charges";
  */
 
 const LIST = "/invoices/awaiting";
+const DRAFTS = "/invoices/drafts";
 
 /** Where these actions bounce back to — the job, or the queue they were run from. */
 function backTo(formData: FormData, orderId: string): string {
@@ -48,13 +51,16 @@ function backTo(formData: FormData, orderId: string): string {
 /* ------------------------------------------------------------- price it --- */
 
 /**
- * (Re-)price a job from its customer's current rate card.
+ * (Re-)price a job from its customer's current rates.
  *
  * Deliberately a button rather than something that happens on completion. A job
  * completes when the driver hands it over, which may be days before anybody
  * looks at the money, and pricing at that instant would freeze a rate card
- * nobody had checked. Pricing on demand means the reviewer sees today's card and
- * can say so.
+ * nobody had checked. Pricing on demand means the reviewer sees today's rates
+ * and can say so.
+ *
+ * The rules live in `priceAndSaveJob`, shared with Price Selected on the queue.
+ * Everything here is the sentence the operator reads back.
  */
 export async function priceJobCharges(formData: FormData): Promise<void> {
   const session = await assertCapability("billing.write");
@@ -64,53 +70,30 @@ export async function priceJobCharges(formData: FormData): Promise<void> {
   const back = backTo(formData, parsed.data.id);
   const supabase = await createClient();
 
-  const job = await loadJobForBilling(supabase, parsed.data.id);
-  if (!job) return fail(LIST, "That job could not be found.");
-  if (job.billing_status !== "awaiting_review") {
-    return fail(back, "Charges can only be changed while a job is awaiting review.");
+  const priced = await priceAndSaveJob(supabase, session, parsed.data.id);
+
+  // A refusal names the screen that fixes it, and which screen that is depends
+  // on which tier is missing: a customer with a rate card that does not cover
+  // the laundry is a rate-card problem, and one without a card is a price-list
+  // problem. Neither is "add it by hand", though that stays available in the
+  // editor above the button.
+  if (!priced.ok) {
+    const link = priced.card
+      ? { href: `/agreements/${priced.card.id}`, label: "Open the rate card" }
+      : { href: "/invoices/prices", label: "Set your laundry prices" };
+    return fail(back, priced.error, priced.customerId ? link : undefined);
   }
 
-  const { lines, unpriced, card } = await priceJobFromRateCard(supabase, job);
-
-  if (lines.length === 0 && unpriced.length === 0) {
-    return fail(back, "This job has no laundry on it, so there is nothing to price.");
-  }
-  if (!card) {
-    return fail(back,
-      "This customer has no rate card, so nothing can be priced automatically. "
-      + "Add the charges by hand, or set a rate card first.",
-      { href: `/customers/${job.customer_id}`, label: "Set their rate card" });
-  }
-
-  const saved = await saveJobCharges(supabase, job.id, lines);
-  if (!saved.ok) return fail(back, saved.error);
-
-  await logOrderActivity(supabase, session, job.id, {
-    activity_type: "updated",
-    next: {
-      billing: "priced",
-      rate_card: `${card.agreement_number} v${card.version}`,
-      lines: lines.length,
-      subtotal: jobChargeSubtotal(lines),
-    },
-  });
-  await recordAudit(session, {
-    entity: "laundry_order", entityId: job.id, action: "update",
-    summary: `${job.order_number}: priced from ${card.agreement_number} v${card.version}`,
-    metadata: { lines: lines.length, unpriced: unpriced.length },
-  });
-
-  revalidatePath(`/orders/${job.id}`);
+  revalidatePath(`/orders/${parsed.data.id}`);
   revalidatePath(LIST);
 
   // The gap is said out loud rather than left for the reviewer to notice. It is
   // a success — the rest of the job *was* priced — so it is a `done` with a
   // caveat, not a failure that would have thrown the priced lines away.
-  const gap = unpriced.length > 0
-    ? ` ${unpriced.length} item(s) had no rate on the card and were not priced.`
+  const gap = priced.unpriced > 0
+    ? ` ${priced.unpriced} item(s) had no rate on the card or the price list and were not priced.`
     : "";
-  return done(back,
-    `Priced ${lines.length} charge(s) from ${card.agreement_number} v${card.version}.${gap}`);
+  return done(back, `Priced ${priced.lines} charge(s) from ${priced.source}.${gap}`);
 }
 
 /* -------------------------------------------------------------- edit it --- */
@@ -136,7 +119,7 @@ export async function updateJobCharges(formData: FormData): Promise<void> {
   const charges = parseJobCharges(formData.get("charges"));
   if (!charges.ok) return fail(back, charges.problem);
 
-  const saved = await saveJobCharges(supabase, job.id, charges.lines);
+  const saved = await saveJobCharges(supabase, session.tenantId, job.id, charges.lines);
   if (!saved.ok) return fail(back, saved.error);
 
   await logOrderActivity(supabase, session, job.id, {
@@ -166,6 +149,12 @@ export async function updateJobCharges(formData: FormData): Promise<void> {
  * Its own capability (`invoices.approve`), separate from `invoices.write`:
  * raising a draft and signing off the price a customer will be held to are
  * different decisions, and the brief asks for exactly that split.
+ *
+ * **Approving also puts the charges on the customer's invoice**, which is the
+ * owner's flow and the step this app did not have: the charge used to be frozen
+ * and then sit in a queue waiting for somebody to come back and press Generate.
+ * `approveAndPlaceJob` holds both halves and the rule that a failed placement
+ * never un-approves the job — see `lib/orders/approve.ts`.
  */
 export async function approveJobCharges(formData: FormData): Promise<void> {
   const session = await assertCapability("invoices.approve");
@@ -175,12 +164,26 @@ export async function approveJobCharges(formData: FormData): Promise<void> {
   const back = backTo(formData, parsed.data.id);
   const supabase = await createClient();
 
-  const result = await approveJob(supabase, session, parsed.data.id);
+  const result = await approveAndPlaceJob(supabase, session, parsed.data.id);
   if (!result.ok) return fail(back, result.error);
 
   revalidatePath(`/orders/${parsed.data.id}`);
   revalidatePath(LIST);
-  return done(back, `Job ${result.orderNumber} approved at ${money(result.subtotal)} before GST.`);
+  revalidatePath(DRAFTS);
+  revalidatePath("/invoices");
+
+  const summary = `Job ${result.orderNumber} approved at ${money(result.subtotal)} before GST.`
+    + describePlacementOutcome(result.placement);
+
+  // A placement that did not happen is reported as a failure even though the
+  // approval stood, because it is the half nobody can see: the job leaves the
+  // review list either way, and an invoice that was never raised looks exactly
+  // like one that was.
+  if (result.placement.kind === "failed") return fail(back, summary);
+
+  return done(back, summary, result.placement.kind === "placed"
+    ? { href: `/invoices/${result.placement.invoiceId}`, label: "Open the invoice" }
+    : undefined);
 }
 
 /* ------------------------------------------------------- send it back ----- */

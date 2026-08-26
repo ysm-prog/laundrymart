@@ -1,17 +1,26 @@
 import { Suspense } from "react";
 import { requireCapability } from "@/lib/auth/context";
 import { createClient } from "@/lib/supabase/server";
-import { date, today } from "@/lib/format";
+import { date } from "@/lib/format";
 import {
   ButtonLink,
   DataTable, EmptyState, PageHeader, SkeletonRows, StatusBadge, humanise,
 } from "@/components/ui";
 import { ListControls, Pagination, pageFrom, rangeFor } from "@/components/list-controls";
+import { FilterChips, PeriodFilter } from "@/components/filters";
+import { isFiltered } from "@/lib/filters";
+import {
+  ACTIVITY_PERIOD_PRESETS, resolvePeriod, type ResolvedPeriod,
+} from "@/lib/domain/dates";
+import { businessToday } from "@/lib/domain/timezone";
 
-export const metadata = { title: "Stops" };
+export const metadata = { title: "Driver visits" };
 export const dynamic = "force-dynamic";
 
-type Search = { q?: string; status?: string; date?: string; page?: string; error?: string; ok?: string };
+type Search = {
+  q?: string; status?: string; period?: string; from?: string; to?: string;
+  page?: string; error?: string; ok?: string;
+};
 
 type Row = {
   id: string;
@@ -26,58 +35,64 @@ type Row = {
   drivers: { full_name: string } | null;
 };
 
+const VISIT_STATUSES = [
+  { value: "scheduled", label: "Scheduled" },
+  { value: "assigned", label: "Assigned" },
+  { value: "in_progress", label: "In progress" },
+  { value: "completed", label: "Completed" },
+  { value: "exception", label: "Exception" },
+  { value: "cancelled", label: "Cancelled" },
+  { value: "unassigned", label: "No route" },
+] as const;
+
+const FILTER_KEYS = ["q", "status", "period", "from", "to"] as const;
+
 export default async function JobsPage({ searchParams }: { searchParams: Promise<Search> }) {
   const params = await searchParams;
   await requireCapability("routes.read");
+  // Today by default, as this screen has always been — but a *window* now, so
+  // "this week" is one press. It used to be a single day with its own hand-rolled
+  // date box that carried the status through and silently dropped the search.
+  const period = resolvePeriod(params, businessToday(), "today");
 
   return (
     <div>
       <PageHeader
-        title="Stops"
-        description="Every stop on a run: what was collected, what was delivered, and anything that went wrong."
+        title="Driver visits"
+        description="Every time a driver called on a customer: what was collected, what was dropped off, and anything that went wrong."
       />
       <ListControls
         action="/jobs"
         q={params.q}
-        filters={[
-          {
-            name: "status", label: "Status", value: params.status,
-            options: [
-              { value: "scheduled", label: "Scheduled" },
-              { value: "assigned", label: "Assigned" },
-              { value: "in_progress", label: "In progress" },
-              { value: "completed", label: "Completed" },
-              { value: "exception", label: "Exception" },
-              { value: "cancelled", label: "Cancelled" },
-              { value: "unassigned", label: "No route" },
-            ],
-          },
-        ]}
+        params={params}
+        filterKeys={FILTER_KEYS}
+        placeholder="Job number…"
+        chips={
+          <>
+            <FilterChips
+              basePath="/jobs" params={params} name="status" label="Visit status"
+              allLabel="All visits" options={VISIT_STATUSES}
+            />
+            <PeriodFilter
+              basePath="/jobs" params={params} period={period}
+              presets={ACTIVITY_PERIOD_PRESETS} today={businessToday()} label="Scheduled in"
+              hideCustomWhenPreset
+            />
+          </>
+        }
       />
-      <form method="get" action="/jobs" className="mb-4 flex flex-wrap items-end gap-2">
-        <input type="hidden" name="status" value={params.status ?? ""} />
-        <label className="text-sm">
-          <span className="mb-1 block font-medium">Date</span>
-          <input type="date" name="date" defaultValue={params.date ?? today()}
-                 className="rounded-md border bg-surface px-3 py-2 text-sm" />
-        </label>
-        <button type="submit" className="rounded-md border bg-surface px-3 py-2 text-sm font-medium hover:bg-surface-muted">
-          Show
-        </button>
-      </form>
 
       <Suspense key={JSON.stringify(params)} fallback={<SkeletonRows rows={8} />}>
-        <JobList params={params} />
+        <JobList params={params} period={period} />
       </Suspense>
     </div>
   );
 }
 
-async function JobList({ params }: { params: Search }) {
+async function JobList({ params, period }: { params: Search; period: ResolvedPeriod }) {
   const supabase = await createClient();
   const page = pageFrom(params.page);
   const [from, to] = rangeFor(page);
-  const scheduled = params.date && /^\d{4}-\d{2}-\d{2}$/.test(params.date) ? params.date : today();
 
   let query = supabase
     .from("jobs")
@@ -86,10 +101,16 @@ async function JobList({ params }: { params: Search }) {
       "customers(business_name), daily_routes(code), drivers(full_name)",
       { count: "exact" },
     )
-    .eq("scheduled_date", scheduled)
     .is("deleted_at", null)
+    // Newest day first inside the window, then the run's own order within a day
+    // — a week of visits read oldest-first would open on last Monday.
+    .order("scheduled_date", { ascending: false })
     .order("sequence")
     .range(from, to);
+
+  if (period.range) {
+    query = query.gte("scheduled_date", period.range.start).lte("scheduled_date", period.range.end);
+  }
 
   if (params.status === "unassigned") query = query.is("route_id", null);
   else if (params.status) query = query.eq("status", params.status);
@@ -99,15 +120,24 @@ async function JobList({ params }: { params: Search }) {
 
   return (
     <>
-      <p className="mb-2 text-sm text-muted-foreground">Showing jobs scheduled for {date(scheduled)}.</p>
+      <p className="mb-2 text-sm text-muted-foreground">
+        {period.range
+          ? (period.range.start === period.range.end
+            ? `Visits scheduled for ${date(period.range.start)}.`
+            : `Visits scheduled between ${date(period.range.start)} and ${date(period.range.end)}.`)
+          : "Every visit on record."}
+      </p>
       <DataTable
         rows={data ?? []}
         rowHref={(row) => `/jobs/${row.id}`}
         empty={
           <EmptyState
-            title="No stops for this date"
-            description="Plan the day's runs and each customer visit appears here as a stop."
-            action={<ButtonLink href="/orders">Go to jobs</ButtonLink>}
+            title={isFiltered(params, FILTER_KEYS)
+              ? "No visits match those filters" : "No visits in this period"}
+            description={isFiltered(params, FILTER_KEYS)
+              ? "Try a wider period, or clear the filters above."
+              : "Plan the day's runs and each customer visit appears here."}
+            action={<ButtonLink href="/orders">Go to customer laundry</ButtonLink>}
           />
         }
         columns={[

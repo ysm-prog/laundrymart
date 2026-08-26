@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { SubmitButton } from "@/components/form";
-import { CONTROL, Eyebrow, Notice } from "@/components/ui";
+import { ButtonLink, CONTROL, Eyebrow, Notice } from "@/components/ui";
 import { businessNowTime, businessToday } from "@/lib/domain/timezone";
 import type { JobStaff } from "./job-form";
 
@@ -41,9 +41,18 @@ export function CompleteJob({
   if (staff.length === 0) {
     return (
       <Notice tone="warning" title="Nobody here can be recorded as handing this over">
-        This laundry has no staff logins yet. Add your people under{" "}
-        <a className="underline" href="/admin/users">Administration → People</a>, then
-        come back and close the job.
+        <p>
+          This laundry has no staff logins yet. Add your people, then come back and close
+          the job.
+        </p>
+        {/* A button rather than a link inside the sentence. An inline link is
+            allowed to be small (WCAG 2.5.8 exempts one in a run of text), but
+            this is the *fix* for the thing that just stopped somebody, and the
+            person reading it may well be holding a phone in a laundry. The
+            same shape the flash toast uses when it carries a way out. */}
+        <ButtonLink href="/admin/users" variant="primary" className="mt-3">
+          Add people
+        </ButtonLink>
       </Notice>
     );
   }

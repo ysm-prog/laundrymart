@@ -19,12 +19,13 @@
 -- to — would be exactly the one that could be duplicated, and which of the two
 -- copies answered would depend on the plan.
 begin;
-select plan(13);
+select plan(15);
 
 insert into auth.users (id, email) values
   ('11111111-1111-1111-1111-111111111111','a@example.com'),
   ('22222222-2222-2222-2222-222222222222','b@example.com'),
-  ('33333333-3333-3333-3333-333333333333','counter@example.com');
+  ('33333333-3333-3333-3333-333333333333','counter@example.com'),
+  ('44444444-4444-4444-4444-444444444444','board@example.com');
 insert into public.tenants (id, name) values
   ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','Laundry A'),
   ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb','Laundry B');
@@ -33,7 +34,10 @@ insert into public.memberships (user_id, tenant_id, role) values
   ('22222222-2222-2222-2222-222222222222','bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb','super_admin'),
   -- The counter: `customer_service` takes laundry in and hands it back, and
   -- holds no invoices capability at all.
-  ('33333333-3333-3333-3333-333333333333','aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','customer_service');
+  ('33333333-3333-3333-3333-333333333333','aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','customer_service'),
+  -- The round. An operational login since 0031, holding no pricing capability
+  -- whatsoever — and the reason the read gate below is not academic.
+  ('44444444-4444-4444-4444-444444444444','aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','board');
 
 insert into public.customers (id, tenant_id, customer_number, business_name) values
   ('c0000000-0000-0000-0000-00000000000a','aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','CUST00001','Harbourview Hotel'),
@@ -116,12 +120,17 @@ select throws_ok(
   'a price must name one of the nine kinds of laundry a job can carry');
 
 -- ------------------------------------------------------------- role gate ----
--- The counter reads prices (a job screen may want to show what something costs)
--- but cannot change what anybody is charged.
+-- 0033: a price list is a finance record, so the read is `can_read_pricing()`
+-- and not `is_member()`.
+--
+-- This block asserted the opposite until then — *the counter can read the
+-- tenant's prices*, count 2 — which is how 0018 shipped the identical hole 0017
+-- had closed on `invoices` a migration earlier, and why it survived a green
+-- suite for two days. A proof that encodes the defect defends it.
 set local "request.jwt.claim.sub" = '33333333-3333-3333-3333-333333333333';
 
-select is((select count(*) from public.laundry_prices)::int, 2,
-          'the counter can read the tenant''s prices');
+select is((select count(*) from public.laundry_prices)::int, 0,
+          'the counter cannot read what anybody is charged');
 
 select throws_ok(
   $$insert into public.laundry_prices (tenant_id, item_type, unit_price)
@@ -134,10 +143,28 @@ select throws_ok(
 -- refused silently rather than by an error, which is precisely why this is
 -- asserted on the data rather than on a raised exception.
 update public.laundry_prices set unit_price = 0 where item_type = 'towels';
+-- Read back as the owner: since 0033 the counter cannot see the row it failed
+-- to change, so counting as them would pass for the wrong reason.
+set local "request.jwt.claim.sub" = '11111111-1111-1111-1111-111111111111';
 select is((select count(*) from public.laundry_prices where unit_price = 0)::int, 0,
           'the counter cannot re-price the work');
 
+-- The board is the case that made this visible: an operational round with its
+-- own login, holding `run.execute` and nothing financial.
+set local "request.jwt.claim.sub" = '44444444-4444-4444-4444-444444444444';
+select is((select count(*) from public.laundry_prices)::int, 0,
+          'a board cannot read the price list');
+
 reset role;
+
+-- The half that is easy to miss. A permissive `for all` policy's USING clause
+-- grants SELECT as well, so leaving 0018's write policy in place would have
+-- kept the whole list readable to `dispatcher` past the narrowed read gate —
+-- the same trap §22 records for 0017, one table later.
+select is((select count(*) from pg_policy
+            where polrelid = 'public.laundry_prices'::regclass
+              and polcmd = '*' and polpermissive)::int, 0,
+          'no permissive `for all` policy is a second door onto SELECT');
 
 -- --------------------------------------------------- the billed-once link ---
 -- Without this column the monthly run has no way to tell laundry it has already

@@ -21,6 +21,8 @@ const CUSTOMER_COLUMNS =
 
 export type JobFormData = {
   customers: JobCustomer[];
+  /** The item master, code-first. Empty for a laundry that has not set one up. */
+  catalogue: JobCatalogueItem[];
   drivers: JobDriver[];
   staff: JobStaff[];
   /** True when more customers exist than the picker loaded. */
@@ -38,13 +40,21 @@ export type JobFormData = {
  *   administrators — so without this, editing a job one of them holds would
  *   open showing "Nobody yet" and clear the assignment on save.
  */
+export type JobCatalogueItem = {
+  id: string;
+  item_code: string | null;
+  name: string;
+  description: string | null;
+  laundry_category: string | null;
+};
+
 export async function loadJobFormData(
   ensureCustomerId?: string, ensureStaffId?: string,
 ): Promise<JobFormData> {
   const session = await requireSession();
   const supabase = await createClient();
 
-  const [customersResult, locationsResult, driversResult, staff] = await Promise.all([
+  const [customersResult, locationsResult, driversResult, catalogueResult, staff] = await Promise.all([
     supabase
       .from("customers")
       .select(CUSTOMER_COLUMNS, { count: "exact" })
@@ -82,6 +92,22 @@ export async function loadJobFormData(
       .is("deleted_at", null)
       .order("full_name")
       .returns<JobDriver[]>(),
+    // The item master, for the counter's code-first picker (0032). Active only:
+    // an inactive item cannot be taken in, so offering it is offering a dead end.
+    //
+    // Tenant named rather than left to RLS (§23) — a platform admin's session
+    // reads every laundry's items, and the id is posted back into a job whose
+    // trigger checks the item belongs to *this* laundry, so an unfiltered list
+    // would offer choices that can only fail.
+    supabase
+      .from("items")
+      .select("id, item_code, name, description, laundry_category")
+      .eq("tenant_id", session.tenantId)
+      .eq("status", "active")
+      .is("deleted_at", null)
+      .order("item_code", { nullsFirst: false })
+      .limit(500)
+      .returns<JobCatalogueItem[]>(),
     listStaff(),
   ]);
   const pickableStaff = withCurrentHolder(staff, await listMembers(), ensureStaffId);
@@ -133,6 +159,7 @@ export async function loadJobFormData(
 
   return {
     customers,
+    catalogue: catalogueResult.data ?? [],
     drivers: driversResult.data ?? [],
     staff: pickableStaff,
     // Measured against what the search box actually covers, not against

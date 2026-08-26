@@ -10,7 +10,10 @@ import {
   SkeletonStats, Stat, StatusBadge,
 } from "@/components/ui";
 import { Field, Input, Select, SubmitButton } from "@/components/form";
-import { BATCH_FLOW, BATCH_STAGE_LABELS, type BatchStage } from "./stages";
+import { ListControls } from "@/components/list-controls";
+import { ToggleChips, FilterSummary } from "@/components/filters";
+import { isFiltered, parseMulti } from "@/lib/filters";
+import { BATCH_FLOW, BATCH_STAGES, BATCH_STAGE_LABELS, type BatchStage } from "./stages";
 import { uncountedRuns } from "./returns";
 import { createBatch } from "./actions";
 
@@ -29,13 +32,21 @@ type BatchRow = {
   production_batch_lines: Array<{ quantity: number; rejected_quantity: number }>;
 };
 
-export default async function WarehousePage() {
+type Search = { q?: string; stage?: string };
+const FILTER_KEYS = ["q", "stage"] as const;
+
+export default async function WarehousePage({
+  searchParams,
+}: {
+  searchParams: Promise<Search>;
+}) {
   const session = await requireCapability("warehouse.read");
+  const params = await searchParams;
 
   return (
     <div className="space-y-6">
       <PageHeader
-        title="In the plant" eyebrow="Production batches"
+        title="In the plant"
         description="Count the vans in, then wash, dry, fold and pack. Each stage moves real stock."
       />
 
@@ -50,7 +61,7 @@ export default async function WarehousePage() {
       </Suspense>
 
       <Suspense fallback={<SkeletonRows rows={6} />}>
-        <Batches />
+        <Batches params={params} />
       </Suspense>
 
       {can(session.role, "warehouse.write") ? (
@@ -129,7 +140,7 @@ async function OnTheFloor() {
   );
 }
 
-async function Batches() {
+async function Batches({ params }: { params: Search }) {
   const supabase = await createClient();
   const { data } = await supabase
     .from("production_batches")
@@ -140,13 +151,54 @@ async function Batches() {
     .limit(50)
     .returns<BatchRow[]>();
 
-  const rows = data ?? [];
+  const all = data ?? [];
+  const stages = parseMulti(params.stage, BATCH_STAGES);
+  const term = params.q?.trim().toLowerCase();
+  const rows = all.filter((batch) => {
+    if (term && !`${batch.batch_number} ${batch.machine ?? ""} ${batch.depots?.name ?? ""}`
+      .toLowerCase().includes(term)) return false;
+    if (stages.length && !stages.includes(batch.stage)) return false;
+    return true;
+  });
+  const filtered = isFiltered(params, FILTER_KEYS);
+  const stageCount = (stage: BatchStage) => all.filter((batch) => batch.stage === stage).length;
 
   return (
     <Card title="Batches" description="The fifty most recent.">
+      {/* Multi-select, unlike every other chip group in the app, because the
+          question the floor asks is "what is still wet?" — washing *and* drying
+          at once — and a single-select group cannot ask it at all. */}
+      <ListControls
+        action="/warehouse"
+        q={params.q}
+        params={params}
+        filterKeys={FILTER_KEYS}
+        placeholder="Batch number, machine or depot…"
+        chips={
+          <ToggleChips
+            basePath="/warehouse" params={params} name="stage" label="Batch stage"
+            allLabel="Every stage" allCount={all.length}
+            options={BATCH_STAGES
+              // A stage nothing is in is left off rather than shown as a chip
+              // promising zero rows — the plant's stages are eight, and half of
+              // them are usually empty.
+              .filter((stage) => stageCount(stage) > 0)
+              .map((stage) => ({
+                value: stage, label: BATCH_STAGE_LABELS[stage], count: stageCount(stage),
+              }))}
+          />
+        }
+        summary={
+          <FilterSummary basePath="/warehouse" shown={rows.length} total={all.length}
+                         noun="batch" nouns="batches" filtered={filtered} />
+        }
+      />
       <DataTable
         rows={rows}
-        empty={<EmptyState
+        empty={filtered
+          ? <EmptyState title="No batches match those filters"
+                        description="Try another stage, or clear the filters above." />
+          : <EmptyState
           title="No batches yet"
           description="A batch is one load of linen going through the plant together. Count a van in above to start one."
         />}

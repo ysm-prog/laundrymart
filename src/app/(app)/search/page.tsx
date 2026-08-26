@@ -258,7 +258,7 @@ async function search(term: string, role: Role): Promise<Group[]> {
     trailing: <StatusBadge status={row.status} />,
   })));
 
-  push(groups, "Item types", "The linen you handle", (items.data ?? []).map((row) => ({
+  push(groups, "Items", "Your master item list", (items.data ?? []).map((row) => ({
     href: `/items/${row.id}`,
     title: row.name,
     detail: `${row.sku} · ${row.category.replace(/_/g, " ")}`,

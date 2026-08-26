@@ -10,8 +10,17 @@ export interface RoleProfile {
   role: string;
   name: string;
   note: string;
+  /**
+   * Local part of the sign-in address, when the role identifier is not the
+   * word the app uses for it. Defaults to the identifier with hyphens.
+   */
+  email?: string;
+  /** A previous local part, adopted (renamed) rather than left behind. */
+  formerly?: string;
   /** Needs a `drivers` row, or `current_driver_id()` is null. */
   driver?: boolean;
+  /** Needs a `boards` row, or `current_board_id()` is null. */
+  board?: boolean;
   /** Not a membership: a row in `platform_admins`, reaching every laundry. */
   platform?: boolean;
 }
@@ -22,6 +31,9 @@ export declare const DEFAULT_TENANT: string;
 export declare const ROLE_PROFILES: readonly RoleProfile[];
 
 export declare function profileEmail(profile: RoleProfile, domain?: string): string;
+export declare function formerProfileEmail(
+  profile: RoleProfile, domain?: string,
+): string | null;
 export declare function selectedProfiles(
   options?: { includePlatformAdmin?: boolean },
 ): RoleProfile[];

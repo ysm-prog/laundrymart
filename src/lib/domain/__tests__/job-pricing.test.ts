@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { billableQuantity, jobChargeSubtotal, priceJob, type RateLine } from "@/lib/domain/job-pricing";
+import {
+  billableQuantity, jobChargeSubtotal, priceJob, pricingSourceLabel, type RateLine,
+} from "@/lib/domain/job-pricing";
 import type { OrderItemInput } from "@/lib/domain/laundry-orders";
 
 /**
@@ -368,5 +370,117 @@ describe("priceJob — the price-list fallback", () => {
 
     expect(result.lines).toHaveLength(0);
     expect(result.unpriced).toHaveLength(1);
+  });
+});
+
+/**
+ * Which tier answered, said back to the reviewer.
+ *
+ * The reason this is computed rather than assumed: both tiers can price parts of
+ * the same job, and the action that used to name only the rate card was the same
+ * action that refused to run without one.
+ */
+describe("pricingSourceLabel", () => {
+  const CARD = { agreement_number: "AGR00007", version: 2 };
+  const fromCard = { source_agreement_id: "agreement-1" };
+  const fromList = { source_agreement_id: null };
+
+  it("names the card when the card priced everything", () => {
+    expect(pricingSourceLabel([fromCard, fromCard], CARD)).toBe("AGR00007 v2");
+  });
+
+  it("names the price list when there is no card at all", () => {
+    expect(pricingSourceLabel([fromList], null)).toBe("the laundry price list");
+  });
+
+  it("names both when a card covered part of the job and the list the rest", () => {
+    expect(pricingSourceLabel([fromCard, fromList], CARD))
+      .toBe("AGR00007 v2 and the laundry price list");
+  });
+
+  it("names the list when a card exists but answered nothing", () => {
+    expect(pricingSourceLabel([fromList, fromList], CARD)).toBe("the laundry price list");
+  });
+
+  it("does not claim a card priced an empty job", () => {
+    expect(pricingSourceLabel([], CARD)).toBe("the laundry price list");
+  });
+});
+
+describe("pricing a coded item (0032)", () => {
+  const towelItem = {
+    item_id: "item-tow001", item_type: "towels",
+    quantity_type: "exact", exact_quantity: 100,
+  };
+
+  it("prefers a rate line for the exact item over one for its category", () => {
+    const result = priceJob({
+      items: [towelItem],
+      rateLines: [
+        // The category line first, so the result cannot come from ordering.
+        rate({ id: "cat", laundry_item_type: "towels", unit_price: 1 }),
+        rate({ id: "item", item_id: "item-tow001", laundry_item_type: null, unit_price: 2 }),
+      ],
+    });
+    expect(result.lines).toHaveLength(1);
+    expect(result.lines[0]!.unit_price).toBe(2);
+    expect(result.lines[0]!.source_agreement_line_id).toBe("item");
+  });
+
+  it("falls back to the category rate line when the card names no item", () => {
+    const result = priceJob({
+      items: [towelItem],
+      rateLines: [rate({ id: "cat", laundry_item_type: "towels", unit_price: 1 })],
+    });
+    expect(result.lines[0]!.unit_price).toBe(1);
+    expect(result.lines[0]!.source_agreement_line_id).toBe("cat");
+  });
+
+  it("prefers the item's own listed price over the category's", () => {
+    const result = priceJob({
+      items: [towelItem],
+      rateLines: [],
+      priceList: new Map([["towels", { unitPrice: 1, bagPrice: null, taxable: true, source: "default" as const }]]),
+      itemPriceList: new Map([["item-tow001", { unitPrice: 3, bagPrice: null, taxable: true, source: "customer" as const }]]),
+    });
+    expect(result.lines).toHaveLength(1);
+    expect(result.lines[0]!.unit_price).toBe(3);
+  });
+
+  it("keeps the rate card ahead of the price list, however specific the list is", () => {
+    // A negotiated agreement beats a default list, even when the list names the
+    // exact item and the agreement names only its category.
+    const result = priceJob({
+      items: [towelItem],
+      rateLines: [rate({ id: "cat", laundry_item_type: "towels", unit_price: 1 })],
+      itemPriceList: new Map([["item-tow001", { unitPrice: 9, bagPrice: null, taxable: true, source: "default" as const }]]),
+    });
+    expect(result.lines[0]!.unit_price).toBe(1);
+  });
+
+  it("records which item was billed, whichever tier priced it", () => {
+    const fromCard = priceJob({
+      items: [towelItem],
+      rateLines: [rate({ id: "cat", laundry_item_type: "towels", unit_price: 1 })],
+    });
+    expect(fromCard.lines[0]!.source_item_id).toBe("item-tow001");
+
+    const fromList = priceJob({
+      items: [towelItem],
+      rateLines: [],
+      itemPriceList: new Map([["item-tow001", { unitPrice: 3, bagPrice: null, taxable: true, source: "default" as const }]]),
+    });
+    expect(fromList.lines[0]!.source_item_id).toBe("item-tow001");
+  });
+
+  it("prices an uncoded item exactly as it did before", () => {
+    // Every job written before the item master has no item_id, and must be
+    // unaffected — this is the assertion that the change is additive.
+    const result = priceJob({
+      items: [{ item_type: "towels", quantity_type: "exact", exact_quantity: 100 }],
+      rateLines: [rate({ id: "cat", laundry_item_type: "towels", unit_price: 1 })],
+    });
+    expect(result.lines[0]!.unit_price).toBe(1);
+    expect(result.lines[0]!.source_item_id).toBeNull();
   });
 });

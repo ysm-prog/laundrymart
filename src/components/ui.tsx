@@ -321,6 +321,11 @@ const BUTTON_VARIANTS = {
   secondary: "border border-strong bg-surface text-foreground shadow-xs hover:bg-surface-muted",
   danger: "bg-danger text-on-status shadow-xs hover:brightness-110 active:brightness-95",
   ghost: "text-primary hover:bg-primary/8",
+  /* A destructive action that sits in a list row, where a solid red block would
+     shout down the row it belongs to. `ghost` is teal — the colour this app
+     uses for "this is the action to take" — so a Remove button wearing it read
+     as the safe thing to press. */
+  dangerGhost: "text-danger hover:bg-danger/8",
   subtle: "bg-surface-muted text-foreground hover:bg-surface-sunken",
 } as const;
 
@@ -347,10 +352,28 @@ export type ButtonSize = keyof typeof BUTTON_SIZES;
  * the client form controls cannot drift apart — they did, and the filter bar
  * spent three releases in a different size and border than every other input.
  */
+/*
+ * `text-base sm:text-sm` — 16px on a phone, 14px from `sm` up.
+ *
+ * The two widths want different things and it is worth spending a breakpoint on
+ * it. On iOS a font size under 16px makes Safari zoom the page the moment an
+ * input takes focus, which throws a driver or a counter hand out of the layout
+ * they were working in. On a desktop that constraint does not exist, and 16px
+ * inputs sit *larger* than the 15px body around them, which is what made the
+ * whole application read as oversized.
+ *
+ * The focus ring is the outline, not a shadow. This used to carry
+ * `focus:outline-none focus:ring-2 focus:ring-primary/25`, which turned off the
+ * global 2px ring from `globals.css` and replaced it with a 25%-opacity halo
+ * measuring about 1.5:1 against the page — under the 3:1 WCAG asks of a focus
+ * indicator, on *every* input, select and textarea in the app. Dropping the
+ * `outline-none` lets the real ring through; the tinted ring stays on top of it
+ * as the soft edge the design language wants.
+ */
 export const CONTROL =
-  "min-h-11 w-full rounded-lg border border-strong bg-surface px-3 py-2 text-sm text-foreground " +
+  "min-h-11 w-full rounded-lg border border-control-border bg-surface px-3 py-2 text-base sm:text-sm text-foreground " +
   "shadow-xs transition placeholder:text-muted-foreground " +
-  "focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/25 " +
+  "focus:border-primary focus:ring-2 focus:ring-primary/25 " +
   "disabled:cursor-not-allowed disabled:bg-surface-muted disabled:opacity-70";
 
 /**
@@ -363,6 +386,25 @@ export const CONTROL =
  * string exported from a `"use client"` module reaches a server component as a
  * client reference rather than as its value.
  */
+/**
+ * The same control skin, sized to its content instead of to its row.
+ *
+ * It exists because **`cx(CONTROL, "w-auto")` does not work, and never has.**
+ * Both are plain `width` utilities of equal specificity, and Tailwind emits
+ * `.w-full` *after* `.w-auto`, so the later rule wins and the control fills its
+ * row regardless. Ten call sites across the filter bars were written that way —
+ * the whole of the Customer laundry filter row, both My Runs pickers and the
+ * period range — and every one of them was rendering full width. Measured, not
+ * guessed: `.w-auto` sits at byte 22698 of the built stylesheet and `.w-full` at
+ * 22717.
+ *
+ * Replacing the class rather than layering another one over it takes the
+ * ordering out of the question. A *responsive* override (`sm:w-auto`) is fine
+ * and is left alone — Tailwind emits variants after the base utilities, so those
+ * genuinely do win.
+ */
+export const CONTROL_AUTO = CONTROL.replace("w-full ", "w-auto ");
+
 export const SELECT_CHEVRON =
   "appearance-none bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22" +
   "%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%236b7280%22%20stroke-width%3D%222%22" +

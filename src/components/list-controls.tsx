@@ -1,5 +1,7 @@
+import type { ReactNode } from "react";
 import Link from "next/link";
-import { Search } from "lucide-react";
+import { Search, X } from "lucide-react";
+import { isFiltered as anyFilterSet, filterHref, type FilterParams } from "@/lib/filters";
 import { CONTROL, SELECT_CHEVRON, cx } from "./ui";
 
 /**
@@ -13,9 +15,24 @@ import { CONTROL, SELECT_CHEVRON, cx } from "./ui";
  * Sits on its own card so it reads as the controls for the list beneath it
  * rather than as a stray row of inputs. On a phone the fields stack full-width;
  * the selects stay native, which is the right picker on a touch device.
+ *
+ * **The layout is chips, then fields, then a summary**, adopted from
+ * `ysm-prog/ysm-hub` (§10b) so both products filter the same way:
+ *
+ *   1. `chips` — the one or two questions this list is usually narrowed by,
+ *      answered in a single press. A chip is a link and applies immediately.
+ *   2. the search box and any `filters` selects — the long tail, answered
+ *      together and submitted once.
+ *   3. `FilterSummary` — how many rows are showing, and the way back out.
+ *
+ * A page may use any of the three. What it must not do is hand-roll a fourth:
+ * the drift this component exists to prevent is a list whose search box is a
+ * different control from every other input in the app, and that has happened
+ * here before.
  */
 export function ListControls({
-  action, q, filters, placeholder = "Search this list…",
+  action, q, filters, chips, summary, placeholder = "Search this list\u2026",
+  params = {}, filterKeys, searchId,
 }: {
   action: string;
   q?: string;
@@ -26,37 +43,84 @@ export function ListControls({
     value?: string;
     options: ReadonlyArray<{ value: string; label: string }>;
   }>;
+  /** Chip groups rendered above the fields — `FilterChips`, `ToggleChips`, `PeriodFilter`. */
+  chips?: ReactNode;
+  /** The count line under the bar, usually a `FilterSummary`. */
+  summary?: ReactNode;
+  /** Every filter parameter currently applied, so Clear knows there is something to clear. */
+  params?: FilterParams;
+  /**
+   * Which parameters count as a filter. Defaults to `q` plus the select names —
+   * a page with chips passes their names too, or Clear never appears for them.
+   */
+  filterKeys?: readonly string[];
+  /**
+   * The search input's DOM id. Derived from `action` by default, which is unique
+   * as long as one page draws one bar per list — a hard-coded `id="q"` was fine
+   * until a page grew a second list, and then the label pointed at the wrong box.
+   */
+  searchId?: string;
 }) {
+  const inputId = searchId ?? `q-${action.replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-|-$/g, "")}`;
+  const keys = filterKeys ?? ["q", ...(filters ?? []).map((filter) => filter.name)];
+  const filtered = anyFilterSet({ ...params, q: q ?? params.q }, keys);
+
   return (
-    <form method="get" action={action}
-          className="mb-5 flex flex-col gap-3 rounded-xl border bg-surface p-3 shadow-sm
-                     sm:flex-row sm:flex-wrap sm:items-center">
-      <div className="relative min-w-[14rem] flex-1">
-        <label htmlFor="q" className="sr-only">Search this list</label>
-        <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2
-                           text-muted-foreground" aria-hidden />
-        <input id="q" name="q" type="search" defaultValue={q} placeholder={placeholder}
-               className={cx(CONTROL, "pl-9")} />
-      </div>
-      {filters?.map((filter) => (
-        <div key={filter.name} className="sm:w-auto">
-          <label htmlFor={filter.name} className="sr-only">{filter.label}</label>
-          <select id={filter.name} name={filter.name} defaultValue={filter.value ?? ""}
-                  className={cx(CONTROL, SELECT_CHEVRON, "sm:w-auto")}>
-            <option value="">Any {filter.label.toLowerCase()}</option>
-            {filter.options.map((option) => (
-              <option key={option.value} value={option.value}>{option.label}</option>
-            ))}
-          </select>
+    <div className="mb-5 flex flex-col gap-3 rounded-xl border bg-surface p-3 shadow-sm">
+      {chips ? <div className="flex flex-col gap-3">{chips}</div> : null}
+      <form method="get" action={action}
+            className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+        {/* Chip selections ride through the search as hidden fields, or typing a
+            search term would silently throw away the chip somebody pressed. */}
+        {Object.entries(params).map(([key, value]) =>
+          value && key !== "q" && key !== "page" && !(filters ?? []).some((f) => f.name === key)
+            ? <input key={key} type="hidden" name={key} value={value} />
+            : null)}
+        {/* The floor is `sm:` and not unconditional. Below `sm` the bar stacks,
+            so the search box is already full width and needs no minimum — and a
+            floor in `rem` grows with the reading control, so at Large on a 320px
+            phone a 14rem minimum is 258px inside a 296px card and pushes the
+            page sideways. A `min-w` in rem that scales with the text defeats
+            itself; the same trap the 2026-08-24 accessibility pass recorded. */}
+        <div className="relative flex-1 sm:min-w-[14rem]">
+          <label htmlFor={inputId} className="sr-only">Search this list</label>
+          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2
+                             text-muted-foreground" aria-hidden />
+          <input id={inputId} name="q" type="search" defaultValue={q} placeholder={placeholder}
+                 className={cx(CONTROL, "pl-9")} />
         </div>
-      ))}
-      <button type="submit"
-              className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg bg-action
-                         px-5 text-sm font-medium text-action-foreground shadow-xs transition
-                         hover:brightness-110">
-        Search
-      </button>
-    </form>
+        {filters?.map((filter) => (
+          <div key={filter.name} className="sm:w-auto">
+            <label htmlFor={filter.name} className="sr-only">{filter.label}</label>
+            <select id={filter.name} name={filter.name} defaultValue={filter.value ?? ""}
+                    className={cx(CONTROL, SELECT_CHEVRON, "sm:w-auto")}>
+              <option value="">Any {filter.label.toLowerCase()}</option>
+              {filter.options.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+          </div>
+        ))}
+        <button type="submit"
+                className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg bg-action
+                           px-5 text-sm font-medium text-action-foreground shadow-xs transition
+                           hover:brightness-110">
+          Search
+        </button>
+        {/* Only when there is no summary beneath. A `FilterSummary` carries its
+            own Clear, and two of them a few pixels apart is one control drawn
+            twice — the reader has to work out whether they do the same thing. */}
+        {filtered && !summary ? (
+          <Link href={filterHref(action, {})}
+                className="inline-flex min-h-11 items-center gap-1 rounded-lg px-2 text-sm font-medium
+                           text-primary hover:underline">
+            <X className="size-4" aria-hidden />
+            Clear
+          </Link>
+        ) : null}
+      </form>
+      {summary}
+    </div>
   );
 }
 

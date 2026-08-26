@@ -1,9 +1,12 @@
 import type { createClient } from "@/lib/supabase/server";
 import type { Session } from "@/lib/auth/context";
+import { accountForLine, incomeAccountsForItems } from "@/lib/invoices/account-coding";
 import { recordAudit } from "@/lib/audit";
 import { describeDbError } from "@/lib/actions";
-import { jobChargeSubtotal, priceJob, type JobChargeLine, type RateLine } from "@/lib/domain/job-pricing";
-import { priceListFor, type LaundryPriceRow } from "@/lib/domain/laundry-billing";
+import {
+  jobChargeSubtotal, priceJob, pricingSourceLabel, type JobChargeLine, type RateLine,
+} from "@/lib/domain/job-pricing";
+import { itemPriceListFor, priceListFor, type LaundryPriceRow } from "@/lib/domain/laundry-billing";
 import type { OrderItemInput } from "@/lib/domain/laundry-orders";
 import { checkBillingTransition, isBillingStatus, type BillingStatus } from "@/lib/domain/billing";
 import { logOrderActivity } from "@/lib/orders/activity";
@@ -70,6 +73,8 @@ export type StoredCharge = {
   source_item_id: string | null;
   source_laundry_item_type: string | null;
   pricing_model: string | null;
+  /** The income account this charge codes to (0039). Carried onto the invoice. */
+  gl_account_id: string | null;
   frozen_at: string | null;
 };
 
@@ -79,7 +84,7 @@ export async function loadJobCharges(supabase: Client, orderId: string): Promise
     .from("job_charge_snapshots")
     .select("id, sequence, description, charge_type, quantity, unit_price, amount, taxable, " +
             "source_agreement_id, source_agreement_line_id, source_item_id, " +
-            "source_laundry_item_type, pricing_model, frozen_at")
+            "source_laundry_item_type, pricing_model, gl_account_id, frozen_at")
     .eq("order_id", orderId)
     .order("sequence")
     .returns<StoredCharge[]>();
@@ -97,7 +102,7 @@ export async function loadChargesForJobs(
     .from("job_charge_snapshots")
     .select("id, order_id, sequence, description, charge_type, quantity, unit_price, amount, " +
             "taxable, source_agreement_id, source_agreement_line_id, source_item_id, " +
-            "source_laundry_item_type, pricing_model, frozen_at")
+            "source_laundry_item_type, pricing_model, gl_account_id, frozen_at")
     .in("order_id", [...orderIds])
     .order("sequence")
     .returns<Array<StoredCharge & { order_id: string }>>();
@@ -167,7 +172,7 @@ export async function loadRateCard(supabase: Client, customerId: string): Promis
 export async function loadJobItems(supabase: Client, orderId: string): Promise<OrderItemInput[]> {
   const { data } = await supabase
     .from("laundry_order_items")
-    .select("item_type, custom_description, quantity_type, exact_quantity, bag_count, estimated_quantity, notes")
+    .select("item_id, item_type, custom_description, quantity_type, exact_quantity, bag_count, estimated_quantity, notes")
     .eq("order_id", orderId)
     .order("created_at")
     .returns<OrderItemInput[]>();
@@ -190,7 +195,7 @@ export type PricedJob = {
  * and approve the other five.
  */
 export async function priceJobFromRateCard(
-  supabase: Client, job: Pick<JobForBilling, "id" | "customer_id">,
+  supabase: Client, tenantId: string, job: Pick<JobForBilling, "id" | "customer_id">,
 ): Promise<PricedJob> {
   const [items, rateCard, priceRows] = await Promise.all([
     loadJobItems(supabase, job.id),
@@ -199,9 +204,18 @@ export async function priceJobFromRateCard(
     // when the card is missing, because a card that covers towels and says
     // nothing about sheets is the ordinary case — the fallback is per kind of
     // laundry, not per customer.
+    //
+    // **The tenant is named rather than left to RLS** (§23), and `tenantId` is a
+    // required argument so a new call site cannot forget it. `is_member()` is
+    // true of every laundry for a platform admin, and the default list is the
+    // row with `customer_id is null` — so unfiltered, two laundries' defaults
+    // both come back and `priceListFor` takes whichever the plan happened to
+    // return first. This read feeds a write (the frozen snapshot), which is
+    // exactly the case that rule exists for.
     supabase
       .from("laundry_prices")
-      .select("customer_id, item_type, unit_price, bag_price, taxable")
+      .select("customer_id, item_type, item_id, unit_price, bag_price, taxable")
+      .eq("tenant_id", tenantId)
       .returns<LaundryPriceRow[]>(),
   ]);
 
@@ -210,9 +224,95 @@ export async function priceJobFromRateCard(
     rateLines: rateCard.lines,
     rateCard: rateCard.card ? { id: rateCard.card.id, fuel_levy_pct: rateCard.card.fuel_levy_pct } : null,
     priceList: priceListFor(job.customer_id, priceRows.data ?? []),
+    // The same list keyed on the item, which is the more specific answer within
+    // this tier — a price written against TOW001 is a price for TOW001.
+    itemPriceList: itemPriceListFor(job.customer_id, priceRows.data ?? []),
   });
 
   return { lines, unpriced, card: rateCard.card };
+}
+
+/**
+ * Price one job and write the result — the whole of the Price button.
+ *
+ * Lives here rather than in either `"use server"` file for the reason
+ * `approveJob` does: a `"use server"` module can export nothing but server
+ * actions, so a helper there becomes a POST endpoint of its own. Shared by the
+ * single Price button on the job page and Price Selected on the queue, so a
+ * selection of twenty cannot take a different path from a selection of one.
+ *
+ * **What it will and will not refuse.** It refuses a job that is not awaiting
+ * review, a job with no laundry on it, and a job where *nothing at all* could be
+ * priced. It does **not** refuse a customer who holds no rate card: the laundry
+ * price list (0018) is a real pricing tier and not a consolation prize — on the
+ * live deployment no customer holds a card, so refusing on that basis made the
+ * button useless for every job and left hand-entry as the only path, while the
+ * list-priced lines were computed and thrown away a few statements later.
+ *
+ * Laundry that neither tier covers still comes back in `unpriced`, because that
+ * is a gap somebody must decide about rather than a zero line.
+ */
+export async function priceAndSaveJob(
+  supabase: Client, session: Session, orderId: string,
+): Promise<
+  | {
+      ok: true; orderNumber: string; customerId: string;
+      lines: number; unpriced: number; subtotal: number; source: string;
+    }
+  | { ok: false; orderNumber: string | null; customerId: string | null; card: RateCardContext["card"]; error: string }
+> {
+  const job = await loadJobForBilling(supabase, orderId);
+  if (!job) {
+    return { ok: false, orderNumber: null, customerId: null, card: null, error: "That job could not be found." };
+  }
+
+  const refuse = (error: string, card: RateCardContext["card"] = null) =>
+    ({ ok: false as const, orderNumber: job.order_number, customerId: job.customer_id, card, error });
+
+  if (job.billing_status !== "awaiting_review") {
+    return refuse(`${job.order_number}: charges can only be changed while a job is awaiting review.`);
+  }
+
+  const { lines, unpriced, card } = await priceJobFromRateCard(supabase, session.tenantId, job);
+
+  if (lines.length === 0 && unpriced.length === 0) {
+    return refuse(`${job.order_number}: there is no laundry on this job, so there is nothing to price.`, card);
+  }
+  if (lines.length === 0) {
+    return refuse(
+      `${job.order_number}: nothing on this job could be priced — `
+      + (card
+        ? "neither the rate card nor the laundry price list has a rate for what is on it."
+        : "this customer has no rate card and the laundry price list has no rate for what is on it."),
+      card,
+    );
+  }
+
+  const saved = await saveJobCharges(supabase, session.tenantId, job.id, lines);
+  if (!saved.ok) return refuse(`${job.order_number}: ${saved.error}`, card);
+
+  const source = pricingSourceLabel(lines, card);
+  const subtotal = jobChargeSubtotal(lines);
+
+  await logOrderActivity(supabase, session, job.id, {
+    activity_type: "updated",
+    next: { billing: "priced", priced_from: source, lines: lines.length, subtotal },
+  });
+  await recordAudit(session, {
+    entity: "laundry_order", entityId: job.id, action: "update",
+    summary: `${job.order_number}: priced from ${source}`,
+    metadata: { lines: lines.length, unpriced: unpriced.length },
+  });
+
+  return {
+    ok: true,
+    orderNumber: job.order_number,
+    customerId: job.customer_id,
+    lines: lines.length,
+    unpriced: unpriced.length,
+    subtotal,
+    source,
+  };
 }
 
 /**
@@ -224,13 +324,32 @@ export async function priceJobFromRateCard(
  *
  * The function refuses outright unless the job is `awaiting_review`, so this
  * cannot re-price an approved job even if a caller forgets to check.
+ *
+ * **This is also where a charge gets its GL code, and it is the only such
+ * place.** Both writers come through here — the automatic pricer and the review
+ * screen's own save — so resolving `item → items.income_account_id` once here
+ * means a priced line and a hand-picked one are coded identically, and neither
+ * caller can forget. A line that already names an account keeps it: choosing a
+ * code on the Charges screen is a deliberate override of whatever the item says.
  */
 export async function saveJobCharges(
-  supabase: Client, orderId: string, lines: readonly JobChargeLine[],
+  supabase: Client, tenantId: string, orderId: string, lines: readonly JobChargeLine[],
 ): Promise<{ ok: true; count: number } | { ok: false; error: string }> {
+  // §23: a read that feeds a write names its tenant. A platform admin's session
+  // reads every laundry, and an item resolved across the boundary would code one
+  // business's charge to another's chart.
+  const accountByItem = await incomeAccountsForItems(
+    supabase, tenantId, lines.map((line) => line.source_item_id),
+  );
+
+  const coded = lines.map((line) => ({
+    ...line,
+    gl_account_id: line.gl_account_id ?? accountForLine(line.source_item_id, accountByItem),
+  }));
+
   const { data, error } = await supabase.rpc("save_job_charge_snapshot", {
     p_order_id: orderId,
-    p_lines: lines,
+    p_lines: coded,
   });
   if (error) {
     return { ok: false, error: error.message.replace(/^ERROR:\s*/, "") };

@@ -35,7 +35,7 @@ export default async function EditJobPage({
   const [{ data: order }, { data: items }] = await Promise.all([
     supabase.from("laundry_orders").select("*").eq("id", id).maybeSingle<LaundryOrder>(),
     supabase.from("laundry_order_items")
-      .select("id, order_id, item_type, custom_description, quantity_type, exact_quantity, bag_count, estimated_quantity, notes")
+      .select("id, order_id, item_id, item_type, custom_description, quantity_type, exact_quantity, bag_count, estimated_quantity, notes")
       .eq("order_id", id).order("created_at")
       .returns<LaundryOrderItem[]>(),
   ]);
@@ -44,7 +44,7 @@ export default async function EditJobPage({
   if (order.status === "cancelled") redirect(`/orders/${id}`);
   if (order.status === "completed" && !can(session.role, "orders.manage")) redirect(`/orders/${id}`);
 
-  const { customers, drivers, staff } =
+  const { customers, catalogue, drivers, staff } =
     await loadJobFormData(customer ?? order.customer_id, order.assigned_to ?? undefined);
 
   return (
@@ -68,6 +68,7 @@ export default async function EditJobPage({
         action={updateOrder}
         customerAction={createCustomer}
         customers={customers}
+        catalogue={catalogue}
         drivers={drivers}
         staff={staff}
         order={order}

@@ -18,7 +18,7 @@
 -- Plus the one-job-one-invoice constraint, and the release path that makes
 -- voiding a wrong invoice possible without stranding the work.
 begin;
-select plan(46);
+select plan(54);
 
 insert into auth.users (id, email) values
   ('11111111-1111-1111-1111-111111111111','finance@example.com'),
@@ -166,6 +166,75 @@ select is(public.save_job_charge_snapshot(
 select is((select count(*) from public.job_charge_snapshots
             where order_id = 'd0000000-0000-0000-0000-00000000000a')::int, 1,
           're-pricing replaces rather than appends');
+
+-- ------------------------------------------- 0039: coding the charge --------
+-- MYOB puts the item and the account code on the line as it is written. Before
+-- 0039 a charge could name an item (only if the pricer supplied one) and could
+-- never name an account, so a hand-added charge reached the invoice uncoded and
+-- somebody re-keyed the code there. Asserted by outcome: the writer really
+-- carries the column, and the guard refuses the two ways it could be wrong.
+insert into public.gl_accounts (id, tenant_id, code, name, account_type, tax_code, level) values
+  ('9a000000-0000-4000-8000-00000000000a','aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+   '4-1100','Towels - Black','Income','GST',2),
+  ('9a000000-0000-4000-8000-00000000000b','aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+   '0-INCOME','Income','Income',null,1);
+update public.gl_accounts set is_header = true where id = '9a000000-0000-4000-8000-00000000000b';
+
+select is(public.save_job_charge_snapshot(
+  'd0000000-0000-0000-0000-00000000000a',
+  '[{"description":"Towels — 10","charge_type":"wash_only","quantity":10,
+     "unit_price":3.00,"amount":30.00,"taxable":true,
+     "gl_account_id":"9a000000-0000-4000-8000-00000000000a"}]'::jsonb), 1,
+  'a charge can be coded to an account as it is written');
+
+select is((select gl_account_id from public.job_charge_snapshots
+            where order_id = 'd0000000-0000-0000-0000-00000000000a'),
+          '9a000000-0000-4000-8000-00000000000a'::uuid,
+          'and the writer really carries it — the silent failure this guards against');
+
+-- Uncoded stays legal: the invoice counts the gap rather than refusing the work.
+select is(public.save_job_charge_snapshot(
+  'd0000000-0000-0000-0000-00000000000a',
+  '[{"description":"Towels — 10","charge_type":"wash_only","quantity":10,
+     "unit_price":3.00,"amount":30.00,"taxable":true}]'::jsonb), 1,
+  'a charge with no account is still accepted');
+select is((select gl_account_id from public.job_charge_snapshots
+            where order_id = 'd0000000-0000-0000-0000-00000000000a'), null,
+          'and carries no code');
+
+select throws_ok(
+  $$select public.save_job_charge_snapshot(
+      'd0000000-0000-0000-0000-00000000000a',
+      '[{"description":"Nonsense","charge_type":"other","quantity":1,
+         "unit_price":1,"amount":1,"taxable":true,
+         "gl_account_id":"9a000000-0000-4000-8000-00000000000b"}]'::jsonb)$$,
+  'P0001',
+  'that is a heading, not an account you can code to',
+  'nothing can be coded to a classification heading');
+
+select throws_ok(
+  $$select public.save_job_charge_snapshot(
+      'd0000000-0000-0000-0000-00000000000a',
+      '[{"description":"Nonsense","charge_type":"other","quantity":1,
+         "unit_price":1,"amount":1,"taxable":true,
+         "gl_account_id":"9b000000-0000-4000-8000-00000000000b"}]'::jsonb)$$,
+  'P0001',
+  'that account could not be found',
+  'an id that is not an account of this laundry is refused by name');
+
+-- The trigger function must not be reachable as RPC. 0019 recorded this trap and
+-- 0036 shipped without it once; asserted here so a third time fails the suite.
+select ok(
+  not has_function_privilege('authenticated', 'public.guard_job_charge_account()', 'EXECUTE'),
+  'the charge-account guard is not published at /rest/v1/rpc');
+
+-- Put the coded charge back, so the approval block below freezes a coded row.
+select is(public.save_job_charge_snapshot(
+  'd0000000-0000-0000-0000-00000000000a',
+  '[{"description":"Towels — 10","charge_type":"wash_only","quantity":10,
+     "unit_price":3.00,"amount":30.00,"taxable":true,
+     "gl_account_id":"9a000000-0000-4000-8000-00000000000a"}]'::jsonb), 1,
+  'the coded charge is restored for the approval block below');
 
 -- ------------------------------------------------------------ approval ------
 select is(public.freeze_job_charges('d0000000-0000-0000-0000-00000000000a'), 1,

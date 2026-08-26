@@ -3,7 +3,8 @@ import Link from "next/link";
 import { requireCapability } from "@/lib/auth/context";
 import { createClient } from "@/lib/supabase/server";
 import { can } from "@/lib/roles";
-import { date, money, relativeDays, today } from "@/lib/format";
+import { counted, date, money, relativeDays, today } from "@/lib/format";
+import { previousMonth } from "@/lib/domain/dates";
 import { CHARGE_TYPE_LABELS, type ChargeType } from "@/lib/domain/pricing";
 import {
   Button, ButtonLink, Card, EmptyState, Eyebrow, Notice, PageHeader,
@@ -11,19 +12,39 @@ import {
 } from "@/components/ui";
 import { Field, Input, Select, SubmitButton } from "@/components/form";
 import { ListControls, Pagination, pageFrom, rangeFor } from "@/components/list-controls";
+import { FilterChips, PeriodFilter } from "@/components/filters";
+import { ACTIVITY_PERIOD_PRESETS, resolvePeriod } from "@/lib/domain/dates";
+import { businessToday } from "@/lib/domain/timezone";
 import { emailIsConfigured } from "@/lib/email/send";
 import {
   createManualInvoice, emailInvoice, generateInvoices, issueInvoice, recordPayment,
 } from "./actions";
-import { SendSelected } from "./send-selected";
+import { InvoiceSelection } from "./invoice-selection";
+import { issueSelectedInvoices, sendSelectedInvoices } from "./bulk-actions";
 
 export const metadata = { title: "Invoices" };
 export const dynamic = "force-dynamic";
 
 type Search = {
-  q?: string; status?: string; customer?: string; page?: string;
-  selected?: string; tool?: string; error?: string; ok?: string;
+  q?: string; status?: string; customer?: string; period?: string; from?: string; to?: string;
+  page?: string; selected?: string; tool?: string; error?: string; ok?: string;
 };
+
+/**
+ * What counts as narrowing the register — `selected` and `tool` deliberately do
+ * not. Opening an invoice in the working pane is not a filter, and clearing the
+ * filters must not close what somebody is reading.
+ */
+const FILTER_KEYS = ["q", "status", "customer", "period", "from", "to"] as const;
+
+const INVOICE_STATUSES = [
+  { value: "draft", label: "Draft" },
+  { value: "issued", label: "Issued" },
+  { value: "part_paid", label: "Part paid" },
+  { value: "paid", label: "Paid" },
+  { value: "overdue", label: "Overdue" },
+  { value: "void", label: "Void" },
+] as const;
 
 /**
  * Billing, as the pack's two-pane (screen 07).
@@ -40,11 +61,17 @@ type Search = {
  */
 export default async function InvoicesPage({ searchParams }: { searchParams: Promise<Search> }) {
   const params = await searchParams;
+  // All time by default: the register is the whole ledger, and a chase list that
+  // opened on this month would hide precisely the invoices that are late.
+  const period = resolvePeriod(params, businessToday(), "all");
   const session = await requireCapability("invoices.read");
   const writable = can(session.role, "invoices.write");
   // Sending in bulk is two capabilities, not one: putting documents in front of
   // customers, and doing it to a whole selection at once.
   const canSendBulk = can(session.role, "invoices.send") && can(session.role, "invoices.bulk");
+  // Issuing in bulk is the rung between them: it needs the write capability the
+  // single Issue button needs, plus the bulk one.
+  const canIssueBulk = writable && can(session.role, "invoices.bulk");
 
   return (
     <div className="space-y-4">
@@ -57,6 +84,11 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
             {can(session.role, "billing.read") ? (
               <ButtonLink href="/invoices/awaiting">Awaiting invoice</ButtonLink>
             ) : null}
+            {canIssueBulk ? (
+              <ButtonLink href={hrefWith(params, { tool: "issue", selected: undefined })}>
+                Issue drafts
+              </ButtonLink>
+            ) : null}
             {canSendBulk ? (
               <ButtonLink href={hrefWith(params, { tool: "send", selected: undefined })}>
                 Send invoices
@@ -65,7 +97,7 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
             {writable ? (
               <>
                 <ButtonLink href={hrefWith(params, { tool: "recurring", selected: undefined })}>
-                  Create this month&apos;s invoices
+                  Create last month&apos;s invoices
                 </ButtonLink>
                 <ButtonLink href={hrefWith(params, { tool: "manual", selected: undefined })}>
                   Manual invoice
@@ -85,17 +117,24 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
           <ListControls
             action="/invoices"
             q={params.q}
-            filters={[{
-              name: "status", label: "Status", value: params.status,
-              options: [
-                { value: "draft", label: "Draft" },
-                { value: "issued", label: "Issued" },
-                { value: "part_paid", label: "Part paid" },
-                { value: "paid", label: "Paid" },
-                { value: "overdue", label: "Overdue" },
-                { value: "void", label: "Void" },
-              ],
-            }]}
+            params={params}
+            filterKeys={FILTER_KEYS}
+            placeholder="Invoice number…"
+            chips={
+              <>
+                <FilterChips
+                  basePath="/invoices" params={params} name="status" label="Invoice status"
+                  allLabel="All invoices" options={INVOICE_STATUSES}
+                />
+                {/* Issue date, not due date: this is the chase list, and the
+                    question asked of it is "what did we bill in August?". */}
+                <PeriodFilter
+                  basePath="/invoices" params={params} period={period}
+                  presets={ACTIVITY_PERIOD_PRESETS} today={businessToday()} label="Issued in"
+                  hideCustomWhenPreset
+                />
+              </>
+            }
           />
           <Suspense key={JSON.stringify(params)} fallback={<SkeletonRows rows={10} />}>
             <Register params={params} />
@@ -106,7 +145,8 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
             pane is just the next thing down the page. */}
         <div className="lg:sticky lg:top-4">
           <Suspense key={`${params.selected ?? ""}-${params.tool ?? ""}`} fallback={<SkeletonRows rows={6} />}>
-            <WorkPane params={params} writable={writable} canSendBulk={canSendBulk} />
+            <WorkPane params={params} writable={writable} tenantId={session.tenantId}
+                    canSendBulk={canSendBulk} canIssueBulk={canIssueBulk} />
           </Suspense>
         </div>
       </div>
@@ -209,6 +249,10 @@ async function Register({ params }: { params: Search }) {
   if (params.status) query = query.eq("status", params.status);
   if (params.customer) query = query.eq("customer_id", params.customer);
   if (params.q) query = query.ilike("invoice_number", `%${params.q}%`);
+  const period = resolvePeriod(params, businessToday(), "all");
+  if (period.range) {
+    query = query.gte("issue_date", period.range.start).lte("issue_date", period.range.end);
+  }
 
   const { data, count } = await query.returns<RegisterRow[]>();
   const rows = data ?? [];
@@ -226,7 +270,7 @@ async function Register({ params }: { params: Search }) {
 
   return (
     <>
-      <Card title="Register" description={`${count ?? rows.length} invoice(s)`} className="[&>div]:p-0">
+      <Card title="Register" description={counted(count ?? rows.length, "invoice")} className="[&>div]:p-0">
         <ul>
           {rows.map((row) => {
             const selected = params.selected === row.id;
@@ -268,7 +312,7 @@ async function Register({ params }: { params: Search }) {
                       chasing ? "text-warning" : "text-muted-foreground",
                     )}>
                       {row.due_date
-                        ? chasing ? `${overdueDays} day(s) past terms` : `due ${date(row.due_date)}`
+                        ? chasing ? `${counted(overdueDays, "day")} past terms` : `due ${date(row.due_date)}`
                         : `issued ${date(row.issue_date)}`}
                     </span>
                   </div>
@@ -286,11 +330,14 @@ async function Register({ params }: { params: Search }) {
 /* ---------------------------------------------------------------- the pane */
 
 async function WorkPane({
-  params, writable, canSendBulk,
-}: { params: Search; writable: boolean; canSendBulk: boolean }) {
+  params, writable, canSendBulk, canIssueBulk, tenantId,
+}: {
+  params: Search; writable: boolean; canSendBulk: boolean; canIssueBulk: boolean; tenantId: string;
+}) {
   if (writable && params.tool === "recurring") return <GenerateTool params={params} />;
   if (writable && params.tool === "manual") return <ManualTool params={params} />;
-  if (canSendBulk && params.tool === "send") return <SendTool params={params} />;
+  if (canIssueBulk && params.tool === "issue") return <IssueTool params={params} tenantId={tenantId} />;
+  if (canSendBulk && params.tool === "send") return <SendTool params={params} tenantId={tenantId} />;
   if (params.selected) return <InvoicePane params={params} writable={writable} />;
 
   return (
@@ -298,12 +345,12 @@ async function WorkPane({
       <EmptyState
         title="Pick an invoice from the register"
         description={writable
-          ? "Or raise one: bill a period from your active contracts, or start a one-off invoice."
+          ? "Or raise one: bill last month from your contracts and approved jobs, or start a one-off invoice."
           : "Its lines, payments and status will open here."}
         action={writable ? (
           <div className="flex flex-wrap justify-center gap-1.5">
             <ButtonLink href={hrefWith(params, { tool: "recurring" })} variant="primary">
-              Create this month&apos;s invoices
+              Create last month&apos;s invoices
             </ButtonLink>
             <ButtonLink href={hrefWith(params, { tool: "manual" })}>Manual invoice</ButtonLink>
           </div>
@@ -381,7 +428,7 @@ async function InvoicePane({ params, writable }: { params: Search; writable: boo
           </Notice>
         ) : chasing ? (
           <Notice tone="warning">
-            {overdueDays} day(s) past terms · {money(invoice.balance)} outstanding.
+            {counted(overdueDays, "day")} past terms · {money(invoice.balance)} outstanding.
           </Notice>
         ) : null}
 
@@ -580,6 +627,77 @@ function PaneSection({ title, children }: { title: string; children: React.React
 /* ----------------------------------------------------------------- the tools */
 
 /**
+ * Issue Selected — the rung between generating and sending.
+ *
+ * Generating writes drafts and sending refuses one, so without this a month-end
+ * run of forty invoices meant forty presses of the single-invoice Issue button
+ * before the bulk send was usable at all.
+ *
+ * Lists drafts only, because that is the one status the action can act on and a
+ * list containing rows it would refuse teaches people to ignore the count.
+ * A draft with no lines is listed with a zero total rather than hidden — issuing
+ * it is legitimate (a nil invoice is still a document), and hiding it would
+ * leave the operator hunting for the invoice that did not appear.
+ */
+async function IssueTool({ params, tenantId }: { params: Search; tenantId: string }) {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("invoices")
+    .select("id, invoice_number, status, total, customers(business_name)")
+    // The tenant is named rather than left to RLS (§23): a bulk list whose ids
+    // are posted straight back into a tenant-filtered write is exactly the case
+    // that rule exists for. Left open, a platform admin — for whom `is_member()`
+    // is true of every laundry — would see another laundry's drafts here and be
+    // told "it is no longer a draft" when the update matched no row.
+    .eq("tenant_id", tenantId)
+    .eq("status", "draft")
+    .is("deleted_at", null)
+    .order("issue_date", { ascending: true })
+    .limit(200)
+    .returns<Array<{
+      id: string; invoice_number: string; status: string; total: number;
+      customers: { business_name: string } | null;
+    }>>();
+
+  const drafts = data ?? [];
+
+  return (
+    <Card
+      title="Issue drafts"
+      description="Issuing turns a draft into a document with a number the customer will see. It does not email anybody."
+      actions={<ButtonLink href={hrefWith(params, { tool: undefined })}>Close</ButtonLink>}
+    >
+      {drafts.length === 0 ? (
+        <EmptyState
+          title="No drafts waiting"
+          description="Generate this month's invoices, or approve a job in the billing queue, and the drafts appear here."
+          action={
+            <ButtonLink href={hrefWith(params, { tool: "recurring" })}>
+              Create last month&apos;s invoices
+            </ButtonLink>
+          }
+        />
+      ) : (
+        <InvoiceSelection
+          action={issueSelectedInvoices}
+          verb="Issue selected"
+          pendingLabel="Issuing…"
+          selectAllLabel="Select every draft listed"
+          returnTo={hrefWith(params, { tool: "issue" })}
+          invoices={drafts.map((row) => ({
+            id: row.id,
+            invoiceNumber: row.invoice_number,
+            customerName: row.customers?.business_name ?? "Unknown customer",
+            total: Number(row.total ?? 0),
+            status: row.status,
+          }))}
+        />
+      )}
+    </Card>
+  );
+}
+
+/**
  * Send Selected.
  *
  * Lists what is actually sendable — issued, part paid or overdue, with a
@@ -588,11 +706,12 @@ function PaneSection({ title, children }: { title: string; children: React.React
  * document any more. Anything without a billing email is listed as unsendable
  * rather than silently dropped, so the fix is visible.
  */
-async function SendTool({ params }: { params: Search }) {
+async function SendTool({ params, tenantId }: { params: Search; tenantId: string }) {
   const supabase = await createClient();
   const { data } = await supabase
     .from("invoices")
     .select("id, invoice_number, status, total, emailed_at, customers(business_name, billing_email)")
+    .eq("tenant_id", tenantId) // Same rule as the issue list above (§23).
     .in("status", ["issued", "part_paid", "overdue"])
     .is("deleted_at", null)
     .order("issue_date", { ascending: true })
@@ -620,7 +739,11 @@ async function SendTool({ params }: { params: Search }) {
         />
       ) : (
         <>
-          <SendSelected
+          <InvoiceSelection
+            action={sendSelectedInvoices}
+            verb="Send selected"
+            pendingLabel="Sending…"
+            selectAllLabel="Select every invoice listed"
             returnTo={hrefWith(params, { tool: "send" })}
             invoices={sendable.map((row) => ({
               id: row.id,
@@ -633,7 +756,7 @@ async function SendTool({ params }: { params: Search }) {
           />
           {blocked > 0 ? (
             <p className="mt-4 border-t pt-3 text-sm text-muted-foreground">
-              {blocked} issued invoice(s) have no billing email and are not listed. Add one on the
+              {counted(blocked, "issued invoice")} {blocked === 1 ? "has" : "have"} no billing email and {blocked === 1 ? "is" : "are"} not listed. Add one on the
               customer to send them.
             </p>
           ) : null}
@@ -643,22 +766,39 @@ async function SendTool({ params }: { params: Search }) {
   );
 }
 
+/**
+ * The month-end run.
+ *
+ * **The period defaults to last month, not this one.** It used to default to the
+ * first of the current month through today, which is the wrong answer for the
+ * only time anybody presses this: on the 1st those dates are a single day of a
+ * month that has barely started, the run finds nothing, and it reports "nothing
+ * to invoice" — which reads as *everything is billed* rather than as *you are
+ * looking at the wrong month*. Billing a month you are standing in the middle of
+ * is the unusual case, and the fields are still there to type.
+ */
 function GenerateTool({ params }: { params: Search }) {
+  const period = previousMonth(today());
   return (
     <Card
-      title="Create this month's invoices"
-      description="One invoice per customer, covering every contract they hold for the period below. Anything already billed is skipped, so it is safe to run twice."
+      title="Create last month's invoices"
+      description="One invoice per customer, covering every contract they hold and every approved job they had completed in the period. Anything already billed is skipped, so it is safe to run twice."
       actions={<ButtonLink href={hrefWith(params, { tool: undefined })}>Close</ButtonLink>}
     >
       <form action={generateInvoices} className="grid gap-3 sm:grid-cols-2">
         <Field label="Period start" name="period_start" required>
-          <Input name="period_start" type="date" required defaultValue={`${today().slice(0, 7)}-01`} />
+          <Input name="period_start" type="date" required defaultValue={period.start} />
         </Field>
         <Field label="Period end" name="period_end" required>
-          <Input name="period_end" type="date" required defaultValue={today()} />
+          <Input name="period_end" type="date" required defaultValue={period.end} />
         </Field>
-        <div className="sm:col-span-2">
+        <div className="sm:col-span-2 space-y-3">
           <SubmitButton pendingLabel="Generating…">Generate</SubmitButton>
+          {/* Said here rather than discovered in the register: the two halves of
+              month-end are separate acts and this is only the first. */}
+          <p className="text-sm text-muted-foreground">
+            This creates drafts. Issue them, then send them — nothing reaches a customer until you do.
+          </p>
         </div>
       </form>
     </Card>

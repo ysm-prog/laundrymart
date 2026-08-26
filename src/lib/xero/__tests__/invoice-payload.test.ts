@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  resolveAccountCode,
   buildContact, buildInvoicePayload, canPushToXero,
   TAX_TYPE_EXEMPT, TAX_TYPE_TAXABLE,
 } from "@/lib/xero/invoice-payload";
@@ -166,5 +167,119 @@ describe("canPushToXero", () => {
     for (const status of ["issued", "part_paid", "overdue", "paid"]) {
       expect(canPushToXero(status), status).toBe(true);
     }
+  });
+});
+
+describe("coding a line to Xero (0037)", () => {
+  const line = (over: Record<string, unknown> = {}) => ({
+    description: "Bath towels", quantity: 10, unit_price: 2, taxable: true, ...over,
+  });
+  const build = (lines: ReturnType<typeof line>[], defaultAccountCode?: string | null) =>
+    buildInvoicePayload({
+      invoice: INVOICE, customer: CUSTOMER, lines, defaultAccountCode,
+    }).LineItems as Array<Record<string, unknown>>;
+
+  it("sends neither code when nothing has been coded", () => {
+    // The property that matters most: a laundry that has filled none of this in
+    // must push exactly the payload it pushed before. `AccountCode` was already
+    // in this mapping and had never once been populated, so "unchanged" is the
+    // only safe default.
+    const [item] = build([line()]);
+    expect(item).not.toHaveProperty("AccountCode");
+    expect(item).not.toHaveProperty("ItemCode");
+  });
+
+  it("sends the line's own account and the item code", () => {
+    const [item] = build([line({ account_code: "200", item_code: "TOW001" })]);
+    expect(item!.AccountCode).toBe("200");
+    expect(item!.ItemCode).toBe("TOW001");
+  });
+
+  it("sends the item's account when the line itself is not coded", () => {
+    const [item] = build([line({ item_account_code: "260", item_code: "TOW001" })]);
+    expect(item!.AccountCode).toBe("260");
+    expect(item!.ItemCode).toBe("TOW001");
+  });
+
+  it("falls back to the laundry's default account for a line with no item", () => {
+    // A fuel levy or a contract minimum carries no item at all, and those are
+    // exactly the lines a bookkeeper would otherwise re-code by hand.
+    const [item] = build([line()], "200");
+    expect(item!.AccountCode).toBe("200");
+    expect(item).not.toHaveProperty("ItemCode");
+  });
+
+  it("lets the line's own account beat both the item's and the default", () => {
+    // The defect this precedence exists to prevent: somebody codes one line
+    // deliberately, and the item's standing account is sent instead. Nobody
+    // finds out until a bookkeeper reconciles.
+    const [item] = build([line({ account_code: "260", item_account_code: "200" })], "700");
+    expect(item!.AccountCode).toBe("260");
+  });
+
+  it("lets the item's account beat the default", () => {
+    const [item] = build([line({ item_account_code: "200" })], "700");
+    expect(item!.AccountCode).toBe("200");
+  });
+
+  it("falls past a blank tier to the next real one", () => {
+    // A blank is not a choice. A line whose account was cleared must fall to the
+    // item, not to nothing — otherwise clearing a code silently uncodes the line.
+    const [item] = build([line({ account_code: "  ", item_account_code: "200" })], "700");
+    expect(item!.AccountCode).toBe("200");
+  });
+
+  it("treats a blank code as no code rather than sending an empty one", () => {
+    // Xero rejects `AccountCode: ""`, so a column that is present and empty
+    // must not become a payload key — otherwise one stray space in a form field
+    // fails every invoice for that item.
+    const [item] = build([line({ account_code: "   ", item_account_code: " ", item_code: "" })], "  ");
+    expect(item).not.toHaveProperty("AccountCode");
+    expect(item).not.toHaveProperty("ItemCode");
+  });
+
+  it("codes each line on its own, not the invoice as a whole", () => {
+    const items = build([
+      line({ account_code: "200", item_code: "TOW001" }),
+      line({ description: "Fuel levy" }),
+    ], "260");
+    expect(items[0]!.AccountCode).toBe("200");
+    expect(items[0]!.ItemCode).toBe("TOW001");
+    expect(items[1]!.AccountCode).toBe("260");
+    expect(items[1]).not.toHaveProperty("ItemCode");
+  });
+
+  it("leaves everything else about the line exactly as it was", () => {
+    const [item] = build([line({ account_code: "200", item_code: "TOW001" })]);
+    expect(item!.Description).toBe("Bath towels");
+    expect(item!.Quantity).toBe(10);
+    expect(item!.UnitAmount).toBe(2);
+    expect(item!.TaxType).toBe(TAX_TYPE_TAXABLE);
+  });
+});
+
+describe("resolveAccountCode", () => {
+  it("prefers the line, then the item, then the laundry's default", () => {
+    expect(resolveAccountCode({ line: "1", item: "2", fallback: "3" })).toBe("1");
+    expect(resolveAccountCode({ line: null, item: "2", fallback: "3" })).toBe("2");
+    expect(resolveAccountCode({ line: null, item: null, fallback: "3" })).toBe("3");
+  });
+
+  it("answers null when no tier has been filled in", () => {
+    // The property that keeps this safe to ship: a laundry that has coded
+    // nothing sends no AccountCode at all, which is exactly the payload that
+    // went before any of this existed.
+    expect(resolveAccountCode({})).toBeNull();
+    expect(resolveAccountCode({ line: null, item: undefined, fallback: null })).toBeNull();
+  });
+
+  it("does not let a blank stand in for a real code", () => {
+    expect(resolveAccountCode({ line: "", item: "2" })).toBe("2");
+    expect(resolveAccountCode({ line: "   ", item: "\t", fallback: "3" })).toBe("3");
+    expect(resolveAccountCode({ line: " ", item: " ", fallback: " " })).toBeNull();
+  });
+
+  it("trims what it returns, because Xero matches on the exact string", () => {
+    expect(resolveAccountCode({ line: "  200  " })).toBe("200");
   });
 });

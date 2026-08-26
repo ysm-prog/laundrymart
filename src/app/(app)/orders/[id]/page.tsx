@@ -36,7 +36,7 @@ type Detail = LaundryOrder & {
     billing_state: string | null; billing_postcode: string | null;
   } | null;
   drivers: { full_name: string } | null;
-  assigned_driver: { id: string; full_name: string } | null;
+  assigned_board: { id: string; name: string } | null;
 };
 
 export async function generateMetadata({
@@ -67,10 +67,11 @@ export default async function JobDetailPage({
       "*, customers(id, customer_number, business_name, trading_name, phone, billing_email, " +
       "billing_address_line1, billing_suburb, billing_state, billing_postcode), " +
       // Disambiguated by constraint name: since 0016 `laundry_orders` has two
-      // foreign keys to `drivers` (who collected it, who is delivering it), and
-      // a bare `drivers(...)` embed is rejected by PostgREST at request time.
+      // foreign keys to `drivers` (who collected it, and a historical delivery
+      // assignment), so a bare `drivers(...)` embed is rejected by PostgREST at
+      // request time. The board embed is named by the same habit.
       "drivers!laundry_orders_pickup_driver_id_fkey(full_name), " +
-      "assigned_driver:drivers!laundry_orders_assigned_driver_id_fkey(id, full_name)",
+      "assigned_board:boards!laundry_orders_assigned_board_id_fkey(id, name)",
     )
     .eq("id", id)
     .maybeSingle<Detail>();
@@ -80,14 +81,14 @@ export default async function JobDetailPage({
   // **Whose job this is.** A platform admin's session reads every laundry
   // (0019) while every write is filtered to the one they are working in, so a
   // job from another business opens here and then refuses every action — which
-  // used to surface as "somebody else changed this job's driver". The page
+  // used to surface as "somebody else changed this job's board". The page
   // stays readable, because looking is exactly what that role is for; what
   // changes is that it now says so.
   const foreign = order.tenant_id !== session.tenantId;
 
   const [items, activity, members] = await Promise.all([
     supabase.from("laundry_order_items")
-      .select("id, order_id, item_type, custom_description, quantity_type, exact_quantity, bag_count, estimated_quantity, notes")
+      .select("id, order_id, item_id, item_type, custom_description, quantity_type, exact_quantity, bag_count, estimated_quantity, notes")
       .eq("order_id", id).order("created_at")
       .returns<LaundryOrderItem[]>(),
     supabase.from("laundry_order_activity")
@@ -227,6 +228,7 @@ export default async function JobDetailPage({
         <Suspense fallback={<SkeletonRows rows={3} />}>
           <ChargesCard
             orderId={order.id}
+            tenantId={session.tenantId}
             billingStatus={billingStatus}
             operationalStatus={order.status}
             customerId={order.customer_id}
@@ -238,7 +240,7 @@ export default async function JobDetailPage({
 
       <div className="grid gap-4 lg:grid-cols-3">
         {/* ------------------------------------------------------ delivery --- */}
-        {/* Which driver is taking it, and on what day. `routes.write` is the
+        {/* Which board is taking it, and on what day. `routes.write` is the
             existing plan-and-assign capability — no new one is introduced. */}
         <DispatchCard order={order} canAssign={can(session.role, "routes.write") && !foreign}
                       foreign={foreign} />
@@ -290,10 +292,10 @@ export default async function JobDetailPage({
                      value={order.expected_delivery_time ? formatTime(order.expected_delivery_time) : null} />
                 {/* The two dates the brief is careful to keep apart: what the
                     customer was promised, and the day it is scheduled to a
-                    driver. Usually the same; shown separately so that when they
+                    round. Usually the same; shown separately so that when they
                     differ, somebody notices. */}
                 <Row label="Assigned to"
-                     value={order.assigned_driver?.full_name ?? "Not assigned"} />
+                     value={order.assigned_board?.name ?? "Not assigned"} />
                 <Row label="Assigned delivery date"
                      value={order.assigned_delivery_date
                        ? formatDate(order.assigned_delivery_date) : null} />

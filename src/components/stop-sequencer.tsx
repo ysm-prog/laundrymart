@@ -72,10 +72,12 @@ export function StopSequencer({
             <span className="flex shrink-0 gap-1">
               <button type="button" onClick={() => move(index, index - 1)} disabled={index === 0}
                       aria-label={`Move ${stop.title} up`}
-                      className="rounded border px-2 py-1 text-xs disabled:opacity-40">↑</button>
+                      className="flex size-11 items-center justify-center rounded-lg border text-base
+                                 transition hover:bg-surface-muted disabled:opacity-40">↑</button>
               <button type="button" onClick={() => move(index, index + 1)} disabled={index === order.length - 1}
                       aria-label={`Move ${stop.title} down`}
-                      className="rounded border px-2 py-1 text-xs disabled:opacity-40">↓</button>
+                      className="flex size-11 items-center justify-center rounded-lg border text-base
+                                 transition hover:bg-surface-muted disabled:opacity-40">↓</button>
             </span>
           </li>
         ))}
@@ -83,8 +85,9 @@ export function StopSequencer({
 
       <div className="flex items-center gap-3">
         <button type="submit" disabled={!dirty}
-                className="rounded-md bg-action px-3 py-2 text-sm font-medium text-action-foreground
- transition hover:brightness-110 disabled:pointer-events-none disabled:opacity-50">
+                className="inline-flex min-h-11 items-center rounded-lg bg-action px-4 text-sm font-medium
+ text-action-foreground transition hover:brightness-110
+ disabled:pointer-events-none disabled:opacity-50">
           Save order
         </button>
         {dirty ? <span className="text-sm text-muted-foreground">Unsaved changes</span> : null}

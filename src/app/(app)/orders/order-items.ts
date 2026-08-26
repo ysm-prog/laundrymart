@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { optionalText } from "@/lib/actions";
+import { optionalText, optionalUuid } from "@/lib/actions";
 import { isBlankItem, type OrderItemInput } from "@/lib/domain/laundry-orders";
 
 /**
@@ -28,6 +28,15 @@ const optionalCount = z.preprocess(
  * so each of these has to accept a JSON null as "not answered".
  */
 const itemSchema = z.object({
+  /**
+   * The item master row the counter picked (0032), or null on a row entered as
+   * a bare kind of laundry.
+   *
+   * `optionalUuid` and not `z.uuid().nullish()`: the form spells an unanswered
+   * field `null`, and a plain optional refuses that — the single fault that made
+   * every job creation fail for the module's whole first week.
+   */
+  item_id: optionalUuid,
   item_type: z.string(),
   custom_description: optionalText,
   quantity_type: z.string(),
@@ -77,6 +86,7 @@ export function parseOrderItems(raw: FormDataEntryValue | null): ItemsResult {
   }
   const items = parsed.data
     .map((item) => ({
+      item_id: item.item_id ?? null,
       item_type: item.item_type,
       custom_description: item.custom_description ?? null,
       quantity_type: item.quantity_type,

@@ -8,7 +8,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { recordAudit } from "@/lib/audit";
 import { describeDbError, done, fail, firstIssue, optionalText, toObject } from "@/lib/actions";
-import { platformSettingsSchema } from "./settings-shape";
+import { platformSettingsSchema, readPlatformSettings } from "./settings-shape";
 
 const PLATFORM = "/platform";
 const ADMINS = "/platform/admins";
@@ -60,16 +60,35 @@ export async function switchTenant(formData: FormData): Promise<void> {
 const tenantSchema = z.object({
   name: z.string().trim().min(2, "Give the laundry a name"),
   abn: optionalText,
-  timezone: z.string().trim().min(3).default("Australia/Sydney"),
+  timezone: z.string().trim().min(3).default("Australia/Adelaide"),
 });
 
-/** Add a laundry to this deployment. */
+/**
+ * Add a laundry to this deployment.
+ *
+ * Refused while `single_laundry` is on. The check here is the *sentence*;
+ * `guard_single_laundry` (0041) is the boundary — `tenants` carries 0019's
+ * `tenants_platform` policy, so this action is not the only door onto the
+ * table. Same arrangement as `removePlatformAdmin` above and its
+ * last-administrator trigger: the readable message in front, the rule
+ * underneath, and both reading the same fact.
+ */
 export async function createTenant(formData: FormData): Promise<void> {
   const session = await assertCapability("platform.write");
   const parsed = tenantSchema.safeParse(toObject(formData));
   if (!parsed.success) return fail(PLATFORM, firstIssue(parsed.error));
 
   const supabase = await createClient();
+  const { data: current } = await supabase
+    .from("platform_settings").select("settings").eq("id", true).maybeSingle();
+  if (readPlatformSettings(current?.settings).single_laundry) {
+    return fail(
+      PLATFORM,
+      "This deployment is set up to run one laundry, so another cannot be added.",
+      { href: SETTINGS, label: "Platform settings" },
+    );
+  }
+
   const { data, error } = await supabase
     .from("tenants")
     .insert({

@@ -35,8 +35,31 @@ export type PayloadLine = {
   quantity: number | string | null;
   unit_price: number | string | null;
   taxable: boolean | null;
-  /** The GL account this line is coded to, when the laundry has set one. */
+  /**
+   * The account **this line was explicitly coded to**, as the code is in Xero.
+   *
+   * Read through `invoice_lines.gl_account_id → gl_accounts.xero_account_code`.
+   * This is somebody's deliberate decision about one line, so it beats
+   * everything below it — see `resolveAccountCode`.
+   */
   account_code?: string | null;
+  /**
+   * The account this line's **item** is coded to, as the code is in Xero.
+   *
+   * Read through `invoice_lines.item_id → items.income_account_id →
+   * gl_accounts.xero_account_code`. The standing answer for "where does money
+   * for this kind of work land", used when nobody has coded the line itself.
+   */
+  item_account_code?: string | null;
+  /**
+   * This line's item code **as it is in Xero** (`items.xero_item_code`).
+   *
+   * Deliberately not `items.item_code`: that is the code staff type here, and
+   * Xero refuses an invoice naming an `ItemCode` its own inventory does not
+   * carry. Sending our code on the assumption the two match would turn one
+   * mismatched item into every invoice failing to push.
+   */
+  item_code?: string | null;
 };
 
 export type PayloadCustomer = {
@@ -53,6 +76,43 @@ export type PayloadCustomer = {
 };
 
 export type XeroInvoicePayload = Record<string, unknown>;
+
+/** A code that is present but blank is no code at all. */
+function clean(value: string | null | undefined): string | null {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : null;
+}
+
+/**
+ * Which account a line is coded to in Xero — the whole ladder, in one place.
+ *
+ * Three tiers, most specific first:
+ *
+ *   1. **the line's own account**, when somebody coded this particular line;
+ *   2. **its item's income account**, the standing answer for that kind of work;
+ *   3. **the laundry's default sales account**, for the many lines that carry
+ *      no item at all — a fuel levy, a contract minimum, a consolidated laundry
+ *      charge.
+ *
+ * The first tier is why this function exists. `invoice_lines.gl_account_id` is
+ * a person's deliberate decision about one line; resolving the item's account
+ * ahead of it would quietly send a different code to Xero from the one they
+ * chose, and nobody would find out until a bookkeeper reconciled.
+ *
+ * Every tier resolves to a **Xero** code, never one of ours: each is read
+ * through `gl_accounts.xero_account_code`, which is null until somebody says
+ * what the matching Xero code is. `invoice_lines.account_code` — our own code,
+ * snapshotted when the line was written — is deliberately *not* a tier here.
+ * Sending it would be sending a code from our chart to somebody else's, and
+ * Xero refuses an invoice naming a code it does not carry.
+ */
+export function resolveAccountCode(sources: {
+  line?: string | null;
+  item?: string | null;
+  fallback?: string | null;
+}): string | null {
+  return clean(sources.line) ?? clean(sources.item) ?? clean(sources.fallback);
+}
 
 /** `numeric` comes back from PostgREST as a string; treat both, reject neither. */
 function toNumber(value: number | string | null | undefined): number {
@@ -107,19 +167,42 @@ export function buildContact(customer: PayloadCustomer): Record<string, unknown>
  * dropping it would make the Xero total disagree with ours.
  */
 export function buildInvoicePayload({
-  invoice, lines, customer,
+  invoice, lines, customer, defaultAccountCode = null,
 }: {
   invoice: PayloadInvoice;
   lines: readonly PayloadLine[];
   customer: PayloadCustomer;
+  /**
+   * The laundry's default sales account, chosen once on the Xero settings
+   * screen beside the bank account payments post to.
+   *
+   * It exists because **most invoice lines carry no item at all** — a fuel
+   * levy, a contract minimum, a consolidated laundry charge — so item-level
+   * coding alone would leave uncoded precisely the lines a bookkeeper has to
+   * sort out by hand. It is the last tier: a line's own account wins, then its
+   * item's. See `resolveAccountCode`.
+   */
+  defaultAccountCode?: string | null;
 }): XeroInvoicePayload {
-  const lineItems = lines.map((line) => ({
-    Description: line.description?.trim() || FALLBACK_DESCRIPTION,
-    Quantity: toNumber(line.quantity),
-    UnitAmount: toNumber(line.unit_price),
-    TaxType: line.taxable === false ? TAX_TYPE_EXEMPT : TAX_TYPE_TAXABLE,
-    ...(line.account_code ? { AccountCode: line.account_code } : {}),
-  }));
+  const lineItems = lines.map((line) => {
+    // Trimmed rather than trusted: a code that is present but blank is the same
+    // as no code, and sending `AccountCode: ""` is a rejection rather than a
+    // no-op.
+    const account = resolveAccountCode({
+      line: line.account_code,
+      item: line.item_account_code,
+      fallback: defaultAccountCode,
+    });
+    const item = clean(line.item_code);
+    return {
+      Description: line.description?.trim() || FALLBACK_DESCRIPTION,
+      Quantity: toNumber(line.quantity),
+      UnitAmount: toNumber(line.unit_price),
+      TaxType: line.taxable === false ? TAX_TYPE_EXEMPT : TAX_TYPE_TAXABLE,
+      ...(account ? { AccountCode: account } : {}),
+      ...(item ? { ItemCode: item } : {}),
+    };
+  });
 
   const payload: XeroInvoicePayload = {
     Type: "ACCREC",

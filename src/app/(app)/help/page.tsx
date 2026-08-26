@@ -66,23 +66,27 @@ const GLOSSARY: Array<{ term: string; also?: string; meaning: string }> = [
   },
   {
     term: "My Runs",
-    meaning: "A driver's own jobs for a day they choose, grouped into what is still to deliver, what is out, and what is done. It is the driver's whole workspace: confirm the load, start the route, open a job, mark it delivered. Dates on it are Adelaide dates.",
+    meaning: "One delivery round's own jobs for a day it chooses, grouped into what is still to deliver, what is out, and what is done. It is the round's whole workspace: confirm the load, start the route, open a job, mark it delivered. Dates on it are Adelaide dates.",
   },
   {
-    term: "Assigned driver",
-    meaning: "The person delivering a job. Chosen from your existing drivers when the job is Ready for delivery. You never create or open a run to do it \u2014 the system arranges the driver's day behind the scenes.",
+    term: "Delivery round", also: "board",
+    meaning: "One of your regular delivery rounds \u2014 Board 1, Board 2, and so on. Work is given to the round, not to a person, because whoever drives it changes: leave, sickness, somebody covering. The round has its own login, so whoever is driving it today signs in as the round and sees that day's deliveries. The app still records which person drove it, so you can always answer \"who was holding that parcel?\".",
+  },
+  {
+    term: "Assigned to",
+    meaning: "The delivery round that is taking a job out, and the day it is going. Chosen when the job is Ready for delivery. You never create or open a run to do it \u2014 the app arranges the round's day behind the scenes. Older jobs may still name a person instead of a round; that is their history and it is left alone.",
   },
   {
     term: "Confirm Load",
-    meaning: "The driver saying the day's assigned laundry is on the van. It replaced the old vehicle inspection and is not one: no checklist, no pass or fail. A job assigned after the load is confirmed stays Assigned until the driver confirms again, so nothing is recorded as leaving the depot that did not.",
+    meaning: "Saying the day's laundry is on the van. It replaced the old vehicle inspection and is not one: no checklist, no pass or fail. A job added after the load is confirmed stays Assigned until it is confirmed again, so nothing is recorded as leaving the site that did not.",
   },
   {
     term: "Start Route",
-    meaning: "The driver saying they are on the road. Every loaded job moves from Assigned to Out for delivery, so nobody in the office has to mark them out by hand.",
+    meaning: "Saying the van is on the road. Every loaded job moves from Assigned to Out for delivery, so nobody in the office has to mark them out by hand.",
   },
   {
-    term: "Stop",
-    meaning: "One visit to one customer on one day, used by the linen collection paperwork \u2014 what was picked up, what was handed over, the signature at the door. A stop is not a Job: a Job is a customer's laundry, a stop is a visit. Drivers no longer work from stops; they work from their jobs in My Runs.",
+    term: "Driver visit", also: "stop",
+    meaning: "One call on one customer on one day, and the paperwork that goes with it \u2014 what was picked up, what was handed over, the signature at the door. A visit is not the same as a customer's laundry: the laundry is the bag, the visit is the trip to the door. Drivers no longer work from visits; they work from the jobs in My Runs.",
   },
   {
     term: "Job", also: "laundry order, ticket, docket",
@@ -90,7 +94,7 @@ const GLOSSARY: Array<{ term: string; also?: string; meaning: string }> = [
   },
   {
     term: "Assigned",
-    meaning: "A job that has been given to a driver for a particular delivery date. It is a real state, and a job cannot be in it without both. Assigning changes nothing about the laundry, the customer, the instructions or the price, and removing an assignment simply puts the job back to Ready for delivery \u2014 it does not cancel it.",
+    meaning: "A job that has been given to a delivery round for a particular date. It is a real state, and a job cannot be in it without both. Assigning changes nothing about the laundry, the customer, the instructions or the price, and removing an assignment simply puts the job back to Ready for delivery \u2014 it does not cancel it.",
   },
   {
     term: "Expected delivery date",
@@ -103,6 +107,22 @@ const GLOSSARY: Array<{ term: string; also?: string; meaning: string }> = [
   {
     term: "Overdue",
     meaning: "A job whose date has gone by and is not finished or cancelled. It is worked out from today's date every time you look — nobody sets it, and it clears itself the moment the job is done.",
+  },
+  {
+    term: "Filter chips",
+    meaning: "The row of small buttons above a list. Press one to narrow the list to it, press it again to go back. The number on each says how many rows you would be left with, so nothing surprises you.",
+  },
+  {
+    term: "Clear filters",
+    meaning: "Puts everything back. It only appears when something is actually narrowing the list — so if you cannot see it, you are looking at the whole list.",
+  },
+  {
+    term: "Period",
+    meaning: "The stretch of time a list is showing. Today, this week, last month and so on, or two dates of your own under Custom range. The dates it works out are printed underneath, so you can always see exactly what you are looking at.",
+  },
+  {
+    term: "This financial year",
+    meaning: "1 July to 30 June — the Australian year the books run on, not January to December.",
   },
   {
     term: "Bulk lot",

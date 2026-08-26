@@ -6,7 +6,7 @@ import type { DayJob } from "@/lib/runs/my-runs";
 import { confirmDayLoad, startDayRoute } from "./actions";
 
 /**
- * The driver's two buttons for a day: Confirm Load, then Start Route.
+ * The round's two buttons for a day: Confirm Load, then Start Route.
  *
  * This replaces the six-stage run workflow that used to sit here, and with it
  * the vehicle inspection that used to be stage one. **Confirm Load is not an
@@ -25,10 +25,10 @@ import { confirmDayLoad, startDayRoute } from "./actions";
  * it up, which is the honest way to say "I went back for it".
  */
 export function DayWorkflow({
-  jobs, driverId, date, returnTo,
+  jobs, boardId, date, returnTo,
 }: {
   jobs: DayJob[];
-  driverId: string;
+  boardId: string;
   date: string;
   returnTo: string;
 }) {
@@ -40,7 +40,7 @@ export function DayWorkflow({
   const row = "flex flex-wrap items-center gap-3 rounded-xl border bg-surface-sunken px-4 py-3";
   const fields = (
     <>
-      <input type="hidden" name="driver_id" value={driverId} />
+      <input type="hidden" name="board_id" value={boardId} />
       <input type="hidden" name="date" value={date} />
       <input type="hidden" name="return_to" value={returnTo} />
     </>

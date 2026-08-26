@@ -9,9 +9,21 @@ import type { Flash } from "@/lib/actions";
 /**
  * The toast half of the flash convention: the server (`(app)/template.tsx`)
  * reads the one-shot cookie and passes it down; this component shows it and
- * deletes the cookie so it is never replayed. Success dismisses itself after
- * five seconds; an error stays until the user closes it — good news can pass
- * by, bad news must be acknowledged.
+ * deletes the cookie so it is never replayed.
+ *
+ * **Nothing dismisses itself any more.** Success used to disappear after five
+ * seconds, on the reasoning that good news can pass by while bad news must be
+ * acknowledged. That holds for somebody who reads at speed. For the people this
+ * app is now being built for it does not: the toast is the *only* record that
+ * anything happened — the form has already been redirected away — and five
+ * seconds is not long enough to find it, read it and understand it. Somebody
+ * who looks up to see an empty screen has no way to find out whether their work
+ * saved, and the safe assumption they will make is that it did not, so they do
+ * it again.
+ *
+ * Both tones now wait to be closed, which is also what WCAG 2.2.1 asks for.
+ * The cost is a card that has to be dismissed; the dismiss button is 44px and
+ * sits where the eye already is.
  *
  * Visually it is a soft card floated over the page with a status icon, matching
  * the `Notice` grammar used inline. The icon matters: it carries success and
@@ -31,10 +43,6 @@ export function FlashToast({ flash }: { flash: Flash | null }) {
     if (!current) return;
     // One-shot: consumed the moment it is shown.
     document.cookie = "flash=; Max-Age=0; path=/";
-    if (current.tone === "success") {
-      const timer = setTimeout(() => setCurrent(null), 5000);
-      return () => clearTimeout(timer);
-    }
   }, [current]);
 
   if (!current) return null;
@@ -69,11 +77,11 @@ export function FlashToast({ flash }: { flash: Flash | null }) {
         <button
           type="button"
           onClick={() => setCurrent(null)}
-          aria-label="Dismiss"
-          className="-mr-1 flex size-8 shrink-0 items-center justify-center rounded-lg
-                     text-muted-foreground transition hover:bg-surface-muted"
+          aria-label="Close this message"
+          className="-mr-1 flex size-11 shrink-0 items-center justify-center rounded-lg
+                     text-muted-foreground transition hover:bg-surface-muted hover:text-foreground"
         >
-          <X className="size-4" aria-hidden />
+          <X className="size-5" aria-hidden />
         </button>
       </div>
     </div>

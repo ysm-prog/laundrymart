@@ -31,6 +31,15 @@ import { ITEM_TYPES, ITEM_TYPE_LABELS, type ItemType } from "@/lib/domain/laundr
 export type LaundryPriceRow = {
   customer_id: string | null;
   item_type: string;
+  /**
+   * The item master row this price is for (0032), or null for a price that
+   * covers a whole kind of laundry.
+   *
+   * A per-item price is the specific answer — TOW001 costs this — and a
+   * per-category one is the tier beneath it. Both are resolved here; which wins
+   * is stated once, in `priceJob`.
+   */
+  item_id?: string | null;
   unit_price: number | string | null;
   bag_price: number | string | null;
   taxable: boolean;
@@ -81,21 +90,58 @@ export function priceListFor(
   const prices = new Map<ItemType, LaundryPrice>();
 
   for (const itemType of ITEM_TYPES) {
-    const own = rows.find((row) => row.customer_id === customerId && row.item_type === itemType);
-    const fallback = rows.find((row) => row.customer_id === null && row.item_type === itemType);
+    // `!row.item_id` on both: a price written against one item is not the
+    // price of its whole category, and letting it answer here would quietly
+    // charge every kind of towel at the rate agreed for one of them.
+    const own = rows.find((row) =>
+      row.customer_id === customerId && row.item_type === itemType && !row.item_id);
+    const fallback = rows.find((row) =>
+      row.customer_id === null && row.item_type === itemType && !row.item_id);
     const row = own ?? fallback;
     if (!row) continue;
+    prices.set(itemType, toPrice(row, Boolean(own)));
+  }
 
-    const bagPrice = row.bag_price === null || row.bag_price === undefined
-      ? null
-      : toNumber(row.bag_price);
+  return prices;
+}
 
-    prices.set(itemType, {
-      unitPrice: toNumber(row.unit_price),
-      bagPrice: bagPrice !== null && bagPrice > 0 ? bagPrice : null,
-      taxable: row.taxable !== false,
-      source: own ? "customer" : "default",
-    });
+function toPrice(row: LaundryPriceRow, isOwn: boolean): LaundryPrice {
+  const bagPrice = row.bag_price === null || row.bag_price === undefined
+    ? null
+    : toNumber(row.bag_price);
+  return {
+    unitPrice: toNumber(row.unit_price),
+    bagPrice: bagPrice !== null && bagPrice > 0 ? bagPrice : null,
+    taxable: row.taxable !== false,
+    source: isOwn ? "customer" : "default",
+  };
+}
+
+/**
+ * The same resolution, keyed on the **item** rather than the kind of laundry.
+ *
+ * Separate from `priceListFor` rather than folded into it, because they answer
+ * two different questions and the callers want different ones: the price screens
+ * show a row per kind of laundry, and the pricer wants the most specific price
+ * for the item actually in the bag. Sharing the resolution *rule* — the
+ * customer's own row wins, the tenant default answers where they have none, and
+ * there is no third fallback — is what matters, and it is the same three lines.
+ */
+export function itemPriceListFor(
+  customerId: string,
+  rows: readonly LaundryPriceRow[],
+): Map<string, LaundryPrice> {
+  const prices = new Map<string, LaundryPrice>();
+  const itemIds = [...new Set(
+    rows.map((row) => row.item_id).filter((id): id is string => Boolean(id)),
+  )];
+
+  for (const itemId of itemIds) {
+    const own = rows.find((row) => row.customer_id === customerId && row.item_id === itemId);
+    const fallback = rows.find((row) => row.customer_id === null && row.item_id === itemId);
+    const row = own ?? fallback;
+    if (!row) continue;
+    prices.set(itemId, toPrice(row, Boolean(own)));
   }
 
   return prices;

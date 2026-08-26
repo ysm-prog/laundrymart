@@ -227,8 +227,8 @@ describe("the received instant", () => {
   });
 
   it("keeps the time already on a job when only its date is corrected", () => {
-    // 8:30am Sydney on 12 August, moved back a day: still 8:30am.
-    const existing = "2026-08-11T22:30:00.000Z";
+    // 8:30am Adelaide on 12 August, moved back a day: still 8:30am.
+    const existing = "2026-08-11T23:00:00.000Z";
     expect(toZonedTime(existing)).toBe("08:30");
     const corrected = receivedInstant("2026-08-11", existing);
     expect(toZonedDate(corrected)).toBe("2026-08-11");
@@ -360,5 +360,27 @@ describe("isOverdue", () => {
     // A customer pickup with no promised collection date is not late; it is
     // simply undated, and inventing a deadline would manufacture an alert.
     expect(isOverdue({ status: "ready_for_delivery", due_date: null }, today)).toBe(false);
+  });
+});
+
+describe("describeItem with a coded item", () => {
+  it("says what the counter would say — the code and the name", () => {
+    const line = describeItem(
+      { item_id: "i1", item_type: "towels", quantity_type: "exact", exact_quantity: 12 },
+      "TOW001 — Bath Towel",
+    );
+    expect(line).toBe("12 × TOW001 — Bath Towel");
+  });
+
+  it("falls back to the kind of laundry when no item is named", () => {
+    // Every job written before the item master, and every uncoded row after it.
+    expect(describeItem({ item_type: "towels", quantity_type: "exact", exact_quantity: 12 }))
+      .toBe("12 × Towels");
+  });
+
+  it("ignores a blank label rather than rendering an empty name", () => {
+    expect(describeItem(
+      { item_type: "towels", quantity_type: "exact", exact_quantity: 12 }, "   ",
+    )).toBe("12 × Towels");
   });
 });

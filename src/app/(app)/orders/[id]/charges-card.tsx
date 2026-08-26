@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
+import type { CodingAccount, CodingItem } from "@/components/coding-pickers";
 import { can, type Role } from "@/lib/roles";
 import { money, dateTime } from "@/lib/format";
 import {
@@ -28,23 +29,31 @@ import {
  * approval is a read-only record with the frozen numbers on it.
  */
 export async function ChargesCard({
-  orderId, billingStatus, operationalStatus, customerId, role, approvedAt,
+  orderId, billingStatus, operationalStatus, customerId, role, tenantId, approvedAt,
 }: {
   orderId: string;
   billingStatus: BillingStatus;
   operationalStatus: string;
   customerId: string;
   role: Role;
+  /** §23: the item and account lists feed a write, so they name their tenant. */
+  tenantId: string;
   approvedAt: string | null;
 }) {
   const supabase = await createClient();
-  const [charges, rateCard] = await Promise.all([
+  const editable = chargesAreEditable(billingStatus) && can(role, "billing.write");
+
+  const [charges, rateCard, items, accounts] = await Promise.all([
     loadJobCharges(supabase, orderId),
     loadRateCard(supabase, customerId),
+    // Only when the charges can still be changed. A frozen job is a record, and
+    // fetching an item list and a chart of accounts to render one would be a few
+    // hundred rows read for nothing on every view of every historical job.
+    editable ? loadCodingItems(supabase, tenantId) : Promise.resolve([]),
+    editable ? loadCodingAccounts(supabase, tenantId) : Promise.resolve([]),
   ]);
 
   const subtotal = jobChargeSubtotal(charges);
-  const editable = chargesAreEditable(billingStatus) && can(role, "billing.write");
   const canApprove = can(role, "invoices.approve");
 
   return (
@@ -76,9 +85,17 @@ export async function ChargesCard({
         </p>
       ) : (
         <p className="mb-4 text-sm text-muted-foreground">
-          This customer has no rate card, so charges are added by hand.{" "}
+          {/* The price list is the tier beneath the card (§21), and this line
+              used to deny it existed — which was the same mistake the Price
+              button made: it refused outright without a card, and every customer
+              on this deployment has none. */}
+          This customer has no rate card, so pricing falls back to your{" "}
+          <Link href="/invoices/prices" className="text-primary hover:underline">
+            laundry price list
+          </Link>
+          . Anything neither covers is added by hand.{" "}
           <Link href={`/customers/${customerId}`} className="text-primary hover:underline">
-            Set one
+            Set a rate card
           </Link>
           .
         </p>
@@ -101,7 +118,10 @@ export async function ChargesCard({
               source_item_id: row.source_item_id,
               source_laundry_item_type: row.source_laundry_item_type,
               pricing_model: row.pricing_model,
+              gl_account_id: row.gl_account_id,
             }))}
+            items={items}
+            accounts={accounts}
           />
 
           <div className="mt-5 flex flex-wrap items-center gap-3 border-t pt-4">
@@ -110,8 +130,10 @@ export async function ChargesCard({
               {/* Replaces every line with today's rate card. Said plainly on the
                   button, because a reviewer who has hand-edited a line needs to
                   know this is not an "update the ones I haven't touched". */}
+              {/* Named by tier rather than by "rate card", because the button
+                  works for a customer who has none — the price list answers. */}
               <SubmitButton variant="secondary" size="md" pendingLabel="Pricing…">
-                {charges.length > 0 ? "Re-price from the rate card" : "Price from the rate card"}
+                {charges.length > 0 ? "Re-price this job" : "Price this job"}
               </SubmitButton>
             </form>
 
@@ -221,3 +243,50 @@ const TONES: Record<BillingStatus, "neutral" | "info" | "success" | "warning" | 
   paid: "success",
   not_billable: "neutral",
 };
+
+/**
+ * The item list and the chart of accounts, for coding a charge where it is made.
+ *
+ * Both name their tenant rather than leaning on RLS (§23): a platform admin's
+ * session reads every laundry, and an id chosen here is posted straight back into
+ * a write scoped to one. Both return `[]` rather than throwing when the caller
+ * cannot read them — the chart is gated on `purchases.read` since 0036, and a
+ * role split later must degrade to "no codes offered" rather than to a 500 on a
+ * job page.
+ */
+async function loadCodingItems(
+  supabase: Awaited<ReturnType<typeof createClient>>, tenantId: string,
+): Promise<CodingItem[]> {
+  const { data } = await supabase
+    .from("items")
+    .select("id, item_code, name, description, laundry_category, sell_price, tax_code, income_account_id")
+    .eq("tenant_id", tenantId)
+    .is("deleted_at", null)
+    .eq("status", "active")
+    // An item the laundry only *buys* is not something a customer is charged
+    // for. Inert on the MYOB import — that export carries no sell/buy flag, so
+    // every imported row is both (see `myob/inventory.ts`) — but it is the lever
+    // an owner has: untick "I sell this" on the drums of detergent and the fan
+    // shafts and they stop being offered here, without deleting stock records
+    // the plant still needs.
+    .eq("is_sell", true)
+    .order("item_code", { nullsFirst: false })
+    .limit(500)
+    .returns<CodingItem[]>();
+  return data ?? [];
+}
+
+async function loadCodingAccounts(
+  supabase: Awaited<ReturnType<typeof createClient>>, tenantId: string,
+): Promise<CodingAccount[]> {
+  const { data } = await supabase
+    .from("gl_accounts")
+    .select("id, code, name, account_type, tax_code, is_header")
+    .eq("tenant_id", tenantId)
+    .is("deleted_at", null)
+    .eq("is_header", false)
+    .order("code")
+    .limit(1000)
+    .returns<CodingAccount[]>();
+  return data ?? [];
+}

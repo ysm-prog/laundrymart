@@ -14,6 +14,12 @@ export const MEMBERSHIP_ROLES = [
   "operations_manager",
   "dispatcher",
   "driver",
+  // The round, not the person (0031). A board holds a login, and whoever is
+  // operating that round today signs in as it — which is the whole point: a
+  // driver resigning, being off sick or covering somebody else's route must not
+  // mean re-pointing every open job at a different employee. Next to `driver`
+  // because they are the two operational logins and hold the same capabilities.
+  "board",
   "finance",
   "warehouse_operator",
   "customer_service",
@@ -52,6 +58,7 @@ export const ROLE_LABELS: Record<Role, string> = {
   branch_manager: "Branch Manager",
   regional_manager: "Regional Manager",
   auditor: "Auditor",
+  board: "Board",
 };
 
 // Capabilities are coarse on purpose — one per navigable area plus a write flag.
@@ -71,6 +78,17 @@ export const CAPABILITIES = [
   // (which plans and assigns) because moving a run that is already out on the
   // road is a floor decision, not a planning one — see ROLE_CAPABILITIES.
   "routes.status",
+  // The order a board drives its day in. Deliberately **not** `routes.write`:
+  // the client's rule is that management determines the order and drivers
+  // execute it, and `routes.write` is held by the dispatcher, the branch
+  // manager and the regional manager as well as by the two roles that rule
+  // names. Planning a day and deciding the sequence of calls turned out to be
+  // two decisions, so they are two capabilities.
+  //
+  // `can_write_run_sequence()` (0036) is the same sentence in the database, and
+  // it is the boundary — `jobs` is published on `/rest/v1/jobs`, so before that
+  // migration a driver could PATCH the order of the run they were standing in.
+  "routes.sequence",
   "operations.read",
   "operations.write",
   "run.execute",
@@ -180,9 +198,50 @@ const JOB_TO_INVOICE: Capability[] = ALL.filter(
       || c.startsWith("pricing.") || c.startsWith("billing."),
 );
 
-/** Everything a role may hold that is neither platform work nor the main flow. */
+/**
+ * Ordering a board's day.
+ *
+ * Held by the Owner and the Office manager alone, like the main flow — but a
+ * separate block because it is a separate decision and the two could reasonably
+ * move apart. It is named here rather than left out role by role for exactly
+ * the reason `JOB_TO_INVOICE` is: six of the roles below derive their
+ * capabilities from `TENANT_ALL`, so a capability that is merely *not mentioned*
+ * is a capability six roles quietly hold. `branch_manager` and
+ * `regional_manager` are the two this actually catches.
+ */
+const RUN_SEQUENCE: Capability[] = ["routes.sequence"];
+
+/**
+ * Changing the item master.
+ *
+ * Held by the Owner and the Office manager alone, on the client's own rule: the
+ * item list is the master reference the whole application resolves through — a
+ * job's laundry, all three pricing tiers, every charge, every invoice line and
+ * every report — so it is maintained in one place by two people rather than
+ * edited wherever somebody happens to be standing.
+ *
+ * A block for the reason `JOB_TO_INVOICE` and `RUN_SEQUENCE` are blocks: the
+ * roles below derive their capabilities from `TENANT_ALL`, so a capability that
+ * is merely *not mentioned* is one they quietly hold. `branch_manager` and
+ * `regional_manager` are the two this catches, and they held `items.write`
+ * until 2026-08-26.
+ *
+ * **`items.read` is deliberately not in it.** A board reads item names off its
+ * run sheet, the plant runs batches keyed on them and the counter picks them
+ * into a job; taking the read away would empty those screens. `0040` draws the
+ * same line underneath, which is the half that actually binds — before it, every
+ * member could rewrite the list straight off `/rest/v1/items` whatever this file
+ * said.
+ */
+const ITEM_MASTER: Capability[] = ["items.write"];
+
+/**
+ * Everything a role may hold that is neither platform work, nor the main flow,
+ * nor the run order, nor the item master.
+ */
 const outsideMainFlow = (caps: Capability[]): Capability[] =>
-  caps.filter((c) => !JOB_TO_INVOICE.includes(c));
+  caps.filter((c) => !JOB_TO_INVOICE.includes(c) && !RUN_SEQUENCE.includes(c)
+                  && !ITEM_MASTER.includes(c));
 
 /**
  * Everything a role bounded by one laundry may hold — that is, all of it except
@@ -244,19 +303,48 @@ export const ROLE_CAPABILITIES: Record<Role, readonly Capability[]> = {
     "warehouse.read", "warehouse.write",
     "items.read", "operations.read",
   ],
-  // Customers and the day's stops. Taking laundry in over the counter was this
-  // role's whole point and is now the Owner's and the Office manager's — so a
-  // laundry that wants counter staff to book jobs gives them the Office role
-  // rather than this one.
+  /*
+   * The counter: customers, the day's visits, and taking laundry in.
+   *
+   * `orders.*` came back on 2026-08-24, reversing the 2026-08-16 decision that
+   * had moved it to the Owner and the Office manager alone. That decision was
+   * coherent — job→invoice is one flow and it answers to two people — but its
+   * effect was that a laundry wanting counter staff to book jobs had to make
+   * them **Office manager**, which is 31 screens including the whole ledger,
+   * the plant and the activity log. The least-trained person in the building
+   * was being handed the largest surface in the application to do the one job
+   * this role is named for.
+   *
+   * `orders.manage` is deliberately **not** among them. Cancelling a job,
+   * backdating a receipt and editing one already completed are the supervisor's
+   * set (§3), and none of them is part of taking laundry in.
+   *
+   * The half that matters is not here: `0025` narrowed every *write* on the job
+   * tables to two roles in RLS, so this list alone would let the counter open
+   * the form, press Save and write **zero rows with no error**. `0034` widens
+   * that restrictive layer to match, and `main_flow_scope.test.sql` asserts the
+   * write actually lands rather than merely not raising.
+   */
   customer_service: [
     "customers.read", "customers.write", "agreements.read", "operations.read",
     "routes.read", "routes.status",
+    "orders.read", "orders.write", "orders.status",
   ],
   sales: ["customers.read", "customers.write", "agreements.read", "agreements.write", "items.read", "reports.read"],
   branch_manager: outsideMainFlow(TENANT_ALL.filter((c) => !c.startsWith("admin."))),
   regional_manager: outsideMainFlow(TENANT_ALL.filter((c) => c !== "admin.write")),
   // Read-only access to compliance and history.
   auditor: outsideMainFlow(READ_ONLY),
+  // A round's own work, on the phone in the van. Identical to `driver` and that
+  // is deliberate rather than lazy: the two are the same job done by the same
+  // person, and the only difference is what the work is filed under. RLS is what
+  // makes `routes.status` here mean "my round" rather than "any round" —
+  // `is_board_only()` narrows every routes row to `current_board_id()`.
+  //
+  // What it deliberately does **not** hold: `routes.write`. Ordering the day is
+  // the office's decision and the round follows it, which is the client's own
+  // rule — a board sees the final sequence and cannot change it.
+  board: ["run.execute", "routes.read", "routes.status", "operations.read", "operations.write"],
 };
 
 /**
@@ -283,6 +371,11 @@ export const ROLE_CAPABILITIES: Record<Role, readonly Capability[]> = {
 export const ROLE_PRESETS = [
   { key: "owner", role: "super_admin", label: "Owner" },
   { key: "office", role: "operations_manager", label: "Office" },
+  // The operational login a small laundry actually creates. It leads the other
+  // two operational roles because a round is what work is assigned to now; a
+  // `driver` membership is still offered further down for a laundry that tracks
+  // people rather than rounds.
+  { key: "board", role: "board", label: "Board" },
   { key: "driver", role: "driver", label: "Driver" },
 ] as const satisfies readonly { key: string; role: Role; label: string }[];
 
@@ -325,7 +418,7 @@ export const ROLE_SUMMARY: Record<Role, string> = {
   platform_admin: "Every laundry on this system, and the system itself",
   super_admin: "Everything, including settings and who can sign in",
   operations_manager: "Everything day to day, but not the settings",
-  dispatcher: "Customers, stops, drivers and trucks — no jobs, invoices or prices",
+  dispatcher: "Customers, stops, drivers and trucks — not the run order, jobs, invoices or prices",
   driver: "Their own run, on their phone, and nothing else",
   finance: "Supplier bills, what you owe, and reports",
   warehouse_operator: "The plant floor and stock — not the customer's job",
@@ -334,6 +427,7 @@ export const ROLE_SUMMARY: Record<Role, string> = {
   branch_manager: "Everything at one site except jobs and invoices",
   regional_manager: "Everything across sites except jobs and invoices",
   auditor: "Can look at everything except jobs and invoices, changes nothing",
+  board: "One delivery round, on the phone in the van — its own jobs and nothing else",
 };
 
 export function can(role: Role, capability: Capability): boolean {

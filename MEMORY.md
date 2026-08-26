@@ -1,607 +1,1110 @@
 # MEMORY — working session handoff
 > Auto-loaded each session. Canonical state is CLAUDE.md; this is the live delta.
 
-## Latest: Assign Driver always failed — platform admins read across laundries
-2026-08-18. "Somebody else changed this job's driver a moment ago" on a job nobody else touched.
-CLAUDE.md §3, §23 and the 2026-08-18 entry have it. **No migration.**
-
-**Cause:** `is_member()` is true of *every* laundry for a platform admin (0019); every write is
-filtered to the *active* laundry. So the job (Adelaide) opened fine, the driver picker offered
-Adelaide's and Harbour's drivers, and the tenant-filtered UPDATE matched no row — reported as a
-race that never happened.
-
-**Live wreckage it left (still there, nothing deleted):** RUN00003/JOB00012 and RUN00004/JOB00013
-in Harbour from the failed attempts — RUN00004 crewed by Mario Forte, an *Adelaide* driver;
-RUN00001/JOB00001 in Adelaide crewed by Sam Okoye, a *Harbour* driver (16 Aug); and **LJ00001, an
-Adelaide job whose customer belongs to Harbour**. Ask the owner before repairing any of it.
-
-**Fix:** a read that feeds a write must name its tenant. `lib/runs/my-runs.ts` and
-`my-runs/actions.ts` readers take `tenantId` as a **required argument** (typechecker enforces it);
-plus the jobs list, job form pickers, orders filter bar, dispatch card, and the customer lookup in
-`createOrder` **and** `updateOrder`. Foreign job → a notice naming the laundry, not a dead picker.
-Reads across laundries still allowed; writes are not.
-
-**Both 2026-08-18 changes are on `Prod` and deployed.** `0030` is on `laundrymart-syd`; the whole
-repo ledger is applied there (0001–0030, four of them live under their original branch names).
-Nothing is pending on the database side.
-
-**Not swept (§23):** ~350 of 451 `.from(...)` reads still rely on RLS alone. Correct for the other
-ten roles; a two-business list for a platform admin. Cheapest option on the table: drop the
-platform-admin rows for darshan/jay — they hold `super_admin` in both laundries anyway.
-
-## Previously: people have names, and platform admins are not staff (`0030`)
-Deployed-app finding 2026-08-18: the job Reassign picker read `8c2b996b… · Driver`, with two
-addresses listed twice each. Three faults, one screenshot. CLAUDE.md §2, §7 (`0030`), §11 and the
-2026-08-18 entry have the detail.
-
-**`tenant_members(t)` (0030) is the one read.** Definer function over `memberships ⋈ auth.users`,
-returning the name from `raw_user_meta_data`, the linked driver's name, the address, the role and
-an `is_platform_admin` flag. Replaces the GoTrue admin API, which could only ever return an
-address, cost one HTTP call per member, and **failed outright for all eleven role profiles** —
-their `confirmation_token`/`recovery_token`/`email_change`/`email_change_token_new` were NULL
-(hand-written SQL, §3a) and GoTrue reads those into non-nullable strings. Repaired live to `''`.
-
-**Scoped by argument, and that is the duplicate fix.** `memberships` under RLS returns *every*
-laundry's rows to a platform admin (0019), so their session listed each membership once per
-laundry.
-
-**Platform admins are excluded from every list a person is picked from, People included** —
-owner's decision, and it holds for the signed-in platform admin too. **They are still resolved by
-name**: `staffMembers()` filters pickers, `memberNames()` renders records. A job one of them
-created still says who created it.
-
-**`Adelaide Towel Service` now has an empty People screen and empty job pickers** — its only two
-members are platform admins. By design; invite one real person there.
-
-**Names can be set**: the invite form asks for a full name (required) and the People row can
-rename. That write still goes through the admin API — the read does not.
-
-`src/lib/staff.ts` and `src/lib/members.ts` deleted; `src/lib/directory.ts` + pure rules in
-`src/lib/domain/members.ts`. 515 unit tests, 306 pgTAP assertions, `verify` green, 0030 applied.
-
-## Previously: one pricing model — the rate card adopted (`0028`)
-Owner's decision 2026-08-17: **adopt `customer-pricing-invoicing-sad9af`.** Two rival answers to
-"what is this customer charged?" had both been live since 15 Aug; only one has code now.
-CLAUDE.md §21/§22 and the 2026-08-17 entry have the design.
-
-**A job's money is decided once, by a person, and frozen.** Complete → `awaiting_review` (set by
-the *trigger*, so no client can bill by completing) → price → approve, which stamps `frozen_at`
-and makes the charge rows unwritable **even to `super_admin`**. The monthly run bills what was
-approved, from `job_charge_snapshots`, never re-pricing.
-
-**`laundry_prices` was NOT retired — deliberately against the literal instruction, and say so if
-asked.** `priceJob` reads the rate card only, and **508 of 508 real customers have no rate card**.
-Retiring the list would price every job at nothing and put 508 agreements between the owner and
-their next invoice. It is now the **tier beneath** the card, per *kind of laundry*: rate line wins,
-list answers where the card is silent, neither → still reported, never billed at zero.
-
-**The old batch pricer is deleted** (`buildLaundryCharges`, `describeUnpriced`). Keeping it would
-be the "two answers, dead one looks live" problem this adoption ends. `priceListFor` /
-`defaultPriceList` stay — they are the list, not the pricer.
-
-**Roles follow 0025, not the branch.** `pricing.*` and `billing.*` were **added to
-`JOB_TO_INVOICE`**, so they subtract from every other role. The branch gave pricing to sales and
-the ledger to finance; that predates the owner's narrowing. Four of its tests were rewritten to
-the decision rather than satisfied.
-
-**`0028` exists because two migrations are numbered 0017 and the orders disagree.** Live: pricing
-first, archive wrapped it — correct. Fresh DB: `0017_archive_records.sql` sorts first (`_` < `c`),
-so the pricing rewrite discarded `archived_at is null` from **twelve permissive policies** and an
-archived invoice became readable. Caught by `archive_records.test.sql` (`not ok 10`). 0028 restores
-it, **permissive policies only** — 0025's restrictive ones AND on top and must not be touched.
-
-**`0028` IS applied to `laundrymart-syd`** (2026-08-17). Verified a no-op first — all twelve
-permissive policies already carried the clause, because the live ordering was lucky. Nothing else
-in that entry changes the live schema.
-
-**No invoice has been generated from an approved job.** First live check: take a job in, complete,
-price and approve at Money › Awaiting invoice, run the month, read the draft.
-
-**A stray NUL byte was removed from `laundry-billing.ts`** — pre-existing, made the file read as
-*binary* to grep and ripgrep, which is how it hid.
-
-**The two billing client components are in `/design-preview` now**, and adding them found a real
-defect: both hand-rolled a 16px `size-4` checkbox instead of the shared `Checkbox`'s 18px box in a
-`min-h-11` label. Eleven of them. Fixed to the shared skin with a measured **44px hit area**.
-`Checkbox` itself cannot be used — it is uncontrolled and these hold React state. Asserted at ten
-widths, both themes: no section overflow, no console errors. The 7px doc overflow at 320/1024 is
-the pre-existing planner fixture.
-
-**CLOSED by `0029` (2026-08-17): the `anon` grants are gone.** It was worse than recorded — all
-seven privileges including **TRUNCATE**, on 52 of 53 tables — and **RLS does not apply to
-TRUNCATE**, so "inert because RLS is on" was the wrong reassurance. Live: 364 anon grants → 0,
-`authenticated` (364) and `service_role` (371) untouched, anon refused at 42501, a new table now
-arrives with zero anon grants.
-
-**The half that matters is the default privileges**, not the revoke: Supabase grants anon on every
-new table in `public`, so without rewriting those ACLs the next migration reopens it.
-
-**`pg-bootstrap.sql` now mirrors Supabase's default privileges** — it did not before, which is why
-CI looked clean for months while live was not. Locally: 0 anon grants before the mirror, 364 after,
-0 once 0029 runs. Both new pgTAP assertions were checked to FAIL without 0029.
-
-**Residual, do not forget:** three default ACLs owned by `supabase_admin` still name anon and
-`postgres` cannot alter them. Latent (no table in `public` is owned by that role). Re-check after
-any Supabase platform upgrade:
-`select count(*) from information_schema.role_table_grants where table_schema='public' and grantee='anon';`
-should stay 0.
-
-## Also live: the trial driver, and linking a login is a picker now
-**`Adelaide Towel Service` had no `drivers` rows at all** — the only two on the deployment
-belonged to the demo tenant — so no job could be assigned and My Runs was empty for everybody.
-One trial driver now exists there: **Mario Forte, D001, Adelaide depot, active,
-`fa1a7cb7-dcf0-484b-a5fe-65755c55f1ce`**, `user_id` still null.
-
-**Next step is the owner's, and it is two clicks:** Settings → People → invite Mario's address as
-Driver, then Fleet → Drivers → pick him in the Login column and press Link. No invitation was
-sent from here — this container has no service-role key and its network policy blocks
-`supabase.co` — and the roster's real email addresses are not in this session's context.
-
-**The Drivers screen no longer asks for a UUID.** It used to say "paste from Administration →
-Users", from a screen that has shown emails and not ids since the People rewrite — so the link
-was effectively unmakeable, and an unlinked driver signs in to empty screens because
-`current_driver_id()` matches `drivers.user_id`. Both the Login column and the Add-driver form
-now offer a picker of the tenant's unlinked members. **Not filtered to the `driver` role**, on
-purpose: an owner who drives a van is ordinary, and roles say what somebody may do while this
-link says which driver they are.
-
-`memberEmails` moved to `src/lib/members.ts` and is shared with People. It still asks the admin
-client for ids the caller already got through RLS, never lists users globally.
-
-## Also live: Xero — invoices (`0026`) and payments (`0027`)
-Billing design as decided: rates stay where they are (contract lines + `laundry_prices`), the
-Owner raises one invoice a month, and both the invoice and its payments reach Xero.
-
-**One Xero org per laundry** — `xero_connections` keyed on `tenant_id`. **The tokens are
-credentials**: RLS denies everything outright, grants revoked, and screens read
-`xero_connection_status()` (definer, never returns a token).
-
-**Neither push ever blocks the money.** Issue/record succeeds first; a refusal is written to
-`xero_push_error` with a Retry. A laundry that has not connected, or has not chosen a bank
-account, is **skipped, not failed** — red errors nobody can act on are how an integration gets
-ignored.
-
-**A payment carries an Idempotency-Key (its own id).** Stricter than the invoice path on
-purpose: a duplicated invoice is visible, a duplicated payment quietly makes a customer look
-paid up.
-
-**Payments need a bank account and only the laundry knows which.** The settings screen lists
-their real Xero bank accounts; `payment_account_code` null = skip.
-
-**Both migrations ARE live on `laundrymart-syd` (2026-08-17).** Rehearsed in an aborted
-transaction, then applied and re-verified: RLS on with the one deny policy, **a real token row
-inserted and both `anon` and `authenticated` refused at 42501 with it present** (grants revoked,
-so the refusal beats RLS to it), `xero_connection_status()` carrying the account, 647 invoices /
-0 payments / 508 archived customers untouched, 0 anon-executable functions. Advisors 14 → 15,
-the addition being `xero_connection_status` (documented definer shape).
-
-Pre-flight surprise worth knowing: **`invoices.xero_invoice_id` was already there**, from the
-unmerged `customer-pricing-invoicing-sad9af` branch — `if not exists` made it a no-op.
-
-**NOTHING has yet talked to Xero.** No credentials on the deployment (owner: "I will add
-variable later"), so the app behaves exactly as before. **Next live step:** set
-XERO_CLIENT_ID/SECRET, register `https://ats.coreit.com.au/api/xero/callback` on the Xero app,
-connect, pick the bank account, then issue **one** invoice and take **one** payment and read
-them in Xero.
-
-**The void path IS built** (owner's decision 2026-08-17). Voiding here voids in Xero, never
-blocking the local void. `voidGate` has three skips (never pushed, already VOIDED, not connected)
-and one real refusal: **Xero will not void an invoice with payments applied** — the message says
-"credit note", because that is the remedy. Retry is status-aware: on a void invoice it retries the
-void, not the push.
-
-**`recordXeroReference` was DELETED, on purpose.** It let a person type `xero_invoice_id` by hand,
-which was fine when there was no Xero client. That column is now the push's idempotency key, so a
-typed value would turn the next push into an update against an arbitrary invoice in their books.
-Do not reinstate it.
-
-**Trap worth remembering:** a pgTAP run reporting `0 assertions, 0 failures` is Postgres being
-down, not a pass. Check the count.
-
-## Also live: a test login per role (`npm run seed:roles`) — tooling, no migration
-`scripts/role-profiles.mjs` (the list) + `scripts/seed-role-profiles.mjs` (the runner). One
-login per role in the demo laundry, `<role>@roles.example.com`, shared password printed each
-run. CLAUDE.md §3a has the reasoning.
-
-**The eleven profiles ARE live on `laundrymart-syd`**, in the demo laundry only. Verified:
-`is_member(Adelaide)` false for all eleven, `current_driver_id()` resolves for the driver, and
-0025 proved through the API — warehouse operator UPDATE on `laundry_orders` = 0 rows, office
-manager = 1 row.
-
-**Provisioned by SQL, not by the script** — no service-role key in that container, so
-`auth.users` + `auth.identities` were written in GoTrue's shape and the bcrypt hash verified.
-**The script's own Auth round trip is therefore still unproven**: run
-`npm run seed:roles -- --dry-run` from a machine with the key — it should say "reset password"
-eleven times and create nothing.
-
-**Nor has a sign-in been exercised.** The password grant was attempted; this container's network
-policy answers 403 to `CONNECT …supabase.co` (same wall the Resend path hit). First thing to do
-on the deployed app: sign in as `driver@roles.example.com` / `RoleTest!2026`.
-
-**`platform_admin` needs `--platform-admin`.** It is not a membership and crosses into
-`Adelaide Towel Service`, which defeats testing on the demo tenant.
-
-**The driver profile creates a `drivers` row.** Without one `current_driver_id()` is null and
-the driver's screens are empty — a login that works and shows nothing.
-
-**`role-profiles.test.ts` imports the script's own module**, so the list has no second copy and
-a role added to `roles.ts` without a profile fails a test.
-
-## Previously: job→invoice is the Owner's and the Office manager's (`0025`)
-`orders.*` + `invoices.*` → `super_admin` and `operations_manager` only (owner's decision).
-
-**Two layers, on purpose.** `roles.ts` decides who is *shown* the flow; `0025` adds
-**restrictive** write policies so the database decides who may *change* it. Restrictive, not a
-rewrite, because of the §11 `invoices` divergence — it ANDs with whatever policy is there.
-
-**SELECT is deliberately NOT restricted.** A driver must read the job they are delivering.
-Locking reads would blank My Runs. Ask before changing that.
-
-**`JOB_TO_INVOICE` is subtracted from every other role** rather than omitted per role — six
-roles derive from `TENANT_ALL`, so a new `orders.*` capability would otherwise reopen the flow
-to all of them silently.
-
-**`purchases.*` deliberately did NOT follow.** Finance keeps supplier bills and the chart of
-accounts; it lost only customer invoicing. The old "invoices minus dispatcher" pin is gone and
-the holders are pinned literally.
-
-**0025 IS applied to `laundrymart-syd`** (2026-08-16), rehearsed and verified: a rehearsal
-warehouse operator's UPDATE touched 0 rows, both real logins still write (they are
-`platform_admin`, which `has_role()` admits), 27 policies over 9 tables, no row changed.
-
-**The driver carve-out is load-bearing** — `completeLaundryOrder` writes `laundry_orders` from
-My Runs and `/run`. Without it a driver's delivery completion is refused *silently* (UPDATE 0,
-no error) and the job sits at `out_for_delivery`. A local probe caught it before it shipped.
-
-## Decided: `claude/phase-6-build-0yybvq` is dropped, not pending
-Owner's decision 2026-08-16, all three parts refused on their own merits. **Do not merge it.**
-Simple mode (D2) was built for a 22-row rail and 0025 shrank most roles further; its own
-`inviteMember` uses `generateLink` and therefore *sends no email at all* (the shipped one uses
-`inviteUserByEmail`, which is what makes Supabase send it); the branded invite email needs
-Resend, which has never been proven against the provider. CLAUDE.md §19 has the full reasoning.
-Branch left on the remote, not deleted.
-
-## Also live: deliveries were impossible — nothing ever loads the van
-Found on the deployed app. `only 0 of that item are in transit, so 12 cannot be moved out`.
-
-**`confirmLoad` moves no stock.** `unload.ts` does `in_transit → at_depot`; nothing does the
-reverse. So `in_transit` is written only by *pickups*, and every clean-linen delivery drew from
-an always-empty pool. Verified live: not one `in_transit` row on the whole deployment.
-
-**Fix: a delivery sources from the van if it has it, else the run's depot**
-(`lib/routes/delivery-stock.ts` decides, `deliver-stock.ts` performs). A short van falls back
-**whole**, never split — one delivery line, one ledger row. Both the online action and
-`/api/sync` go through the one helper; they used to carry separate copies of the move.
-
-**If you build a load manifest**, that is where the depot→van hop belongs, and this fallback
-should then only cover the unloaded case. It is not built because the load step captures no
-quantities — counts are taken at the door.
-
-## Also live: the app wears the YSM Hub design language (no migration)
-Presentation only. **No schema, action, RLS policy, capability, query, route or business rule
-moved**, and the 332 unit tests pass untouched. CLAUDE.md §10b and the 2026-08-16 entry have the
-detail; what to carry forward:
-
-**The source of truth is `ysm-prog/ysm-hub`, `src/index.css`** — attached to that session via
-`add_repo` and cloned to `/workspace/ysm-hub`. If you need to re-check a value, read that file
-rather than this app's tokens. Their design is "paper and ink with accent": warm paper
-`#f4f1ea` with an 18px dot grid, ink `#121a19`, teal `#01696f`, Instrument Sans + Instrument
-Serif italic + JetBrains Mono.
-
-**The whole re-skin is in `globals.css`'s token layer** because `src/` carries zero literal
-Tailwind palette classes and zero hard-coded hex outside the email templates. Keep it that way:
-the moment a screen hard-codes a colour, the next re-skin stops being a one-file change.
-
-**Palette values are pinned to one decimal place on purpose.** Integer HSL percentages drift
-1–2 per channel — the first pass rendered `#f4f2eb` instead of `#f4f1ea`. If you add a token,
-carry the decimal and verify by reading the computed colour out of the browser.
-
-**Two places this app knowingly departs from YSM, both documented in §10b — do not "fix" them
-back:**
-1. **Mono labels.** YSM spends mono on eyebrows, table headers and badges. Adopting that would
-   reverse the 2026-08-13 sweep of 74 `font-mono` and every uppercase tracked label across 28
-   files, done because counter staff and drivers read the result as a developer console. Only
-   `BrandMark` uses mono.
-2. **Comfort metrics.** 15px body and 44px controls, against YSM's 14px/36px — this is a counter
-   tablet and a driver's phone, and YSM itself lifts its scale under `@media (pointer: coarse)`.
-
-**The dark theme is derived, not copied.** YSM never contrast-checked its own dark accent
-(`#00898f` = 4.4:1 on page, 4.0:1 on card) and leaves its semantic four at light values that are
-unreadable on `#141412`. Every dark colour here keeps YSM's hue exactly and moves only lightness
-until it clears AA on page, on card, and as a fill under `--on-status`.
-
-**`/design-preview` cannot show the active rail row** — its pathname matches no nav area, so no
-row is ever active there. The active state is an ink pill with paper text (inverted on dark) and
-must be verified by probing the `--sidebar-*` tokens, not by screenshot.
-
-**Verification.** `verify` green; asserted light and dark at eight widths with no console errors.
-The pre-existing dispatch-planner overflow was measured against a stash-and-rebuild baseline
-rather than assumed: **16px at 320/1024 before, 7px after**, same 135/33 overflowing elements and
-the same 16px smallest tap target. **Never opened against a live project** — no Supabase
-credentials in this container, so the authenticated screens have not been seen with real rows.
-
-**Two traps that cost time in this session, both environmental:**
-- Copying `.env.example` verbatim does **not** boot: `SENTRY_DSN=`, `RESEND_API_KEY=` and
-  `CRON_SECRET=` are present-but-empty, which Zod rejects rather than treating as absent, and the
-  anon-key placeholder is under the 20-char minimum. Omit the optionals entirely.
-- `pkill -f "next start"` does **not** match the running process, which is named `next-server`.
-  A survivor kept serving a stale build and returned CSS as `text/plain`, which renders the
-  gallery completely unstyled and silently invalidates every measurement taken against it.
-
-## Also live: a role above the laundry — platform admins (`0019_platform_admin`)
-`platform_admin` is the twelfth role and the only one that is **not a membership**. CLAUDE.md
-§3/§7 and the 2026-08-16 entry have the detail; what to carry forward:
-
-**The widening is two functions, not fifty policies.** `is_member()` and `has_role()` each
-gained `or public.is_platform_admin()`; `is_driver_only()` gained `and not`. Every privileged
-surface funnels through those, so this reaches everything at once — including the `invoices`
-policies this repo and the live project still disagree about (§11), which is exactly why they
-were not rewritten. **If you add a policy, it inherits this for free. Do not restate it.**
-
-**`platform_admins` has no `tenant_id`** — the only table in the schema that does not — and
-`apply_tenant_policy` must never be used on it. Its policy is `is_platform_admin()` both ways,
-so nobody else can see the list exists. `platform_settings` is a single row keyed
-`id boolean primary key default true check (id)`.
-
-**`ROLES` (12) vs `MEMBERSHIP_ROLES` (11).** The check constraint on `memberships.role` refuses
-`platform_admin`. The People picker and the Zod enums in `inviteMember`/`updateMembership` must
-use `MEMBERSHIP_ROLES`, and the last-admin guard must use `membershipRolesWith`, not
-`rolesWith`. Tenant roles are built from `TENANT_ALL`, never `ALL`, so `platform.*` cannot leak
-into `super_admin`.
-
-**0019 IS APPLIED to `laundrymart-syd`** (2026-08-16) and merged to `Prod`. Rehearsed and
-verified per §11 — the decisive probe was a rehearsal laundry invisible to an ordinary member
-and visible to a platform admin, then rolled back.
-
-**Bootstrapped: `darshan@` and `jay@ctnorwood.com.au` are the two platform admins** (2026-08-16).
-Two on purpose — the delete guard refuses the last row. Verified as each: both laundries visible,
-the ledger readable, and a non-admin still sees nothing.
-
-**Both logins now resolve as `platform_admin`, not `super_admin`.** `requireSession()` checks
-`platform_admins` first, so their memberships no longer drive their role. They default to
-`Adelaide Towel Service` (first by name) and switch from the account menu. Memberships untouched;
-delete the platform row to put either back to `super_admin`.
-
-**Release is read-only on purpose.** `platform_migrations()` reads the ledger; there is no
-function that applies one. The brief asked for schema updates from the app and this deliberately
-stops short — CI and the Supabase console own DDL. Don't "finish" it without asking.
-
-**Session resolution changed for everyone**, not just platform admins: `requireSession()` now
-reads an `active_tenant` cookie and orders the membership query. The old `.limit(1)` with no
-ordering (the §11 bug) is gone.
-
-## Previously: monthly invoices bill the counter's laundry (`0018_laundry_pricing`)
-The Jobs module carried no money since 0014, so a drop-off customer was never billed. Now the
-monthly run makes one draft invoice per customer carrying **every item of every job completed
-in the period, at that customer's price**, beside the contract charges it already produced.
-CLAUDE.md §4/§7 and the 2026-08-16 entry have the detail; what to carry forward:
-
-**Numbered 0018, not 0017** — `Prod` took 0017 for `archive_records` while this was in
-flight, and that one is already applied live. `laundry_prices` is deliberately **not** in
-`archivable_tables()`: a price list is configuration, not a customer's paperwork.
-
-**Prices live in `laundry_prices`, one row per kind of laundry per scope.** `customer_id is
-null` is the tenant default and a customer row overrides it — **there is no third fallback**.
-The unique index is `(tenant_id, customer_id, item_type) nulls not distinct`, because under the
-default NULL rule the *default* list is exactly the row that could be duplicated. Writes are
-role-gated like 0006 and `apply_tenant_policy` is deliberately **not** used: its permissive
-`for all` policy would OR with the role gate and let any member re-price the work.
-
-**Unpriced is a reported outcome, never a zero.** `buildLaundryCharges` returns lines *and*
-unpriced items with the reason and job number; the run reports them in a sticky toast linking
-to `/invoices/prices`. The form parser (`prices/price-form.ts`, outside `"use server"`, tested)
-holds the matching rule: **blank clears the row, it does not store zero.** If you touch either,
-keep that distinction — a zero bills silently, a missing price is visible.
-
-**A job is billed once, marked by `invoice_lines.laundry_order_id`.** The run skips any job
-already on a non-void invoice. Voiding an invoice makes its work billable again, on purpose.
-
-**Contracts are no longer a precondition of `generateInvoices`.** It used to refuse the whole
-period when no contract covered it, which would now hold back every counter-only customer. The
-customer set is contract customers ∪ customers with unbilled completed jobs.
-
-**Period edges are composed in `BUSINESS_TIMEZONE`** (`toInstant(start)` … `toInstant(end+1)`),
-because `completed_at` is a timestamptz and a 9pm finish on the 31st belongs to that month.
-
-**0018 is applied to `laundrymart-syd` (2026-08-16)** and verified by rolled-back probe: RLS on,
-both policies present, unique index `nulls not distinct`, trigger attached, and an `anon` read of
-an inserted price returning 0 rows. No new security advisor.
-
-**Watch this — there are two pricing designs in the live database.** The unmerged branch
-`claude/customer-pricing-invoicing-sad9af` applied `0017_customer_pricing_billing` on 2026-08-15:
-rate cards via `customers.rate_card_agreement_id` plus frozen `job_charge_snapshots`. It landed on
-**exactly** the same `invoice_lines.laundry_order_id` (same FK, same partial index), which is why
-0018 adds that column `if not exists` — without the guard it fails 42701 on the hosted database.
-Its tables are **empty** and its code is unmerged, so only this design has screens behind it. That
-branch needs a decision before anyone relies on either.
-
-**Verification.** 325 unit tests, 131 pgTAP assertions, `verify` green, all migrations + pgTAP
-+ seed applied to a fresh Postgres 16 in-container, price table asserted at eight widths in
-`/design-preview` light and dark. **No live project** — no invoice has been generated with real
-jobs on it. First thing on a live project: apply 0018, set the usual prices at
-Invoices › Laundry prices, run one month, read the draft.
-
-## Also live: hide the real records, reversibly (`0017_archive_records`)
-**Applied to `laundrymart-syd`, and the real records ARE archived (2026-08-16).** 1,154 rows
-hidden — 508 customers, 646 invoices. A signed-in user now sees only the demo tenant's 4
-customers and 1 invoice. Nothing deleted; every row still on disk with its `archived_at` stamp.
-Undo with `select public.set_records_archived('20000000-0000-4000-8000-000000000001', false);`
-called as a super_admin of that tenant. CLAUDE.md §3, §11 and the 2026-08-16 changelog.
-
-**Merged into `Prod`** (`f52116a`, PR #18, CI green), so `/admin/data` — Settings → Your
-records — is deployed and the undo is a button. The SQL call above is the fallback.
-
-**`Dev` is stale**: 15 commits behind `Prod` at the time of this merge, which is why this went
-straight to `Prod` like the three features before it. Worth a catch-up merge before anyone
-treats `Dev` as a staging branch again.
-
-**The live project has two tenants and only one of them is real.** `Adelaide Towel Service`
-(`20000000-0000-4000-8000-000000000001`) holds 508 customers and 646 invoices and **no jobs**;
-`Harbour Commercial Laundry` is the demo seed. The real tenant also holds 1,515 supplier bills,
-192 suppliers, 268 GL accounts and 636 import-activation rows from branches not merged here —
-**those have no screens in this build, so they are already invisible and 0017 does not touch
-them.** Both logins (`darshan@`, `jay@ctnorwood.com.au`) are super_admin of *both* tenants.
-
-**Watch this:** `requireSession()` picks the membership with `.limit(1)` and **no ordering**,
-so which of the two tenants a user lands in is effectively arbitrary. Pre-existing, unrelated
-to this branch, and worth fixing before anyone relies on the demo/real split.
-
-**The hiding is in the RLS policy, not in the queries** — `archived_at is null` appended to
-every policy on nineteen tables. `with check` carries it too, which is *why* archive/restore is
-`set_records_archived(t, archive)`, SECURITY DEFINER with the membership+role check inside:
-once a row is archived nobody signed in can see it, so nobody signed in can clear the flag.
-Call it on the **RLS-bound** client (needs a real `auth.uid()`), never the admin one.
-
-**The rewrite is generic on purpose.** `apply_archive_policy()` reads each policy's expression
-out of `pg_get_expr` and wraps it, because this repo's `invoices` policies and the live
-project's are different shapes (§11) and restating either would have dropped the other's
-tenancy predicate. If you add a table to `archivable_tables()`, that is the only place to add
-it — the DDL loop, the stamper and the counts all read it, and `archive.test.ts` pins the
-screen's labels to it from both directions.
-
-**The service-role client is the one reader policies do not apply to.** `/api/notifications/
-sweep` filters `archived_at` by hand for that reason. Any new admin-client read of customers,
-jobs or invoices needs the same filter.
-## Previously: roadmap Phase D — an owner can add their own people (no migration)
-Invite by email, remove access, three role presets. CLAUDE.md §10c and the 2026-08-15
-changelog entry have the detail; the parts worth carrying forward:
-
-**The invite lands on `/auth/invite`, never `/auth/callback`.** Supabase returns an accepted
-invitation with the session in the URL **fragment** (never sent to the server), and
-`inviteUserByEmail` cannot use PKCE because the inviting browser is not the accepting one — no
-code verifier is waiting. Pointing it at `/auth/callback` compiles, builds and dead-ends every
-invitee on "link was invalid or expired". `/auth/invite` is therefore **the only
-client-rendered screen in the app** and `src/lib/supabase/client.ts` the **only browser Supabase
-client** — and that one reads `process.env.NEXT_PUBLIC_*` directly, deliberately unlike the
-three server clients, because `lib/env` validates the service-role key and must not be bundled
-for the browser.
-
-**Removing access opened a lockout that granting never could.** Two administrators could each
-demote or remove the other. `updateMembership` and `removeMember` both refuse the last
-`admin.write` holder, counted against `rolesWith("admin.write")` — derived, never hand-listed.
-A failed count reads as "not stranded", so a transient error refuses nothing.
-
-**Role presets are presentation.** `ROLE_PRESETS` carries a `role`, never a capability list;
-the database, `has_role()` and every policy know only the eleven roles. Replaced `COMMON_ROLES`.
-
-**D2 (simple mode) was deliberately not built** — its premise was a 22-row rail, which the
-2026-08-05 audit and the 2026-08-14 workflow change already removed. The `ui_mode` slot in
-`tenants.settings` stays reserved. D3 and D4 shipped 2026-08-05, so Phase D is otherwise done
-and the roadmap's remaining work is Phase E (customer portal, public tracking, Xero, bag scan).
-
-**Untested end to end.** No Supabase credentials here, so the mail → redirect → fragment →
-password round trip has never run. **First thing on a live project: add `<origin>/auth/invite`
-to the allowed redirect URLs, then invite one real address and follow the link.**
-
-**The workflow simplification is done, applied to `laundrymart-syd` and merged into `Prod`.**
-CLAUDE.md §18 has the full entry; the short version:
-
-```
-operational  new → in_progress → ready_for_delivery → assigned → out_for_delivery → completed
-financial    pending → awaiting_review → approved → invoice_generated → invoice_sent → paid
-```
-
-**`0017_customer_pricing_billing` is the only migration, and it IS applied to `laundrymart-syd`**
-(2026-08-15, via the Supabase MCP; ledger name `0017_customer_pricing_billing`). It was applied to a
-fresh Postgres 16 in-container first, with the whole pgTAP suite and the seed against it, then to
-the live project after reading its preconditions.
-
-**What the live verification actually proved** (CLAUDE.md §11 has the full record): the backfill —
-LJ00003 and LJ00006 `completed → awaiting_review`, LJ00004/5 left `pending`, 512 customers defaulted
-to `monthly_consolidated`; **fourteen guard probes in one rolled-back block** against real rows, all
-correct; and the security claim end to end — a real member demoted to `driver` inside a rolled-back
-transaction read **0 of 647 invoices and 0 of 5 rate lines** while still reading contract headers and
-customers. Advisors 7 → 10, the three new ones being this migration's own helpers.
-
-**Two things to know before the next live change.**
-1. **`anon` holds SELECT and INSERT on all 49 public tables** of the live project. The repo's
-   migrations never grant that — it arrived with an unmerged import branch. It is inert today
-   (RLS on all 49, every policy `to authenticated`; probed as `anon`: 0 rows read, INSERT refused),
-   but it is missing defence-in-depth and deserves its own migration. Not bundled into 0017.
-2. Probe C in the live run refused with *"a job cannot go from billing state pending to approved"*
-   rather than *"only a completed job can be approved"* — because the job was `pending`, so the
-   transition table rejects it before the completed-job rule is reached. Both are correct refusals;
-   don't read the message as evidence the completed-job rule fired.
-
-**Statement order in 0017 is load-bearing**, same as 0016: the billing columns are added and
-backfilled (cancelled → `not_billable`, completed → `awaiting_review`) *before* the guard that
-polices them, because those are not transitions — they are what was already true. Re-running
-against an empty database is a no-op on the backfill.
-
-**The one sentence the whole feature exists for:** changing a customer's rate tomorrow must never
-change an invoice from yesterday. That is true because approval copies the rate card into
-`job_charge_snapshots` and stamps `frozen_at`, and `guard_job_charge_snapshot` then refuses every
-update and delete — **including from `super_admin`**. `job_billing.test.sql` raises a rate line to
-$99 after approval and asserts the approved job still reads $3. If you touch that guard, that is
-the test to re-read.
-
-**Completion never bills.** The stamp to `awaiting_review` is made by
-`guard_laundry_order_transition`, not by a screen, so no client can bill by completing. The pgTAP
-proof completes a job and counts zero invoices.
-
-**Watch this one — it is the bug I introduced and fixed mid-build.** The billing guard as first
-written forbade `invoice_generated → approved`, which would have made voiding an invoice strand its
-jobs forever. The rule now is explicit: a job returns to `approved` exactly when **no
-`invoice_source_jobs` row references it**. So `releaseVoidedInvoiceJobs` must delete the link rows
-*before* updating the jobs, and it bails if the delete fails. Any new path out of an invoiced state
-has to go through that same door.
-
-**`uq_invoice_source_jobs_once` is partial on purpose** — unique on `(tenant_id, order_id)` where
-`invoice_id is not null`. Partial because voiding has to release the work; a plain unique
-constraint would have made a wrongly-invoiced job permanently unbillable.
-
-**Two records of one fact again** (the 0016 arrangement): `invoices.source_job_id` is set only for
-a single-job invoice, `invoice_source_jobs` carries every job, and `guard_invoice_source_job`
-refuses any way they could disagree.
-
-**Dispatcher lost `invoices.read`/`invoices.write`.** That is the only capability any role lost.
-Driver, warehouse operator, customer service and dispatcher now hold no financial capability and
-keep every operational one; `nav.test.ts` asserts both directions. Sales hold `pricing.*` and not
-the ledger — that split is the entire reason pricing and billing are separate capabilities.
-
-**RLS is the boundary, not React.** 0017 replaced the read policies on `invoices`,
-`invoice_lines`, `payments`, `credit_notes`, `credit_note_lines` and `service_agreement_lines`.
-Two traps that cost real thought:
-- **a `for all` policy's USING half grants SELECT too**, so narrowing only `<t>_read` would have
-  left the hole open through `<t>_write` — both were replaced;
-- 0006's read policy was `is_member` and nothing more, so since My Runs a driver's session could
-  read every invoice amount off PostgREST. The proof reads *as a driver and as a dispatcher* and
-  counts zero rows, rather than inspecting policy text.
-
-Knock-on: the money **reports** are filtered out of `/reports` for a role without `billing.read`,
-because a revenue report rendering "$0" is a wrong answer that looks like a right one.
-
-**Rate cards are service agreement versions** — no `rate_cards` table was invented. The bridge to
-counter laundry is one nullable column, `service_agreement_lines.laundry_item_type`; a rate line
-without it prices linen rental and is invisible to the job pricer, which is correct.
-
-**The contract minimum is deliberately never applied per job** (fifteen jobs would mean fifteen
-minimums). The fuel levy is, because a levy is genuinely per delivery.
-
-**Xero is recorded by hand and nothing else.** Columns exist on customers and invoices and the
-screens say plainly that this app does not talk to Xero. Authentication and invoice-state mapping
-were unresolved at the previous checkpoint and still are — do not invent an API contract.
-
-**Still true from before:** `laundry_orders` has two FKs to `drivers`, so every `drivers(...)` embed
-on it must be disambiguated by constraint name or PostgREST returns PGRST201 at request time.
-`@typescript-eslint/no-unused-vars` is an error. Compose-locally-commit-once payload schemas stay
-outside `"use server"` files with tests against what the producer really emits — that rule caught
-two things again here: `orders/job-charges.ts` (the charge editor's payload) and
-`lib/domain/invoice-grouping.ts`, which had to move out of `lib/invoices/from-jobs.ts` because that
-module reaches `recordAudit` → `lib/env` and throws in a test environment.
-
-**Verification state.** 358 unit tests, 164 pgTAP assertions, typecheck/lint/build green, all
-seventeen migrations + the pgTAP suite + the seed applied to a fresh Postgres 16 in-container.
-**Not opened against a live Supabase project, and no screen was rendered with real rows in it.**
-The billing screens have not been screenshotted at the ten widths the design system asks for.
+## Latest: the emails look like the rest of it, and the chase cannot fire blind
+2026-08-26, branch `claude/adelaide-towel-single-tenant-tbyy06`. Wiring Resend for PROD in YSM
+Hub's language with the Core IT credit. **No migration** — `git diff` over `supabase/` is empty.
+CLAUDE.md §10d holds the design.
+
+**The transport was already right; the templates were not.** `sendEmail()` has been the single
+door to Resend since Phase C and all five senders use it. The four *templates* each carried their
+own chrome and none of it was the brand — grey `#f6f7f9`, system fonts, and the teal in exactly
+one button of one email.
+
+- **One shell** (`src/lib/email/layout.ts`), YSM Hub's palette transcribed from its `src/index.css`
+  byte for byte (paper `#F4F1EA`, card `#FBF9F3`, ink `#121A19`, accent `#01696F`). Literal hex,
+  because mail clients have no `var()`. The templates lost their `<!doctype html>`.
+- **`email-branding.test.ts` sweeps every template's *source*** and fails on a hex outside
+  `EMAIL_PALETTE`; comments stripped first, and it asserts it found four templates before
+  sweeping so a rename cannot make it pass vacuously.
+- **Core IT credit on customer mail only** — same wording/size/link as YSM Hub's `lib/_credit.js`,
+  whose header draws that exact boundary. On invoice/delivery/chase, off invitation/sign-in link,
+  asserted both ways and in both halves.
+- Screenshotted at 700px and 390px across six states: 0 overflow, 0 console errors.
+
+**One test rewritten to its decision:** the chase asserted `not.toContain("href=")` to mean *no
+payment link*; the credit gave it its first hyperlink. It now asserts the only link is the credit
+and nothing invites a payment.
+
+**The finding that changed the work.** 646 invoices are MYOB headers with **no payment rows**;
+449 customers have a billing address. The 7/14/21 cadence keeps 400 ancient ones out (some due
+**2011**) but **41 sit on a reminder day today** — so setting `RESEND_API_KEY` and switching
+customer email on would have chased 41 real businesses about money this app cannot see settled.
+`chaseBlockedBecause` fixes it: **never chase an invoice this app did not send** (`emailed_to` is
+written by `lib/invoices/send.ts` and nothing else — checked). Pure, in
+`lib/notifications/settings.ts` beside `reminderDue` so a unit test reaches it; proved
+non-vacuous.
+
+**965 unit tests (was 940), `verify` green.** 478 pgTAP unchanged.
+
+**Nothing has ever been sent** — 0 `emailed_to`, 0 `auth.one_time_tokens`. Left to do, in order:
+verify the domain in Resend (SPF+DKIM), set the four vars on Vercel (Production *and* Preview),
+then Settings › Notifications › *Send a test email*. Only then the customer switches.
+
+## Previously: Adelaide Towel Service is the only laundry
+2026-08-26, branch `claude/adelaide-towel-single-tenant-tbyy06`. Mostly a **live data change**;
+one migration (`0041`) keeps it that way. No new table, column, policy or capability; nothing
+dropped and no row's meaning changed. CLAUDE.md §11 has the read-backs, §7 the migration, §3a the
+consequence for the test logins.
+
+**`Harbour Commercial Laundry` is deleted** — 186 rows across 27 tables, one `delete from tenants`
+with all 51 cascading FKs still enforced. Snapshotted first to
+`docs/archive/harbour-demo-tenant-2026-08-26.json`, so it is reversible by data and not only by
+`supabase/seed.sql`. Two guard triggers (`guard_production_batch_lines_change`,
+`guard_laundry_order_items_change`) had to be disabled to let the cascade through and were
+re-enabled in the same transaction — the Jay CT lesson, five days on.
+
+**Twelve Adelaide rows went with it, and that is the part beyond the ask.** Every Adelaide row
+that *pointed into* Harbour blocked the cascade, and every one was an artefact of the 2026-08-18
+cross-tenant bug or the 2026-08-16 delivery session: `LJ00001` + its item + 6 activity rows, stop
+`JOB00001`, `RUN00001`, and the project's only `deliveries`/`delivery_lines` pair. All against
+Harbour's customer `Test`. **Adelaide now has 0 laundry jobs and 0 runs** — honest, since its whole
+job history was test activity. Found by sweeping *every* FK between two tenant-scoped tables for
+disagreeing `tenant_id`s: nine such references existed, in both directions.
+
+**The twelve `@roles.example.com` profiles are members of the real laundry now** (owner's call), so
+each role can still be signed in as. **This reverses a property §11 used to prove** — they were
+Harbour-only, so the 508 real customers were outside all of them. Re-proved as six real sessions
+instead: counter/driver/board read **0** invoices, **0** accounts, **0** audit rows; owner/auditor
+read 646/268/41; finance reads the money and 0 audit. `driver@` and `board@` got a `Test Driver`
+and `TESTBOARD` row in Adelaide, or `current_driver_id()`/`current_board_id()` would be null and
+both logins would work with empty screens. **The shared password is a live credential now** —
+replace it via People › Email sign-in link.
+
+**The 1,154 archived records are restored** through `set_records_archived(…, false)` as a real
+owner session: 508 customers, 646 invoices readable again.
+
+**`0041` exists because the screen is not the boundary.** `tenants` carries 0019's
+`tenants_platform` policy, so a platform admin could POST a second laundry straight to
+`/rest/v1/tenants`. `guard_single_laundry` refuses with 42501; the action's check is the readable
+sentence in front. A **switch** (`platform_settings.settings.single_laundry`), not a removal,
+because the ask was "for now" — one press on Platform › Settings turns it off, no deploy.
+**Absent means off**, which is load-bearing: the seed creates a laundry and the proofs create two.
+**INSERT only, and only the second** — renaming, suspending and deleting stay writable, and the
+first laundry is always allowed.
+
+**934 unit tests (was 928), 478 pgTAP assertions across 26 files (was 469/25), `verify` green**,
+43 migrations against a fresh Postgres 16 with the suite and seed. **940/478 with `Prod` merged
+in**, which brought the coding-control fix. The seed applying on top is the real check here: it
+creates a laundry, so passing is "absent means off" proved rather than asserted. New assertions proved to fail
+without the fix: the proof dies outright without 0041, and `z.coerce.boolean()` in place of the
+checkbox preprocessor fails the stray-value test.
+
+**Applied live before the merge.** Rehearsed in a transaction that ended by raising; the rollback
+read back clean, the real run matched it exactly, ten assertions passed. After: **1 tenant**, 18
+logins, 508 customers, 646 invoices, 254 items, 268 accounts, 1,515 bills, 5 boards, 2 drivers,
+0 jobs, 0 runs. Advisors **23**, unchanged — both new functions are revoked from `authenticated`
+so neither is on the list. 0 anon table grants, 0 tables without RLS. Refusal proved as a real
+platform admin: 42501 with the sentence, while a rename still touched its row.
+
+**Two things left for the owner, not the code.** Adelaide's only depot (`ADL`) is **inactive** —
+set that way deliberately by `darshan@` at 01:57 on 2026-08-26 — and all eight site pickers filter
+`status = 'active'`, so adding a customer/driver/board/vehicle/contract currently offers no site.
+One press on Settings › Sites. And Adelaide still holds **0 laundry prices**. One `run-media`
+object under the old tenant's prefix survives: Supabase refuses a direct delete on
+`storage.objects`.
+
+**Not verified behind the auth gate** — no Supabase credentials here. Before trusting it: sign in
+as `owner@roles.example.com` on `ats.coreit.com.au`, check Platform shows "This laundry" with no
+Add form, and that Customers lists the 508 that came back.
+
+**Merged to `Prod` (`bf92cbc`, PR #38) and `Dev` (`1b799f9`, PR #39)** — identical trees, CI green
+on all three jobs, Vercel production deploy completed. `Prod` had moved (PR #36, the coding
+control) and was merged in first; only the two doc files conflicted. Direct pushes to `Prod` are
+refused in this environment, so the merge went through pull requests.
+
+
+## Previously: the coding control stopped promising codes that are not there
+
+> **Superseded in its data, not its fix.** `Harbour Commercial Laundry` and `LJ00006` were deleted
+> later the same day (see the entry above). The rule and its tests stand.
+2026-08-26, branch `claude/code-review-requirements-ns6bav`. Reported from the deployed app —
+*"I still can't get the codes here"* on `LJ00006`'s charges. **No migration.**
+
+**The diagnosis is data, not code.** `LJ00006` is a **Harbour Commercial Laundry** job (the demo
+tenant), and Harbour holds **0 `gl_accounts`**. The **261** postable accounts and the **254**
+items belong to **Adelaide Towel Service**. Both owner logins are platform admins and
+`super_admin` of both, so the answer is the tenant switcher in the account menu.
+
+**What was genuinely broken:** the charges editor said "Add item or code" regardless, and pressing
+it produced an item picker and an apology — the dead end §27 already records being fixed on the
+invoice composer one screen over. `codingOffer` in `lib/domain/coding.ts` is that rule now, pure
+and tested; the absence sentence names the *missing list* rather than the consequence. 934 unit
+tests (was 928), gallery gained the third state, 48 browser assertions at 390/1440 with 0 console
+errors, and both new assertions confirmed to fail without the fix.
+
+**Two things left, both the owner's and neither a code change:**
+- Adelaide holds **0 of 254 items with an income account**, so item→code produces nothing there.
+  The MYOB inventory export carries no such column, so nothing was dropped or guessed (§25's
+  discipline). Set it on `/items/:id` — only the few items a customer is charged for need it.
+- **0 of 261 accounts carry a `xero_account_code`**, so even a coded line sends nothing to Xero.
+
+
+## Previously: one invoice per customer per month, and it fills up as it goes
+2026-08-26, branch `claude/invoice-draft-consolidation-eqr3o7`. **One migration (`0040`)**, no new
+table, no new role, no new capability, nothing dropped. `docs/REQUIREMENTS-RUNNING-DRAFT-INVOICE.md`
+is the BA statement; CLAUDE.md §30 the rationale, §4 the database rules, §7 the migration.
+
+**The defect: consolidation belonged to a button press, not to the customer.**
+`generateInvoicesForJobs` always **inserted** and `groupJobsForInvoicing` grouped only the jobs it
+was handed — so a `monthly_consolidated` customer got one invoice per *press*. Approve on the 3rd
+and Generate, approve on the 11th and Generate: two August invoices. Nothing double-billed
+(`uq_invoice_source_jobs_once`); the month was split.
+
+- **Approving a job places its charges on that customer's open draft for the period.** Next job
+  joins the same one; same item at the same rate merges into one line. `manual` is the opt-out —
+  no new setting, because that billing method already means "a person decides each time".
+- **New board: Money › Open drafts** (`/invoices/drafts`), one card per running invoice with
+  **Issue now** on every row and a bulk Issue selected. Issuing at any time is the point.
+- **Take a job back off a draft** — voiding releases *all* of them, which is wrong for a draft
+  carrying eleven good jobs and one bad one.
+- **The month-end run writes onto the same draft**, so §4's "one invoice per customer per period,
+  contracts *and* jobs" is true for the first time; it used to raise two.
+- **An invoice is dated the day it is issued** (`issueOneInvoice` re-stamps `issue_date`/`due_date`).
+  A behaviour change, and necessary: a draft opened on the 3rd would otherwise arrive on the 31st
+  a fortnight overdue.
+
+**Two holes found on the way, neither about the feature:**
+- **A line could be added to an issued, sent, paid or voided invoice** — `addInvoiceLine` checks the
+  capability and never the status, and `invoice_lines` is on `/rest/v1/…`.
+  `guard_invoice_line_draft_only` refuses with 42501 (trigger, not restrictive policy: the rule is
+  about the *parent's* state, and a restrictive policy writes zero rows in silence).
+- **Nothing said where a line came from**, so "rebuild the generator's lines, leave typed ones
+  alone" was inexpressible. `invoice_lines.origin` = job / contract / manual, default manual.
+
+**Decisions:** job lines are **rebuilt, never patched** (consolidated lines are sums of frozen
+amounts; recomputing loses the cent), `jobInvoiceLines` is the single line writer shared by create
+and append, and the draft is found via a **partial unique index** rather than remembered. The
+residual two-writer race is documented and narrowed by one retry inside `rebuildJobLines`; closing
+it fully needs a database function.
+
+**913 unit tests (was 894), 460 pgTAP assertions (was 439), `verify` green**, 41 migrations against
+a fresh Postgres 16 with the suite and seed. Every new assertion proved to fail without its fix.
+Gallery measured: 24 combinations, 0 console errors, 0 section overflow, 0 sub-36px targets,
+document overflow byte-identical to the baseline.
+
+**Applied to `laundrymart-syd` before the merge** (`20260826040754`), so the schema led the code.
+Rehearsed against the real 647 invoices and rolled back first — and the rollback mechanism itself
+was proved before being trusted. After the apply: index unique, `origin` defaulting to `manual`,
+guard attached and **not** callable by `authenticated`/`anon`, 0 probe leftovers, every count
+unchanged. Advisors 22 → 23, the addition being `can_write_items` from the *other* 0040 — mine adds
+none.
+
+**There are two 0040s on the project and both are ours** — `0040_item_master_write` (03:08) and
+`0040_open_draft_invoices` (04:07). Disjoint objects, so unlike the 0036/0037 collision there was
+nothing to reconcile; **proved** by applying both to a fresh Postgres 16 in filename order with the
+whole suite on top. Merged tree: **928 unit tests, 469 pgTAP assertions**, `verify` green.
+
+**Merged: `Dev` and `Prod` are both `816c52c`, identical trees, CI green on all three jobs for
+both.** `Dev` had moved six commits while this was in flight (the item master gate, its capability
+block, the "Items" rename, `laundry_category`, and the Adelaide-time correction); only the two
+documentation files conflicted.
+
+**Still not opened behind the auth gate** (no credentials here). Next: take a job in on
+`ats.coreit.com.au`, approve it, check Money › Open drafts; take a second job in for the same
+customer, approve it, confirm the *same* invoice number picks it up with quantities added rather
+than a second line; press Issue now and check it is dated today. All 647 invoices still carry 0
+lines, so the first running draft has yet to collect anything.
+
+
+## Previously: what kind of laundry each item is
+
+## Latest: the business runs on Adelaide time
+2026-08-26, branch `claude/invoice-item-code-selection-vlwwb4`. **No migration, no schema
+change, and no live row altered.** CLAUDE.md §2 and the newest changelog entry have it.
+
+The client's correction: this project is based on Adelaide date and time. `BUSINESS_TIMEZONE`
+was `Australia/Sydney` — from the skeleton this build started from, not from anything about
+the client — and it decides the instant composed from "received today", the day an invoice
+period ends and the day a notification is filed under. For half an hour either side of
+midnight it filed this laundry's work under another state's date.
+
+- **The database always said Adelaide.** `tenants.timezone` and `depots.timezone` have read
+  `Australia/Adelaide` since the cutover; nothing in `src/` consulted them because the zone was
+  hard-coded. The correction changed **no live row**.
+- **Re-dated nothing, checked before moving:** 1 app-composed `received_at` (not near
+  midnight), 646 invoices whose `issue_date` is a `DATE`, 0 charges, 0 notifications. The two
+  zones differ by 30 minutes, so only an instant within 30 minutes of midnight could move day.
+- **Seven tests failed and all seven were rewritten to the decision**, not made to pass — they
+  encoded the old offsets (AEST +10 → ACST +9:30, AEDT +11 → ACDT +10:30, delivery email 2:30pm
+  → 2:00pm). Expected instants computed against the tz database, not by hand.
+- `OPERATIONS_TIMEZONE` and `BUSINESS_TIMEZONE` are both Adelaide now but stay separate names:
+  different questions, and Harbour (the demo tenant) is still a Sydney laundry in its own rows.
+- Cron unchanged (UTC; now 06:30–14:30 Adelaide). `syd1` region unchanged — that is a region,
+  not a timezone.
+- 885 unit tests, 448 pgTAP assertions, verify green.
+
+### Next
+1. Not merged to `Dev`/`Prod` yet.
+2. **Adelaide's price list is still not in hand.** The client says it was provided; the only
+   uploads present are the two MYOB workbooks, and neither carries rates — `MYOB_Inventory`
+   has a selling price on **2 of 257** rows and its second sheet is aggregate stats only.
+   `laundry_prices` for Adelaide is still **0**.
+3. Still never run end to end: take a job in → code a charge → approve → generate → confirm the
+   line arrives already coded.
+
+---
+
+## Previous: what kind of laundry each item is
+2026-08-26, branch `claude/invoice-item-code-selection-vlwwb4`. **No migration** — one pure
+rule (`src/lib/domain/laundry-category.ts`), its tests, and a live data write. CLAUDE.md §25
+and the newest changelog entry have it.
+
+**125 of Adelaide's 254 items now carry a `laundry_category`; the other 129 are deliberately
+null** — chemicals, gloves, cups, machine parts, washroom paper and fees, all things the
+laundry buys.
+
+- **A rule, not a one-off UPDATE**, because `laundry_category` is what
+  `sync_laundry_item_type` derives `item_type` from, and `item_type` is what all three pricing
+  tiers and every report match on. This answer decides what a customer is charged.
+- **It refuses to guess.** A wrong category prices work at another kind's rate with nothing on
+  screen to explain it; a missing one leaves the item exactly as it was.
+- Towel family is one bucket (`towels`) — face washers, tea towels, glass cloths, salon and gym
+  towels — matching how Harbour's tea towel was already filed.
+
+**Five traps, all pinned by tests confirmed to fail without their guard:** a bath sheet is a
+bath towel not bedding; their `4-` "hand towels" are washroom paper; `Toilet Paper 2Ply 400
+Sheet` matches the generic sheet rule; *Lost Towels* / *New Towels — dozen* name linen while
+being a charge and a sale; and a container bag is not laundry while **`Towels Per Bag` and
+`Sleeping Bags` are** — the last found by dry-running the 254 rows, because a blanket `bag`
+exclusion had silently swallowed four real items. **A false exclusion is the quiet way this
+goes wrong**: the row just stays uncategorised.
+
+**Three left for a person, named not skipped:** `29927` and `50761`, truncated by MYOB at 30
+characters before the word that would place them (their siblings are tea towels), and `18662
+Terry Nappies`, which is laundry and fits none of the nine kinds.
+
+- 885 unit tests (was 872), 448 pgTAP assertions, verify green.
+- **Applied live**, rehearsed first, behind six assertions. Read back as `board1@ats.example.com`:
+  254 items, 125 categorised, every spot-check code correct. **No job was re-categorised** —
+  `sync_laundry_item_type` fires on `laundry_order_items`, not `items`, so the 5 existing job item
+  rows still read `towels`.
+
+### Next
+1. Not merged to `Dev`/`Prod` yet.
+2. Adelaide still holds **0** `laundry_prices` — the categories are in place, the rates are not.
+3. Still never run end to end: take a job in → code a charge → approve → generate → confirm the
+   line arrives already coded.
+
+---
+
+## Previously: the item master is one list, named one way, changed by two people
+2026-08-26, branch `claude/invoice-item-code-selection-vlwwb4`. One migration
+(`0040_item_master_write`) — no new table, no new column, no new trigger, nothing dropped
+but the policy it replaces, no row changed. CLAUDE.md §3, §7, §25 and the newest changelog
+entry have it.
+
+The client's instruction: the list they sent is the master, it is the only item reference
+anywhere for ATS, and the Owner and the Office manager maintain it.
+
+- **The option they asked for already existed; the boundary under it did not.** `roles.ts`
+  has gated `/items` on `items.write` all along. `items` carried 0002's permissive
+  `for all … using is_member(tenant_id)`, so **nothing gated the table**.
+- **Probed as one of Adelaide's own `board` logins**, rolled back: it read all 254,
+  **renamed `TW`**, **inserted** an item and **deleted** one. Control: `laundry_prices`
+  returned 0 to the same session, so 0033's gate held and this was `items` specifically.
+- **Fourth table to need this exact replacement** (0006→0017, 0018→0033, 0021→0036). It hid
+  the same way: six demo rows until the import. **An empty table is not a proof.**
+- **SELECT stays open to every member** — a board's run sheet, the plant's batches, the
+  counter's picker all name items. Only the write moved.
+- **`items.write` → Owner + Office manager**, an `ITEM_MASTER` block subtracted from the
+  `TENANT_ALL`-derived roles. `branch_manager`/`regional_manager` held it by not being
+  mentioned.
+
+**A proof was defending the hole, for the third time here.** `main_flow_scope.test.sql`
+asserted `lives_ok` on the *plant floor inserting an item* under "the floor still runs its
+own screens". `warehouse_operator` has never held `items.write`. Rewritten to the decision,
+the same move `laundry_pricing.test.sql` needed in 0033.
+
+**One reference, one way of naming it.** A job's laundry rows used a plain `<select>` while
+the invoice and charges used the type-ahead — unusable at 254 rows. `ItemPicker` is generic
+now, so the job form passes its own catalogue type; `purpose` is the only difference, and a
+laundry row shows **no price** (the rate is `laundry_prices`; 252 of 254 have no sell price,
+so "no price set" would read as "this will not be billed"). Tab renamed "Item types" →
+"Items".
+
+**The migration's own assertion caught a defect in the migration**: `can_write_items` was
+created PUBLIC-executable. Postgres grants EXECUTE to PUBLIC as a *built-in* default and
+`alter default privileges` (0011, 0029) is applied on top of it, not instead. Revoked by
+name, the way 0036 does. Fifth instance of that trap here.
+
+- 872 unit tests, **448 pgTAP assertions**, verify green, 40 migrations + suite + seed on a
+  fresh Postgres 16. Both new proof blocks confirmed to fail without 0040.
+- Gallery: the picker in both purposes, driven in a real browser — 10 assertions clean,
+  including no duplicate ids across two pickers and a guard that the section is in the page
+  *being served*.
+
+**Applied live** as `20260826030846`, the ledger's last entry. Read back as five real
+sessions, writes rolled back: the board, the warehouse operator and the counter all still
+**read** the list and their rename touches **0 rows** with the name unchanged, insert
+refused 42501; `owner@roles` (a real super_admin, **not** a platform admin) and the office
+manager both rename 1 row and insert successfully. 4 policies on `items`, one verb each,
+**0 permissive for-all**. Advisors 22 → 23, the addition being `can_write_items`.
+
+**The rehearsal needed a second attempt and the reason is worth keeping**: the first pass
+renamed by `item_code in ('TW','TOW001')` and the Owner's rename came back 0 rows — which
+reads as a refusal and was actually *no such code in Harbour*. Every probe now renames a row
+the session has just read back, so 0 rows can only mean refused.
+
+### Next
+Still never run end to end: take a job in → code a charge → approve → generate → confirm the
+line arrives already coded.
+
+---
+
+## Previously: the Jay CT test data is deleted
+2026-08-26, at the owner's instruction. **Live data deletion only — no migration, no schema, no code
+change.** 58 rows across 11 tables, all in Adelaide, all belonging to the two duplicate `Jay CT`
+customer records: 2 customers, 2 locations, LJ00002–LJ00006, 7 items, 31 activity rows, 4 stops,
+1 frozen charge, RUN00002/3/4, and `INV00001` with its line and source-job link.
+
+- **Rehearsed in a block that could not commit first**, and the real run matched it exactly. The
+  runs were **checked** for stops belonging to another customer (the block aborts if any) rather
+  than assumed empty.
+- **Two DELETE guards bypassed deliberately and re-enabled in the same transaction** —
+  `guard_job_charge_snapshots_change` (refuses a frozen charge even for `super_admin`) and
+  `guard_laundry_order_items_change`. Both back at `tgenabled = 'O'`. `session_replication_role`
+  was **not** used: it would have turned FK enforcement off too. 0 orphans afterwards.
+- **The `Test` customer (`CUST00003`, `LJ00001`) was left alone** — not asked for.
+
+**Adelaide now:** 0 active customers, 508 archived, 1 laundry job, 1 run, 646 invoices. Harbour
+untouched. **No invoice on the project carries a line any more**, so the live end-to-end evidence
+for job → price → approve → generate is gone with `INV00001`; unit tests and pgTAP still cover it.
+The next run-through will be the first against a real customer.
+
+**Two claims merged an hour earlier are now corrected in §11** — they asserted INV00001 exists and
+that Jay CT was being left in place.
+
+
+## Previously: the item list arrives, and 254 items are live in Adelaide
+2026-08-26, branch `claude/invoice-item-code-selection-vlwwb4`. **No migration** — the
+reader, the pickers and a live data import. CLAUDE.md §11, §25, §27 and the newest
+changelog entry have it.
+
+The client's updated requirement: pick the **ItemCode and price**, not the account code.
+Half is built; the other half cannot come from this file, which is the finding.
+
+- **The item leads, the account follows** — MYOB's own shape. The coding strip asks for
+  the item and shows the account beneath it, with "Use a different account" as the escape.
+- **The price is not in this export**: 2 of 257 rows carry one, and every sellable service
+  code (`TW`, `GTW`, `HTW`, `BT`, `Del`) is blank. Most of these are things the laundry
+  *buys*. So the rate keeps coming from `laundry_prices` — where the client's own rates
+  already are (their invoice bills `TW` at $0.22, a customer rate, not a list price).
+- **`Item Number` is the code staff type, not `Item ID`** — the latter is MYOB's internal
+  row number. Reading it would have imported 257 items nobody could find.
+- **A defect proved against a real database:** `items` is unique on
+  `(tenant_id, lower(item_code))` and partial, so PostgREST's `on_conflict=` cannot name it
+  (`42P10`). `PlannedTable.matchBy` reads, updates by id and inserts the rest.
+- `MAX_ITEM_CODE` 20 → 30: their real codes reach 23.
+
+**Imported live.** 254 items into `Adelaide Towel Service`, rehearsed in a rolled-back
+transaction first, then applied behind eight assertions (including that the table still
+started empty). Read back **as `board1@ats.example.com`**, a real Adelaide-only session:
+254 items, Harbour's 6 not among them, and still 0 accounts / 0 invoices / 0 prices — so
+0036's gate and the billing narrowing both held. 268 accounts, 647 invoices, 6 jobs
+unchanged.
+
+**Two things stated rather than glossed**, because both differ from what was offered:
+- **All 254 are `is_sell` *and* `is_buy`** — the export carries neither flag, so neither is
+  inferred. The two coding pickers now filter `is_sell`, which they never did before, so
+  the flag is a lever an owner can pull (untick "I sell this" on the detergent) rather than
+  decoration. Inert on this data.
+- **All 254 have no `laundry_category` and no `income_account_id`.** The export says
+  neither. So the item picker works today and the *account* is still chosen per line until
+  somebody codes the items. Owner's next step, not something the import could answer.
+
+**`0039` is applied** (`20260826022128`, the ledger's last entry). Eleven verifications,
+six of them behavioural against real rows in an aborted transaction; **no new security
+advisor**, so the `public, anon, authenticated` revoke on the definer trigger function
+held — the check 0036 failed.
+
+**Another session deleted Adelaide's test data at 02:12:59**, between the import and the
+0039 apply: 2 customers, 5 jobs, 1 invoice, the 1 frozen charge and the paperwork under
+them. Deliberate and rehearsed, not an accident, and **the 254 items were untouched**.
+Adelaide is down to LJ00001. So §27's motivating count (1 frozen charge, 0 with an item)
+is now 0 charges — the argument stands on the reasoning, not on a live row.
+
+### Next
+End to end, still never run: take a job in → code one charge → approve → generate the
+invoice → confirm the line arrives already coded; then push one invoice and watch
+`AccountCode` populate for the first time.
+
+---
+
+## Previous: code the charge where the charge is made
+2026-08-26, branch `claude/invoice-item-code-selection-vlwwb4`. One migration
+(`0039_job_charge_codes`) — no new table, no new role, no new capability, nothing
+dropped, no row changed. CLAUDE.md §7, §27 and the newest changelog entry have it.
+
+The client's comparison: MYOB puts **Item ID** and **Category** (the account code) on
+the line as it is written. This app asked twice — a charge added by hand on a job
+carried no item and *could* carry no account, so the invoice line came out uncoded and
+somebody re-keyed it. Counted first: Adelaide holds **1** frozen charge, **0** with an
+item, and has no rate card and no price list — so every charge it raises is hand-added
+and the coding feature was inert for the one real business using it.
+
+- Each charge row names an item and an account, same code-first type-ahead as the
+  invoice composer. Pickers are now **shared** (`components/coding-pickers.tsx`).
+- **`saveJobCharges` is the one place a charge gets its code** — both writers pass
+  through it. An account already on the charge wins (a hand override is deliberate).
+- **The account is part of the consolidation key**, like unit price and `taxable`:
+  two charges for one item coded differently must not merge into one line.
+- Generation prefers the charge's account, item as fallback — same precedence as
+  `lib/xero/push.ts`.
+
+**Found by driving it:** every row rendered the same DOM ids, so each row's label
+pointed at the first row's box. Pickers take an `idPrefix` now. Invisible to
+typecheck, unit tests and screenshots alike.
+
+- 802 unit tests, **439 pgTAP assertions**, verify green, whole suite + seed on a
+  fresh Postgres 16. New assertions confirmed to fail without 0039.
+- Gallery: 24 combinations, 0 console errors, 0 overflow, 0 targets under 36px,
+  document overflow byte-identical to baseline. 12 interaction assertions.
+
+---
+
+## Previous: merged to Prod and Dev — the filter language is live
+2026-08-26. **PR [#30](https://github.com/ysm-prog/laundrymart/pull/30) → `Prod` (`8510154`), PR
+[#32](https://github.com/ysm-prog/laundrymart/pull/32) → `Dev` (`2bcd4fe`)**, identical trees, CI
+green on all three jobs for both (verify, gitleaks, and the DB job: 40 migrations, 431 pgTAP
+assertions and the seed against a fresh Postgres 16). 843 unit tests.
+
+- **Nothing to apply to Supabase** for that work: `git diff` over `supabase/` was empty and the
+  ledger's last entry was `0038_invoice_line_account`. `0039_job_charge_codes` went on later the
+  same day, from this branch.
+- **What landed:** the YSM Hub filter language on every list — `components/filters.tsx`
+  (`FilterChips`, `ToggleChips`, `PeriodFilter`, `FilterSummary`) with the rules pure and tested in
+  `lib/filters.ts`, ten canonical period presets in `lib/domain/dates.ts` behind `resolvePeriod`,
+  and `ListControls` composing chips → fields → summary. CLAUDE.md **§29** is the design.
+- **Eleven screens had no filter at all** before this, the billing queue among them. Four defects
+  the gallery caught are in CLAUDE.md's entry — the biggest being that **`cx(CONTROL, "w-auto")`
+  has never worked** (ten call sites rendering full width; `CONTROL_AUTO` now).
+
+**Two process faults on the way out, neither in the code.** The first merge commit recorded **only
+one parent** — a `git checkout` mid-merge cleared `MERGE_HEAD`, so the commit had the right tree
+and no link to `Prod`; GitHub marked the PR conflicted, and **a conflicted PR has no merge ref, so
+CI never ran on it**. Redone from the pre-merge commit, tree proved byte-identical. Second:
+GitHub's **check-runs API served a stale `in_progress`** for a job that had finished four minutes
+earlier — read the run's jobs endpoint, not the check, before calling a job stuck.
+
+**Still open and needing a login, not a commit:** open Money › Awaiting invoice on
+`ats.coreit.com.au`, press **"Not priced yet"**, and confirm the chip's count matches the rows
+under it. Also still open from before: take a real run through Adjust Run → Save & Lock Run as
+`owner@roles.example.com`, and the Xero coding ladder has never met real data.
+
+## Previously: Adjust Run merged, and verified against the live database
+2026-08-26. **`Prod` = `f8eb138` (PR #26), `Dev` = `6c1dd4c` (PR #27)**, identical trees, CI green on
+all three jobs for both.
+
+- **Nothing to deploy to Supabase.** The branch adds no migration. Checked by **object, not by ledger
+  name** — six migrations sit live under their pre-renumbering names, so a name diff reports six
+  false gaps. Everything Adjust Run calls at request time is live and correctly shaped
+  (`apply_run_sequence` INVOKER, `compact_run_sequence` DEFINER, `daily_routes.sequence_*`, both
+  guard triggers — which are named `guard_jobs_sequence` / `guard_daily_routes_sequence_control`,
+  **not** after their functions).
+- **The boundary is proved against real rows for the first time**: Adelaide Board 1 / 28 Aug, in a
+  block ending with a raise so nothing commits — board refused 42501, dispatcher refused 42501,
+  `operations_manager` saved v1→2 with the stops really swapping, stale replay refused. Rollback read
+  back clean (version 1, still locked, 0 audit rows).
+- Advisors **22** = 21 documented definer helpers + auth toggle; `sync_invoice_line_account` still
+  absent, so the 2026-08-25 revoke holds. 0 anon table grants, 0 tables without RLS.
+- Counts moved because the laundry is using it: **648** invoices (was 647), **10** laundry jobs
+  (was 8).
+
+**`Jay CT` is a test customer — the owner confirmed it on 2026-08-26 — and it exists twice**
+(`CUST00509` = 4 jobs + `INV00001` + 3 stops, `CUST00510` = 1 job + 1 stop, created 0.65s apart with
+a location row each at the same address). That is why Board 1's 28 Aug run has two stops at one
+address and the Run order card shows "Jay CT" twice; `findOrCreateStop` keys on (tenant, run,
+customer) and is right. Nothing to fix in code, and not deleted — it is the only end-to-end evidence
+the billing path has.
+
+**The correction that came out of it, and it is the important one.** CLAUDE.md §11 claimed `LJ00002`
+was *"the first time the billing lifecycle has run against real work"*. It was not:
+**all six of Adelaide's laundry jobs are against test customers** (LJ00002–06 = Jay CT, LJ00001 =
+a customer named `Test`); jobs against a non-test customer = **0**. What *is* true and is new:
+`INV00001` (draft, $55, one line, from LJ00002, 2026-08-26) is the **only one of 648 invoices that
+carries a line at all**, so job → price → approve → generate is now proved end to end — against test
+data. Both corrected in §11.
+
+**Still needs a login, not a commit:** open My Runs as `owner@roles.example.com` on
+`ats.coreit.com.au` and drive Adjust Run in the browser; confirm `board1@ats.example.com` sees no
+card.
+
+
+## Earlier: Adjust Run reaches My Runs
+2026-08-26, branch `claude/adjust-run-button-roles-ushdk9`. The owner asked for the button on the
+screen they are actually looking at, restricted to the Owner and the Office manager. **No
+migration, no schema, no RLS, no capability, no new role.**
+
+- `/my-runs` now draws a **"Run order"** card between the day's workflow and its job groups: the
+  *same* `SequenceBoard` and the *same* `reorderRunStops` the Runs screen uses. Gated on
+  `routes.sequence`, so a board, a driver and a dispatcher get **no card at all** — and no extra
+  query, because the read is skipped with it.
+- `lib/runs/sequence-stops.ts` is new and shared by both screens. Not tidiness: the version a page
+  renders with is the token its save is compared against, so a second read would be a stale-version
+  refusal nobody could explain.
+- `SequenceBoard` gained `returnTo`; `reorderRunStops` reads it through `returnTo(formData, …)`.
+  Without it a manager adjusting a run from the round's day would be moved to `/runs`.
+- `SequenceStop` moved into `sequence.ts` as `OrderableStop & { … }`, so `progressStatus` and its
+  `asOrderable` adapter are gone. Design-preview fixtures updated with it.
+- 812 unit tests (was 806), `verify` green. Both new assertions **proved to fail** without their
+  fix. 42 browser interaction assertions at 390/1440, and 12 measured combinations with 0 overflow
+  inside the card, 0 sub-36px targets, 0 console errors.
+- **The measurement harness caught itself twice** and both are recorded in CLAUDE.md §18: a stale
+  `next start` (failed loudly — the 2026-08-25 vacuous-pass trap), and a text-size sweep that was
+  vacuous because `"biggest"` is the label and `"xlarge"` is the value. It now asserts the root
+  font size actually moved.
+
+**Not opened behind the auth gate** — no Supabase credentials here. Before trusting it: as
+`owner@roles.example.com` on `ats.coreit.com.au`, open My Runs for Board 1 on a two-stop day,
+Adjust Run, swap 1 and 2, Save & Lock Run; then check `board1@ats.example.com` sees no card. That
+is also the one item the 2026-08-25 entry left open.
+
+
+## Earlier still: merged to Prod and Dev
+2026-08-26. **PR #23 → `Prod` (`00c6613`), PR #24 → `Dev`**, CI green on all three jobs for both
+(verify, gitleaks, and the DB job: 40 migrations, 431 pgTAP assertions and the seed against a
+fresh Postgres 16). `ats.coreit.com.au` carries the whole branch.
+
+## Older: merged with Prod — the coding ladder and the audit rule
+2026-08-25. **Most of this branch is already live on `ats.coreit.com.au`**; another session
+merged the run-sequencing work and the account-codes work to `Prod` while this branch was still
+open. `origin/Prod` was merged **into** this branch and the four conflicts resolved before
+anything else — the branch was seven commits behind.
+
+**What is genuinely new here, and not yet on Prod:**
+- **`resolveAccountCode`** — the Xero coding ladder as one pure, tested rule: **line's own
+  account → its item's → the laundry's default sales account**. Prod had independently fixed the
+  same defect inline in `push.ts` with `??`, in the same direction. Mine is kept for two reasons
+  and Prod's reasoning is kept with it: it is tested (9 assertions, 5 fail without the item
+  tier), and a `??` chain **stops on an empty string** — sending `AccountCode: ""`, which Xero
+  rejects — where the rule falls through a blank tier to the next real one.
+- **`buildSequenceAudit`** — the run-order audit record as a pure rule, so §15/§23's list
+  (previous order, new order, board, date, actor, role) is asserted field by field rather than
+  read. Confirmed by dropping the actor's role and by aliasing the arrays: two tests fail.
+- **`0038_invoice_line_account`** — `invoice_lines.gl_account_id`, `if not exists`, so a database
+  built from this repo carries what `push.ts` reads. A no-op after `0036_invoice_account_codes`.
+
+**What was resolved in Prod's favour, and why it is better than what I had:**
+- **`0037`'s policy half is gone entirely.** I had made it *conditional* (gate the chart if
+  nobody has). Prod **deleted** the `can_read_accounts()`/`can_write_accounts()` pair and the four
+  policies outright, because `0036_invoice_account_codes` already gates `gl_accounts` with
+  identical role lists across all six payable tables. Two names for one rule is the duplication
+  this repo argues against, and a conditional block would have left both helpers in the schema.
+- **`push.ts` keeps Prod's shape and comments** — the unaliased embeds matching its select, and
+  the two-charts explanation (`invoice_lines.account_code` is the *MYOB* code a bookkeeper reads;
+  only `gl_accounts.xero_account_code` travels). It also carries an insight mine lacked: a line
+  coded to a bare account has **no item row to travel through**, which is why the line tier
+  cannot be skipped.
+
+
+## Previously: two branches reconciled, both merged
+2026-08-25. `claude/invoice-item-code-selection-vlwwb4` (account codes on an invoice) and
+`claude/code-review-requirements-ns6bav` (run sequencing + Xero codes) were built the same
+afternoon, both applied migrations to `laundrymart-syd`, and **both gated `gl_accounts`**.
+CLAUDE.md's newest changelog entry, §3, §7, §27 and §28 have the whole of it.
+
+**They could not both merge as they stood** — every migration on a fresh Postgres 16, in filename
+order, failed with `42710: policy "gl_accounts_read" already exists`. CI's DB job does exactly
+that. Resolved by keeping **0036's** gate (`can_read_purchases`/`can_write_purchases`, six payable
+tables) and dropping 0037's (`can_read_accounts`/`can_write_accounts`, `gl_accounts` alone,
+**identical role lists**). 0037 now asserts against 0036's gate rather than creating its own.
+
+**The Xero push takes theirs and generalises it.** Two charts, not one:
+`invoice_lines.account_code` is the MYOB code the bookkeeper reads; `gl_accounts.xero_account_code`
+is what Xero calls that account. Only the second travels — Xero refuses a code its chart lacks.
+Their path was `line → item → account`, which misses a line coded straight to an account; 0036's
+`invoice_lines.gl_account_id` is set either way, so it is read first with the item as fallback.
+
+**A live regression was found on the way**: `0036_run_sequence_control` was applied to the hosted
+project with its code unmerged, so the database refused a **dispatcher** reordering a stop while
+the deployed screen still offered it. Merging the branch is the fix.
+
+**Live ledger carries three of today's migrations**, two of them numbered 0036
+(`0036_invoice_account_codes`, `0036_run_sequence_control`, `0037_account_and_item_codes`) — the
+same situation §7 records for the two 0017s. Filename order matches apply order, so nothing needs
+renumbering.
+
+- 431 pgTAP assertions across 24 proofs; `verify` green; whole suite + seed on a fresh Postgres 16.
+- `run-db-tests.sh` now fails on `not ok` and on a plan mismatch — it used to trust psql's exit
+  code, which is 0 for a file full of failed assertions.
+
+---
+
+## Previous: account codes on an invoice line
+2026-08-25, branch `claude/invoice-item-code-selection-vlwwb4`. CLAUDE.md §3, §7, **§27** and the
+newest changelog entry have it. One migration (`0036_invoice_account_codes`) — **no new table, no
+new role, no new capability, nothing dropped, no row changed**.
+
+The client sent their MYOB chart of accounts (268 accounts, 24 income) and asked for an invoice
+line added **by item or by code**, with anything in neither list written as free text.
+
+**Three ways to fill one line, not three kinds of line.** Whichever route is taken the row is the
+same shape, so there is no `line_kind` column and a month-end line is indistinguishable from a
+typed one. `items.income_account_id` is the bridge (MYOB's "Income Account for Tracking Sales");
+`invoice_lines.gl_account_id` + `account_code` carry it — the link for joins, the text for history,
+kept coherent by `sync_invoice_line_account()`, which **derives the code and never accepts one**.
+An uncoded line is legal and **counted on the invoice**, never refused: the free-text line is what
+the client explicitly asked for.
+
+**Xero has been ready since 0026 and was never fed.** `buildInvoicePayload` has mapped
+`account_code` → `AccountCode` from the day it was written and nothing selected the column, so
+**every line this app has pushed landed in Xero's default sales account**. One word in one select.
+
+**The migration's first part is a security fix, and it is why it shipped with the feature.** All
+six payable tables (`gl_accounts`, `suppliers`, `supplier_bills`, `purchase_orders`,
+`supplier_payments`, `import_activation_state`) carried one permissive `for all … using
+is_member(tenant_id)` policy from `apply_tenant_policy`. Probed live as one of Adelaide's own
+**board** logins: **268 accounts** (owner's equity, drawings, every vehicle loan), **192 suppliers**,
+**1,515 bills** worth $65,724 — and an UPDATE renaming `4-1600 Laundry` **succeeded**. A delivery
+round could rewrite the chart of accounts. Same shape as 0006/`invoices`, 0018/`laundry_prices`:
+**the third time**, hidden because the demo tenant has none of this data so the 2026-08-20 board
+sweep read 0. **An empty table is not a proof.** Now `can_read_purchases()`/`can_write_purchases()`,
+`for all` **replaced** (its USING half grants SELECT — the 0033 trap).
+
+### Where it stands
+- 765 unit tests (was 739), **382 pgTAP assertions** (was 368), `verify` green, all 36 migrations
+  applied to a fresh Postgres 16 with the suite and the seed. All 14 new assertions **confirmed to
+  fail without 0036**, the write hole included.
+- Gallery: composer in three states, 24 combinations measured — 0 console errors, 0 overflow inside
+  it, 0 targets under 36px. Document overflow byte-identical to the recorded baseline. 26
+  interaction assertions drive every route.
+
+### Applied live on 2026-08-25, and merged
+**`0036` is the ledger's last entry** (`20260825114025`). Rehearsed in three aborted transactions,
+then read back as real sessions: `board1@ats.example.com` went **268 / 192 / 1,515 / 1 / 62 / 636 →
+0 of each**, its rename touched 0 rows, its own run and jobs untouched. Counter 0, driver 0. `jay@`
+still reads 268 and 1,515 and its importer-style insert **landed**. Every count unchanged.
+
+**The apply found a defect in the migration and the advisors caught it.** 18 → **21**: two expected
+helpers plus `sync_invoice_line_account` on `/rest/v1/rpc/`. The revoke said `from public, anon` —
+**enough locally, not on Supabase**, which hands each new function a *direct* `authenticated` grant
+that revoking PUBLIC does not touch. Only matters for a SECURITY DEFINER trigger function, which is
+what 0019 recorded for `guard_last_platform_admin`. Fixed live within the hour; advisors → **20**.
+
+Three follow-ups, and the middle one is the durable win:
+- `0036` now revokes from `public, anon, **authenticated**` with a fifth self-assertion naming it.
+- **`pg-bootstrap.sql` mirrors Supabase's *function* default privileges**, so that assertion is
+  real rather than vacuous — proved by reverting the word and watching it fail. 0029's lesson one
+  object class over: *the local harness was reproducing a friendlier database than the real one.*
+- **CLAUDE.md's claim that `sync_laundry_item_type`'s EXECUTE is revoked was false** and is
+  corrected. It is not revoked; it is SECURITY INVOKER, which is what keeps it off the advisor
+  list. Right observation, wrong reason — and the wrong reason is what made 0036's revoke look fine.
+
+### Next, and it needs a browser
+1. Set an income account on a few items, add a line each way on a draft, read the PDF.
+2. Push one invoice to Xero and check `AccountCode` arrives — **first time that field is populated**.
+3. **Adelaide holds 268 accounts and zero items**, so the composer opens on the account code there.
+   The item master still waits on the MYOB import (§25).
+
+### Traps this session re-learned
+- A gallery measurement reported a **clean sweep vacuously**: `next start` failed with
+  `EADDRINUSE`, the old build kept serving, `getElementById` returned null and the loop
+  `continue`d. Check the element exists before trusting a zero. **The pgTAP assertion above failed
+  the same way for a different reason** — twice in one session, so treat a passing new assertion as
+  unproven until it has been seen to fail.
+- `searchAccounts` first ranked revenue *within* a tier, so `5-1000 Towel Purchases` (name starts
+  with "towel") beat `4-1000 Sales of Towels` (merely contains it) — the wrong side of the books
+  answering a sales question. Revenue is a whole tier ahead now; an exact code still wins outright.
+
+---
+
+## Previous: usable by somebody who has been shown it once
+
+---
+
+## Latest: 0036 and 0037 are live on `laundrymart-syd`
+2026-08-25. Both applied and verified by read-back. CLAUDE.md §11 has the full record.
+
+**The pre-flight turned up a collision, and it changed what 0037 could be.** A third `0036` —
+`0036_invoice_account_codes`, from a branch not in this repo — was applied to the project the
+same day and had already done most of our 0037's policy work: `can_read_purchases()` /
+`can_write_purchases()` with **the same two role lists** as our `can_*_accounts()`, the identical
+four-policy rewrite of `gl_accounts` (same policy names), and `items.income_account_id`. It also
+added `invoice_lines.gl_account_id` + `account_code` with a `sync_invoice_line_account` trigger.
+- So our 0037 went on **reconciled**: only the four Xero-code columns
+  (`gl_accounts.xero_account_code`, `items.xero_item_code`, `xero_connections.sales_account_code`
+  /`_name`) and the re-created `xero_connection_status()`. Re-running the policy half would have
+  failed 42710, and forcing it would have left `gl_accounts` gated differently from the five
+  sibling tables that branch gates the same way. **The repo file is unchanged and still right for
+  a fresh database**; the ledger entry records the difference. Same shape as the 0018 convergence.
+
+**⚠️ Open, and the owner's call: two answers to "what account is this invoice line coded to".**
+That branch snapshots `invoice_lines.account_code` at write time via a trigger. Our `push.ts`
+ignores that column and resolves the code at push time from
+`invoice_lines.item_id → items.income_account_id → gl_accounts.xero_account_code`. Both are now
+live. If a bookkeeper codes a line explicitly, our push would send the *item's* code instead —
+so this wants deciding before the first real Xero push, and it is a small fix either way
+(prefer `invoice_lines.account_code` when present, fall back to the item).
+
+**Verified live, as real sessions in rolled-back transactions:**
+- **0036** — board and dispatcher, both of which can *see* the run, refused 42501 with the
+  sentence; both refused the unlock. A driver was **lent a stop** inside the rolled-back
+  transaction (no ordinary driver login on this deployment can see one, so probing without that
+  proves RLS filtering, not the guard) and, seeing the row, was refused identically. Office
+  manager saved a real order, version 1 → 2. Moving a worked stop refused. Stale session got the
+  concurrency sentence. After: 11 runs locked at v1, both guards attached, **0 duplicate
+  positions**, all counts unchanged (16 stops / 8 jobs / 647 invoices / 20 memberships / 5 boards
+  / 508 archived customers).
+- **0037** — **0** accounts and **0** items carry a Xero code, so every invoice pushes exactly
+  the payload it pushed before. `xero_connection_status()` returns 8 columns now; `authenticated`
+  still cannot read `xero_connections`. Owner and office manager can **add an account**; driver,
+  board and counter refused 42501.
+- **Advisors 18 → 22** (+2 ours, +2 that branch's). Our two trigger functions are correctly
+  **absent** — EXECUTE revoked, the 0019 trap avoided. 0 anon table grants, 0 anon functions,
+  0 tables without RLS.
+
+**Two data facts worth knowing before trying it:** the chart of accounts (268 rows) is
+**Adelaide's**, which has **no items**; the six items are **Harbour's**, which has **no
+accounts**. And all **647 invoices carry 0 invoice_lines** (import headers), so there is nothing
+yet for the line coding to act on.
+
+## Previously: the Owner keeps the codes, and the codes reach Xero
+2026-08-25, same branch. One migration (`0037`), **no new table, no dropped column, no row
+changed, no new capability**. CLAUDE.md §20 and §25 hold the design; §3, §7, §11 and the newest
+changelog entry the rest.
+
+Three asks, and each had a defect behind it.
+
+**1. The three plan-count mismatches are fixed — and the reason they hid is the real finding.**
+`boards_scope` 20→23, `item_master` 16→17, `main_flow_scope` 29→27. None was failing;
+`main_flow_scope` genuinely contains 27 and claimed 29, so nothing was skipped.
+- **`run-db-tests.sh` trusted `psql`'s exit code, and `psql` exits 0 for a pgTAP file that runs
+  to completion.** A failed assertion is a *result row* (`not ok 7 - …`), not an error — so **CI
+  would have gone green over a security proof that had started failing.** The runner now fails
+  on `not ok`, on "Looks like you failed" and on a plan mismatch. All three were proved to fail
+  the run by deliberately breaking a proof, not assumed.
+
+**2. Chart of accounts: the Owner can add to it, and before this everybody could rewrite it.**
+`/accounts` had been read-only since the MYOB import ("appears here once it is imported…"), with
+no create action anywhere in `src/`. Underneath, 0021's `apply_tenant_policy` left one permissive
+`for all` policy, so **every member could read and rewrite the chart off PostgREST** — proved on a
+0001–0036 database: a driver read the balances, renamed an account, zeroed it and inserted one.
+`current_balance` is on that table.
+- `for all` **dropped and replaced** by four explicit policies (its USING half grants SELECT —
+  the 0033 trap, third table).
+- **No new capability**: `purchases.read`/`purchases.write`, which `/accounts` was already gated
+  on. Auditor reads and does not write, hence two helper functions.
+- New: `/accounts` create form, `/accounts/[id]` edit page, `accounts_scope.test.sql` (19).
+
+**3. Xero: nothing this app knew had ever reached it as a code.**
+`buildInvoicePayload` mapped `line.account_code` → `AccountCode` since 0026 and **nothing ever
+populated it** — `push.ts` selected four columns and stopped. Every pushed line landed uncoded;
+no `ItemCode` either.
+- Codes now travel `invoice_lines.item_id → items.income_account_id → gl_accounts.xero_account_code`
+  (+ `items.xero_item_code`), with `xero_connections.sales_account_code` as the fallback for the
+  many lines carrying **no item** (fuel levy, contract minimum, consolidated laundry charge).
+- **The Xero codes are separate fields from ours, deliberately.** Xero refuses an invoice naming
+  a code its chart/inventory lacks, so defaulting to `items.item_code` would turn one mismatch
+  into *every* invoice failing. Blank omits the key → a laundry that fills none of this in
+  pushes exactly yesterday's payload. That is the first assertion in the payload tests.
+- Resolved at **push time**, not snapshotted: a code is a classification, not money, so a
+  corrected code should be sent on Retry. The amount is what `job_charge_snapshots` freezes.
+
+**Verified:** 766 unit tests (was 755), **417 pgTAP assertions (was 398)**, `verify` green, all
+37 migrations against a fresh Postgres 16 with the seed on top, every pre-existing proof
+unchanged. Both new PostgREST embeds checked for ambiguity — exactly one FK per hop.
+
+**NOT applied to `laundrymart-syd`** — no credentials here. **0037 first**: until it lands, the
+new Accounts screen offers an Owner a create form whose refusals are not enforced underneath, and
+the chart stays readable and writable by every member.
+
+## Previously: the run is locked, and only the office may change its order
+2026-08-25, branch `claude/code-review-requirements-ns6bav`. The client's controlled-sequencing
+requirement. CLAUDE.md **§27** holds the design; §3, §4, §7, §11 and the newest changelog entry
+have the rest. **One migration (`0036`), no new table, nothing dropped, no existing row
+invalidated** — every column's default describes what was already true.
+
+**The headline: the security boundary did not exist.** The reorder was gated on `routes.write`,
+while `jobs` sits on `/rest/v1/jobs` under a single permissive `for all` policy — so **a driver
+could PATCH `jobs.sequence` on the run they were standing in**. Reproduced against a 0001–0035
+database rather than reasoned about: `UPDATE 1`, a real row changed.
+
+**What changed, in five pieces:**
+- `routes.sequence` — a new capability, `super_admin` + `operations_manager` only. `routes.write`
+  was the wrong authority (dispatcher, branch_manager, regional_manager hold it). Named in a
+  `RUN_SEQUENCE` block and **subtracted** from the `TENANT_ALL`-derived roles — the leak trap
+  this repo has now recorded three times.
+- `guard_job_sequence` — a trigger, not a restrictive policy. The rule is about *one column*
+  (a driver must still write `progress_status`), and a restrictive policy writes **zero rows in
+  silence** where a trigger raises 42501. UPDATE-only, so assignment (an INSERT appended at the
+  end) still works for the roles that assign but do not order.
+- `guard_run_sequence_control` — found by probing: a board/driver may update their **own** run
+  row, so without this they could set `sequence_locked = false` and walk past the first guard.
+- `apply_run_sequence()` — Save & Lock in one transaction. Re-resolves the run from
+  (tenant, board, date) rather than trusting a posted id, compare-and-swaps `sequence_version`,
+  writes 1..n in one statement. SECURITY **INVOKER**, so RLS + both guards still apply.
+- `compact_run_sequence()` — closes the gap `retireStopIfEmpty` used to leave (a run that lost
+  its second call read 1, 3, 4). SECURITY DEFINER, safe **by construction**: it takes no order
+  from its caller, so it can only close a gap, never undo a management decision.
+
+**Two design calls worth not re-litigating:**
+- **Editing is never persisted.** §6 of the requirement says Cancel writes nothing, which settles
+  it — entering edit mode cannot write either, or Cancel would have to write it back.
+  `sequence_locked` is the standing statement that the order is management's, read by the guard;
+  it is not a mutex and nothing flips it.
+- **Concurrency is `sequence_version`, not `updated_at`** — that column moves for status changes
+  and load confirmation, which would refuse saves over edits that never touched the order. The
+  day's token is the **highest** version across the board+date's runs, swapped on `<= expected`,
+  so a run opened after the last save joins the token instead of deadlocking.
+
+`applyDispatchPlan` moved to the same capability: the unlinked planner writes `jobs.sequence` too
+and would have been a live bypass of the screen next door.
+
+**Verified:** 755 unit tests (was 739), **398 pgTAP assertions (was 368)**, `verify` green, all
+36 migrations against a fresh Postgres 16 with the seed on top, and **every pre-existing proof
+passes unchanged** — the check that mattered, since the new trigger sits on a table five of them
+own. The lock→edit→cancel cycle was driven in a real browser: 26 interaction assertions at
+390/768/1440, light and dark, 0 console errors, 0 overflow.
+
+**Recorded, not fixed (pre-existing, identical without 0036):** three proofs declare a `plan(N)`
+that disagrees with what they run — `boards_scope` 20/23, `item_master` 16/17, **`main_flow_scope`
+29/27**. Nothing fails, but that last one means two assertions in a security proof are not what
+somebody thought. `run-db-tests.sh` does not fail on a plan mismatch, which is why it hid.
+
+**NOT applied to `laundrymart-syd`.** No credentials here. 0036 is the one migration in §7 the
+hosted project does not carry, and until it is applied the *screens* are narrowed while the
+database still lets a driver rewrite `jobs.sequence`. Apply it, then sign in as
+`driver@roles.example.com` (cannot reorder) and `owner@roles.example.com` (can).
+
+## Previously: usable by somebody who has been shown it once
+2026-08-24, branch `claude/app-accessibility-all-ages-e7sh41`. CLAUDE.md §6, §10b, §26 and the
+newest changelog entry have it. **No migration. No schema, RLS, capability, policy or workflow
+change** — every screen still exists, every route still resolves, no role gained or lost anything.
+
+The owner's brief: a ten-year-old and a seventy-year-old who only knows how to turn on a laptop
+must both be able to use this. Four specialist reviews first (UX, accessibility, business
+analysis, frontend architecture) against `.claude/skills/`, then the work the evidence pointed at.
+
+**The lever: one CSS rule makes the whole app bigger.** Every size here is `rem` — Tailwind 4's
+`--spacing` is `0.25rem`, its type scale is rem, `body` is rem — so moving the *root* font size
+scales text, padding, gaps, control heights and the rail's width together. `html[data-text-size]`
+in `globals.css` is three lines and is a genuine zoom. Measured: root 16 → 18.4 → 20.8px, body
+15 → 17.3 → 19.5px, smallest control 44 → 51 → 57px.
+- `normal` deliberately sets **nothing**, so a browser-level preference is respected not overruled.
+- It must be on `<html>` — `rem` resolves against the root element only — so it rides
+  `localStorage` + the root layout's pre-paint script beside the theme, **not** the cookie pattern
+  the rail's collapsed state uses (that applies to a wrapper, which would scale nothing).
+- Media-query `rem` resolves against the browser's initial size, so breakpoints do not shift.
+
+**The second lever: "What do you want to do?"** — `lib/quick-actions.ts`, seven jobs as verbs,
+capability-filtered, first on the dashboard. **Not the simple mode §19 records as rejected**: no
+mode flag, nothing hidden, no rail row moved, and the standing "a second list drifts from
+`nav.ts`" objection is answered by a test asserting every href is a real `NAVIGATION` destination.
+
+The control appears in the header, on the home screen, and **on the sign-in page** — the last
+because somebody who cannot read the login screen cannot sign in to reach the other two.
+
+**Also done:** `firstIssue` stopped printing the Zod path (112 call sites — the toast said
+`expected_delivery_date: Invalid input`); `describeDbError` stopped relaying raw Postgres; both
+rules moved to `lib/messages.ts` (testable — `lib/actions.ts` imports `next/headers`). Toasts no
+longer self-destruct after 5s. `CONTROL` and five other sites stopped killing the focus ring.
+`Field` wires `aria-describedby`/`aria-invalid`. Rail rows renamed **Customer laundry** /
+**Driver visits** (both rows kept, per §6). Eleven trade-term eyebrows dropped. "Danger zone" →
+"Hide this customer" with a confirm. `counted()` retired `invoice(s)`. Help page rewritten around
+the delivery round. Stale "this app does not connect to Xero" copy fixed.
+
+**A code review then caught two things the tests did not.** `validationMessage` was a *denylist*
+of Zod's known wordings, so `z.enum()` and a bare `.min()` still reached a counter as
+`Invalid option: expected one of "van"|"truck"` and `Too small: expected number to be >=1950`. It
+now builds from the issue's structured fields and lets a message through only past a machine-text
+guard — safe by construction, like `databaseMessage`. And the rail rename never reached the pages:
+`/orders` was still titled "Jobs". Both now have tests; the nav one reads the page sources, since
+a `page.tsx` cannot be imported into a unit test.
+
+**Three contrast failures were computed and fixed at the token layer.** `--control-border` is new
+(an input's border was 1.42:1 against its own fill, where 1.4.11 asks 3:1) and is used by
+`CONTROL` and the checkbox only — `--strong` is untouched because its other 60 call sites are
+decorative rules. `--muted-foreground` failed AA in dark on a sunken panel (4.45:1) and now clears
+AAA in both themes. The dark danger badge was 4.45:1 on the word "Overdue".
+
+691 unit tests (was 621), `verify` green. Gallery asserted light+dark × 3 text sizes ×
+320/390/768/1440 — **zero console errors, zero card overflow, sub-36px targets 79 → 0**, and 69
+controls measured at 3.21:1 (light) / 3.01:1 (dark) as rendered.
+
+## Then tidied, same day, on the owner's feedback
+The side panel wanted collapsing section by section and the whole app read as oversized.
+- **Rail is three collapsible groups** — "Day to day" open, "Customers & money" and "Set-up &
+  reports" shut, Help pinned outside. 12 flat rows → 6 visible. Softens §6's "no headings" and
+  says so; screens inside an area are still tabs, never rail rows. `navigationFor()` stays flat
+  and `groupNavigation()` only *draws* it, so `sectionFor` and every existing test are untouched.
+  An unnamed area falls through rather than vanishing; the group you are in always draws open;
+  shut groups ride an `es_nav` cookie read in the layout (the `es_rail` pattern).
+- **Type scale back down.** Labels 14px, hints 12px, tokens 12/11px, toast 14px. Two exceptions:
+  a field error stays 13px medium/danger, and `CONTROL` is `text-base sm:text-sm` — 16px on a
+  phone (under 16px iOS zooms on focus), 14px on desktop (16px inputs read larger than the 15px
+  body, which was most of the "too big"). The argument for a tidy default is that the
+  reading-comfort control now exists.
+- Headings are **sentence case**: uppercase tracked labels are what the 2026-08-13 redesign swept
+  out of 28 files, and §10b names `Eyebrow`'s 12px sentence case as the supporting-label voice.
+- 698 unit tests (was 691), `verify` green, re-measured clean at all sizes; control border still
+  3.21:1 / 3.01:1.
+
+## Then four questions the owner answered, same day
+Asked rather than assumed — each was theirs, and three could not be done safely in `src/` alone.
+CLAUDE.md §3, §7, §11, §22, §24, §26 and the newest changelog entry have it. **Two migrations
+(`0034`, `0035`)**, no new table/column/function/capability, no row changed by either.
+
+- **The counter takes laundry in again** (§26, now closed). `customer_service` holds
+  `orders.read/write/status` again — the alternative was making a counter hand an **Office
+  manager**: 31 screens to do the one job their role is named for. Now ~11.
+  **`roles.ts` alone would have been a silent bug**: 0025's *restrictive* write policies are the
+  real boundary, so the capability without the policy is Save writing **zero rows with no error**
+  — the failure 0025 hit for the driver and 0031 for the board, `lives_ok` passing both times.
+  `0034` widens three tables (`laundry_orders` + items + activity) and **only** those three;
+  billing and the price list are untouched and the migration asserts that by name. No
+  `orders.manage`, and no DELETE on the job — only on its items, which
+  `save_laundry_order_items()` (SECURITY INVOKER) needs to replace the child set.
+  `main_flow_scope.test.sql` 18 → 29 assertions, each checking the write **landed**.
+- **The activity log narrowed** (`0035`). `audit_logs` was 0001's `for all … using is_member`, so
+  a driver, a board and the counter read the whole tenant's trail. SELECT → the four `admin.read`
+  roles (auditor among them — that is why it is a role list, not `admin.write`). **INSERT stays
+  open to every member**: `recordAudit()` runs on the caller's own client, so narrowing it would
+  stop the log recording the people it exists to record; `actor_id` is pinned to `auth.uid()`.
+  **No UPDATE/DELETE policy at all** → append-only. The `for all` is *dropped*, not supplemented,
+  because its USING half grants SELECT (the 0033 trap). New `audit_log_scope.test.sql`, 11
+  assertions, all by outcome.
+- **§22 said something the database does not do.** It claimed the agreement header is readable
+  "to `agreements.read`"; `service_agreements` is `for all … using is_member`, so any member reads
+  every header. The decision is sound (a header carries no price) — the **wording** was corrected,
+  the policy deliberately not narrowed.
+- **Adelaide's four boards have logins.** `board1@`…`board4@ats.example.com`, written by SQL in
+  GoTrue's shape (§3a) because this deployment still cannot send an invitation. Boards linked
+  **1 of 5 → 5 of 5**, so `LJ00003`/`LJ00004` are no longer on rounds nobody can sign in as.
+  Password is a bootstrap, in **no committed file**, and wants replacing once SMTP works.
+
+700 unit tests (was 698), **368 pgTAP assertions (was 348)**, `verify` green, all 35 migrations
+against a fresh Postgres 16. Both new proofs were confirmed to **fail without their migration**.
+
+## Then: auth emails moved onto Resend, so no SMTP is needed
+The owner's instruction, and it closes the longest-standing open item in the file. CLAUDE.md §10,
+§10c, §24 and the newest changelog entry have it. **No migration; no schema, RLS, capability,
+policy or workflow change** — one sender replaces another.
+
+**The project had never sent a single auth email and had been saying otherwise.** Invitations used
+`inviteUserByEmail`, sign-in links used `signInWithOtp`; both ask **Supabase's built-in mailer**,
+which needs custom SMTP nobody configured. Baseline read off the live database first: **0
+`auth.one_time_tokens`, 0 `auth.flow_state`, `confirmation_sent_at`/`recovery_sent_at`/`invited_at`
+NULL on all 18 logins, 15 of 18 never signed in.** Meanwhile invoices and customer mail have gone
+through **Resend** the whole time — a working sender and a broken one, with the auth mail on the
+broken one.
+
+- **`generateLink()` is the seam.** It mints a link and **sends nothing**; the app then posts the
+  email through `sendEmail()`. That is `ysm-hub`'s arrangement — everything it sends goes through
+  `resend.emails.send()` and Supabase delivers none of it.
+- **The link points at this app** (`<origin>/auth/invite?token_hash=…`), not at Supabase's
+  `/auth/v1/verify`. That removes the §10c deployment step: the project no longer has to list this
+  origin under its allowed redirect URLs, so a preview deployment works with zero configuration.
+- **A sign-in link is a `recovery` link.** It is the one type that signs a person in *and* lets
+  them set a password — what "No password, or forgotten it?" already promised — and it cannot
+  create an account, so a typo still cannot mint an orphan login.
+- **A refused send deletes the login it just made.** Minting an invite link *creates* the user, and
+  leaving a half-made one would make the retry answer "they already have a login" — the one thing
+  that stops the admin sending the mail that never went. Provider is checked *before* the mint too.
+- **"Email sign-in link" is new on every People row** — the missing rung between changing a role
+  and removing access. It is how the four board logins stop sharing one bootstrap password.
+- **The anti-enumeration rule is unchanged**, only its vocabulary moved. `classifyLinkError`
+  **defaults to "about this address"**, so an unrecognised refusal is hidden rather than becoming
+  an oracle; `inviteFailureMessage` is the admin-facing half that is allowed to say more.
+- `INVOICE_FROM_EMAIL` is the sender for auth mail too and was deliberately **not** renamed —
+  a rename takes a live deployment's mail down on redeploy, for tidiness.
+
+739 unit tests (was 700), `verify` green. Both callers derive the origin from `Host` via one
+tested rule — the sign-in form used to read the optional `Origin` header, which would have failed
+confusingly the first time somebody asked for a link. `/auth/invite` and `/login` are outside the auth gate so
+they could actually be rendered: **72 combinations** (2 themes × 3 text sizes × 4 widths × 3 pages)
+with **0 overflow and 0 sub-36px targets**, headings confirmed as "You have been invited" and
+"Choose a new password". The 48 console errors are all `ERR_TUNNEL_CONNECTION_FAILED` from the
+invite screen calling the *placeholder* Supabase URL the local build uses — `/login` has none.
+
+**Every live login can be sent one today** — checked, not assumed: all 18 are confirmed, unbanned,
+not soft-deleted, non-SSO and have a real address, so `generateLink({type:"recovery"})` has a user
+to work with for all of them (the four boards included).
+
+**Nothing has been sent yet.** No Resend key and no service key here. **Before trusting it: invite
+one real address on `ats.coreit.com.au`, follow the link, then check the counters moved** —
+`auth.one_time_tokens` should stop being 0. **Merged to `Dev` and `Prod` (`abbeafa`), CI green on
+all three jobs for both.**
+
+## Verified against the live project (2026-08-24)
+The accessibility and tidy-up work added **no migration**; the four fixes above added two, both
+now applied (§11). Checked at the first pass: advisors **18** (unchanged — no function added), **0** `anon` table grants, **0**
+tables without RLS, and 647 invoices / 508 archived customers / 16 memberships / 5 boards / 9
+prices exactly as recorded. `FIELD_LABELS`' 79 keys were checked against `information_schema`:
+76 are real columns, and the three that are not (`default_gst_rate`, `received_date`,
+`return_board`) are real form-only fields. **Merged to `Dev` and `Prod`** — both were clean
+fast-forwards, and Dev absorbed the 18-commit backlog the changelog kept recording as stale.
+
+## What the live read-back turned up — the owner's to act on
+- **The real laundry has been used since the cutover.** Adelaide now has four jobs; `LJ00002` was
+  completed, **priced and approved** (the first frozen charge snapshot on the project). But
+  `invoice_source_jobs` is 0 and no invoice exists since 20 August — so it is sitting in the
+  billing queue and **the month-end roll-up is still the one money step never run end to end**.
+- **The month-end run was rehearsed read-only, and that is the finding.** It works — and pressing
+  "last month's invoices" *today* answers **nothing to invoice**, because the default period is the
+  previous month (1–31 July) and `LJ00002` completed on **20 August**. That reads as *everything is
+  billed*, not as *wrong month*. **Set the period to August, or run it in September.** The default
+  is right for the ordinary case; the trap is that the first real run is mid-month against a job
+  from the current one.
+- **Adelaide's four boards now have logins** (fixed, §24) — but it still has **no member who is not
+  a platform admin**, and its price list is still empty, so `LJ00002` was priced by hand.
+
+## Do these next
+- **Reconcile the two `0036`s when that branch merges.** Half done: `0037` is now
+  order-independent, so neither order breaks and the chart ends gated exactly once. What is left
+  is repo hygiene at merge time — two migrations numbered 0036, and a duplicate helper pair
+  (`can_*_accounts` vs `can_*_purchases`, identical role lists) to renumber and collapse. The
+  same job §7 records for the two 0017s and the two 0015s. **Nothing to do until that branch
+  lands** — the duplication does not exist yet in either place.
+- **Push one real invoice to Xero.** The coding ladder has never run against real data: this
+  deployment has no `XERO_CLIENT_ID`, 0 `xero_connections`, and all 647 invoices carry **0
+  lines** (import headers). Needs a connected organisation and one invoice with lines on it.
+- **Open the screens with real rows.** Both migrations are verified at the database level; no
+  authenticated page has been rendered against them. Sign in as `owner@roles.example.com`:
+  Adjust Run → Save & Lock Run on a real board, and add one account at `/accounts`.
+- **Open it with real rows in it.** This container has no Supabase credentials, so no
+  authenticated screen was rendered. Sign in as `owner@roles.example.com`, press each card on the
+  home screen, and set the text to Biggest on a phone.
+- **Change the board password.** `board1@`…`board4@ats.example.com` share one bootstrap password
+  (in no committed file — it was reported in chat). **You can now do this**: press *Email sign-in
+  link* beside each board on `/admin/users` and let each round set its own.
+- **Set `RESEND_API_KEY` and `INVOICE_FROM_EMAIL` on the deployment if they are not already.**
+  Every auth email now depends on them; without them each action says so by name rather than
+  claiming a success that did not happen.
+- **Sign in as the counter and take a job in.** `customer_service` got `orders.*` back and 0034
+  widened the policy; the write was proved to land against live rows, but no *screen* has been
+  opened as that role.
+- Still from the previous session: run the month for Adelaide (**period = August**); invite a real
+  person into Adelaide; enter Adelaide's own prices.
+
+## Still open (unchanged from the previous session)
+- **`LJ00001`** — Adelaide job, Harbour customer, still `ready_for_delivery`. Remedy is
+  cancellation, which is terminal; the owner's call.
+- **`service_agreements` is `for all … using is_member(tenant_id)`**, so any operational login
+  reads every contract header. Decided 2026-08-24: **left as it is** — a header carries no price,
+  and only §22's wording was wrong. `audit_logs` was the other half of that finding and **was**
+  narrowed (0035).
+- **§23 sweep:** ~345 of 451 `.from(...)` reads still rely on RLS alone; correct for eleven of
+  twelve roles, but a platform admin's session spans two laundries.
+- **Nothing has talked to Xero yet** (`XERO_CLIENT_ID`/`SECRET` unset by the owner's decision).
+- **Auth email now goes through Resend, not Supabase** (2026-08-24), so no SMTP is needed — but
+  **it has not been exercised against the provider yet**, and it needs `RESEND_API_KEY` +
+  `INVOICE_FROM_EMAIL` on the deployment. Until one real invitation has been followed end to end,
+  treat this as built rather than proven.
+- Database: **0001–0035 applied to `laundrymart-syd`.** Nothing pending.
 
 ## Environment readiness
-- node v22.22.2
-- deps installed (`npm install` done)
-- `.env` written with build-only placeholders (gitignored) so `next build` runs; **not** real
-  credentials, so nothing can be opened against Supabase from here.
-- Postgres 16 + pgTAP installed in-container; `scripts/run-db-tests.sh` expects `psql` to reach a
-  database as the current user, so it was driven manually as the `postgres` role.
+- node v22.22.2, deps installed (`npm install`)
+- env missing (copy `.env.example`) — no Supabase credentials here; live work goes through the
+  Supabase MCP tools
+- `npm run verify` supplies its own build placeholders, so it runs green without env
+- Screenshotting the gallery: `npm run build`, then `npx next start -p <port>` **with no other
+  server running** (a rebuild under a live server leaves it serving deleted chunks and the CSS
+  404s as `text/plain` — check the stylesheet returns 200 before trusting any measurement), then
+  Playwright against `/opt/pw-browsers/chromium-1194/chrome-linux/chrome`. Note `pkill -f
+  next-server` matches your own shell's command line; kill by PID from `/proc`.
+- Postgres 16 + pgTAP local: `sudo pg_ctlcluster 16 main start`, then
+  `sudo -u postgres createdb lm_v && PGDATABASE=lm_v bash scripts/run-db-tests.sh`
 
-Reminders: RLS on every tenant table (tenant_id); admin client must filter tenant_id; getClaims not
-getUser; region syd1.
+Reminders: RLS on every tenant table (tenant_id); admin client must filter tenant_id;
+getClaims not getUser; region syd1.

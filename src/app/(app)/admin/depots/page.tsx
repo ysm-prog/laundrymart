@@ -7,6 +7,9 @@ import {
   Card, DataTable, EmptyState, PageHeader, SkeletonRows, StatusBadge,
 } from "@/components/ui";
 import { Field, Input, Select, SubmitButton } from "@/components/form";
+import { ListControls } from "@/components/list-controls";
+import { FilterChips, FilterSummary } from "@/components/filters";
+import { isFiltered } from "@/lib/filters";
 import { createDepot, updateDepotStatus } from "../actions";
 
 export const metadata = { title: "Sites" };
@@ -16,23 +19,34 @@ const AU_STATES = ["NSW", "VIC", "QLD", "WA", "SA", "TAS", "ACT", "NT"]
   .map((state) => ({ value: state, label: state }));
 
 const TIMEZONES = [
-  "Australia/Sydney", "Australia/Melbourne", "Australia/Brisbane",
-  "Australia/Adelaide", "Australia/Perth", "Australia/Hobart", "Australia/Darwin",
+  // Adelaide leads because that is where this business is; the rest follow in
+  // population order. The list is the same set either way — only the default
+  // and the first thing an owner sees have moved.
+  "Australia/Adelaide", "Australia/Sydney", "Australia/Melbourne", "Australia/Brisbane",
+  "Australia/Perth", "Australia/Hobart", "Australia/Darwin",
 ].map((value) => ({ value, label: value.replace("Australia/", "") }));
 
-export default async function DepotsPage() {
+type Search = { q?: string; status?: string };
+const FILTER_KEYS = ["q", "status"] as const;
+
+export default async function DepotsPage({
+  searchParams,
+}: {
+  searchParams: Promise<Search>;
+}) {
   const session = await requireCapability("admin.read");
+  const params = await searchParams;
   const writable = can(session.role, "admin.write");
 
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Sites" eyebrow="Depots"
+        title="Sites"
         description="Each place you operate from. Runs, trucks, drivers and stock all belong to one site — most laundries only ever need one."
       />
 
-      <Suspense fallback={<SkeletonRows rows={4} />}>
-        <DepotList writable={writable} />
+      <Suspense key={JSON.stringify(params)} fallback={<SkeletonRows rows={4} />}>
+        <DepotList params={params} writable={writable} />
       </Suspense>
 
       {writable ? (
@@ -54,7 +68,7 @@ export default async function DepotsPage() {
             <Field label="Phone" name="contact_phone"><Input name="contact_phone" type="tel" /></Field>
             <Field label="Email" name="contact_email"><Input name="contact_email" type="email" /></Field>
             <Field label="Timezone" name="timezone">
-              <Select name="timezone" options={TIMEZONES} defaultValue="Australia/Sydney" />
+              <Select name="timezone" options={TIMEZONES} defaultValue="Australia/Adelaide" />
             </Field>
             <Field label="Status" name="status">
               <Select name="status" defaultValue="active"
@@ -70,7 +84,7 @@ export default async function DepotsPage() {
   );
 }
 
-async function DepotList({ writable }: { writable: boolean }) {
+async function DepotList({ params, writable }: { params: Search; writable: boolean }) {
   const supabase = await createClient();
   const { data } = await supabase
     .from("depots")
@@ -78,10 +92,51 @@ async function DepotList({ writable }: { writable: boolean }) {
     .is("deleted_at", null).order("code")
     .returns<Depot[]>();
 
+  const all = data ?? [];
+  const term = params.q?.trim().toLowerCase();
+  const rows = all.filter((row) => {
+    if (term && !`${row.code} ${row.name} ${row.suburb ?? ""}`.toLowerCase().includes(term)) {
+      return false;
+    }
+    if (params.status && row.status !== params.status) return false;
+    return true;
+  });
+  const filtered = isFiltered(params, FILTER_KEYS);
+  const statusCount = (status: string) => all.filter((row) => row.status === status).length;
+
   return (
+    <>
+    {/* Most laundries have one site, and a filter bar over one row is furniture.
+        It appears when there are enough sites to hunt through. */}
+    {all.length > 3 ? (
+      <ListControls
+        action="/admin/depots"
+        q={params.q}
+        params={params}
+        filterKeys={FILTER_KEYS}
+        placeholder="Code, name or suburb…"
+        chips={
+          <FilterChips
+            basePath="/admin/depots" params={params} name="status" label="Site status"
+            allLabel="All sites" allCount={all.length}
+            options={[
+              { value: "active", label: "Active", count: statusCount("active") },
+              { value: "inactive", label: "Inactive", count: statusCount("inactive") },
+            ]}
+          />
+        }
+        summary={
+          <FilterSummary basePath="/admin/depots" shown={rows.length} total={all.length}
+                         noun="site" filtered={filtered} />
+        }
+      />
+    ) : null}
     <DataTable
-      rows={data ?? []}
-      empty={<EmptyState title="No depots yet" description="Add your first depot before creating routes." />}
+      rows={rows}
+      empty={filtered
+        ? <EmptyState title="No sites match those filters"
+                      description="Try a broader search, or clear the filters above." />
+        : <EmptyState title="No depots yet" description="Add your first depot before creating routes." />}
       columns={[
         { header: "Code", cell: (row) => row.code },
         { header: "Name", cell: (row) => row.name },
@@ -100,7 +155,7 @@ async function DepotList({ writable }: { writable: boolean }) {
             <form action={updateDepotStatus}>
               <input type="hidden" name="id" value={row.id} />
               <input type="hidden" name="status" value={row.status === "active" ? "inactive" : "active"} />
-              <button type="submit" className="text-xs font-medium text-primary hover:underline">
+              <button type="submit" className="inline-flex min-h-11 items-center rounded-lg px-2 text-sm font-medium text-primary transition hover:bg-primary/8 hover:underline">
                 {row.status === "active" ? "Deactivate" : "Activate"}
               </button>
             </form>
@@ -108,5 +163,6 @@ async function DepotList({ writable }: { writable: boolean }) {
         },
       ]}
     />
+    </>
   );
 }

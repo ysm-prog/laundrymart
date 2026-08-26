@@ -1,14 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
   ASSIGNABLE_STATUS, RUN_NOT_STARTED_STATUSES, checkAssignable, checkAssignmentRemovable, checkConfirmLoad,
-  checkRunStart, checkStartRoute, describeProgress, dispatchableJobs, groupDriverDay,
+  checkRunStart, checkStartRoute, describeProgress, dispatchableJobs, groupRunDay,
   isUnassignedDeliveryWork, jobProgress, loadableJobs, preferredRunDate, runStage,
   stopProgress,
 } from "@/lib/domain/run-assignment";
+import { sortByRunOrder } from "@/lib/runs/my-runs";
 import { ORDER_STATUSES } from "@/lib/domain/laundry-orders";
 
 /**
- * The rules of giving a job to a driver for a day.
+ * The rules of giving a job to a board for a day.
  *
  * These are asserted twice in this repository on purpose — here in English and
  * in `supabase/tests/run_assignment.test.sql` against the triggers. This file is
@@ -17,11 +18,11 @@ import { ORDER_STATUSES } from "@/lib/domain/laundry-orders";
  */
 
 const READY = {
-  status: "ready_for_delivery", delivery_required: true, assigned_driver_id: null,
+  status: "ready_for_delivery", delivery_required: true, assigned_board_id: null,
 };
 
 describe("checkAssignable", () => {
-  it("allows a ready-for-delivery delivery job with no driver", () => {
+  it("allows a ready-for-delivery delivery job with no board", () => {
     expect(checkAssignable(READY)).toEqual({ ok: true });
   });
 
@@ -44,11 +45,11 @@ describe("checkAssignable", () => {
     expect(checkAssignable({ ...READY, status: "cancelled" }).ok).toBe(false);
   });
 
-  it("refuses a job that already has a driver, unless reassigning", () => {
-    const assigned = { status: "assigned", delivery_required: true, assigned_driver_id: "d1" };
+  it("refuses a job that already has a board, unless reassigning", () => {
+    const assigned = { status: "assigned", delivery_required: true, assigned_board_id: "d1" };
     const fresh = checkAssignable(assigned);
     expect(fresh.ok).toBe(false);
-    expect(fresh.ok === false && fresh.reason).toMatch(/already assigned to another driver/i);
+    expect(fresh.ok === false && fresh.reason).toMatch(/already assigned to another board/i);
 
     expect(checkAssignable(assigned, { allowAssigned: true })).toEqual({ ok: true });
   });
@@ -57,7 +58,7 @@ describe("checkAssignable", () => {
     // The reassign path relaxes exactly one rule. A cancelled job does not
     // become assignable because someone pressed the other button.
     expect(checkAssignable(
-      { status: "cancelled", delivery_required: true, assigned_driver_id: "d1" },
+      { status: "cancelled", delivery_required: true, assigned_board_id: "d1" },
       { allowAssigned: true },
     ).ok).toBe(false);
   });
@@ -74,30 +75,30 @@ describe("checkAssignable", () => {
   it("agrees with isUnassignedDeliveryWork on what the queue holds", () => {
     expect(isUnassignedDeliveryWork(READY)).toBe(true);
     expect(isUnassignedDeliveryWork({ ...READY, delivery_required: false })).toBe(false);
-    expect(isUnassignedDeliveryWork({ ...READY, assigned_driver_id: "d1" })).toBe(false);
+    expect(isUnassignedDeliveryWork({ ...READY, assigned_board_id: "d1" })).toBe(false);
     expect(isUnassignedDeliveryWork({ ...READY, status: "out_for_delivery" })).toBe(false);
     expect(ASSIGNABLE_STATUS).toBe("ready_for_delivery");
   });
 });
 
 describe("checkAssignmentRemovable", () => {
-  it("allows an assigned job to have its driver taken away", () => {
+  it("allows an assigned job to have its board taken away", () => {
     expect(checkAssignmentRemovable({
-      status: "assigned", delivery_required: true, assigned_driver_id: "d1",
+      status: "assigned", delivery_required: true, assigned_board_id: "d1",
     })).toEqual({ ok: true });
   });
 
-  it("refuses a job that has no driver to remove", () => {
+  it("refuses a job that has no board to remove", () => {
     const result = checkAssignmentRemovable(READY);
     expect(result.ok).toBe(false);
     expect(result.ok === false && result.reason).toMatch(/not assigned/i);
   });
 
   it("refuses removal once the job has left, and points at reassignment", () => {
-    // The driver is holding it somewhere. Putting it back in the ready queue
+    // The round is holding it somewhere. Putting it back in the ready queue
     // would have the office believe it is on the shelf.
     const result = checkAssignmentRemovable({
-      status: "out_for_delivery", delivery_required: true, assigned_driver_id: "d1",
+      status: "out_for_delivery", delivery_required: true, assigned_board_id: "d1",
     });
     expect(result.ok).toBe(false);
     expect(result.ok === false && result.reason).toMatch(/reassign/i);
@@ -105,12 +106,12 @@ describe("checkAssignmentRemovable", () => {
 
   it("refuses removal on a finished job", () => {
     expect(checkAssignmentRemovable({
-      status: "completed", delivery_required: true, assigned_driver_id: "d1",
+      status: "completed", delivery_required: true, assigned_board_id: "d1",
     }).ok).toBe(false);
   });
 });
 
-describe("groupDriverDay", () => {
+describe("groupRunDay", () => {
   const day = [
     { status: "assigned" as const },
     { status: "out_for_delivery" as const },
@@ -118,27 +119,27 @@ describe("groupDriverDay", () => {
     { status: "assigned" as const },
   ];
 
-  it("splits a day into the three groups the driver reads, in order", () => {
-    const grouped = groupDriverDay(day);
+  it("splits a day into the three groups the round reads, in order", () => {
+    const grouped = groupRunDay(day);
     expect(grouped.toDeliver).toHaveLength(2);
     expect(grouped.outForDelivery).toHaveLength(1);
     expect(grouped.completed).toHaveLength(1);
   });
 
   it("counts outstanding work as everything not yet delivered", () => {
-    const grouped = groupDriverDay(day);
+    const grouped = groupRunDay(day);
     expect(grouped.outstanding).toBe(3);
     expect(grouped.total).toBe(4);
   });
 
   it("keeps completed work in the day rather than dropping it", () => {
     // Coming back to an earlier date has to still show what happened on it,
-    // and a job the driver has just delivered should move, not vanish.
-    expect(groupDriverDay([{ status: "completed" }]).completed).toHaveLength(1);
+    // and a job just delivered should move, not vanish.
+    expect(groupRunDay([{ status: "completed" }]).completed).toHaveLength(1);
   });
 
   it("does not put an unknown status in any group", () => {
-    const grouped = groupDriverDay([{ status: "cancelled" }]);
+    const grouped = groupRunDay([{ status: "cancelled" }]);
     expect(grouped.toDeliver.concat(grouped.outForDelivery, grouped.completed)).toHaveLength(0);
     expect(grouped.total).toBe(1);
   });
@@ -170,7 +171,7 @@ describe("confirm load and start route", () => {
 
   it("sends out only the jobs that were actually loaded", () => {
     // This is the whole reason load confirmation is tracked per job: work
-    // assigned after the driver loaded the van is not on it, and Start Route
+    // assigned after the round loaded the van is not on it, and Start Route
     // must not claim it left the depot.
     const jobs = [assigned("2026-08-16T21:00:00Z"), assigned(null)];
     expect(dispatchableJobs(jobs)).toHaveLength(1);
@@ -264,8 +265,8 @@ describe("checkRunStart", () => {
   });
 
   it("allows a loaded run with no stops on it yet", () => {
-    // Stops are added through the morning. A driver who cannot press start
-    // until dispatch has finished planning is a driver waiting in a car park.
+    // Stops are added through the morning. A round that cannot press start
+    // until dispatch has finished planning is a van waiting in a car park.
     expect(checkRunStart({ status: "planned", load_confirmed_at: "2026-08-14T21:00:00Z" }).ok)
       .toBe(true);
   });
@@ -308,5 +309,37 @@ describe("progress", () => {
   it("does not divide by zero on an empty run", () => {
     expect(stopProgress([])).toEqual({ total: 0, done: 0 });
     expect(describeProgress({ total: 0, done: 0 }, "stop")).toBe("0 of 0 stops completed");
+  });
+});
+
+describe("sortByRunOrder", () => {
+  it("drives in the order the office set", () => {
+    // The whole point of the Runs screen: a sequence the round cannot see is a
+    // decision that was never made.
+    const jobs = [
+      { id: "c", jobs: { sequence: 3 } },
+      { id: "a", jobs: { sequence: 1 } },
+      { id: "b", jobs: { sequence: 2 } },
+    ];
+    expect(sortByRunOrder(jobs).map((job) => job.id)).toEqual(["a", "b", "c"]);
+  });
+
+  it("puts a job with no stop last, not first", () => {
+    // Work that has not been placed on the run. At the head of the list it
+    // would send somebody to it before the planned first call.
+    const jobs = [
+      { id: "unplaced", jobs: null },
+      { id: "second", jobs: { sequence: 2 } },
+      { id: "first", jobs: { sequence: 1 } },
+    ];
+    expect(sortByRunOrder(jobs).map((job) => job.id)).toEqual(["first", "second", "unplaced"]);
+  });
+
+  it("keeps the incoming order for ties, so a day does not shuffle between renders", () => {
+    const jobs = [
+      { id: "a", jobs: { sequence: 1 } },
+      { id: "b", jobs: { sequence: 1 } },
+    ];
+    expect(sortByRunOrder(jobs).map((job) => job.id)).toEqual(["a", "b"]);
   });
 });

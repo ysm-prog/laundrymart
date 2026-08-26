@@ -9,8 +9,23 @@ import { UNASSIGNED, isMovable, isReceiving, parseDispatchPlan } from "./plan";
 
 type Placement = { routeId: string | null; sequence: number };
 
+/**
+ * Apply a whole day's plan.
+ *
+ * **Gated on `routes.sequence`, not `routes.write`, since 0036.** This screen
+ * writes `jobs.sequence` on every stop it touches, so leaving it on
+ * `routes.write` would have made the Runs screen's boundary a fiction: a
+ * dispatcher refused there could have reordered the same day here. Two screens
+ * that write the same fact have to answer to the same authority.
+ *
+ * It costs a dispatcher the planner outright, which is a real narrowing and is
+ * accepted rather than worked around: no rail row has pointed at `/routes/*`
+ * since the 2026-08-14 simplification (`nav.test.ts` asserts it), so nobody
+ * reaches this screen in the ordinary course of a day — and the database would
+ * refuse the write regardless, which is a worse way to find out.
+ */
 export async function applyDispatchPlan(formData: FormData): Promise<void> {
-  const session = await assertCapability("routes.write");
+  const session = await assertCapability("routes.sequence");
 
   // The board arrives as one payload; the schema and this parse live in
   // `plan.ts` so the contract can be unit-tested. See the note there.

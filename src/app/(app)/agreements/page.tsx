@@ -9,6 +9,7 @@ import {
   ButtonLink, DataTable, EmptyState, PageHeader, SkeletonRows, StatusBadge,
 } from "@/components/ui";
 import { ListControls, Pagination, pageFrom, rangeFor } from "@/components/list-controls";
+import { FilterChips } from "@/components/filters";
 
 export const metadata = { title: "Contracts" };
 export const dynamic = "force-dynamic";
@@ -35,7 +36,7 @@ export default async function AgreementsPage({ searchParams }: { searchParams: P
   return (
     <div>
       <PageHeader
-        title="Contracts" eyebrow="Service agreements"
+        title="Contracts"
         description="The contract that decides when a customer is serviced and what they are charged."
         actions={can(session.role, "agreements.write")
           ? <ButtonLink href="/agreements/new" variant="primary">New agreement</ButtonLink>
@@ -44,16 +45,22 @@ export default async function AgreementsPage({ searchParams }: { searchParams: P
       <ListControls
         action="/agreements"
         q={params.q}
-        filters={[{
-          name: "status", label: "Status", value: params.status,
-          options: [
-            { value: "draft", label: "Draft" },
-            { value: "active", label: "Active" },
-            { value: "suspended", label: "Suspended" },
-            { value: "expired", label: "Expired" },
-            { value: "terminated", label: "Terminated" },
-          ],
-        }]}
+        params={params}
+        filterKeys={["q", "status"]}
+        placeholder="Contract number or customer…"
+        chips={
+          <FilterChips
+            basePath="/agreements" params={params} name="status" label="Contract status"
+            allLabel="All contracts"
+            options={[
+              { value: "draft", label: "Draft" },
+              { value: "active", label: "Active" },
+              { value: "suspended", label: "Suspended" },
+              { value: "expired", label: "Expired" },
+              { value: "terminated", label: "Terminated" },
+            ]}
+          />
+        }
       />
       <Suspense key={JSON.stringify(params)} fallback={<SkeletonRows rows={6} />}>
         <AgreementList params={params} />

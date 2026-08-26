@@ -1,12 +1,15 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { headers } from "next/headers";
 import { z } from "zod";
 import { assertCapability } from "@/lib/auth/context";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { recordAudit } from "@/lib/audit";
+import { sendInvite, sendSignInLink } from "@/lib/auth/send-link";
+import { requestOrigin } from "@/lib/auth/request-origin";
+import { listMembers } from "@/lib/directory";
+import { inviteFailureMessage } from "@/lib/auth/magic-link";
 import { MEMBERSHIP_ROLES, membershipRolesWith, type MembershipRole } from "@/lib/roles";
 import {
   describeDbError, done, fail, firstIssue, optionalText, optionalUuid, requiredDate, toObject,
@@ -203,42 +206,6 @@ const inviteSchema = z.object({
 });
 
 /**
- * Where the invitation link lands.
- *
- * `/auth/invite`, **not** the `/auth/callback` the magic link uses. Supabase
- * bounces an accepted invitation back with the session in the URL fragment,
- * which never reaches the server; and an invite cannot use the PKCE `?code=`
- * flow either, because the browser that sent the invitation is not the browser
- * that opens it, so no code verifier is waiting. `/auth/invite` is the one
- * client-rendered screen in the app for exactly that reason.
- *
- * The origin is read off the request rather than out of an environment
- * variable, so a preview deployment invites into itself instead of mailing a
- * link to production — and so nothing new has to be configured for the feature
- * to work at all. Supabase must still list this URL under its allowed redirect
- * URLs, or it falls back to the project's Site URL.
- */
-async function inviteRedirect(): Promise<string> {
-  const requestHeaders = await headers();
-  const host = requestHeaders.get("x-forwarded-host") ?? requestHeaders.get("host") ?? "";
-  const protocol = requestHeaders.get("x-forwarded-proto") ?? "https";
-  return `${protocol}://${host}/auth/invite`;
-}
-
-type Invitee =
-  | { ok: true; userId: string; invited: boolean }
-  | { ok: false; message: string };
-
-/** Whether a login already carries a name, in either of the keys 0030 reads. */
-function hasName(metadata: Record<string, unknown> | undefined): boolean {
-  for (const key of ["full_name", "name"]) {
-    const value = metadata?.[key];
-    if (typeof value === "string" && value.trim() !== "") return true;
-  }
-  return false;
-}
-
-/**
  * Set what a person is called.
  *
  * The name is read out of `auth.users` by a definer function (0030) and written
@@ -265,68 +232,6 @@ async function setMemberName(
   return { ok: true };
 }
 
-/** Someone can already sign in with this address — here before, or elsewhere. */
-function isExistingAccount(error: { code?: string; status?: number; message: string }): boolean {
-  if (error.code === "email_exists" || error.code === "user_already_exists") return true;
-  return /already (been )?registered|already exists/i.test(error.message);
-}
-
-/**
- * The login behind an invited address, creating it if there is none.
- *
- * This is the one part of the flow that needs the service role: creating an
- * `auth.users` row is not something a signed-in member can do through RLS. The
- * **membership** row is deliberately not written here — it goes in through the
- * caller's own RLS-bound client, so which tenant a person joins stays the
- * database's decision rather than this file's.
- */
-async function resolveInvitee(
-  email: string, redirectTo: string, fullName: string,
-): Promise<Invitee> {
-  let admin: ReturnType<typeof createAdminClient>;
-  try {
-    admin = createAdminClient();
-  } catch {
-    return {
-      ok: false,
-      message: "This deployment has no service key set up, so invitations cannot be sent yet.",
-    };
-  }
-
-  const { data, error } = await admin.auth.admin.inviteUserByEmail(email, {
-    redirectTo,
-    // Stored on the login rather than on the membership: a person is one
-    // person, and a second copy of their name per laundry is a second thing to
-    // keep in step. `tenant_members()` (0030) reads it straight back out.
-    data: { full_name: fullName },
-  });
-  if (!error && data.user) return { ok: true, userId: data.user.id, invited: true };
-
-  // They already have a login — with another laundry on this deployment, or
-  // here before their access was removed. Ask the auth API who they are without
-  // sending anything: an invitation mail would be wrong (they have a password
-  // already) and issuing one would only invalidate a link they may still hold.
-  if (error && isExistingAccount(error)) {
-    const { data: link, error: linkError } =
-      await admin.auth.admin.generateLink({ type: "magiclink", email });
-    if (!linkError && link.user) {
-      // Their login is theirs and may serve another laundry, so their existing
-      // name is left alone; one is only set where there is none to overwrite.
-      if (!hasName(link.user.user_metadata)) {
-        await setMemberName(link.user.id, fullName, link.user.user_metadata);
-      }
-      return { ok: true, userId: link.user.id, invited: false };
-    }
-  }
-
-  return {
-    ok: false,
-    message: error
-      ? `The invitation could not be sent. ${error.message}`
-      : "The invitation could not be sent.",
-  };
-}
-
 /**
  * Invite somebody to this laundry by email (roadmap D5).
  *
@@ -341,8 +246,17 @@ export async function inviteMember(formData: FormData): Promise<void> {
   if (!parsed.success) return fail(PEOPLE, firstIssue(parsed.error));
   const { email, full_name, role, depot_id } = parsed.data;
 
-  const invitee = await resolveInvitee(email, await inviteRedirect(), full_name);
-  if (!invitee.ok) return fail(PEOPLE, invitee.message);
+  // Minted here and emailed by this app's own provider — Supabase's built-in
+  // mailer needs custom SMTP this deployment has never had, so before this every
+  // invitation was a form that reported success and sent nothing.
+  const invitee = await sendInvite({
+    email,
+    fullName: full_name,
+    tenantName: session.tenantName,
+    invitedBy: session.email ?? undefined,
+    origin: await requestOrigin(),
+  });
+  if (!invitee.ok) return fail(PEOPLE, inviteFailureMessage(invitee.failure));
 
   const supabase = await createClient();
 
@@ -373,7 +287,7 @@ export async function inviteMember(formData: FormData): Promise<void> {
   revalidatePath(PEOPLE);
   return done(
     PEOPLE,
-    invitee.invited
+    invitee.emailed
       ? `Invitation emailed to ${full_name} at ${email}. They can sign in as soon as they follow the link.`
       : `${full_name} already had a login, so no email was sent — they have access now.`,
   );
@@ -388,6 +302,52 @@ export async function inviteMember(formData: FormData): Promise<void> {
  * jobs, stops, audit entries — keeps pointing at them, which is the whole point
  * of an audit trail.
  */
+/**
+ * Email one of your people a link that signs them in.
+ *
+ * The missing rung. An invitation only ever goes out once, so until now a
+ * person who never opened theirs, or who has simply lost their password, had
+ * no way back in that an owner could offer — the People screen could change
+ * their role and take their access away and nothing in between.
+ *
+ * It exists now because it *can*: the same `sendSignInLink` the login page uses
+ * needs no SMTP, so an owner can get anybody in from the screen they are
+ * already looking at. It is also how the four board logins (§24) stop sharing
+ * one bootstrap password — send each round its own link and let it set one.
+ *
+ * Deliberately not enumeration-guarded like the login form: the address is
+ * already on the administrator's own screen, so there is nothing here they
+ * could learn that the row above the button has not already told them.
+ */
+export async function sendMemberSignInLink(formData: FormData): Promise<void> {
+  const session = await assertCapability("admin.write");
+  const parsed = z.object({ user_id: z.string().uuid() }).safeParse(toObject(formData));
+  if (!parsed.success) return fail(PEOPLE, firstIssue(parsed.error));
+
+  // Resolve the address from **this laundry's own directory** rather than
+  // trusting the posted id. `tenant_members()` is scoped to a laundry the
+  // caller belongs to (0030), so an id from anywhere else resolves to nothing
+  // at all instead of quietly mailing a stranger a way into somebody's app.
+  const member = (await listMembers()).find((row) => row.id === parsed.data.user_id);
+  if (!member?.email) {
+    return fail(PEOPLE, "That person is not on this laundry's list, so nothing was sent.");
+  }
+
+  const result = await sendSignInLink({
+    email: member.email,
+    origin: await requestOrigin(),
+    tenantName: session.tenantName,
+  });
+  if (!result.ok) return fail(PEOPLE, inviteFailureMessage(result.failure));
+
+  await recordAudit(session, {
+    entity: "membership", entityId: parsed.data.user_id, action: "update",
+    summary: `sign-in link emailed to ${member.email}`,
+  });
+
+  return done(PEOPLE, `A sign-in link is on its way to ${member.email}.`);
+}
+
 export async function removeMember(formData: FormData): Promise<void> {
   const session = await assertCapability("admin.write");
   const parsed = z.object({ user_id: z.string().uuid() })

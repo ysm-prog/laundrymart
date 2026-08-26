@@ -1,10 +1,12 @@
 "use server";
 
 import { redirect } from "next/navigation";
-import { headers } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
+import { magicLinkOutcome } from "@/lib/auth/magic-link";
+import { sendSignInLink } from "@/lib/auth/send-link";
+import { requestOrigin } from "@/lib/auth/request-origin";
 
 const credentials = z.object({
   email: z.string().email("Enter a valid email address"),
@@ -47,16 +49,32 @@ export async function sendMagicLink(formData: FormData): Promise<void> {
   const parsed = emailOnly.safeParse({ email: formData.get("email") });
   if (!parsed.success) back({ error: parsed.error.issues[0]?.message ?? "Enter a valid email address." });
 
-  const origin = (await headers()).get("origin") ?? "";
-  const supabase = await createClient();
-  const { error } = await supabase.auth.signInWithOtp({
+  // The link is minted by `generateLink()` and delivered by **this app's own
+  // mail provider**, not by Supabase's built-in sender — which needs custom
+  // SMTP this deployment has never had, and which is why this form said a link
+  // was on its way every time without one ever being. See `auth-links.ts`.
+  //
+  // A `recovery` link also cannot create an account, which keeps the property
+  // `shouldCreateUser: false` used to buy: a mistyped address here can no
+  // longer mint a real `auth.users` row with no membership behind it — a login
+  // that exists, receives mail, and dead-ends on "not linked to a laundry yet".
+  // Access is granted by an administrator inviting somebody (§10c), never by
+  // turning up at the login screen.
+  const result = await sendSignInLink({
     email: parsed.data.email,
-    options: { emailRedirectTo: `${origin}/auth/callback` },
+    origin: await requestOrigin(),
   });
-  // Same response either way so the form can't be used to enumerate accounts.
-  if (error) console.error("magic link request failed", error.message);
 
-  back({ ok: "If that address has an account, a sign-in link is on its way." });
+  if (!result.ok) {
+    // Never the address, and never which half of it was wrong.
+    console.error("sign-in link request failed", { failure: result.failure });
+  }
+
+  // Success and "no such login" answer identically, so the form cannot be used
+  // to enumerate accounts. A broken *deployment* is told plainly: it is true of
+  // every address, so it reveals nothing, and swallowing it made a project that
+  // has never sent a single email look exactly like one that just sent yours.
+  back(magicLinkOutcome(result.ok ? null : result.failure));
 }
 
 export async function signOut(): Promise<void> {

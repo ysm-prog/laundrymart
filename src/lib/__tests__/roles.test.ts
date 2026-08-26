@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  CAPABILITIES, PRESET_ROLES, ROLES, ROLE_LABELS, ROLE_PRESETS, ROLE_SUMMARY,
+  CAPABILITIES, PRESET_ROLES, ROLES, ROLE_CAPABILITIES, ROLE_LABELS, ROLE_PRESETS, ROLE_SUMMARY,
   can, isRole, membershipRolesWith, MEMBERSHIP_ROLES, presetForRole, rolesWith, type Role,
 } from "@/lib/roles";
 
@@ -20,10 +20,12 @@ describe("role presets", () => {
     expect(new Set(ROLE_PRESETS.map((preset) => preset.key)).size).toBe(ROLE_PRESETS.length);
   });
 
-  it("covers the three answers a small laundry gives", () => {
-    // Owner, office, driver — the roadmap's D1 shape. Pinned because dropping
-    // one of the three would quietly send an owner back into the eleven.
-    expect(PRESET_ROLES).toEqual(["super_admin", "operations_manager", "driver"]);
+  it("covers the answers a small laundry gives", () => {
+    // Owner, office, board, driver. Pinned because dropping one would quietly
+    // send an owner back into the full list. `board` leads the two operational
+    // ones since 0031: a round is what work is assigned to, and a `driver`
+    // membership is now for a laundry that tracks people rather than rounds.
+    expect(PRESET_ROLES).toEqual(["super_admin", "operations_manager", "board", "driver"]);
   });
 
   it("round-trips a role back to its preset, and knows when there is none", () => {
@@ -33,19 +35,43 @@ describe("role presets", () => {
     expect(presetForRole("auditor")).toBeUndefined();
   });
 
-  it("leaves the eleven roles and their capabilities untouched", () => {
+  it("leaves the membership roles and their capabilities untouched", () => {
     // The presets are presentation. If adding them had changed who can do what,
     // this is the assertion that would have caught it.
     //
-    // MEMBERSHIP_ROLES rather than ROLES since 0019: the eleven this test is
-    // about are the ones a membership can hold, and `platform_admin` is a
-    // twelfth that deliberately cannot. Pinning ROLES here would have made the
-    // new role look like a regression in the preset model, which it is not.
-    expect(MEMBERSHIP_ROLES).toHaveLength(11);
+    // MEMBERSHIP_ROLES rather than ROLES since 0019: the ones this test is
+    // about are those a membership can hold, and `platform_admin` deliberately
+    // cannot. Pinning ROLES here would have made that role look like a
+    // regression in the preset model, which it is not.
+    expect(MEMBERSHIP_ROLES).toHaveLength(12);
     expect(can("super_admin", "admin.write")).toBe(true);
     expect(can("operations_manager", "admin.write")).toBe(false);
     expect(can("driver", "run.execute")).toBe(true);
     expect(can("driver", "orders.write")).toBe(false);
+  });
+
+  it("gives a board a round's work and not the office's", () => {
+    // The client's rule, stated as capabilities: a board sees the sequence the
+    // office set and cannot change it, and reaches nothing financial or
+    // administrative. `routes.status` means "my round" only because
+    // `is_board_only()` narrows every routes row to `current_board_id()`.
+    expect(can("board", "run.execute")).toBe(true);
+    expect(can("board", "routes.read")).toBe(true);
+    expect(can("board", "routes.status")).toBe(true);
+    expect(can("board", "routes.write")).toBe(false);
+    for (const capability of [
+      "orders.write", "invoices.read", "billing.read", "pricing.read",
+      "admin.read", "admin.write", "customers.read", "items.write",
+    ] as const) {
+      expect(can("board", capability), capability).toBe(false);
+    }
+  });
+
+  it("gives a board exactly a driver's capabilities", () => {
+    // Same job, same phone, different filing. Pinned so the two cannot drift
+    // apart without somebody deciding they should.
+    expect([...ROLE_CAPABILITIES.board].sort())
+      .toEqual([...ROLE_CAPABILITIES.driver].sort());
   });
 
   it("describes and labels every role, preset or not", () => {
@@ -98,8 +124,8 @@ describe("platform_admin (0019)", () => {
     // not to the column, the failure is an insert error in production; this is
     // the cheaper place to find out.
     expect([...MEMBERSHIP_ROLES].sort()).toEqual([
-      "auditor", "branch_manager", "customer_service", "dispatcher", "driver",
-      "finance", "operations_manager", "regional_manager", "sales",
+      "auditor", "board", "branch_manager", "customer_service", "dispatcher",
+      "driver", "finance", "operations_manager", "regional_manager", "sales",
       "super_admin", "warehouse_operator",
     ]);
   });
@@ -192,38 +218,62 @@ describe("the payable side (purchases.*)", () => {
   });
 });
 
-describe("job → invoice is the Owner's and the Office manager's alone", () => {
-  const CHAIN = [
-    "orders.read", "orders.write", "orders.status", "orders.manage",
-    "invoices.read", "invoices.write",
-  ] as const;
+describe("job → invoice, and who the counter is", () => {
+  /*
+   * Billing stays where 2026-08-16 put it. Taking laundry *in* does not.
+   *
+   * That decision made job→invoice one flow answering to two people, which is
+   * coherent — but its effect was that a laundry wanting counter staff to book
+   * jobs had to make them Office manager: 31 screens, the whole ledger, the
+   * plant and the activity log, handed to the least-trained person in the
+   * building to do the one job their role is named for. The owner reversed the
+   * `orders.*` half on 2026-08-24. The test below said "a future edit that
+   * hands one of them back should have to change this test and say why", which
+   * is exactly what happened, and this is the why.
+   */
+  const BILLING = ["invoices.read", "invoices.write"] as const;
+  const COUNTER = ["orders.read", "orders.write", "orders.status"] as const;
 
-  it("is held by exactly super_admin and operations_manager", () => {
-    // The owner's decision, 2026-08-16: taking a job in, moving it through the
-    // plant and billing it is one flow and it answers to two people.
-    // `platform_admin` holds it the way it holds everything.
-    for (const capability of CHAIN) {
+  it("keeps billing with the Owner and the Office manager alone", () => {
+    for (const capability of BILLING) {
       expect(rolesWith(capability), capability).toEqual([
         "platform_admin", "super_admin", "operations_manager",
       ]);
     }
   });
 
-  it("is closed to every other role, read included", () => {
+  it("lets the counter take laundry in, and nobody else new", () => {
+    for (const capability of COUNTER) {
+      expect(rolesWith(capability), capability).toEqual([
+        "platform_admin", "super_admin", "operations_manager", "customer_service",
+      ]);
+    }
+  });
+
+  // The supervisor's set — cancel a job, backdate a receipt, edit a completed
+  // one — is not part of taking laundry in and did not move.
+  it("keeps orders.manage away from the counter", () => {
+    expect(rolesWith("orders.manage")).toEqual([
+      "platform_admin", "super_admin", "operations_manager",
+    ]);
+    expect(can("customer_service", "orders.manage")).toBe(false);
+  });
+
+  it("closes billing to every other role, read included", () => {
     const allowed = new Set(["platform_admin", "super_admin", "operations_manager"]);
     for (const role of ROLES.filter((r) => !allowed.has(r))) {
-      for (const capability of CHAIN) {
+      for (const capability of BILLING) {
         expect(can(role, capability), `${role} → ${capability}`).toBe(false);
       }
     }
   });
 
-  it("names the roles that lost it, so the change is not silent", () => {
-    // Each of these held part of the chain before and no longer does. Listed
-    // by name because a future edit that hands one of them back should have to
-    // change this test and say why.
+  it("names the roles still outside it, so a change is never silent", () => {
+    // Listed by name because a future edit handing one of them back should have
+    // to change this test and say why — which is how the counter's own line
+    // came off this list on 2026-08-24.
     expect(can("warehouse_operator", "orders.status")).toBe(false); // the plant floor
-    expect(can("customer_service", "orders.write")).toBe(false);    // the counter
+    expect(can("customer_service", "invoices.read")).toBe(false);   // the counter sees no money
     expect(can("dispatcher", "invoices.write")).toBe(false);
     expect(can("finance", "invoices.write")).toBe(false);
     expect(can("auditor", "invoices.read")).toBe(false);
@@ -241,5 +291,148 @@ describe("job → invoice is the Owner's and the Office manager's alone", () => 
     expect(can("finance", "purchases.write")).toBe(true);
     expect(can("finance", "reports.read")).toBe(true);
     expect(can("driver", "run.execute")).toBe(true);
+  });
+});
+
+describe("ordering a run (routes.sequence)", () => {
+  /*
+   * The client's rule: management determines the order of the run, drivers
+   * execute it. That is a narrower statement than `routes.write`, which is why
+   * this capability exists at all — and these assertions are the reason it
+   * cannot quietly widen again.
+   *
+   * `can_write_run_sequence()` (0036) is the same sentence in the database, and
+   * `run_sequence.test.sql` proves the two agree by refusing a dispatcher's
+   * UPDATE. Neither half is the boundary on its own: `roles.ts` drives the nav
+   * and the page guards, and `jobs` is published on `/rest/v1/jobs`.
+   */
+  const OWNER_AND_OFFICE: Role[] = ["platform_admin", "super_admin", "operations_manager"];
+
+  it("is held by the Owner and the Office manager, and by nobody else", () => {
+    expect(rolesWith("routes.sequence").sort()).toEqual([...OWNER_AND_OFFICE].sort());
+  });
+
+  it("is narrower than routes.write, which is the entire point", () => {
+    // If these two sets were ever equal the capability would be dead weight and
+    // somebody would quite reasonably delete it — so the gap is asserted rather
+    // than assumed, and the roles in it are named.
+    const planners = rolesWith("routes.write");
+    const orderers = rolesWith("routes.sequence");
+    expect(planners.length).toBeGreaterThan(orderers.length);
+    expect(planners.filter((role) => !orderers.includes(role)).sort())
+      .toEqual(["branch_manager", "dispatcher", "regional_manager"]);
+  });
+
+  it("keeps the dispatcher planning the day without setting the order", () => {
+    expect(can("dispatcher", "routes.write")).toBe(true);
+    expect(can("dispatcher", "routes.status")).toBe(true);
+    expect(can("dispatcher", "routes.sequence")).toBe(false);
+  });
+
+  it("does not leak into the roles derived from TENANT_ALL", () => {
+    // The trap this file has recorded twice already: `branch_manager` and
+    // `regional_manager` are built by *subtracting* from TENANT_ALL, so a
+    // capability that is merely not mentioned is a capability they hold. Both
+    // keep `routes.write`, so this is a real narrowing rather than an accident
+    // of them holding nothing.
+    for (const role of ["branch_manager", "regional_manager"] as const) {
+      expect(can(role, "routes.write")).toBe(true);
+      expect(can(role, "routes.sequence")).toBe(false);
+    }
+    expect(can("auditor", "routes.sequence")).toBe(false);
+  });
+
+  it("gives the van and the round no way to reorder their own work", () => {
+    // The requirement names these two explicitly, and both can read the run and
+    // advance it — which is exactly why "they simply hold nothing" would be the
+    // wrong proof.
+    for (const role of ["driver", "board"] as const) {
+      expect(can(role, "routes.read")).toBe(true);
+      expect(can(role, "routes.status")).toBe(true);
+      expect(can(role, "routes.sequence")).toBe(false);
+      expect(can(role, "routes.write")).toBe(false);
+    }
+  });
+
+  it("keeps the counter and the floor out of it too", () => {
+    for (const role of ["customer_service", "warehouse_operator", "sales", "finance"] as const) {
+      expect(can(role, "routes.sequence")).toBe(false);
+    }
+  });
+
+  it("lets everybody who may order a run also open the screen", () => {
+    // A capability to change something you cannot see is a page guard away from
+    // being unusable: `/runs` is gated on `routes.read`.
+    for (const role of rolesWith("routes.sequence")) {
+      expect(can(role, "routes.read")).toBe(true);
+    }
+  });
+});
+
+describe("the chart of accounts (0037)", () => {
+  /*
+   * `/accounts` is gated on `purchases.read` and its new create/edit actions on
+   * `purchases.write`. `can_read_purchases()` and `can_write_purchases()` are the
+   * database's copies of those two sets, and `accounts_scope.test.sql` proves
+   * them by reading and writing as each role — so if either list moves here,
+   * one of the two will disagree and a screen will offer something the policy
+   * refuses in silence.
+   */
+  it("keeps reading the chart to the roles the screen already allowed", () => {
+    expect(rolesWith("purchases.read").sort()).toEqual([
+      "auditor", "branch_manager", "finance", "operations_manager",
+      "platform_admin", "regional_manager", "super_admin",
+    ]);
+  });
+
+  it("lets the auditor look at the chart and not change it", () => {
+    expect(can("auditor", "purchases.read")).toBe(true);
+    expect(can("auditor", "purchases.write")).toBe(false);
+  });
+
+  it("keeps the chart away from the van, the round, the counter and the floor", () => {
+    // Not cosmetic: `gl_accounts.current_balance` is on this table, so an open
+    // read is every account balance in the business. Before 0037 the table
+    // carried `apply_tenant_policy`'s single permissive `for all` policy, so
+    // all four of these could read *and rewrite* the chart off PostgREST.
+    for (const role of ["driver", "board", "customer_service", "warehouse_operator"] as const) {
+      expect(can(role, "purchases.read")).toBe(false);
+      expect(can(role, "purchases.write")).toBe(false);
+    }
+    expect(can("dispatcher", "purchases.read")).toBe(false);
+  });
+
+  it("lets everybody who can code an item also see the accounts to code it to", () => {
+    // The item form offers a picker of `gl_accounts`. A role that may edit an
+    // item but may not read the chart would get an empty picker with no
+    // explanation, which reads as a broken screen — the unlinked-driver failure
+    // this project has already shipped once.
+    for (const role of rolesWith("items.write")) {
+      expect(can(role, "purchases.read")).toBe(true);
+    }
+  });
+
+  it("keeps the item master to the Owner and the Office manager", () => {
+    // The client's rule: the item list is the master reference the whole
+    // application resolves through, so it is maintained by two people rather
+    // than edited wherever somebody is standing. Pinned here because the roles
+    // that lost it — branch_manager and regional_manager — derive from
+    // TENANT_ALL, so the capability would come straight back if the block were
+    // dropped, and nothing else would notice.
+    expect(rolesWith("items.write").filter((r) => r !== "platform_admin"))
+      .toEqual(["super_admin", "operations_manager"]);
+  });
+
+  it("still lets everybody who names an item read the list", () => {
+    // The other half, and the one that breaks a screen if it is got wrong: a
+    // board reads item names off its run sheet, the plant runs batches keyed on
+    // them, and the counter picks them into a job. `0040` narrows the write and
+    // deliberately leaves the read alone.
+    for (const role of ["board", "driver", "warehouse_operator", "customer_service"] as const) {
+      expect(can(role, "items.write")).toBe(false);
+    }
+    for (const role of ["warehouse_operator", "dispatcher", "finance", "sales"] as const) {
+      expect(can(role, "items.read")).toBe(true);
+    }
   });
 });

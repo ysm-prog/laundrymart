@@ -10,9 +10,16 @@
 
 import { createClient } from "@/lib/supabase/server";
 import type { ChargeType } from "@/lib/domain/pricing";
+import { loadInvoiceBreakdown, type InvoiceBreakdown } from "@/lib/invoices/breakdown";
 
 export type InvoicePdfLine = {
   description: string;
+  /**
+   * The GL account this line is coded to, as it stood when the line was written.
+   * Null on a free-text line, which prints as a blank rather than a dash: the
+   * customer reading this invoice is not the person who needs the code.
+   */
+  account_code?: string | null;
   charge_type: ChargeType;
   quantity: number;
   unit_price: number;
@@ -48,6 +55,15 @@ export type InvoicePdfData = {
     notes: string | null;
   };
   lines: InvoicePdfLine[];
+  /**
+   * The per-job detail behind a consolidated invoice, or empty.
+   *
+   * On the page the lines are rolled up per item, so a customer holding ten
+   * jobs' worth of towels reads one line. This is the audit trail that has to
+   * travel with it — otherwise the emailed PDF is the one copy of the invoice
+   * that cannot answer "which day were those 1,450 towels?".
+   */
+  breakdown: InvoiceBreakdown;
 };
 
 export async function loadInvoiceForPdf(
@@ -79,7 +95,7 @@ export async function loadInvoiceForPdf(
   const [{ data: lines }, { data: tenant }] = await Promise.all([
     supabase
       .from("invoice_lines")
-      .select("description, charge_type, quantity, unit_price, amount, taxable")
+      .select("description, charge_type, quantity, unit_price, amount, taxable, account_code")
       .eq("invoice_id", invoiceId)
       .order("sequence")
       .returns<InvoicePdfLine[]>(),
@@ -111,5 +127,6 @@ export async function loadInvoiceForPdf(
     },
     invoice,
     lines: lines ?? [],
+    breakdown: await loadInvoiceBreakdown(supabase, tenantId, invoiceId),
   };
 }

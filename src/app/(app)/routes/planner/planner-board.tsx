@@ -242,7 +242,7 @@ export function PlannerBoard({
                           {index + 1}
                         </span>
                         <Link href={`/jobs/${job.id}`}
-                              className="truncate text-xs text-primary hover:underline">
+                              className="inline-flex min-h-11 items-center truncate rounded px-1 text-sm text-primary hover:underline">
                           {job.jobNumber}
                         </Link>
                       </div>
@@ -265,11 +265,13 @@ export function PlannerBoard({
                           <button type="button" onClick={() => nudge(column.id, index, -1)}
                                   disabled={index === 0}
                                   aria-label={`Move ${job.jobNumber} earlier`}
-                                  className="rounded-lg border border-strong px-1.5 py-0.5 text-2xs disabled:opacity-40">↑</button>
+                                  className="flex size-11 items-center justify-center rounded-lg border border-strong text-base
+                                             transition hover:bg-surface-muted disabled:opacity-40">↑</button>
                           <button type="button" onClick={() => nudge(column.id, index, 1)}
                                   disabled={index === column.jobIds.length - 1}
                                   aria-label={`Move ${job.jobNumber} later`}
-                                  className="rounded-lg border border-strong px-1.5 py-0.5 text-2xs disabled:opacity-40">↓</button>
+                                  className="flex size-11 items-center justify-center rounded-lg border border-strong text-base
+                                             transition hover:bg-surface-muted disabled:opacity-40">↓</button>
                           <label className="sr-only" htmlFor={`move-${jobId}`}>
                             Move {job.jobNumber} to another run
                           </label>
@@ -277,7 +279,7 @@ export function PlannerBoard({
                             id={`move-${jobId}`}
                             value={column.id}
                             onChange={(event) => place(jobId, event.target.value, Number.MAX_SAFE_INTEGER)}
-                            className="rounded-lg min-w-0 flex-1 border border-strong bg-surface-muted px-1 py-0.5 text-2xs"
+                            className="rounded-lg min-h-11 min-w-0 flex-1 border border-strong bg-surface-muted px-2 text-sm"
                           >
                             {columns.filter((target) => target.open || target.id === column.id).map((target) => (
                               <option key={target.id} value={target.id}>{target.code}</option>
@@ -304,13 +306,13 @@ export function PlannerBoard({
 
       <div className="flex flex-wrap items-center gap-3 border-t pt-3">
         <button type="submit" disabled={!dirty}
-                className="rounded-lg inline-flex items-center justify-center bg-action px-3 py-1.5 text-sm
+                className="rounded-lg inline-flex items-center justify-center min-h-11 bg-action px-4 text-sm
  font-medium text-action-foreground transition hover:brightness-110
  disabled:pointer-events-none disabled:opacity-50">
           Apply plan
         </button>
         <button type="button" onClick={() => setColumns(initial)} disabled={!dirty}
-                className="rounded-lg inline-flex items-center justify-center border border-strong bg-surface px-3 py-1.5
+                className="rounded-lg inline-flex items-center justify-center min-h-11 border border-strong bg-surface px-4
  text-sm font-medium transition hover:bg-surface-muted
  disabled:pointer-events-none disabled:opacity-50">
           Discard changes
@@ -335,7 +337,7 @@ function CrewSelect({
       <select
         value={value} disabled={disabled}
         onChange={(event) => onChange(event.target.value)}
-        className="rounded-lg min-w-0 flex-1 border border-strong bg-surface-muted px-1.5 py-0.5 text-xs disabled:opacity-60"
+        className="rounded-lg min-h-11 min-w-0 flex-1 border border-strong bg-surface-muted px-2 text-sm disabled:opacity-60"
       >
         <option value="">Unassigned</option>
         {options.map((option) => (

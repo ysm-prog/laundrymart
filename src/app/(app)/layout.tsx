@@ -1,10 +1,10 @@
 import { cookies } from "next/headers";
 import { requireSession, switchableTenants, type Session } from "@/lib/auth/context";
-import { navigationFor } from "@/lib/nav";
+import { NAV_GROUP_LABELS, navigationFor } from "@/lib/nav";
 import { ROLE_LABELS } from "@/lib/roles";
 import { createClient } from "@/lib/supabase/server";
 import { today } from "@/lib/format";
-import { SectionNav, ThemeToggle, type NavCounts } from "@/components/app-nav";
+import { SectionNav, TextSizeControl, ThemeToggle, type NavCounts } from "@/components/app-nav";
 import { AppShell } from "@/components/app-shell";
 import { GlobalSearch } from "@/components/global-search";
 import { UserMenu } from "@/components/user-menu";
@@ -29,7 +29,9 @@ async function navCounts(): Promise<NavCounts> {
 
     // No runs-today count: the rail no longer has a Runs row to hang it on, and
     // querying for a badge nothing renders is a request every page load pays for.
-    const [exceptions, batches, unpaid, overdueJobs, bills, awaitingInvoice] = await Promise.all([
+    const [
+      exceptions, batches, unpaid, overdueJobs, bills, awaitingInvoice, openDrafts,
+    ] = await Promise.all([
       supabase.from("jobs").select("id", head).eq("status", "exception"),
       supabase.from("production_batches").select("id", head)
         .in("stage", ["received", "washing", "drying", "folding", "packing", "ready_for_dispatch"])
@@ -53,6 +55,12 @@ async function navCounts(): Promise<NavCounts> {
       // shown — but it still costs a query, which is why it is head-only.
       supabase.from("laundry_orders").select("id", head)
         .in("billing_status", ["awaiting_review", "approved"]),
+      // Invoices still collecting. Head-only like the rest, and deliberately
+      // counted on `status` alone rather than on the open-draft predicate: a
+      // per-job draft nobody has issued is equally something waiting to be
+      // dealt with, and the screen itself is what separates the three stages.
+      supabase.from("invoices").select("id", head)
+        .eq("status", "draft").is("deleted_at", null),
     ]);
 
     return {
@@ -62,6 +70,7 @@ async function navCounts(): Promise<NavCounts> {
       overdueJobs: overdueJobs.count ?? undefined,
       unpaidBills: bills.count ?? undefined,
       awaitingInvoice: awaitingInvoice.count ?? undefined,
+      openDrafts: openDrafts.count ?? undefined,
     };
   } catch {
     return {};
@@ -87,12 +96,24 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   // on the very first frame instead of snapping after hydration.
   const collapsed = cookieStore.get("es_rail")?.value === "collapsed";
 
+  // Which rail groups the person has shut, same reasoning and same lifetime.
+  // Stored as the *shut* ones so the default — everything the group data says —
+  // survives a release that adds a group, rather than a missing name reading as
+  // "closed".
+  const shut = new Set(
+    (cookieStore.get("es_nav")?.value ?? "").split("|").map(decodeURIComponent).filter(Boolean),
+  );
+  const openGroups = Object.fromEntries(
+    NAV_GROUP_LABELS.map((label) => [label, !shut.has(label)]),
+  );
+
   return (
     <AppShell
       items={items}
       counts={counts}
       tenantName={session.tenantName}
       defaultCollapsed={collapsed}
+      openGroups={openGroups}
       sectionSlot={<SectionNav items={items} />}
       headerSlot={
         <>
@@ -102,6 +123,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           <div className="flex items-center gap-1">
             <span className="mr-1 hidden text-sm text-muted-foreground lg:inline">{today()}</span>
             <NotificationBell count={unread} />
+            {/* Beside the theme toggle: the two questions are the same question
+                — "can I read this comfortably?" — and somebody who cannot is
+                looking in one place, not two. */}
+            <TextSizeControl />
             <ThemeToggle />
             <UserMenu
               email={session.email ?? "Signed in"}

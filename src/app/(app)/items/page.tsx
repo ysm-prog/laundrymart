@@ -9,10 +9,13 @@ import {
 } from "@/components/ui";
 import { Field, Input, Select, SubmitButton } from "@/components/form";
 import { ListControls } from "@/components/list-controls";
+import { FilterChips } from "@/components/filters";
+import { IncomeAccountField } from "./income-account-field";
+import { ITEM_TYPES, ITEM_TYPE_LABELS } from "@/lib/domain/laundry-orders";
 import { ITEM_CATEGORIES } from "./categories";
 import { createItem } from "./actions";
 
-export const metadata = { title: "Item types" };
+export const metadata = { title: "Items" };
 export const dynamic = "force-dynamic";
 
 type Search = { q?: string; category?: string; error?: string; ok?: string };
@@ -25,23 +28,29 @@ export default async function ItemsPage({ searchParams }: { searchParams: Promis
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Item types" eyebrow="Items"
-        description="The linen you handle. Prices here apply unless a customer’s contract sets its own."
+        title="Items"
+        description="Your master item list, under the codes your books use. Everything else in the app names an item from here — a job’s laundry, its charges, an invoice line and every report."
       />
       <ListControls
         action="/items"
         q={params.q}
-        filters={[{
-          name: "category", label: "Category", value: params.category,
-          options: ITEM_CATEGORIES.map((value) => ({ value, label: humanise(value) })),
-        }]}
+        params={params}
+        filterKeys={["q", "category"]}
+        placeholder="Item code, name or description…"
+        chips={
+          <FilterChips
+            basePath="/items" params={params} name="category" label="Item category"
+            allLabel="All items"
+            options={ITEM_CATEGORIES.map((value) => ({ value, label: humanise(value) }))}
+          />
+        }
       />
 
       <Suspense key={JSON.stringify(params)} fallback={<SkeletonRows rows={6} />}>
         <ItemList params={params} />
       </Suspense>
 
-      {writable ? <NewItemForm /> : null}
+      {writable ? <NewItemForm tenantId={session.tenantId} /> : null}
     </div>
   );
 }
@@ -50,14 +59,21 @@ async function ItemList({ params }: { params: Search }) {
   const supabase = await createClient();
   let query = supabase
     .from("items")
-    .select("id, sku, name, category, ownership_type, replacement_cost, rental_price, wash_only_price, weight_kg, reorder_level, status")
+    .select("id, sku, item_code, name, description, category, laundry_category, " +
+            "ownership_type, is_sell, is_buy, sell_price, cost_price, tax_code, " +
+            "replacement_cost, rental_price, wash_only_price, weight_kg, reorder_level, " +
+            "myob_item_id, myob_item_code, external_synced_at, income_account_id, status")
     .is("deleted_at", null)
+    // By code, because that is what the list is scanned by. Staff look for
+    // TOW001 and read down; alphabetical by name puts the towels in three places.
+    .order("item_code", { nullsFirst: false })
     .order("name");
 
   if (params.category) query = query.eq("category", params.category);
   if (params.q) {
     const term = `%${params.q}%`;
-    query = query.or(`name.ilike.${term},sku.ilike.${term}`);
+    // The code first, because typing `TOW` is how staff search.
+    query = query.or(`item_code.ilike.${term},name.ilike.${term},sku.ilike.${term}`);
   }
 
   const { data } = await query.returns<Item[]>();
@@ -66,14 +82,30 @@ async function ItemList({ params }: { params: Search }) {
     <DataTable
       rows={data ?? []}
       rowHref={(row) => `/items/${row.id}`}
-      empty={<EmptyState title="No items yet" description="Add the linen types you handle to start pricing agreements." />}
+      empty={<EmptyState title="No items yet"
+                         description="Add the items you handle, or import them from your accounting system. Everything else in the app names an item from this list." />}
       columns={[
+        {
+          // The code leads the row for the same reason it leads every label:
+          // two items can be called "Bath Towel" and only one is TOW001.
+          header: "Code",
+          cell: (row) => (
+            <span className="font-mono text-sm font-medium">{row.item_code ?? "—"}</span>
+          ),
+        },
         { header: "Item", cell: (row) => row.name },
-        { header: "SKU", cell: (row) => row.sku, hideBelow: "sm" },
-        { header: "Category", cell: (row) => humanise(row.category), hideBelow: "md" },
-        { header: "Rental", cell: (row) => money(row.rental_price), align: "right" },
-        { header: "Wash only", cell: (row) => money(row.wash_only_price), align: "right", hideBelow: "sm" },
-        { header: "Replacement", cell: (row) => money(row.replacement_cost), align: "right", hideBelow: "lg" },
+        { header: "Kind of laundry", hideBelow: "lg",
+          cell: (row) => (row.laundry_category ? humanise(row.laundry_category) : "—") },
+        {
+          header: "Sell / Buy", hideBelow: "md",
+          // MYOB's own two flags, shown as words rather than ticks so the column
+          // reads without a legend.
+          cell: (row) => [row.is_sell ? "Sell" : null, row.is_buy ? "Buy" : null]
+            .filter(Boolean).join(" · ") || "—",
+        },
+        { header: "Sell price", cell: (row) => money(row.sell_price), align: "right" },
+        { header: "Cost", cell: (row) => money(row.cost_price), align: "right", hideBelow: "sm" },
+        { header: "Rental", cell: (row) => money(row.rental_price), align: "right", hideBelow: "lg" },
         { header: "Weight", cell: (row) => `${number(row.weight_kg)} kg`, align: "right", hideBelow: "lg" },
         { header: "Status", cell: (row) => <StatusBadge status={row.status} /> },
       ]}
@@ -81,15 +113,60 @@ async function ItemList({ params }: { params: Search }) {
   );
 }
 
-function NewItemForm() {
+const LAUNDRY_CATEGORY_OPTIONS = ITEM_TYPES.map((value) => ({
+  value, label: ITEM_TYPE_LABELS[value],
+}));
+
+/**
+ * Loads its own accounts rather than being handed them, so the page above stays
+ * one read for a role that cannot see this form at all.
+ */
+async function NewItemForm({ tenantId }: { tenantId: string }) {
   return (
-    <Card title="Add an item">
+    <Card
+      title="Add an item"
+      description="Use the same code as your books. It has to be unique, and it is what staff will type."
+    >
       <form action={createItem} className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <Field label="Item code" name="item_code" required
+               hint="What staff type — TOW001. No spaces.">
+          <Input name="item_code" required placeholder="TOW001" />
+        </Field>
         <Field label="Name" name="name" required>
           <Input name="name" required placeholder="Bath Towel — White" />
         </Field>
-        <Field label="SKU" name="sku" required>
+        <Field label="Description" name="description" className="sm:col-span-2">
+          <Input name="description" placeholder="Bath Towel — Commercial, white" />
+        </Field>
+        <Field label="SKU" name="sku" required hint="The stock code, if it differs from the item code.">
           <Input name="sku" required placeholder="BT-WHT-01" />
+        </Field>
+        <Field label="Kind of laundry" name="laundry_category"
+               hint="What this counts as when a customer hands it in. Leave blank for rental linen only.">
+          <Select name="laundry_category" placeholder="Not laundry a customer hands in"
+                  options={LAUNDRY_CATEGORY_OPTIONS} />
+        </Field>
+        <Field label="I sell this" name="is_sell">
+          <Select name="is_sell" defaultValue="true"
+                  options={[{ value: "true", label: "Yes" }, { value: "false", label: "No" }]} />
+        </Field>
+        <Field label="I buy this" name="is_buy">
+          <Select name="is_buy" defaultValue="false"
+                  options={[{ value: "true", label: "Yes" }, { value: "false", label: "No" }]} />
+        </Field>
+        <Field label="Sell price" name="sell_price">
+          <Input name="sell_price" type="number" step="0.01" min={0} defaultValue="0" />
+        </Field>
+        <Field label="Cost price" name="cost_price">
+          <Input name="cost_price" type="number" step="0.01" min={0} defaultValue="0" />
+        </Field>
+        <Field label="Tax code" name="tax_code" hint="As it is in your books — GST, FRE.">
+          <Input name="tax_code" placeholder="GST" />
+        </Field>
+        <IncomeAccountField tenantId={tenantId} />
+        <Field label="MYOB item ID" name="myob_item_id"
+               hint="Optional. Filled in by an import; kept so the two systems can be reconciled.">
+          <Input name="myob_item_id" />
         </Field>
         <Field label="Category" name="category">
           <Select name="category" defaultValue="bath_towel"

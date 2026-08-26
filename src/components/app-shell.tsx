@@ -21,7 +21,7 @@ import type { NavItem } from "@/lib/nav";
  * renders at the right width on the first paint instead of snapping after it.
  */
 export function AppShell({
-  items, counts, tenantName, headerSlot, sectionSlot, defaultCollapsed, children,
+  items, counts, tenantName, headerSlot, sectionSlot, defaultCollapsed, openGroups, children,
 }: {
   items: NavItem[];
   counts?: NavCounts;
@@ -29,6 +29,8 @@ export function AppShell({
   headerSlot: ReactNode;
   sectionSlot: ReactNode;
   defaultCollapsed: boolean;
+  /** Which rail groups are open, read from a cookie in the layout. */
+  openGroups?: Record<string, boolean>;
   children: ReactNode;
 }) {
   const [collapsed, setCollapsed] = useState(defaultCollapsed);
@@ -111,7 +113,7 @@ export function AppShell({
         </div>
 
         <div className="flex-1 overflow-y-auto px-2 py-3">
-          <AppNav items={items} counts={counts} collapsed={collapsed} />
+          <AppNav items={items} counts={counts} collapsed={collapsed} openGroups={openGroups} />
         </div>
 
         <div className="flex-none border-t border-sidebar-border p-2">
@@ -159,7 +161,8 @@ export function AppShell({
               </button>
             </div>
             <div className="flex-1 overflow-y-auto px-2 py-3">
-              <AppNav items={items} counts={counts} onNavigate={() => setDrawerOpen(false)} />
+              <AppNav items={items} counts={counts} openGroups={openGroups}
+                      onNavigate={() => setDrawerOpen(false)} />
             </div>
           </div>
         </div>

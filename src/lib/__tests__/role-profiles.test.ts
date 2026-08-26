@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { MEMBERSHIP_ROLES, ROLES } from "@/lib/roles";
 import {
-  DEFAULT_EMAIL_DOMAIN, ROLE_PROFILES, profileEmail, selectedProfiles, type RoleProfile,
+  DEFAULT_EMAIL_DOMAIN, ROLE_PROFILES, formerProfileEmail, profileEmail, selectedProfiles,
+  type RoleProfile,
   // The provisioning script's own module, imported rather than restated: a
   // second copy of this list is a second thing to keep in step, and the point
   // of the test is that `roles.ts` and the script cannot drift apart.
@@ -40,6 +41,14 @@ describe("test role profiles", () => {
     expect(selectedProfiles({ includePlatformAdmin: true })).toHaveLength(ROLES.length);
   });
 
+  it("gives the board profile a board record, since RLS reads one", () => {
+    // `current_board_id()` resolves `boards.user_id`; without a row it is null
+    // and every board-scoped policy matches nothing. The login would work and
+    // every screen would be empty — the same trap the driver profile records,
+    // and the one this project has already shipped once.
+    expect(profiles.filter((p) => p.board).map((p) => p.role)).toEqual(["board"]);
+  });
+
   it("gives the driver profile a driver record, since RLS reads one", () => {
     // `current_driver_id()` resolves `drivers.user_id`; without a row it is
     // null and every driver-scoped policy matches nothing. The login would work
@@ -54,8 +63,42 @@ describe("test role profiles", () => {
     // chase aimed at a test profile can never leave the building.
     expect(DEFAULT_EMAIL_DOMAIN.endsWith("example.com")).toBe(true);
     for (const email of emails) expect(email).toMatch(/^[a-z-]+@[a-z.]+$/);
-    expect(emails).toContain(`super-admin@${DEFAULT_EMAIL_DOMAIN}`);
     expect(emails).toContain(`warehouse-operator@${DEFAULT_EMAIL_DOMAIN}`);
+  });
+
+  it("addresses the owner as the owner, which is what every screen calls them", () => {
+    // The regression this pins. `ROLE_PRESETS` labels `super_admin` "Owner",
+    // the People picker offers it that way and this profile is named "Test
+    // Owner" — but the address was derived from the role *identifier*, so the
+    // one string an operator has to type was the only place in the app that
+    // said "super-admin". An owner working from a list of test logins typed
+    // `owner@` and was told their details were invalid, which was true and
+    // useless: no such login existed.
+    const owner = profiles.find((p) => p.role === "super_admin");
+    expect(profileEmail(owner!)).toBe(`owner@${DEFAULT_EMAIL_DOMAIN}`);
+  });
+
+  it("remembers an address a profile has moved away from", () => {
+    // Without this the rename leaves the old login in the laundry holding the
+    // same membership: two owner logins, one of them at an address nothing
+    // tells you about, and `--remove` cleaning up neither.
+    const owner = profiles.find((p) => p.role === "super_admin");
+    expect(formerProfileEmail(owner!)).toBe(`super-admin@${DEFAULT_EMAIL_DOMAIN}`);
+
+    // Nobody else has moved, so nobody else claims an old address — a stale
+    // `formerly` would have the runner adopt a login it does not own.
+    const moved = profiles.filter((p) => formerProfileEmail(p) !== null);
+    expect(moved.map((p) => p.role)).toEqual(["super_admin"]);
+  });
+
+  it("never lets a former address collide with a current one", () => {
+    // Two profiles cannot both answer to one login: whichever ran second would
+    // rename the other's account out from under it.
+    const current = new Set(profiles.map((p) => profileEmail(p)));
+    for (const profile of profiles) {
+      const former = formerProfileEmail(profile);
+      if (former) expect(current.has(former), profile.role).toBe(false);
+    }
   });
 
   it("says what each profile is for", () => {

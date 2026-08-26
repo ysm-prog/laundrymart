@@ -15,11 +15,30 @@
 /** Domain for the generated addresses. `example.com` can never receive mail. */
 export const DEFAULT_EMAIL_DOMAIN = "roles.example.com";
 
-/** Shared password. Test logins, on a test tenant — printed on every run. */
+/**
+ * Shared password, printed on every run.
+ *
+ * **This stopped being "a test password on a test tenant" on 2026-08-26.** The
+ * demo laundry was deleted and these twelve profiles were moved into
+ * `Adelaide Towel Service`, which is a real business with 508 customers, 646
+ * invoices and a 268-line chart of accounts. A profile signed in as here reads
+ * whatever its role is allowed to read of *that*, so the shared password is now
+ * a credential on live data rather than on a sandbox. Reset it, or give each
+ * profile its own from People > Email sign-in link, before handing any of these
+ * to somebody outside the business.
+ */
 export const DEFAULT_PASSWORD = "RoleTest!2026";
 
-/** The demo laundry from `supabase/seed.sql`, resolved by name. */
-export const DEFAULT_TENANT = "Harbour Commercial Laundry";
+/**
+ * The laundry the memberships go in, resolved by name.
+ *
+ * `Adelaide Towel Service` since 2026-08-26: it is the only tenant on this
+ * deployment, so there is nowhere else for them to go. It was
+ * `Harbour Commercial Laundry`, the demo laundry from `supabase/seed.sql`,
+ * which no longer exists live — leaving that here would have made
+ * `npm run seed:roles` fail on a name nothing on the project answers to.
+ */
+export const DEFAULT_TENANT = "Adelaide Towel Service";
 
 /**
  * `note` is what the profile is *for* — the screen or the refusal worth
@@ -40,6 +59,14 @@ export const ROLE_PROFILES = [
     role: "super_admin",
     name: "Test Owner",
     note: "The owner. Everything in one laundry, including Settings and the job→invoice flow.",
+    // Every word this app puts in front of a person for `super_admin` is
+    // "Owner" — ROLE_PRESETS labels it that, the People picker offers it that
+    // way, and the note above says it. Deriving the address from the *role
+    // identifier* made the one string an operator has to type the only place
+    // that said "super-admin", and an owner handed a list of test logins typed
+    // `owner@` and was told their details were invalid. Say the same word here.
+    email: "owner",
+    formerly: "super-admin",
   },
   {
     role: "operations_manager",
@@ -59,6 +86,16 @@ export const ROLE_PROFILES = [
     // null, and every driver-scoped policy then matches nothing — the login
     // works and the screens are empty, which reads as a bug in the screens.
     driver: true,
+  },
+  {
+    role: "board",
+    name: "Test Board",
+    note: "One round's own jobs. Sees the sequence the office set and cannot change it.",
+    // A `board` membership with no `boards` row makes `current_board_id()` null,
+    // and every board-scoped policy then matches nothing — the login works and
+    // every screen is empty, which reads as a bug in the screens rather than as
+    // a missing link. The same trap the driver profile below records.
+    board: true,
   },
   {
     role: "finance",
@@ -97,9 +134,26 @@ export const ROLE_PROFILES = [
   },
 ];
 
-/** `super_admin` → `super-admin@roles.example.com`. */
+/**
+ * The address to sign in as. `operations_manager` →
+ * `operations-manager@roles.example.com`; a profile carrying `email` says its
+ * own local part instead, for a role the app names differently from its
+ * identifier (`super_admin` is "Owner" everywhere a person can read it).
+ */
 export function profileEmail(profile, domain = DEFAULT_EMAIL_DOMAIN) {
-  return `${profile.role.replaceAll("_", "-")}@${domain}`;
+  return `${profile.email ?? profile.role.replaceAll("_", "-")}@${domain}`;
+}
+
+/**
+ * The address this profile used to be provisioned at, if it has moved.
+ *
+ * Renaming a profile without this would leave the old login sitting in the
+ * laundry holding the same membership — two Owner logins, one of them at an
+ * address nothing tells you about, and `--remove` cleaning up neither. The
+ * runner adopts it instead, so a rerun renames rather than duplicates.
+ */
+export function formerProfileEmail(profile, domain = DEFAULT_EMAIL_DOMAIN) {
+  return profile.formerly ? `${profile.formerly}@${domain}` : null;
 }
 
 /** The profiles to provision: memberships always, the platform row on request. */

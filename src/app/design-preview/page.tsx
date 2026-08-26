@@ -23,6 +23,13 @@ import { DateNav } from "@/app/(app)/my-runs/date-nav";
 import { DaySummary, JobCard, JobGroup } from "@/app/(app)/my-runs/run-view";
 import { BillingQueue, type QueueRow } from "@/app/(app)/invoices/awaiting/billing-queue";
 import { JobChargesEditor, type EditableCharge } from "@/app/(app)/orders/[id]/job-charges-editor";
+import { ItemPickerPreview } from "./item-picker-preview";
+import {
+  InvoiceLineForm, type LineFormAccount, type LineFormItem,
+} from "@/app/(app)/invoices/[id]/line-form";
+import {
+  InvoiceSelection, type SelectableInvoice,
+} from "@/app/(app)/invoices/invoice-selection";
 import { PriceTable } from "@/app/(app)/invoices/prices/price-table";
 import {
   defaultPriceList, priceListFor, type LaundryPriceRow,
@@ -49,6 +56,16 @@ import { CountRow } from "@/app/(app)/warehouse/count-row";
  */
 
 import { notFound } from "next/navigation";
+import { SequenceBoard, type SequenceStop } from "@/app/(app)/runs/sequence-board";
+import { MoveToBoard } from "@/app/(app)/runs/move-to-board";
+import { consolidateChargeLines } from "@/lib/domain/invoice-consolidation";
+import { FilterChips, FilterSummary, PeriodFilter, ToggleChips } from "@/components/filters";
+import { ListControls } from "@/components/list-controls";
+import { ACTIVITY_PERIOD_PRESETS, BILLING_PERIOD_PRESETS, resolvePeriod } from "@/lib/domain/dates";
+import { money } from "@/lib/format";
+import { QuickActions } from "@/components/quick-actions";
+import { DraftCard } from "@/app/(app)/invoices/drafts/draft-card";
+import type { DraftSummary } from "@/lib/invoices/open-draft";
 
 export const metadata = { title: "Design preview" };
 
@@ -214,7 +231,7 @@ const PREVIEW_REGISTER = [
 /* --------------------------------------------------------- my runs fixture */
 
 /**
- * A driver's morning, fixed. The date is the day the redesign fixtures use, so
+ * A round's morning, fixed. The date is the day the redesign fixtures use, so
  * the screenshots are byte-stable across builds; the two stops are the two
  * shapes that matter — one customer with several jobs under a single stop, and
  * one already done.
@@ -223,12 +240,13 @@ const PREVIEW_DAY_JOBS: DayJob[] = [
   {
     id: "j1", order_number: "LJ01041", status: "assigned", priority: "urgent",
     delivery_required: true, due_date: "2026-08-16", expected_delivery_date: "2026-08-16",
-    assigned_delivery_date: "2026-08-16", assigned_driver_id: "d1",
+    assigned_delivery_date: "2026-08-16", assigned_board_id: "d1",
     load_confirmed_at: null, completed_at: null,
     delivery_window: "morning", expected_delivery_time: null,
     delivery_address: "123 Main Street, Adelaide SA 5000",
     delivery_instructions: "Ring the bell at the roller door.",
     special_instructions: null, customer_id: "c1",
+    stop_id: "s1", jobs: { sequence: 1 },
     customers: { id: "c1", business_name: "ABC Fitness", phone: "08 1234 5678" },
     laundry_order_items: [
       { item_type: "towels", custom_description: null, quantity_type: "exact",
@@ -238,11 +256,12 @@ const PREVIEW_DAY_JOBS: DayJob[] = [
   {
     id: "j2", order_number: "LJ01045", status: "out_for_delivery", priority: "normal",
     delivery_required: true, due_date: "2026-08-16", expected_delivery_date: "2026-08-16",
-    assigned_delivery_date: "2026-08-16", assigned_driver_id: "d1",
+    assigned_delivery_date: "2026-08-16", assigned_board_id: "d1",
     load_confirmed_at: "2026-08-15T22:10:00Z", completed_at: null,
     delivery_window: null, expected_delivery_time: null,
     delivery_address: "55 North Terrace, Adelaide SA 5000",
     delivery_instructions: null, special_instructions: null, customer_id: "c2",
+    stop_id: "s2", jobs: { sequence: 2 },
     customers: { id: "c2", business_name: "XYZ Medical", phone: "08 8888 1010" },
     laundry_order_items: [
       { item_type: "sheets", custom_description: null, quantity_type: "bulk_lot",
@@ -252,11 +271,12 @@ const PREVIEW_DAY_JOBS: DayJob[] = [
   {
     id: "j3", order_number: "LJ01051", status: "completed", priority: "normal",
     delivery_required: true, due_date: "2026-08-16", expected_delivery_date: "2026-08-16",
-    assigned_delivery_date: "2026-08-16", assigned_driver_id: "d1",
+    assigned_delivery_date: "2026-08-16", assigned_board_id: "d1",
     load_confirmed_at: "2026-08-15T22:10:00Z", completed_at: "2026-08-16T01:12:00Z",
     delivery_window: null, expected_delivery_time: null,
     delivery_address: "19 King William Street, Adelaide SA 5000",
     delivery_instructions: null, special_instructions: null, customer_id: "c3",
+    stop_id: "s3", jobs: { sequence: 3 },
     customers: { id: "c3", business_name: "City Gym", phone: null },
     laundry_order_items: [
       { item_type: "bath_towels", custom_description: null, quantity_type: "exact",
@@ -265,10 +285,10 @@ const PREVIEW_DAY_JOBS: DayJob[] = [
   },
 ];
 
-/** The planner's driver fixture is `{value,label}`; My Runs wants real rows. */
-const PREVIEW_RUN_DRIVERS = [
-  { id: "d1", full_name: "John Smith", status: "active", phone: "0400 000 111" },
-  { id: "d2", full_name: "Mel Nguyen", status: "active", phone: null },
+/** The planner's fixture is `{value,label}`; My Runs wants real board rows. */
+const PREVIEW_RUN_BOARDS = [
+  { id: "d1", code: "BOARD1", name: "Board 1", status: "active" },
+  { id: "d2", code: "BOARD2", name: "Board 2", status: "active" },
 ];
 
 /**
@@ -454,6 +474,10 @@ export default function DesignPreviewPage() {
                     <Button variant="ghost">Ghost link</Button>
                     <ButtonLink href="/design-preview">Button link</ButtonLink>
                     <SubmitButton>Save</SubmitButton>
+                    {/* The third verb in a row that already has two — the
+                        People screen's "Email sign-in link" beside Save and
+                        Remove. Present without competing with them. */}
+                    <SubmitButton variant="ghost">Ghost submit</SubmitButton>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
                     <StatusBadge status="active" /><StatusBadge status="in_progress" />
@@ -907,18 +931,18 @@ export default function DesignPreviewPage() {
             <PageHeader
               eyebrow="Sunday, 16 August 2026"
               title="My Runs"
-              description="Good morning, John. Here is your work for the day."
+              description="Good morning. Here is Board 1&apos;s work for the day."
             />
 
             <DateNav
               date="2026-08-16"
-              driverParam="me"
-              drivers={PREVIEW_RUN_DRIVERS}
-              canChooseDriver
+              boardParam="me"
+              boards={PREVIEW_RUN_BOARDS}
+              canChooseBoard
             />
 
             <DaySummary
-              driverName="John Smith"
+              boardName="John Smith"
               date="2026-08-16"
               toDeliver={1}
               outForDelivery={1}
@@ -943,16 +967,39 @@ export default function DesignPreviewPage() {
               ))}
             </JobGroup>
 
+            {/* Adjust Run, where the manager is actually standing.
+
+                The round's own day is the screen somebody is looking at when
+                they notice the van should call at the school before the hotel,
+                so the ordering board is drawn here too — the same component the
+                Runs screen uses, so there is one answer to "how is a run
+                ordered". It renders for the Owner and the Office manager alone:
+                a board holds `routes.read` and not `routes.sequence`, and gets
+                no card at all rather than a disabled button. */}
+            <div id="my-runs-run-order">
+              <Card
+                title="Run order"
+                description="The order this round drives in. Press Adjust Run to move a stop, then Save &amp; Lock Run — the round sees the new order straight away."
+                actions={<Badge tone="neutral">3 stops</Badge>}
+              >
+                <SequenceBoard
+                  boardId="b1" boardName="Board 1" date="2026-08-16"
+                  stops={PREVIEW_RUN_STOPS} version={1} canSequence
+                  returnTo="/design-preview"
+                />
+              </Card>
+            </div>
+
             <Card
               title="Ready for delivery, assigned to nobody"
               description="Customer pickups are not listed — they are never assigned for delivery."
             >
               <AssignForm
                 orderId="preview"
-                defaultDriverId="d1"
+                defaultBoardId="d1"
                 defaultDate="2026-08-16"
                 expectedDeliveryDate="2026-08-16"
-                drivers={PREVIEW_RUN_DRIVERS}
+                boards={PREVIEW_RUN_BOARDS}
                 returnTo="/design-preview"
               />
             </Card>
@@ -986,14 +1033,32 @@ export default function DesignPreviewPage() {
               planner's whole board. The pages that host them are async server
               components reading Supabase, so this gallery is the only place
               their layout and their empty states can be looked at at all. */}
+          {/* The running draft. Laid out as it is on the board — two columns from
+              `sm`, so twelve customers read as a grid rather than as twelve
+              screens of scrolling. */}
+          <section id="open-drafts-preview" className="space-y-4 border-t pt-8">
+            <PageHeader
+              title="Open drafts"
+              description="One invoice per customer per billing period, collecting each job as it is approved. Issue one whenever you are ready."
+            />
+            <div className="grid gap-4 sm:grid-cols-2">
+              {PREVIEW_OPEN_DRAFTS.map(({ draft, stage }) => (
+                <DraftCard key={draft.id} draft={draft} stage={stage} mayIssue
+                           issueAction={async () => { "use server"; }}
+                           returnTo="/invoices/drafts" />
+              ))}
+            </div>
+          </section>
+
           <section id="billing-review-preview" className="space-y-6 border-t pt-8">
             <PageHeader
               title="Awaiting invoice"
               description="Finished work that has not been billed. Approve the charges, then generate."
             />
 
-            <Card title="Approve" description="A job with no charges cannot be selected — it needs pricing first.">
-              <BillingQueue rows={PREVIEW_QUEUE} mode="approve" canAct />
+            <Card title="Price and approve"
+                  description="Two verbs over one selection. An unpriced job is selectable because Price Selected is the verb that applies to it; approving one is refused by name.">
+              <BillingQueue rows={PREVIEW_QUEUE} mode="approve" canAct canPrice />
             </Card>
 
             <Card title="Generate" description="Approved jobs, grouped by each customer's billing method.">
@@ -1001,14 +1066,365 @@ export default function DesignPreviewPage() {
             </Card>
 
             <Card title="Nothing waiting" description="The state the queue is in most of the time.">
-              <BillingQueue rows={[]} mode="approve" canAct />
+              <BillingQueue rows={[]} mode="approve" canAct canPrice />
             </Card>
 
+            {/* The rung between generating and sending, and the reason it is
+                worth looking at: the same component carries both verbs, so a
+                change to the tap targets or the running total has to be right
+                for the issue list and the send list at once. */}
+            <Card title="Issue drafts"
+                  description="Generating writes drafts; this turns them into documents. It emails nobody.">
+              <InvoiceSelection
+                invoices={PREVIEW_DRAFTS}
+                returnTo="/invoices?tool=issue"
+                action={async () => { "use server"; }}
+                verb="Issue selected"
+                pendingLabel="Issuing…"
+                selectAllLabel="Select every draft listed"
+              />
+            </Card>
+
+            <Card title="Send invoices"
+                  description="Issued invoices with a billing email. Re-sending is legitimate and simply labelled.">
+              <InvoiceSelection
+                invoices={PREVIEW_SENDABLE}
+                returnTo="/invoices?tool=send"
+                action={async () => { "use server"; }}
+                verb="Send selected"
+                pendingLabel="Sending…"
+                selectAllLabel="Select every invoice listed"
+              />
+            </Card>
+
+            {/* The charge lines, now coded where they are made. The row states
+                worth looking at are all three at once: one carrying an item and
+                its account, one uncoded and saying so, and one added by hand —
+                because "is this coded?" has to be answerable without a click,
+                and an uncoded charge is the one that reaches the invoice needing
+                to be re-keyed. */}
+            <div id="job-charges-preview" className="space-y-6">
             <Card title="A job's charges"
-                  description="Editable right up until approval, and frozen the moment it is given.">
+                  description="Editable right up until approval, and frozen the moment it is given. Each line can name an item and an account, so the invoice needs neither again.">
               <JobChargesEditor orderId="preview" initial={PREVIEW_CHARGES}
+                                items={PREVIEW_LINE_ITEMS} accounts={PREVIEW_CHART}
                                 action={async () => { "use server"; }} />
             </Card>
+
+            <Card title="A job's charges · no chart of accounts"
+                  description="A laundry that has not imported one. Nothing is blocked — the strip offers the item alone and says why there is no code.">
+              <JobChargesEditor orderId="preview-nochart" initial={PREVIEW_CHARGES}
+                                items={PREVIEW_LINE_ITEMS} accounts={[]}
+                                action={async () => { "use server"; }} />
+            </Card>
+
+            {/* The mirror image, and the state the real laundry was in until its
+                item master arrived: a full chart and nothing to pick from. The
+                control has to stop saying "item" here for the same reason it
+                stops saying "code" above. */}
+            <Card title="A job's charges · no item list"
+                  description="A chart of accounts and no items yet. The charge is coded by its account code, and the control offers only that.">
+              <JobChargesEditor orderId="preview-noitems" initial={PREVIEW_CHARGES}
+                                items={[]} accounts={PREVIEW_CHART}
+                                action={async () => { "use server"; }} />
+            </Card>
+            </div>
+
+            {/* **The one way an item is chosen, in the two things it is chosen
+                for.** Until 2026-08-26 the job form picked an item from a plain
+                `<select>` while the invoice and the charges used this type-ahead
+                — two ways to name the same thing, and the dropdown became
+                unusable the moment a real master list arrived (Adelaide's is 254
+                rows). One picker now serves both, and `purpose` is the only
+                difference.
+
+                Worth looking at rather than reading, because what differs is a
+                *state*: type "tow" into each and the coding one prices the
+                result while the laundry one does not. That is deliberate — a
+                job's rate comes from `laundry_prices`, and with 252 of 254 items
+                carrying no sell price, "no price set" beside a bag of towels
+                would read as "this job will not be billed". */}
+            <div id="item-picker-preview" className="space-y-6">
+            <Card title="Naming an item on a job's laundry"
+                  description="What the counter sees. The kind of laundry comes with the item; no price is shown, because the rate is the customer's, not the item's.">
+              <div className="grid gap-4 sm:grid-cols-2">
+                {/* Two of them, because the job form draws one per laundry row
+                    and every row must carry its own ids — the defect the charges
+                    editor shipped and only a rendered page could show. */}
+                <ItemPickerPreview items={PREVIEW_LINE_ITEMS} idPrefix="laundry-row-1" purpose="laundry" />
+                <ItemPickerPreview items={PREVIEW_LINE_ITEMS} idPrefix="laundry-row-2" purpose="laundry" />
+              </div>
+            </Card>
+
+            <Card title="Naming an item on an invoice line or a job charge"
+                  description="The same picker, coding a line. Here the item really does bring its price, its GST answer and its account, so the results say so.">
+              <ItemPickerPreview items={PREVIEW_LINE_ITEMS} idPrefix="coding-row-1" purpose="coding" />
+            </Card>
+            </div>
+
+            {/* Adding a line, three ways. The client keeps their books against a
+                chart of accounts and every sale has to land on one, so a line can
+                be filled in from an item, from the code, or typed out. Worth
+                looking at rather than reading, because the three routes share one
+                set of fields and the failure this component exists to prevent —
+                an item with no account producing a silently uncoded line — is a
+                *state*, not a layout: pick TT001 and the account picker appears
+                with the reason above it. */}
+            <div id="invoice-line-composer-preview" className="space-y-6">
+            <Card title="Add a line to an invoice"
+                  description="An item, an account code, or free text. The code follows the item; a line with no code is legal and counted.">
+              <InvoiceLineForm
+                invoiceId="preview" items={PREVIEW_LINE_ITEMS} accounts={PREVIEW_CHART}
+                action={async () => { "use server"; }}
+              />
+            </Card>
+
+            <Card title="No chart of accounts yet"
+                  description="A laundry that has not imported one. Nothing is blocked — items and free text still work.">
+              <InvoiceLineForm
+                invoiceId="preview-empty" items={PREVIEW_LINE_ITEMS} accounts={[]}
+                action={async () => { "use server"; }}
+              />
+            </Card>
+
+            <Card title="No items yet"
+                  description="The real laundry's state today — 268 accounts, no item list. It opens on the code, because that is the route that still produces a coded line.">
+              <InvoiceLineForm
+                invoiceId="preview-no-items" items={[]} accounts={PREVIEW_CHART}
+                action={async () => { "use server"; }}
+              />
+            </Card>
+            </div>
+          </section>
+
+          {/* ------------------------------------------------- period billing --- */}
+          {/* The month-end screen. Its three parts are computed from one set of
+              charges in one pass, so the summary can never disagree with the
+              history above it — which is the whole point of building the roll-up
+              and the breakdown together. */}
+          <section id="period-billing-preview" className="space-y-4 border-t pt-8">
+            <PageHeader
+              eyebrow="Money"
+              title="ABC Hotel"
+              description="1 August to 31 August 2026"
+            />
+
+            <Card title="Billing period"
+                  description="Quick filters, defaulting to last month — the month you are standing in bills nothing on the 1st and says so in a way that reads as “all done”.">
+              <PeriodFilter
+                basePath="/design-preview"
+                params={{ period: "last_month" }}
+                period={resolvePeriod({ period: "last_month" }, "2026-09-03", "last_month")}
+                presets={BILLING_PERIOD_PRESETS}
+                today="2026-09-03"
+                label="Billing period"
+              />
+            </Card>
+
+            <Card title="Invoice summary"
+                  description="What the invoice carries. Identical items are added together; a rate that changed mid-period stays two lines, at the two rates actually charged.">
+              <DataTable
+                bare
+                label="Consolidated invoice lines"
+                empty="No lines"
+                rows={PREVIEW_CONSOLIDATED}
+                columns={[
+                  {
+                    header: "Description",
+                    cell: (line) => (
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-medium">{line.description}</span>
+                        {line.merged ? (
+                          <Badge tone="info">{line.contributions.length} jobs</Badge>
+                        ) : null}
+                      </div>
+                    ),
+                  },
+                  { header: "Quantity", align: "right",
+                    cell: (line) => line.quantity.toLocaleString("en-AU") },
+                  { header: "Unit price", align: "right", cell: (line) => money(line.unit_price) },
+                  { header: "Amount", align: "right", cell: (line) => money(line.amount) },
+                ]}
+              />
+            </Card>
+          </section>
+
+          {/* ------------------------------------------------------ the run --- */}
+          {/* Both of these are compose-locally-commit-once components, which is
+              the class that has shipped broken here three times behind a green
+              `verify` — the job form's items, the planner's whole board, and the
+              planner's payload again. They are in the gallery so they can be
+              looked at without a live database. */}
+          <section id="run-sequence-preview" className="space-y-4 border-t pt-8">
+            <PageHeader
+              title="Runs"
+              description="What each board is delivering on a day, and the order it drives in."
+            />
+
+            {/* Locked is the resting state, and it is the one a manager meets
+                first. Worth having in the gallery in its own right: the thing to
+                look at is that there is no arrow, no handle and no Save on
+                screen at all — a disabled control would still invite a press. */}
+            <Card title="Board 1 — Friday, 21 August 2026"
+                  description="The run is locked. Press Adjust Run to change the order, then Save & Lock Run.">
+              <SequenceBoard boardId="b1" boardName="Board 1" date="2026-08-21"
+                             stops={PREVIEW_RUN_STOPS} version={1} canSequence />
+            </Card>
+
+            <Card title="Part of the run has been driven"
+                  description="A stop the round has already worked stays where it is, and says so — moving anything past it would rewrite where work that has already happened happened.">
+              <SequenceBoard boardId="b1" boardName="Board 1" date="2026-08-21"
+                             stops={PREVIEW_RUN_STOPS_WORKED} version={4} canSequence />
+            </Card>
+
+            <Card title="What a board sees"
+                  description="The final sequence, read-only. A board holds routes.read and not routes.sequence, so Adjust Run is simply not there.">
+              <SequenceBoard boardId="b1" boardName="Board 1" date="2026-08-21"
+                             stops={PREVIEW_RUN_STOPS} version={1} canSequence={false} />
+            </Card>
+
+            <MoveToBoard
+              date="2026-08-21"
+              fromBoard={PREVIEW_RUN_BOARDS[0]!}
+              boards={PREVIEW_RUN_BOARDS}
+              jobs={PREVIEW_RUN_STOPS.flatMap((stop) =>
+                stop.jobs.map((job) => ({ ...job, customerName: stop.customerName })))}
+            />
+          </section>
+
+          {/*
+            The guided home card and the reading-comfort control.
+
+            Both are new in the 2026-08-24 accessibility pass and both are the
+            kind of thing that can only be checked by looking: the card is a
+            responsive grid that has to stay one column on a phone, and the
+            reading control changes the size of the entire page — including
+            itself — which is exactly the interaction a unit test cannot see.
+
+            Rendered for two roles on purpose. `super_admin` gets every card;
+            `board` gets three, and the point of showing it is that a narrow
+            role must not be left with an empty card or a lonely single tile.
+          */}
+
+          {/* --------------------------------------------------------------
+            The filter language, which is the one thing every list page shares.
+
+            Here because it is a *composition*: `ListControls` renders chips,
+            fields and a summary together, and the three go wrong in ways only
+            a rendered page shows — a chip row that wraps into six rows on a
+            phone, a Clear link that disappears when it is needed, a count that
+            says "1 batchs". Every real list page is an async server component
+            reading Supabase, so none of them render here.
+
+            Four states, because the interesting ones are the edges: filtered
+            (Clear showing, "showing 3 of 47"), unfiltered (no Clear, a plain
+            count), a multi-select group mid-selection, and the period picker
+            with Custom open.
+          */}
+          <section id="filters-preview" className="space-y-4 border-t pt-8">
+            <PageHeader
+              title="Filtering a list"
+              description="Chips for the one or two questions a list is usually narrowed by, fields for the long tail, and a line saying how much is hidden."
+            />
+
+            <Card title="Filtered" description="Two chips pressed and a search term typed: Clear appears, and the summary says how much of the list is hidden.">
+              <ListControls
+                action="/design-preview"
+                q="towel"
+                params={{ q: "towel", status: "active", period: "this_month" }}
+                filterKeys={["q", "status", "period", "from", "to"]}
+                placeholder="Business name or customer number…"
+                chips={
+                  <>
+                    <FilterChips
+                      basePath="/design-preview"
+                      params={{ q: "towel", status: "active", period: "this_month" }}
+                      name="status" label="Customer status" allLabel="All customers"
+                      allCount={47}
+                      options={[
+                        { value: "active", label: "Active", count: 31 },
+                        { value: "prospect", label: "Prospect", count: 4 },
+                        { value: "on_hold", label: "On hold", count: 2 },
+                        { value: "inactive", label: "Inactive", count: 10 },
+                      ]}
+                    />
+                    <PeriodFilter
+                      basePath="/design-preview"
+                      params={{ q: "towel", status: "active", period: "this_month" }}
+                      period={resolvePeriod({ period: "this_month" }, "2026-08-26", "all")}
+                      presets={ACTIVITY_PERIOD_PRESETS} today="2026-08-26"
+                      label="Taken in" hideCustomWhenPreset
+                    />
+                  </>
+                }
+                summary={
+                  <FilterSummary basePath="/design-preview" shown={3} total={47}
+                                 noun="customer" filtered />
+                }
+              />
+            </Card>
+
+            <Card title="Nothing filtered" description="No Clear link, because there is nothing to clear — and a plain count rather than “showing 47 of 47”.">
+              <ListControls
+                action="/design-preview"
+                params={{}}
+                filterKeys={["q", "status"]}
+                placeholder="Business name or customer number…"
+                chips={
+                  <FilterChips
+                    basePath="/design-preview" params={{}} name="status"
+                    label="Customer status" allLabel="All customers" allCount={47}
+                    options={[
+                      { value: "active", label: "Active", count: 31 },
+                      { value: "prospect", label: "Prospect", count: 4 },
+                    ]}
+                  />
+                }
+                summary={
+                  <FilterSummary basePath="/design-preview" shown={47} noun="customer"
+                                 filtered={false} />
+                }
+              />
+            </Card>
+
+            <Card title="Several at once"
+                  description="A multi-select group, for the questions a single choice cannot ask — “what is still wet?” is washing and drying together.">
+              <ToggleChips
+                basePath="/design-preview" params={{ stage: "washing,drying" }}
+                name="stage" label="Batch stage" allLabel="Every stage" allCount={18}
+                options={[
+                  { value: "received", label: "Counted in", count: 2 },
+                  { value: "washing", label: "Washing", count: 5 },
+                  { value: "drying", label: "Drying", count: 3 },
+                  { value: "folding", label: "Folding", count: 4 },
+                  { value: "packing", label: "Packing", count: 1 },
+                  { value: "ready_for_dispatch", label: "Ready to go out", count: 3 },
+                ]}
+              />
+              <p className="mt-3 text-2xs text-muted-foreground">
+                A stage nothing is in is left off rather than drawn as a chip promising zero rows.
+              </p>
+            </Card>
+
+            <Card title="A period, with Custom open"
+                  description="The escape hatch is always last, and the resolved window is printed beside the chips — “This financial year” is a claim a reader should not have to take on trust.">
+              <PeriodFilter
+                basePath="/design-preview"
+                params={{ period: "custom", from: "2026-08-03", to: "2026-08-19" }}
+                period={resolvePeriod(
+                  { period: "custom", from: "2026-08-03", to: "2026-08-19" }, "2026-08-26", "all")}
+                presets={ACTIVITY_PERIOD_PRESETS} today="2026-08-26" label="Completed in"
+              />
+            </Card>
+          </section>
+
+          <section id="quick-actions-preview" className="space-y-4 border-t pt-8">
+            <PageHeader
+              title="What do you want to do?"
+              description="The way in to the app for somebody who has been shown it once."
+            />
+            <QuickActions role="super_admin" />
+            <QuickActions role="board" />
           </section>
         </main>
       </div>
@@ -1017,30 +1433,211 @@ export default function DesignPreviewPage() {
 }
 
 /**
+ * A month of one customer's jobs, rolled up.
+ *
+ * Built by the real rule rather than hand-written, so the gallery shows what the
+ * screen will show: three jobs of towels become one line carrying 460, and the
+ * fuel levy on each delivery stays three lines because a levy is an event and
+ * not a quantity.
+ */
+const PREVIEW_CONSOLIDATED = consolidateChargeLines(
+  [
+    { job: "LJ01041", date: "2026-08-02", qty: 150, amount: 225 },
+    { job: "LJ01045", date: "2026-08-09", qty: 130, amount: 195 },
+    { job: "LJ01051", date: "2026-08-16", qty: 180, amount: 270 },
+  ].flatMap((entry, index) => [
+    {
+      job: { id: `job-${index}`, orderNumber: entry.job, date: entry.date },
+      charge: {
+        description: "TOW001 — Bath Towel", charge_type: "wash_only",
+        quantity: entry.qty, unit_price: 1.5, amount: entry.amount, taxable: true,
+        source_item_id: "item-tow001", source_agreement_id: null,
+        source_laundry_item_type: "bath_towels",
+      },
+    },
+    {
+      job: { id: `job-${index}`, orderNumber: entry.job, date: entry.date },
+      charge: {
+        description: "Fuel levy", charge_type: "fuel_levy",
+        quantity: 1, unit_price: 6.5, amount: 6.5, taxable: true,
+        source_item_id: null, source_agreement_id: null, source_laundry_item_type: null,
+      },
+    },
+  ]),
+);
+
+/**
+ * A board's day, fixed.
+ *
+ * Three stops, because three is the smallest number that shows an order worth
+ * changing, and one of them carries two jobs — the case the whole
+ * order-by-stop decision turns on: one customer, one visit, two lots of laundry.
+ */
+const PREVIEW_RUN_STOPS: SequenceStop[] = [
+  {
+    id: "s1", status: "assigned", progress_status: "not_started",
+    customerName: "ABC Hotel", address: "123 Main Street, Adelaide, SA",
+    jobs: [
+      { id: "j1", orderNumber: "LJ01041", itemCount: 3 },
+      { id: "j2", orderNumber: "LJ01042", itemCount: 1 },
+    ],
+  },
+  {
+    id: "s2", status: "assigned", progress_status: "not_started",
+    customerName: "XYZ Medical", address: "55 North Terrace, Adelaide, SA",
+    jobs: [{ id: "j3", orderNumber: "LJ01045", itemCount: 2 }],
+  },
+  {
+    id: "s3", status: "assigned", progress_status: "not_started",
+    customerName: "City Gym", address: "19 King William Street, Adelaide, SA",
+    jobs: [{ id: "j4", orderNumber: "LJ01051", itemCount: 1 }],
+  },
+];
+
+/** The same day, with the first call already made. */
+const PREVIEW_RUN_STOPS_WORKED: SequenceStop[] = [
+  { ...PREVIEW_RUN_STOPS[0]!, status: "completed", progress_status: "delivery_completed" },
+  PREVIEW_RUN_STOPS[1]!,
+  { ...PREVIEW_RUN_STOPS[2]!, progress_status: "at_customer" },
+];
+
+/**
  * Fixtures for the billing review screens.
  *
  * `chargeCount: 0` on one row is deliberate and is the case worth looking at:
  * that job cannot be approved, so the queue must render it unselectable with a
  * reason beside it rather than offering a tick that would half-fail.
  */
+/* -------------------------------------------------- invoice line composer --- */
+/* Real rows from the client's own chart of accounts and item list, codes and tax
+   codes included. The two that matter are deliberate: `TT001` has **no** income
+   account, which is the state that would otherwise produce an uncoded line in
+   silence; and the chart carries `5-1000 Towel Purchases`, the wrong side of the
+   books, so the ranking can be seen doing its job on a real name collision. */
+const PREVIEW_LINE_ITEMS: LineFormItem[] = [
+  { id: "i1", item_code: "TOW001", name: "Bath Towel — Black", description: "Commercial, black",
+    laundry_category: "bath_towels", sell_price: 3.20, tax_code: "GST", income_account_id: "g2" },
+  { id: "i2", item_code: "TOW010", name: "Hand Towel — White", description: null,
+    laundry_category: "hand_towels", sell_price: 1.80, tax_code: "N-T", income_account_id: "g3" },
+  { id: "i3", item_code: "TT001", name: "Tea Towel", description: "Cotton, checked",
+    laundry_category: "towels", sell_price: 0.95, tax_code: "GST", income_account_id: null },
+  { id: "i4", item_code: "LB-STD-01", name: "Laundry Bag", description: "Container, not laundry",
+    laundry_category: null, sell_price: 0, tax_code: "GST", income_account_id: null },
+];
+
+const PREVIEW_CHART: LineFormAccount[] = [
+  { id: "g1", code: "4-1000", name: "Sales of Towels", account_type: "Income", tax_code: "GST" },
+  { id: "g2", code: "4-1100", name: "Towels - Black", account_type: "Income", tax_code: "GST" },
+  { id: "g3", code: "4-1150", name: "Towels - White", account_type: "Income", tax_code: "N-T" },
+  { id: "g4", code: "4-1400", name: "Tea Towels", account_type: "Income", tax_code: "GST" },
+  { id: "g5", code: "4-2000", name: "Delivery Fees Collected", account_type: "Income", tax_code: "GST" },
+  { id: "g6", code: "4-7000", name: "Sundry Income", account_type: "Income", tax_code: "GST" },
+  { id: "g7", code: "5-1000", name: "Towel Purchases", account_type: "Cost of sales", tax_code: "GST" },
+  { id: "g8", code: "8-9000", name: "Rebates", account_type: "Other income", tax_code: "N-T" },
+];
+
 const PREVIEW_QUEUE: QueueRow[] = [
   {
     id: "job-1", orderNumber: "LJ00042", customerId: "cust-1",
-    customerName: "Harbourview Hotel", billingMethod: "monthly_consolidated",
+    customerName: "Harbourview Hotel",
+    billingMethod: "Monthly consolidated", billingMethodValue: "monthly_consolidated",
     completedAt: "2026-08-14T04:20:00Z", chargeCount: 3, subtotal: 184.5,
     hasRateCard: true,
   },
   {
     id: "job-2", orderNumber: "LJ00043", customerId: "cust-2",
-    customerName: "Bondi Surf Club", billingMethod: "invoice_per_job",
+    customerName: "Bondi Surf Club",
+    billingMethod: "One invoice per job", billingMethodValue: "invoice_per_job",
     completedAt: "2026-08-15T22:10:00Z", chargeCount: 1, subtotal: 42,
     hasRateCard: false,
   },
   {
     id: "job-3", orderNumber: "LJ00044", customerId: "cust-3",
-    customerName: "City Gym — Alexandria", billingMethod: "monthly_consolidated",
+    customerName: "City Gym — Alexandria",
+    billingMethod: "Monthly consolidated", billingMethodValue: "monthly_consolidated",
     completedAt: "2026-08-16T01:05:00Z", chargeCount: 0, subtotal: 0,
     hasRateCard: false,
+  },
+];
+
+/**
+ * Drafts waiting to be issued, and issued invoices waiting to be sent.
+ *
+ * Two fixtures rather than one, because the two lists differ in exactly the
+ * detail worth looking at: a draft can legitimately total nothing, and a
+ * sendable invoice can carry the "already sent" label.
+ */
+/**
+ * The open-drafts board, in the three states that matter.
+ *
+ * The one worth looking at is **Collecting**: it is the ordinary state of a
+ * running draft for most of a month, it is the only card that says a number
+ * which is not final, and it is the state the reader has no other way to
+ * recognise — a draft that is still filling up looks exactly like one that is
+ * finished and waiting to be issued.
+ */
+const PREVIEW_OPEN_DRAFTS: Array<{
+  draft: DraftSummary; stage: "ready" | "collecting" | "none";
+}> = [
+  {
+    stage: "collecting",
+    draft: {
+      id: "draft-1", invoiceNumber: "INV00341", customerId: "c1",
+      customerName: "Harbourview Hotel",
+      periodStart: "2026-08-01", periodEnd: "2026-08-31",
+      jobCount: 7, lineCount: 5, total: 1284.5,
+      createdAt: "2026-08-03T09:00:00Z", updatedAt: "2026-08-24T04:10:00Z",
+    },
+  },
+  {
+    stage: "ready",
+    draft: {
+      id: "draft-2", invoiceNumber: "INV00338", customerId: "c2",
+      customerName: "Bondi Surf Club",
+      periodStart: "2026-07-01", periodEnd: "2026-07-31",
+      jobCount: 3, lineCount: 4, total: 462,
+      createdAt: "2026-07-04T09:00:00Z", updatedAt: "2026-07-30T22:15:00Z",
+    },
+  },
+  {
+    // Opened by an approval and then emptied — the job was taken back off. It
+    // keeps its number rather than being deleted, and says there is nothing to
+    // issue instead of offering a button that could only be refused.
+    stage: "collecting",
+    draft: {
+      id: "draft-3", invoiceNumber: "INV00342", customerId: "c3",
+      customerName: "City Gym — Alexandria",
+      periodStart: "2026-08-01", periodEnd: "2026-08-31",
+      jobCount: 0, lineCount: 0, total: 0,
+      createdAt: "2026-08-19T02:00:00Z", updatedAt: null,
+    },
+  },
+  {
+    stage: "none",
+    draft: {
+      id: "draft-4", invoiceNumber: "INV00340", customerId: "c4",
+      customerName: "Quay Bistro",
+      periodStart: null, periodEnd: null,
+      jobCount: 1, lineCount: 2, total: 88.4,
+      createdAt: "2026-08-22T01:00:00Z", updatedAt: null,
+    },
+  },
+];
+
+const PREVIEW_DRAFTS: SelectableInvoice[] = [
+  { id: "inv-1", invoiceNumber: "INV00311", customerName: "Harbourview Hotel", total: 1284.5, status: "draft" },
+  { id: "inv-2", invoiceNumber: "INV00312", customerName: "Bondi Surf Club", total: 42, status: "draft" },
+  { id: "inv-3", invoiceNumber: "INV00313", customerName: "City Gym — Alexandria", total: 0, status: "draft" },
+];
+
+const PREVIEW_SENDABLE: SelectableInvoice[] = [
+  {
+    id: "inv-4", invoiceNumber: "INV00308", customerName: "Harbourview Hotel",
+    total: 1190.25, status: "issued",
+  },
+  {
+    id: "inv-5", invoiceNumber: "INV00309", customerName: "Parkside Aged Care",
+    total: 763.4, status: "overdue", alreadyEmailed: true,
   },
 ];
 
@@ -1053,8 +1650,9 @@ const PREVIEW_CHARGES: EditableCharge[] = [
     key: "c1", description: "Bath towels — 120", charge_type: "wash_only",
     quantity: 120, unit_price: 1.1, taxable: true,
     source_agreement_id: "agr-1", source_agreement_line_id: "line-1",
-    source_item_id: null, source_laundry_item_type: "bath_towels",
+    source_item_id: "i1", source_laundry_item_type: "bath_towels",
     pricing_model: "per_item",
+    gl_account_id: "g2",
   },
   {
     key: "c2", description: "Sheets — 40 (price list)", charge_type: "wash_only",
@@ -1062,6 +1660,7 @@ const PREVIEW_CHARGES: EditableCharge[] = [
     source_agreement_id: null, source_agreement_line_id: null,
     source_item_id: null, source_laundry_item_type: "sheets",
     pricing_model: "per_item",
+    gl_account_id: "g6",
   },
   {
     key: "c3", description: "Fuel levy (5%)", charge_type: "fuel_levy",
@@ -1069,5 +1668,6 @@ const PREVIEW_CHARGES: EditableCharge[] = [
     source_agreement_id: "agr-1", source_agreement_line_id: null,
     source_item_id: null, source_laundry_item_type: null,
     pricing_model: "percentage",
+    gl_account_id: null,
   },
 ];

@@ -303,6 +303,15 @@ export const QUANTITY_TYPE_LABELS: Record<QuantityType, string> = {
 /* ------------------------------------------------------------------ items */
 
 export type OrderItemInput = {
+  /**
+   * The item master row this is (0032), where the counter picked a coded item.
+   *
+   * Optional, and null on every job written before the item master existed. When
+   * it is set, `item_type` is derived from the item's `laundry_category` by a
+   * database trigger, so the two can never disagree — which is what lets every
+   * existing price tier, report and filter keep matching on `item_type`.
+   */
+  item_id?: string | null;
   item_type: string;
   custom_description?: string | null;
   quantity_type: string;
@@ -363,11 +372,19 @@ export function validateItem(item: OrderItemInput, position: number): string | n
   return null;
 }
 
-/** One item, said the way it would be said across a counter. */
-export function describeItem(item: OrderItemInput): string {
-  const kind = item.item_type === "other"
-    ? (item.custom_description?.trim() || "Other")
-    : ITEM_TYPE_LABELS[item.item_type as ItemType] ?? item.item_type;
+/**
+ * One item, said the way it would be said across a counter.
+ *
+ * `label` is the item master's name when the row names a coded item — staff read
+ * "TOW001 — Bath Towel", not "Towels", and the code is the half they recognise.
+ * Without one this falls back to the kind of laundry exactly as it always did,
+ * which is what every job written before the item master relies on.
+ */
+export function describeItem(item: OrderItemInput, label?: string | null): string {
+  const kind = label?.trim()
+    || (item.item_type === "other"
+      ? (item.custom_description?.trim() || "Other")
+      : ITEM_TYPE_LABELS[item.item_type as ItemType] ?? item.item_type);
 
   if (item.quantity_type === "exact") return `${item.exact_quantity ?? 0} × ${kind}`;
 
@@ -381,7 +398,7 @@ export function describeItem(item: OrderItemInput): string {
 /** The list's laundry column: the first couple of items, then a count. */
 export function summariseItems(items: readonly OrderItemInput[], limit = 2): string {
   if (items.length === 0) return "No items";
-  const shown = items.slice(0, limit).map(describeItem).join(", ");
+  const shown = items.slice(0, limit).map((item) => describeItem(item)).join(", ");
   const rest = items.length - limit;
   return rest > 0 ? `${shown} +${rest} more` : shown;
 }
