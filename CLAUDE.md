@@ -2067,7 +2067,8 @@ The migration went on **before** the merge, so the schema led the code — the s
 same one the last several releases record. 41 migrations applied to a fresh Postgres 16 with the
 whole pgTAP suite on top (**439 assertions**, none failing) and 870 unit tests green, which is the
 check that mattered: this is the first time both `0036`s, `0037`, `0038` and `0039` have been in
-one tree.
+one tree. `Prod` is `08536df` (a clean fast-forward) and `Dev` is `5f177fc` (a merge, because Dev
+carries four PR merge commits Prod does not); the trees are identical. **CI green on both.**
 
 ### 2026-08-26 · One way to filter a list, and it is YSM Hub's
 The filter language adopted from `ysm-prog/ysm-hub` and applied across every list in the app.
