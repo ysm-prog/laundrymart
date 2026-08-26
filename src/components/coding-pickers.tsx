@@ -388,3 +388,121 @@ export function DescriptionWithItems<T extends PickerItem>({
     </div>
   );
 }
+
+/**
+ * A narrow cell that finds something by typing, shows what was chosen, and fits
+ * in a table column.
+ *
+ * `ItemPicker` and `AccountPicker` render a labelled `Field` with a search box
+ * and a hint under it — right for a form, far too tall for MYOB's `Item ID` and
+ * `Category` columns, where the value is one code and the row is one line. This
+ * is the same behaviour at column height: type to search, arrow keys and Enter,
+ * Escape to dismiss, and once something is chosen the cell shows its code with a
+ * clear button rather than a search box asking a question already answered.
+ *
+ * Generic over what it is picking so the item and the account columns are one
+ * component: they differ only in what a match looks like, which the caller
+ * supplies.
+ */
+export function CodeCell<T extends { id: string }>({
+  id, label, placeholder, chosen, chosenLabel, search, onChoose, onClear, mono = true,
+}: {
+  id: string;
+  label: string;
+  placeholder: string;
+  chosen: T | null;
+  chosenLabel: (value: T) => string;
+  /** Ranked matches for what has been typed. The caller owns the ranking. */
+  search: (query: string) => readonly { value: T; primary: string; secondary?: string }[];
+  onChoose: (value: T) => void;
+  onClear: () => void;
+  mono?: boolean;
+}) {
+  const [query, setQuery] = useState("");
+  const [focused, setFocused] = useState(false);
+  const [active, setActive] = useState(0);
+
+  const matches = useMemo(
+    () => (query.trim() ? search(query) : []),
+    // `search` is rebuilt each render by the caller; keying on the query alone is
+    // deliberate, and the list it closes over is the one this render was given.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [query],
+  );
+  const open = focused && matches.length > 0;
+
+  if (chosen) {
+    return (
+      <div className="flex min-h-11 items-center gap-1 rounded-lg border bg-surface-muted/50 px-2">
+        <span className={cx("truncate text-sm", mono && "font-mono")} title={chosenLabel(chosen)}>
+          {chosenLabel(chosen)}
+        </span>
+        <button
+          type="button"
+          onClick={() => { onClear(); setQuery(""); }}
+          aria-label={`Clear ${label.toLowerCase()}`}
+          className="ml-auto shrink-0 rounded px-1 text-lg leading-none text-muted-foreground
+                     hover:text-foreground"
+        >
+          ×
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="relative">
+      <input
+        id={id}
+        className={cx(CONTROL, mono && "font-mono")}
+        value={query}
+        placeholder={placeholder}
+        autoComplete="off"
+        role="combobox"
+        aria-label={label}
+        aria-expanded={open}
+        aria-controls={`${id}-list`}
+        aria-autocomplete="list"
+        onChange={(event) => { setQuery(event.target.value); setActive(0); }}
+        onFocus={() => setFocused(true)}
+        // Deferred so a click on a suggestion lands before the list closes.
+        onBlur={() => window.setTimeout(() => setFocused(false), 120)}
+        onKeyDown={(event) => {
+          if (!open) return;
+          if (event.key === "ArrowDown") {
+            event.preventDefault(); setActive((i) => (i + 1) % matches.length);
+          } else if (event.key === "ArrowUp") {
+            event.preventDefault(); setActive((i) => (i - 1 + matches.length) % matches.length);
+          } else if (event.key === "Enter") {
+            const match = matches[active];
+            if (match) { event.preventDefault(); onChoose(match.value); setQuery(""); }
+          } else if (event.key === "Escape") {
+            event.preventDefault(); setFocused(false);
+          }
+        }}
+      />
+      {open ? (
+        <ul id={`${id}-list`} role="listbox"
+            className="absolute inset-x-0 top-full z-30 mt-1 max-h-60 w-max min-w-full
+                       max-w-[22rem] overflow-y-auto rounded-xl border bg-surface py-1 shadow-lg">
+          {matches.map((match, index) => (
+            <li key={match.value.id} role="option" aria-selected={index === active}>
+              <button
+                type="button"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => { onChoose(match.value); setQuery(""); }}
+                className={cx("flex min-h-11 w-full flex-col items-start justify-center px-3 py-1.5 text-left",
+                  index === active ? "bg-surface-muted" : "hover:bg-surface-muted")}
+              >
+                <span className="font-mono text-sm font-medium">{match.primary}</span>
+                {match.secondary ? (
+                  <span className="text-xs text-muted-foreground">{match.secondary}</span>
+                ) : null}
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
+  );
+}

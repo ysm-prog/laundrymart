@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { TAX_CODES, type TaxCode } from "@/lib/domain/gst";
 import { lineAmount, round2, CHARGE_TYPES, type ChargeType } from "@/lib/domain/pricing";
 import type { JobChargeLine } from "@/lib/domain/job-pricing";
 
@@ -49,6 +50,26 @@ const chargeSchema = z.object({
   quantity: numeric.pipe(z.number().min(0, "Quantity cannot be negative")),
   unit_price: numeric.pipe(z.number().min(0, "A rate cannot be negative")),
   taxable: z.preprocess((value) => value !== false, z.boolean()),
+  // MYOB's three: the unit the price is per, the percentage off the line, and
+  // the tax code that replaces a yes/no tick. Each is optional so a payload
+  // composed before 0043 still parses — the editor sends them, and an older
+  // saved draft in somebody's open tab must not fail on their absence.
+  // `null` as well as `""`, because this payload is composed in the browser and
+  // `JSON.stringify` spells an unanswered field `null` — the trap §2 records
+  // taking down a whole array parse once already.
+  unit_label: z.preprocess(
+    (value) => (value === "" || value === null ? undefined : value),
+    z.string().trim().max(20).optional(),
+  ),
+  discount_percent: z.preprocess(
+    (value) => (value === "" || value === null || value === undefined ? 0 : value),
+    numeric.pipe(z.number().min(0, "A discount cannot be negative")
+                          .max(100, "A discount cannot be more than 100%")),
+  ),
+  tax_code: z.preprocess(
+    (value) => (value === "" || value === null || value === undefined ? undefined : value),
+    z.enum(TAX_CODES).optional(),
+  ),
   source_agreement_id: nullableUuid,
   source_agreement_line_id: nullableUuid,
   source_item_id: nullableUuid,
@@ -81,6 +102,9 @@ export type JobChargeInput = {
   quantity: number | string;
   unit_price: number | string;
   taxable: boolean;
+  unit_label?: string | null;
+  discount_percent?: number | string;
+  tax_code?: TaxCode | null;
   source_agreement_id: string | null;
   source_agreement_line_id: string | null;
   source_item_id: string | null;
@@ -131,8 +155,13 @@ export function parseJobCharges(raw: FormDataEntryValue | null): ParsedJobCharge
       quantity: round2(line.quantity),
       unit_price: round2(line.unit_price),
       // The browser's arithmetic is a preview. This is the number.
-      amount: lineAmount(line.quantity, line.unit_price),
-      taxable: line.taxable,
+      amount: lineAmount(line.quantity, line.unit_price, line.discount_percent),
+      // The code decides `taxable`, and the database's trigger says the same
+      // thing — sending both keeps a pre-0043 reader working unchanged.
+      taxable: line.tax_code ? line.tax_code === "GST" : line.taxable,
+      unit_label: line.unit_label ?? null,
+      discount_percent: line.discount_percent,
+      tax_code: line.tax_code ?? null,
       source_agreement_id: line.source_agreement_id ?? null,
       source_agreement_line_id: line.source_agreement_line_id ?? null,
       source_item_id: line.source_item_id ?? null,
