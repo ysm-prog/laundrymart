@@ -6,11 +6,9 @@ import { assertCapability } from "@/lib/auth/context";
 import { createClient } from "@/lib/supabase/server";
 import { recordAudit } from "@/lib/audit";
 import { done, fail, returnTo } from "@/lib/actions";
-import { businessToday } from "@/lib/domain/timezone";
 import { counted, money } from "@/lib/format";
 import { approveJob, priceAndSaveJob } from "@/lib/orders/job-billing";
 import { placeApprovedJobs } from "@/lib/orders/approve";
-import { generateInvoicesForJobs } from "@/lib/invoices/from-jobs";
 import { issueOneInvoice } from "@/lib/invoices/issue";
 import { sendInvoice } from "@/lib/invoices/send";
 
@@ -177,13 +175,11 @@ export async function approveSelectedJobs(formData: FormData): Promise<void> {
   // faster and the only way the roll-up can be computed once over the lot.
   const placements = await placeApprovedJobs(supabase, session, approvedIds);
   const placedOn = new Map<string, number>();
-  let held = 0;
   let unplaced = 0;
   for (const placement of placements.values()) {
     if (placement.kind === "placed") {
       placedOn.set(placement.invoiceNumber, (placedOn.get(placement.invoiceNumber) ?? 0) + 1);
-    } else if (placement.kind === "held") held += 1;
-    else unplaced += 1;
+    } else unplaced += 1;
   }
 
   await recordAudit(session, {
@@ -191,7 +187,7 @@ export async function approveSelectedJobs(formData: FormData): Promise<void> {
     summary: `bulk approve: ${approved.length} of ${ids.length}`,
     metadata: {
       approved: approved.length, refused: refused.length,
-      invoices: [...placedOn.keys()], held, unplaced,
+      drafts: [...placedOn.keys()], unplaced,
     },
   });
 
@@ -210,78 +206,115 @@ export async function approveSelectedJobs(formData: FormData): Promise<void> {
     ? ` They are on ${counted(placedOn.size, "draft invoice")}`
       + `${placedOn.size <= 3 ? ` (${[...placedOn.keys()].join(", ")})` : ""}.`
     : "";
-  const heldNote = held > 0
-    ? ` ${held} belong to customers billed manually and were not invoiced.`
-    : "";
   const unplacedNote = unplaced > 0
-    ? ` ${unplaced} could not be put on an invoice — they are still in this queue.`
+    ? ` ${unplaced} could not be put on a draft — they are still in this queue.`
     : "";
   const note = refused.length > 0
     ? ` ${refused.length} could not be approved — ${refused[0]}`
     : "";
 
   const summary = `Approved ${approved.length} job(s), ${money(total)} before GST.`
-    + `${draftNote}${heldNote}${unplacedNote}${note}`;
+    + `${draftNote}${unplacedNote}${note}`;
 
   // An unplaced job is reported as a failure even though its approval stood: it
-  // has left the review list either way, and an invoice that was never raised
+  // has left the review list either way, and a draft that was never started
   // looks exactly like one that was.
   return unplaced > 0 ? fail(QUEUE, summary) : done(QUEUE, summary,
     placedOn.size > 0 ? { href: DRAFTS, label: "Open drafts" } : undefined);
 }
 
-/* ------------------------------------------------------ generate selected --- */
+/* --------------------------------------------------------- place selected --- */
 
-export async function generateSelectedInvoices(formData: FormData): Promise<void> {
+/**
+ * Put approved jobs on their customers' draft invoices.
+ *
+ * **This replaced Generate Selected, and the difference is the point.** That
+ * button turned a selection of jobs straight into invoices — for a per-job or a
+ * `manual` customer it minted a fresh document per press, which is the one route
+ * by which a job could become an invoice without a draft in between. There is no
+ * such route now: a job's money reaches a customer by joining a draft and the
+ * draft being issued, and this button is the first half of that.
+ *
+ * It exists at all because a placement can fail. Approval freezes the charges
+ * whatever happens next — deliberately, since un-approving a decision somebody
+ * made because a later write failed is the worse outcome — so a transient error
+ * can leave a job `approved` and on no draft. This is how it gets there, and it
+ * goes through `placeApprovedJobs`, the very function approval uses, so a retry
+ * cannot take a different path from the original.
+ */
+export async function placeSelectedJobs(formData: FormData): Promise<void> {
   const session = await assertCapability("invoices.bulk");
   await assertCapability("invoices.write");
 
   const ids = selectedIds(formData);
   if (!ids) return fail(QUEUE, "That selection could not be read. Please try again.");
-  if (ids.length === 0) return fail(QUEUE, "Select at least one approved job to invoice.");
+  if (ids.length === 0) return fail(QUEUE, "Select at least one approved job to put on a draft.");
   if (ids.length > MAX_SELECTION) {
     return fail(QUEUE, `Select ${MAX_SELECTION} jobs or fewer at a time.`);
   }
 
   const supabase = await createClient();
-  const result = await generateInvoicesForJobs(supabase, session, ids, {
-    issueDate: businessToday(),
-    // A person picked these rows, which is exactly the decision `manual` asks
-    // for — so a manual customer's jobs are honoured here, unlike in a
-    // scheduled run.
-    respectManual: false,
+  const placements = await placeApprovedJobs(supabase, session, ids);
+
+  const placedOn = new Map<string, boolean>();
+  const reasons: string[] = [];
+  let placedJobs = 0;
+  for (const placement of placements.values()) {
+    if (placement.kind === "placed") {
+      placedJobs += 1;
+      // `opened` is per invoice, and several jobs share one — first write wins,
+      // which is the one that actually opened it.
+      if (!placedOn.has(placement.invoiceNumber)) {
+        placedOn.set(placement.invoiceNumber, placement.opened);
+      }
+    } else {
+      reasons.push(placement.reason);
+    }
+  }
+
+  await recordAudit(session, {
+    entity: "invoice", action: "generate",
+    summary: `bulk place: ${placedJobs} of ${ids.length} job(s) onto ${placedOn.size} draft(s)`,
+    metadata: { jobs: placedJobs, drafts: [...placedOn.keys()], refused: reasons.length },
   });
 
   revalidatePath(QUEUE);
   revalidatePath(REGISTER);
   revalidatePath(DRAFTS);
 
-  if (result.created.length === 0) {
-    const first = result.skipped[0];
-    return fail(QUEUE, first
-      ? `Nothing was invoiced — ${first.orderNumber}: ${first.reason}.`
-      : "Nothing was invoiced.");
+  if (placedJobs === 0) {
+    return fail(QUEUE, `Nothing was put on a draft — ${reasons[0] ?? "no charges on the approved jobs."}`);
   }
 
-  const jobCount = result.created.reduce((sum, entry) => sum + entry.jobIds.length, 0);
-  const opened = result.created.filter((entry) => entry.opened).length;
-  const joined = result.created.length - opened;
-  // Raised and added-to are different facts, and the second is the one the
-  // running draft makes common. An operator who reads "generated 4" every time
-  // has no way to notice whether that was four documents or one.
+  // Started and added-to are different facts, and the second is the one the
+  // running draft makes common. An operator who reads "4 drafts" every time has
+  // no way to notice whether that was four documents or one being filled up.
+  const started = [...placedOn.values()].filter(Boolean).length;
+  const joined = placedOn.size - started;
   const shape = joined > 0
-    ? ` ${opened} raised, ${joined} added to a draft that was already open.`
+    ? ` ${started} started, ${joined} already open.`
     : "";
-  const skipped = result.skipped.length > 0
-    ? ` ${result.skipped.length} job(s) skipped — ${result.skipped[0]?.reason}.`
+  const skipped = reasons.length > 0
+    ? ` ${reasons.length} job(s) could not be placed — ${reasons[0]}`
     : "";
 
-  // Said out loud: generating is not sending. The whole point of phase 5 is
-  // that a customer has not been contacted at this moment.
-  return done(REGISTER,
-    `${counted(jobCount, "job")} on ${counted(result.created.length, "draft invoice")}.${shape} `
-    + `Nothing has been sent yet.${skipped}`,
-    { href: DRAFTS, label: "Open drafts" });
+  // Said out loud: a draft is not an invoice. The customer hears nothing until
+  // somebody issues it, which is the whole separation phase 5 exists for.
+  const summary = `${counted(placedJobs, "job")} on ${counted(placedOn.size, "draft invoice")}.`
+    + `${shape} Nothing has been issued or sent.${skipped}`;
+
+  // **Any job left behind is a failure, even where forty succeeded**, which is
+  // the opposite of what Issue Selected and Send Selected do with a partial
+  // batch — and deliberate. This action exists *only* to clear jobs that already
+  // failed to place once; a job that is still in the queue after somebody
+  // pressed the button for exactly that is the one thing that must not be
+  // reported in the success tone. `approveSelectedJobs` says the same about the
+  // same outcome, a few lines up, and for the same reason: the job has left the
+  // review list either way, so a draft that was never started looks exactly like
+  // one that was.
+  return reasons.length > 0
+    ? fail(QUEUE, summary)
+    : done(QUEUE, summary, { href: DRAFTS, label: "Open drafts" });
 }
 
 /* --------------------------------------------------------- issue selected --- */
@@ -289,10 +322,11 @@ export async function generateSelectedInvoices(formData: FormData): Promise<void
 /**
  * Issue a selection of drafts.
  *
- * The missing rung between Generate Selected and Send Selected. Generation
- * writes drafts and sending refuses one — correctly, since a draft's lines can
- * still change — so a month-end run of forty invoices needed forty presses of a
- * single-invoice button before the bulk send was usable at all.
+ * The missing rung between a draft and Send Selected, and the step that actually
+ * creates the invoice: approving fills drafts and sending refuses one —
+ * correctly, since a draft's lines can still change — so a month-end run of
+ * forty invoices needed forty presses of a single-invoice button before the bulk
+ * send was usable at all.
  *
  * Each goes through `issueOneInvoice`, so the Xero push and its
  * never-block-the-money contract are the same here as on the single button. A

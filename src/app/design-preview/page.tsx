@@ -1054,7 +1054,7 @@ export default function DesignPreviewPage() {
           <section id="billing-review-preview" className="space-y-6 border-t pt-8">
             <PageHeader
               title="Awaiting invoice"
-              description="Finished work that has not been billed. Approve the charges, then generate."
+              description="Finished work that has not been billed. Approve the charges and they join the customer's draft."
             />
 
             <Card title="Price and approve"
@@ -1062,8 +1062,9 @@ export default function DesignPreviewPage() {
               <BillingQueue rows={PREVIEW_QUEUE} mode="approve" canAct canPrice />
             </Card>
 
-            <Card title="Generate" description="Approved jobs, grouped by each customer's billing method.">
-              <BillingQueue rows={PREVIEW_QUEUE_APPROVED} mode="generate" canAct />
+            <Card title="Add to draft"
+                  description="Approved jobs that reached no draft, grouped by each customer's billing method. Nothing here creates an invoice — a draft is issued from the drafts board.">
+              <BillingQueue rows={PREVIEW_QUEUE_APPROVED} mode="place" canAct />
             </Card>
 
             <Card title="Nothing waiting" description="The state the queue is in most of the time.">

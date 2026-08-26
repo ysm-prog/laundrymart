@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   FORTNIGHT_ANCHOR, billingPeriodFor, describePeriod, fortnightOf, monthOf,
-  placesAutomatically, samePeriod, weekOf,
+  samePeriod, sweptByMonthEndRun, weekOf,
 } from "@/lib/domain/billing-period";
 import { addDays, daysBetween, isoWeekday } from "@/lib/domain/dates";
 
@@ -94,8 +94,17 @@ describe("billingPeriodFor", () => {
     expect(billingPeriodFor("invoice_per_job", "2026-08-14")).toBeNull();
   });
 
-  it("has no period for a manual customer — a person decides each time", () => {
-    expect(billingPeriodFor("manual", "2026-08-14")).toBeNull();
+  it("gives a manual customer a monthly window like everybody else", () => {
+    // It used to answer null, and that is what made every press of Generate
+    // raise such a customer another invoice: with no window there is no draft to
+    // look up, so there was always a fresh one to open. What `manual` buys is
+    // `sweptByMonthEndRun`, not a different shape of document.
+    expect(billingPeriodFor("manual", "2026-08-14"))
+      .toEqual({ start: "2026-08-01", end: "2026-08-31" });
+  });
+
+  it("has no period only for a per-job customer, whose job is its own draft", () => {
+    expect(billingPeriodFor("invoice_per_job", "2026-08-14")).toBeNull();
   });
 
   it("has no period for a job that never finished", () => {
@@ -120,18 +129,27 @@ describe("billingPeriodFor", () => {
   });
 });
 
-describe("placesAutomatically", () => {
+describe("sweptByMonthEndRun", () => {
   it("is false only for manual", () => {
-    expect(placesAutomatically("manual")).toBe(false);
-    expect(placesAutomatically("monthly_consolidated")).toBe(true);
-    expect(placesAutomatically("weekly_consolidated")).toBe(true);
-    expect(placesAutomatically("fortnightly_consolidated")).toBe(true);
-    expect(placesAutomatically("invoice_per_job")).toBe(true);
+    expect(sweptByMonthEndRun("manual")).toBe(false);
+    expect(sweptByMonthEndRun("monthly_consolidated")).toBe(true);
+    expect(sweptByMonthEndRun("weekly_consolidated")).toBe(true);
+    expect(sweptByMonthEndRun("fortnightly_consolidated")).toBe(true);
+    expect(sweptByMonthEndRun("invoice_per_job")).toBe(true);
   });
 
-  it("treats an unknown method as placing, matching billingPeriodFor's default", () => {
-    expect(placesAutomatically("something_new")).toBe(true);
-    expect(placesAutomatically(undefined)).toBe(true);
+  it("treats an unknown method as swept, matching billingPeriodFor's default", () => {
+    expect(sweptByMonthEndRun("something_new")).toBe(true);
+    expect(sweptByMonthEndRun(undefined)).toBe(true);
+  });
+
+  it("is the only thing manual changes — it still collects on a draft", () => {
+    // The pair that has to stay true together: a manual customer is left out of
+    // the scheduled sweep *and* has a window to collect in when a person
+    // approves their work. Answering null to the second is what used to hand
+    // them a document per press.
+    expect(sweptByMonthEndRun("manual")).toBe(false);
+    expect(billingPeriodFor("manual", "2026-08-14")).not.toBeNull();
   });
 });
 

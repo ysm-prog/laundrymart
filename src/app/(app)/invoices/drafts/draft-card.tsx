@@ -19,7 +19,8 @@ import { SubmitButton } from "@/components/form";
  *
  *   **Ready**      the period has finished, so nothing more will join. Bill it.
  *   **Collecting** the period is running and approvals are still landing on it.
- *   **No period**  a per-job or manual invoice. It was never collecting.
+ *   **No period**  a per-job customer's draft, opened for one job and joined by
+ *                  nothing. It was never collecting.
  *
  * *Ready* is a suggestion and never a gate: Issue now is offered at every stage,
  * because billing on the 9th is the thing the owner asked to be able to do.

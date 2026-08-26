@@ -16,7 +16,54 @@ logins — which live there precisely so they cannot read the real business's re
 **The multi-tenancy architecture stays.** One operating tenancy is a fact about today's data, not
 a reason to drop `tenant_id`, RLS, or §23's rule that a read feeding a write names its tenant.
 
-## Latest: a job's stage is picked, not walked
+## Latest: a job never becomes an invoice — it joins a draft
+2026-08-26, branch `claude/invoice-creation-job-workflow-11mobw`. Reported from the deployed app:
+*"you allowed to create a invoice from Job by clicking on Approve button but it shouldn't, it
+always should go to draft invoice and only create invoice from draft always."* **No migration; no
+schema, RLS, capability or policy change.**
+
+**The report was right and two doors were open.** The running draft made approval place charges
+on the customer's open draft — for a `*_consolidated` customer only.
+- **`invoice_per_job`**: `placeGroupOnInvoice` branched on "no billing period" and **inserted an
+  invoice itself**, so one Approve press raised a whole document.
+- **`manual`**: reached no draft at all, so its jobs waited for **Generate Selected** — a button
+  whose whole job was turning selected jobs straight into invoices.
+
+**One door now, and structurally so.** `lib/invoices/open-draft.ts` is the only module in `src/`
+that inserts an invoice for a job, and everything it opens is `status: 'draft'`. The codebase
+holds exactly **two** invoice inserts — that one, and `createManualInvoice` (a hand-raised blank,
+not from a job, also a draft).
+- **`manual` collects on a monthly draft now.** Its `null` period *was* the defect: no window
+  means no draft to look up, so every press opened another document. What it still buys is
+  `sweptByMonthEndRun` — the scheduled run leaves them alone.
+- **`invoice_per_job`** still means one invoice per job, as a `per_job` **draft** per job. Only a
+  per-job *customer* gets that shape; a consolidated customer with no `completed_at` must not.
+- **Generate Selected → Add to Draft**, kept only as the retry path for a placement that failed
+  (approval freezes charges whatever happens next), routed through `placeApprovedJobs`.
+- **Wording was half the defect**: "Draft invoice INV00042 **raised**" → "**Started** draft
+  invoice INV00042 … Issue it when you are ready to bill"; badge "Invoice generated" → "**On a
+  draft invoice**"; a line under Approve says what it does. Glossary gained *Draft invoice* and
+  *Issue*, lost *Generate*.
+- **Add to Draft fails a partial batch** (Generate Selected did not) — deliberate: this verb only
+  ever retries jobs that already failed, so one still in the queue must not read as success.
+- `generatesAutomatically` removed — same question as `sweptByMonthEndRun`, no caller in `src/`.
+  Depot stamping kept asymmetric on purpose: customer's for a periodic draft, the job's for a
+  period-less one (merging the branches nearly lost that).
+- `one-door.test.ts` reads the **sources** and fails if a second insert appears (`lib/invoices/*`
+  → `lib/env` is unimportable from vitest). Proved to catch the regression, and guarded against
+  passing vacuously.
+- 981 tests on the branch, **991 with `Prod` merged in**; no migration, `supabase/` untouched.
+  Merged tree: 45 migrations + **485** pgTAP assertions + seed, run locally on a fresh Postgres 16.
+
+**Live shape unchanged:** all **509** customers are `monthly_consolidated`, **0** `per_job`
+invoices exist, so neither closed door was in use. Forward-looking narrowing, checked against the
+database rather than assumed.
+
+**Before trusting it:** take a job in on `ats.coreit.com.au`, approve it, confirm the toast says
+*Started draft invoice…* (not "raised"), that "Approved, not yet on a draft" is empty, and that
+the invoice reaches the register only after Issue on the drafts board.
+
+## Previously: a job's stage is picked, not walked
 2026-08-26, branch `claude/tasks-design-ysm-hub-loe44p`. **One migration (`0042`), applied to
 `laundrymart-syd` as `20260826112650 free_status_moves`.** CLAUDE.md §4 (rules), §6 (screen),
 §7 (migration) and §11 (the apply) hold it.

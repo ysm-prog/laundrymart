@@ -158,7 +158,7 @@ const GLOSSARY: Array<{ term: string; also?: string; meaning: string }> = [
   },
   {
     term: "Billing method",
-    meaning: "How a customer's finished work becomes invoices: one invoice per job, or everything rolled onto one weekly, fortnightly or monthly bill. Set on the customer. \"Manual\" means you decide each time.",
+    meaning: "How many draft invoices a customer's finished work collects on: a draft per job, or everything rolled onto one weekly, fortnightly or monthly draft. Set on the customer. \"Manual\" is the same, except that Create this month's invoices leaves them out \u2014 you issue theirs yourself.",
   },
   {
     term: "Awaiting review",
@@ -166,15 +166,19 @@ const GLOSSARY: Array<{ term: string; also?: string; meaning: string }> = [
   },
   {
     term: "Approved",
-    meaning: "The charges on a job have been signed off. This is the moment the price freezes: after it, the job's charges cannot be changed by anyone, and changing the customer's rate card no longer affects it.",
+    meaning: "The charges on a job have been signed off, and they go straight onto that customer's draft invoice. This is the moment the price freezes: after it, the job's charges cannot be changed by anyone, and changing the customer's rate card no longer affects it. It does not create an invoice \u2014 the draft becomes one when you issue it.",
   },
   {
     term: "Invoice",
     meaning: "A bill for a customer, carrying the jobs you approved for them in the period and anything their contract charges. A draft can be changed; an issued invoice cannot, and is voided with a reason instead.",
   },
   {
-    term: "Generate",
-    meaning: "Turning approved jobs into draft invoices. It does not send anything — the customer hears nothing until you send.",
+    term: "Draft invoice",
+    meaning: "A customer's bill while it is still filling up. Every job you approve joins theirs for the period, so one month is one draft. Nothing reaches the customer while it is a draft \u2014 and there is no other way for a job to reach an invoice.",
+  },
+  {
+    term: "Issue",
+    meaning: "Closing a draft, which is the moment it becomes a real invoice: its date is stamped, its lines are locked, and the next job you approve starts a fresh draft. It does not send anything \u2014 the customer hears nothing until you send.",
   },
   {
     term: "Send",

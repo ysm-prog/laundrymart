@@ -13,8 +13,17 @@
  *     monthly_consolidated        2026-08-01 → 2026-08-31
  *     fortnightly_consolidated    2026-08-03 → 2026-08-16
  *     weekly_consolidated         2026-08-10 → 2026-08-16
- *     invoice_per_job             — none, the job is its own invoice
- *     manual                      — none, a person decides each time
+ *     manual                      2026-08-01 → 2026-08-31
+ *     invoice_per_job             — none, the job is its own draft
+ *
+ * **`manual` collects on a monthly draft like everyone else, and that is a
+ * change.** It used to answer `null`, which meant an approved job for such a
+ * customer had no draft to look up — so every press of Generate raised them
+ * another invoice. What `manual` actually asks for is *a person decides*, and
+ * under the running draft the person's decision is the Issue press; the window
+ * the charges wait in is not the part they were choosing. What the setting still
+ * buys them is {@link sweptByMonthEndRun}: the scheduled month-end run leaves
+ * them alone.
  *
  * It lives in `lib/domain/` rather than beside the writer for the reason this
  * repository records three times over: `lib/invoices/*` reaches `recordAudit` →
@@ -74,12 +83,16 @@ export function fortnightOf(date: IsoDate): BillingPeriod {
 }
 
 /**
- * The period a job belongs to, or `null` when its customer's method does not
- * consolidate.
+ * The period a job belongs to, or `null` when it is its own document.
  *
- * `null` is a real answer and not a failure. `invoice_per_job` means the job is
- * its own invoice, and `manual` means nobody decides but a person — in both
- * cases there is no running draft to look up, and the callers say so.
+ * `null` now means one thing only — `invoice_per_job`, where the job *is* the
+ * invoice, so there is no window and nothing to look up. Every other method
+ * answers with a window, `manual` included, so every approved job has a draft to
+ * collect on.
+ *
+ * A job with no completion date also answers `null`, because there is no date to
+ * place it by. That is a defensive path rather than a real one: the transition
+ * guard stamps `completed_at`, so a completed job always has one.
  *
  * An unrecognised method reads as monthly, the same safe default
  * `groupJobsForInvoicing` takes: the mistake that direction avoids is a customer
@@ -98,25 +111,32 @@ export function billingPeriodFor(
     case "weekly_consolidated": return weekOf(completedOn);
     case "fortnightly_consolidated": return fortnightOf(completedOn);
     case "monthly_consolidated": return monthOf(completedOn);
-    case "invoice_per_job":
-    case "manual":
-      return null;
+    // A person still decides when this goes out; it collects on a monthly draft
+    // in the meantime rather than raising a document per press. See the note at
+    // the top of this file.
+    case "manual": return monthOf(completedOn);
+    // The one real `null`: a per-job customer's job *is* the document, so there
+    // is no window and nothing to look up. It still opens as a draft.
+    case "invoice_per_job": return null;
   }
 }
 
 /**
- * Whether an approved job should be placed on a running draft on its own.
+ * Whether the scheduled month-end run picks a customer up on its own.
  *
- * `manual` is the one that should not, and that is the entire meaning of the
- * setting — a person decides each time. It is deliberately **not** a second
- * tenant-level "auto-draft" switch: `billing_method` already answers this
- * question, and two answers to one question is the duplication this codebase
- * argues against everywhere else.
+ * `manual` is the one that does not, and that is now the whole of what the
+ * setting buys: *nothing is generated automatically*. Approving a job still
+ * places its charges on that customer's draft, because approval is a person
+ * deciding — which is exactly what `manual` asks for — and a job that landed
+ * nowhere would sit in the queue with no way onto an invoice at all now that
+ * jobs cannot be turned into one directly.
  *
- * `invoice_per_job` *is* placed automatically — as its own invoice. The shape
- * differs; the moment does not.
+ * Stated here rather than inline in `from-jobs.ts` because that module reaches
+ * `recordAudit` → `lib/env`, so a rule written there is a rule no unit test can
+ * import. This repository has shipped three contracts broken behind a green
+ * `verify` for exactly that reason.
  */
-export function placesAutomatically(method: BillingMethod | string | null | undefined): boolean {
+export function sweptByMonthEndRun(method: BillingMethod | string | null | undefined): boolean {
   const resolved = typeof method === "string" && isBillingMethod(method)
     ? method
     : "monthly_consolidated";

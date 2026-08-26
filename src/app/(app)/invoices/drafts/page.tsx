@@ -38,7 +38,9 @@ const FILTER_KEYS = ["q", "stage"] as const;
  *
  *   **Ready to issue**  — the period has finished. Bill it.
  *   **Still collecting** — the period is running. Leave it; jobs are still joining.
- *   **No period**       — a per-job or manual invoice. It was never collecting.
+ *   **No period**       — a per-job customer's draft, opened for one job. It was
+ *                          never collecting. (`manual` has a period like anybody
+ *                          else; what it skips is the month-end run.)
  *
  * *Ready* is a suggestion and never a gate. The whole point of the change is that
  * the owner bills when they choose: an invoice may be issued on the 9th, or twice
@@ -144,7 +146,7 @@ export default async function OpenDraftsPage({
                 title: "The period is still running, so approved jobs are still joining" },
               ...(countOf("none") > 0
                 ? [{ value: "none", label: "No period", count: countOf("none"),
-                     title: "Per-job and manual invoices, which were never collecting" }]
+                     title: "A per-job customer\u2019s drafts, each opened for one job" }]
                 : []),
             ]}
           />
@@ -198,6 +200,9 @@ export default async function OpenDraftsPage({
                   rate become one line, not two.</li>
               <li>Issue it when you are ready. The invoice is dated the day you issue it, and
                   the next job that customer sends in opens a fresh draft.</li>
+              <li><strong className="text-foreground">This is the only way an invoice is
+                  made.</strong> Approving a job never creates one &mdash; there is no route
+                  from a job to an invoice that does not pass through a draft.</li>
             </ul>
           </Card>
 

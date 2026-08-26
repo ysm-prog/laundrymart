@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   BILLING_METHODS, BILLING_METHOD_LABELS, BILLING_STATUSES, BILLING_STATUS_LABELS,
-  checkBillingTransition, chargesAreEditable, generatesAutomatically, isBillingMethod,
+  checkBillingTransition, chargesAreEditable, isBillingMethod,
   isBillingStatus, isConsolidated, nextBillingStatuses, OPEN_BILLING_STATUSES,
   type BillingStatus,
 } from "@/lib/domain/billing";
+import { sweptByMonthEndRun } from "@/lib/domain/billing-period";
 
 /**
  * The financial lifecycle, held to the same standard as the operational one:
@@ -158,9 +159,10 @@ describe("billing methods", () => {
 
   it("excludes only `manual` from an automatic run", () => {
     // `manual` means "a person chooses each time", not "never bill them" — so
-    // it is the one method a bulk run skips, and the only one.
+    // it is the one method the month-end run skips, and the only one. Approving
+    // one of their jobs still places it: that is a person choosing.
     for (const method of BILLING_METHODS) {
-      expect(generatesAutomatically(method)).toBe(method !== "manual");
+      expect(sweptByMonthEndRun(method)).toBe(method !== "manual");
     }
   });
 });

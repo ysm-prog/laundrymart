@@ -5,6 +5,30 @@
 > implemented in the same session. Where the delivered system departs from the
 > wording below, §9 says so.
 
+> ### Amended 2026-08-26 — the draft is now the *only* route
+>
+> The owner read the delivered flow and refused two things it still allowed:
+> *"you allowed to create a invoice from Job by clicking on Approve button but it
+> shouldn't, it always should go to draft invoice and only create invoice from
+> draft always."* They were right, and the document below is left as the record
+> of what was decided first rather than rewritten. What changed:
+>
+> - **A job never becomes an invoice.** Approving places its charges on a draft,
+>   and issuing that draft is the only act that makes an invoice. There is no
+>   second route.
+> - **D1 is reversed for placement.** A `manual` customer's approval **does** now
+>   open or join a draft — the wording below (§4 D1, §7 A8, §8) says it does not.
+>   That `null` period was the defect: with no window there is no draft to look
+>   up, so every press opened another document. `manual` now means only that the
+>   **month-end run** leaves the customer alone (`sweptByMonthEndRun`); approving
+>   is a person deciding, which is what the setting was asking for.
+> - **R1 for `invoice_per_job` is a draft, not an invoice.** §7 A9 reads "its own
+>   invoice"; it is its own **draft**, opened for that one job and issued from the
+>   drafts board like any other.
+> - **Generate Selected is gone.** §6 names it as a caller; the queue's second
+>   verb is **Add to Draft**, and it exists only as the retry path for a
+>   placement that failed.
+
 ---
 
 ## 1. The flow the owner described
