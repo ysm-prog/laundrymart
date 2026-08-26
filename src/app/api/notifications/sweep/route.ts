@@ -29,7 +29,9 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { env } from "@/lib/env";
 import { today } from "@/lib/format";
 import { notifyTenant } from "@/lib/notifications/notify";
-import { parseSettings, reminderDue, type NotificationSettings } from "@/lib/notifications/settings";
+import {
+  chaseBlockedBecause, parseSettings, reminderDue, type NotificationSettings,
+} from "@/lib/notifications/settings";
 import {
   CHASEABLE_STATUSES, NOT_STARTED_STATUSES,
   daysBetween, minutesOfDayIn, runIsLate,
@@ -50,6 +52,8 @@ type OverdueInvoice = {
   due_date: string;
   balance: number | string;
   currency: string | null;
+  /** Stamped by `lib/invoices/send.ts` at send time (0008). Null = we never sent it. */
+  emailed_to: string | null;
   customers: {
     business_name: string;
     billing_email: string | null;
@@ -89,7 +93,7 @@ async function sweepOverdueInvoices(
   const { data, error } = await admin
     .from("invoices")
     .select(
-      "id, invoice_number, due_date, balance, currency, " +
+      "id, invoice_number, due_date, balance, currency, emailed_to, " +
       "customers(business_name, billing_email, reminders_enabled)",
     )
     .eq("tenant_id", tenant.id)
@@ -177,11 +181,15 @@ async function chaseOverdueInvoices(
   for (const { invoice, daysOverdue, sequence } of candidates) {
     if (alreadySent.has(`${invoice.id}:${sequence}`)) continue;
 
-    // The tenant switch decides whether the chase runs at all; this decides who
-    // is in it. Customers carried in from a previous system arrive with the
-    // choice their old books recorded, and a customer who was never chased
-    // there must not start being chased here.
-    if (invoice.customers?.reminders_enabled === false) continue;
+    // The tenant switch decides whether the chase runs at all; `chaseBlockedBecause`
+    // decides who is in it — the customer's own preference, and the rule that we
+    // never chase an invoice this app did not send. Both live in
+    // `lib/notifications/settings.ts` so a unit test can reach them.
+    if (chaseBlockedBecause({
+      emailedTo: invoice.emailed_to,
+      remindersEnabled: invoice.customers?.reminders_enabled ?? null,
+      billingEmail: invoice.customers?.billing_email ?? null,
+    })) continue;
 
     const recipient = invoice.customers?.billing_email;
     if (!recipient) continue;

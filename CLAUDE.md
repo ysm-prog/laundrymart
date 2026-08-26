@@ -1238,6 +1238,60 @@ open on **all time** (narrowing on open would hide the thing somebody came to fi
 list that opened on this month would hide precisely the invoices that are late); `/billing` opens
 on **last month**, which is `previousMonth`'s own reasoning.
 
+## 10d. Transactional email
+Every email this app sends is built on **one shell** (`src/lib/email/layout.ts`) and posted
+through **one transport** (`src/lib/email/send.ts` → Resend). Five senders use it: the invoice
+with its PDF, the delivery confirmation, the overdue chase, the invitation and the sign-in link.
+
+- **The shell carries YSM Hub's palette, transcribed from `ysm-prog/ysm-hub`'s `src/index.css`
+  byte for byte** — paper `#F4F1EA`, card `#FBF9F3`, ink `#121A19`/`#3A4543`/`#5F645F`, hairline
+  `#E4DFD3`, accent `#01696F`. Literal hex rather than tokens, because a mail client cannot be
+  relied on for `var()` or a `<style>` block. Transcribed rather than re-derived from our own
+  HSL: those were rounded to one decimal to round-trip (§10b), and a second pass through HSL is
+  how a near-miss creeps in.
+- **Before this the four templates each carried their own chrome**, and the drift was not
+  subtle: a grey `#f6f7f9` page nothing in the brand uses, a system font stack, and the teal
+  appearing in exactly one button of one email. `email-branding.test.ts` reads every template's
+  *source* and fails on any hex outside `EMAIL_PALETTE`, which is what stops it coming back —
+  the next person adding a template will copy an existing one, and a code review is not a
+  reliable place to catch a hex code.
+- **The Core IT credit goes on customer mail and never on staff mail.** *"App is developed &
+  designed by CoreIT"*, the label hyperlinked to `coreit.com.au` in the accent colour, 11.5px
+  centred — the same line, wording and size as YSM Hub's own `lib/_credit.js`, whose header
+  draws exactly this boundary. So the invoice, the delivery note and the chase carry it; an
+  invitation telling a counter hand to choose a password does not. `audience` is the switch, in
+  both halves — the HTML through the shell and the plain text through `withTextCredit()` — and
+  the guard asserts both, because either could be flipped alone.
+  - YSM Hub signs a per-customer tracking token onto that link. This app has nothing to
+    attribute a click to and no table to record one in, so the link goes straight to
+    `coreit.com.au`; a tracking scheme nothing reads would be a second thing to keep in step
+    for no answer.
+- **The masthead is the laundry, not the software.** An invoice comes from Adelaide Towel
+  Service; Core IT is a credit in the footer and `INVOICE_FROM_NAME` should be the laundry's
+  own name. The two are different claims and the email makes both.
+- **Every email carries a preheader** — the hidden line a client shows beside the subject in
+  the inbox list. Without one the preview is whatever the body starts with, which for a card
+  layout is the laundry's name repeated.
+- Outlook on Windows renders through Word, which ignores `max-width` on a `div`, so the card is
+  a table. Four lines, and it is the thing that has worked in every client for fifteen years.
+
+**The provider is optional and says so.** With no `RESEND_API_KEY`/`INVOICE_FROM_EMAIL` the app
+runs, Settings › Notifications shows a warning, and every send action reports "no email provider
+is configured" rather than a success that did not happen. **Nothing has ever been sent from this
+deployment** — 0 invoices with `emailed_to`, 0 `auth.one_time_tokens`, 0 recovery mails — so the
+first real send is still ahead. §18's 2026-08-26 entry has the ordered steps.
+
+**A customer is never chased about an invoice this app did not send** (`chaseBlockedBecause`).
+`invoices.emailed_to` is stamped by `lib/invoices/send.ts` and by nothing else, so a null means
+the customer has never had it from us. On this deployment that is **all 646 invoices**: they came
+out of MYOB as headers with an `issue_date`, no lines and no payments, and MYOB is where their
+money was recorded. Without the rule, the first sweep after the mail provider was wired would
+have chased **41 real businesses** about amounts this app cannot see a settlement for — and the
+cadence alone would not have stopped it, only kept the other 400 (some due in 2011) out by
+being more than three reminders old. The rule is right in general, not just for imported data:
+the chase says *"reply if you need the invoice sent again"*, which is only true of somebody we
+sent it to.
+
 ## 11. Hosted project
 **One laundry, since 2026-08-26.** `0041_single_laundry` (`20260826053208`) is the ledger's last
 entry, and the deployment now holds a single tenant — `Adelaide Towel Service` — with the
@@ -2045,6 +2099,67 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-08-26 · The emails look like the rest of it, and the chase cannot fire blind
+Wiring Resend for PROD, in YSM Hub's language with the Core IT credit. **No migration; no schema,
+RLS, capability or policy change.** §10d holds the design.
+
+**The transport was already right; the templates were not.** `sendEmail()` has been the one door
+to Resend since Phase C, and all five senders go through it — invoice, delivery confirmation,
+overdue chase, invitation, sign-in link. What each of the four *templates* carried was its own
+copy of the same chrome, and none of it was the brand: a grey `#f6f7f9` page, a system font
+stack, `#6b7280` body text, and the teal `#01696F` appearing in exactly one button of one email.
+Four copies of one shell is also four places to fix anything.
+
+- **One shell** (`layout.ts`) with YSM Hub's palette transcribed from its `src/index.css` byte
+  for byte, plus `paragraph`/`summary`/`notice`/`button` so a template writes wording and money
+  and nothing about colour. The four templates lost their `<!doctype html>` entirely.
+- **`email-branding.test.ts` reads every template's source** and fails on any hex outside
+  `EMAIL_PALETTE`. Source rather than output, so a colour on a branch no fixture exercises still
+  fails; comments are stripped first, or the file *explaining* the old greys would fail the
+  sweep and the obvious "fix" would be deleting the explanation. It asserts it found four
+  templates before sweeping them, because a rename would otherwise make it pass over an empty
+  list — the vacuous-pass trap this file records twice.
+- **The Core IT credit, exactly as YSM Hub writes it** — same wording, 11.5px, centred, label
+  hyperlinked in the accent — and **customer-facing only**, which is the boundary drawn at the
+  top of YSM Hub's own `lib/_credit.js`. Asserted in both halves and in both directions: on the
+  invoice, delivery note and chase; off the invitation and the sign-in link.
+- Rendered and screenshotted at 700px and 390px: **0 document overflow, 0 console errors** on
+  all six states (invoice outstanding, invoice paid, chase, delivery, invitation, sign-in link).
+
+**One test was rewritten to its decision rather than satisfied.** The chase asserted
+`not.toContain("href=")` to mean *no payment link* — true until the credit gave that email its
+first hyperlink, at which point it failed for a reason unrelated to the rule it defended. It now
+says what it means: the only link is the credit, and nothing anywhere invites a payment, because
+the schema holds no payment URL and inventing one would send customers somewhere real money
+could go astray.
+
+**The finding that changed the work: wiring the provider would have made the chase dangerous.**
+This deployment holds 646 invoices imported from MYOB as headers — an `issue_date`, no lines,
+**no payment rows** — and 449 customers with a billing address. The cadence (7/14/21 days, three
+at most) keeps 400 ancient ones out by being too old, including invoices due in **2011**. It does
+not stop the other 41, which sit exactly on a reminder day *today*: switching customer email on
+after setting `RESEND_API_KEY` would have emailed 41 real businesses about money this app cannot
+see a settlement for, under the laundry's own name.
+- `chaseBlockedBecause` is the rule: **never chase an invoice this app did not send.**
+  `invoices.emailed_to` is written by `lib/invoices/send.ts` and by nothing else — checked, not
+  assumed — so null means the customer has never had it from us.
+- Pure and in `lib/notifications/settings.ts` beside `reminderDue`, not inline in the route, for
+  §2's reason: a rule inside a module no unit test can import is one that ships broken behind a
+  green `verify`. Proved non-vacuous by deleting the rule and watching the assertion fail.
+- It is right in general, not a workaround for imported data: the chase says *"reply if you need
+  the invoice sent again"*, which only makes sense to somebody we sent it to. A laundry that
+  invoices on paper should send it from here first — one press, and it makes the reminder true.
+
+**965 unit tests (was 940)**, 478 pgTAP assertions unchanged — this adds no policy and no
+migration; `git diff` over `supabase/` is empty. `verify` green.
+
+**Nothing has been sent yet, and that is the one thing left.** No `RESEND_API_KEY` on the
+deployment: 0 invoices carry `emailed_to`, 0 `auth.one_time_tokens`, 0 recovery mails, ever.
+**Before trusting it:** verify the sending domain in Resend (SPF + DKIM), set the four variables
+on Vercel for Production *and* Preview, then sign in as an owner and press Settings ›
+Notifications › *Send a test email* — it goes only to your own address and is audited. Only then
+consider the customer switches, and read the paragraph above before switching the chase on.
+
 ### 2026-08-26 · Adelaide Towel Service is the only laundry
 The owner's instruction, and mostly a live data change: the demo laundry is deleted, its twelve
 role-profile logins moved into the real one, and the real one's 1,154 archived records restored.

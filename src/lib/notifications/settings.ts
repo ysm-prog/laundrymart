@@ -155,3 +155,45 @@ export function reminderDue(
   const sequence = elapsed / settings.repeatEveryDays + 1;
   return sequence <= settings.maxReminders ? sequence : null;
 }
+
+/**
+ * Whether a customer may be chased about this invoice at all.
+ *
+ * Separate from `reminderDue`, which answers *when*. This answers *whether*,
+ * and it is the half that keeps a wired mail provider from being dangerous:
+ * the cadence alone would have chased 41 real businesses on the first sweep
+ * after `RESEND_API_KEY` was set, about invoices this app has never sent and
+ * holds no payments for.
+ *
+ * Pure and here rather than inline in `/api/notifications/sweep`, for the
+ * reason CLAUDE.md §2 gives about `plan.ts` and `order-items.ts`: a rule stated
+ * inside a module no unit test can import is a rule that ships broken behind a
+ * green `verify`, and this repo has done that twice.
+ *
+ * Returns the reason to skip, or `null` to go ahead — a reason rather than a
+ * boolean because the caller logs nothing and a future one will want to.
+ */
+export type ChaseBlock = "reminders-off" | "never-sent" | "no-address";
+
+export function chaseBlockedBecause(invoice: {
+  /** `invoices.emailed_to`, stamped by `lib/invoices/send.ts` and nothing else. */
+  emailedTo: string | null;
+  /** The customer's own choice, carried in from their previous books. */
+  remindersEnabled: boolean | null;
+  billingEmail: string | null;
+}): ChaseBlock | null {
+  // The customer's own preference wins over everything, including a correctly
+  // sent invoice — somebody who was never chased in the old books must not
+  // start being chased here.
+  if (invoice.remindersEnabled === false) return "reminders-off";
+
+  // **Never chase an invoice this app did not send.** A null `emailed_to` means
+  // the customer has never had it from us: on this deployment that is every one
+  // of the 646 imported MYOB headers, whose payments live in MYOB. The chase
+  // says "reply if you need the invoice sent again", which is only true of
+  // somebody we sent it to.
+  if (!invoice.emailedTo) return "never-sent";
+
+  if (!invoice.billingEmail) return "no-address";
+  return null;
+}

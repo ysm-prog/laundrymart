@@ -1,7 +1,47 @@
 # MEMORY — working session handoff
 > Auto-loaded each session. Canonical state is CLAUDE.md; this is the live delta.
 
-## Latest: Adelaide Towel Service is the only laundry
+## Latest: the emails look like the rest of it, and the chase cannot fire blind
+2026-08-26, branch `claude/adelaide-towel-single-tenant-tbyy06`. Wiring Resend for PROD in YSM
+Hub's language with the Core IT credit. **No migration** — `git diff` over `supabase/` is empty.
+CLAUDE.md §10d holds the design.
+
+**The transport was already right; the templates were not.** `sendEmail()` has been the single
+door to Resend since Phase C and all five senders use it. The four *templates* each carried their
+own chrome and none of it was the brand — grey `#f6f7f9`, system fonts, and the teal in exactly
+one button of one email.
+
+- **One shell** (`src/lib/email/layout.ts`), YSM Hub's palette transcribed from its `src/index.css`
+  byte for byte (paper `#F4F1EA`, card `#FBF9F3`, ink `#121A19`, accent `#01696F`). Literal hex,
+  because mail clients have no `var()`. The templates lost their `<!doctype html>`.
+- **`email-branding.test.ts` sweeps every template's *source*** and fails on a hex outside
+  `EMAIL_PALETTE`; comments stripped first, and it asserts it found four templates before
+  sweeping so a rename cannot make it pass vacuously.
+- **Core IT credit on customer mail only** — same wording/size/link as YSM Hub's `lib/_credit.js`,
+  whose header draws that exact boundary. On invoice/delivery/chase, off invitation/sign-in link,
+  asserted both ways and in both halves.
+- Screenshotted at 700px and 390px across six states: 0 overflow, 0 console errors.
+
+**One test rewritten to its decision:** the chase asserted `not.toContain("href=")` to mean *no
+payment link*; the credit gave it its first hyperlink. It now asserts the only link is the credit
+and nothing invites a payment.
+
+**The finding that changed the work.** 646 invoices are MYOB headers with **no payment rows**;
+449 customers have a billing address. The 7/14/21 cadence keeps 400 ancient ones out (some due
+**2011**) but **41 sit on a reminder day today** — so setting `RESEND_API_KEY` and switching
+customer email on would have chased 41 real businesses about money this app cannot see settled.
+`chaseBlockedBecause` fixes it: **never chase an invoice this app did not send** (`emailed_to` is
+written by `lib/invoices/send.ts` and nothing else — checked). Pure, in
+`lib/notifications/settings.ts` beside `reminderDue` so a unit test reaches it; proved
+non-vacuous.
+
+**965 unit tests (was 940), `verify` green.** 478 pgTAP unchanged.
+
+**Nothing has ever been sent** — 0 `emailed_to`, 0 `auth.one_time_tokens`. Left to do, in order:
+verify the domain in Resend (SPF+DKIM), set the four vars on Vercel (Production *and* Preview),
+then Settings › Notifications › *Send a test email*. Only then the customer switches.
+
+## Previously: Adelaide Towel Service is the only laundry
 2026-08-26, branch `claude/adelaide-towel-single-tenant-tbyy06`. Mostly a **live data change**;
 one migration (`0041`) keeps it that way. No new table, column, policy or capability; nothing
 dropped and no row's meaning changed. CLAUDE.md §11 has the read-backs, §7 the migration, §3a the
