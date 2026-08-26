@@ -952,10 +952,38 @@ working day, not a promise about a particular clock time.
 
 ## 10a. Toolchain pins
 Next 16 (Turbopack), React 19, Tailwind 4 (CSS-first — no `tailwind.config.ts`), Zod 4,
-vitest 4. Two pins are held back on purpose: TypeScript **6** (typescript-eslint does not
-support TS 7) and ESLint **9** (`eslint-config-next@16` depends on typescript-eslint 8,
-which targets ESLint 9). Next 16 needs `experimental.useTypeScriptCli` and the auth gate
-lives in `src/proxy.ts`, not `src/middleware.ts`.
+vitest 4. Two pins are held back on purpose: TypeScript **6** and ESLint **9**. Next 16 needs
+`experimental.useTypeScriptCli` and the auth gate lives in `src/proxy.ts`, not
+`src/middleware.ts`.
+
+**Both pins were re-tested on 2026-08-26 rather than taken on trust, and both still hold.**
+Dependabot offered TypeScript 7 and ESLint 10 together (PR #22); each was installed and `eslint .`
+run, and each fails on its own, so neither could be taken without the other and the pair fails too:
+
+- **TypeScript 7** → `Error: typescript-eslint does not support TS 7.0`, raised from
+  `eslint-config-next/node_modules/typescript-eslint/dist/index.js`. The dependency is *nested*,
+  which is the part worth knowing: it cannot be lifted by a root override, so this pin moves when
+  `eslint-config-next` ships a typescript-eslint that supports TS 7 and not before.
+- **ESLint 10** → `TypeError: scopeManager.addGlobals is not a function`, from
+  `eslint/lib/languages/js/source-code/source-code.js`. ESLint 10 calls an API that
+  typescript-eslint 8's scope manager does not implement, so every file errors rather than one
+  rule misbehaving.
+
+**Dependabot re-offers this group as its versions move** — the same two blocked bumps arrived
+again as #44 with `vitest` added — so the errors above are the thing to re-run, not the PR number
+to remember.
+
+**What was salvageable was taken**: `eslint-config-next` `^16.3.1` (resolving to 16.3.3) and
+`vitest` `^4.1.11`, both green on TypeScript 6 + ESLint 9. Keeping `eslint-config-next` current is
+also what makes the next attempt at the other two cheap — the dependency that has to move first
+lives inside it.
+
+**A vitest patch is not a small lockfile change**, which is worth knowing before the next one:
+4.1.10 → 4.1.11 moved **26 packages**, carrying `rolldown` 1.2.2 → 1.2.5 and `vite` 8.2.0 → 8.2.2
+with it. All `dev: true`, so none of it reaches the production bundle, and the one package added is
+an optional Android ARM binding no runner installs. Checked as package sets rather than read off
+the diff's line count — the lockfile churns re-emitted `resolved` fields, so the line count says
+nothing.
 
 `eslint.config.mjs` adds one rule on top of `eslint-config-next`:
 **`@typescript-eslint/no-unused-vars` as an error**, because a value fetched and then dropped
@@ -2099,6 +2127,32 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-08-26 · The dependency backlog, decided rather than left open
+Three pull requests had been sitting open against this repo. **No migration; nothing under `src/`
+or `supabase/` changed** — `git diff` over both is empty for all of it. §10a holds the pin
+evidence.
+
+- **#21 merged** — `next` 16.3.0 → 16.3.1 and `resend` 6.18.1 → 6.20.0. Verified rather than
+  waved through, because `resend` is the transport every email in this app now goes through and
+  the templates had been rewritten onto it the same day: merged with current `Prod` locally,
+  `npm ci` clean, and the whole verify gate — typecheck, lint, **965 tests**, production build —
+  green on the new versions before the PR was touched.
+- **#22 and #44 closed, and what was safe in them taken separately.** They are the same
+  dev-dependency group re-offered as its versions moved: TypeScript 7 and ESLint 10, with
+  `eslint-config-next` and (in #44) `vitest` alongside. **Both held-back pins were re-tested rather
+  than defended from the note**, and each fails on its own: TS 7 raises
+  `typescript-eslint does not support TS 7.0` from the *nested* copy inside `eslint-config-next`
+  (so no root override lifts it), and ESLint 10 raises
+  `TypeError: scopeManager.addGlobals is not a function` on every file. Taken instead:
+  `eslint-config-next` `^16.3.1` → 16.3.3, and `vitest` `^4.1.11`. Lockfiles checked by comparing
+  **package sets** rather than by reading the diff's line count — the first moved 2 packages with
+  none added or removed; the second moved 26, all `dev: true`, carrying rolldown and vite with it.
+- **#17 closed** — `feature/job-billing-workflow`, which §19 records the owner dropping on
+  2026-08-17. Merging it would have deleted 337 lines of `nav.ts` and 625 of `orders/actions.ts`
+  and carried a third migration numbered 0017; its one good idea was adopted from another branch
+  at the time. The branch stays on the remote per the convention in §19 — closing the pull request
+  is what stops it reading as pending work.
+
 ### 2026-08-26 · The emails look like the rest of it, and the chase cannot fire blind
 Wiring Resend for PROD, in YSM Hub's language with the Core IT credit. **No migration; no schema,
 RLS, capability or policy change.** §10d holds the design.
