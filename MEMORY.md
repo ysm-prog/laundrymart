@@ -1,7 +1,37 @@
 # MEMORY — working session handoff
 > Auto-loaded each session. Canonical state is CLAUDE.md; this is the live delta.
 
-## Latest: merged to Prod and Dev — the branch is live
+## Latest: Adjust Run reaches My Runs
+2026-08-26, branch `claude/adjust-run-button-roles-ushdk9`. The owner asked for the button on the
+screen they are actually looking at, restricted to the Owner and the Office manager. **No
+migration, no schema, no RLS, no capability, no new role.**
+
+- `/my-runs` now draws a **"Run order"** card between the day's workflow and its job groups: the
+  *same* `SequenceBoard` and the *same* `reorderRunStops` the Runs screen uses. Gated on
+  `routes.sequence`, so a board, a driver and a dispatcher get **no card at all** — and no extra
+  query, because the read is skipped with it.
+- `lib/runs/sequence-stops.ts` is new and shared by both screens. Not tidiness: the version a page
+  renders with is the token its save is compared against, so a second read would be a stale-version
+  refusal nobody could explain.
+- `SequenceBoard` gained `returnTo`; `reorderRunStops` reads it through `returnTo(formData, …)`.
+  Without it a manager adjusting a run from the round's day would be moved to `/runs`.
+- `SequenceStop` moved into `sequence.ts` as `OrderableStop & { … }`, so `progressStatus` and its
+  `asOrderable` adapter are gone. Design-preview fixtures updated with it.
+- 812 unit tests (was 806), `verify` green. Both new assertions **proved to fail** without their
+  fix. 42 browser interaction assertions at 390/1440, and 12 measured combinations with 0 overflow
+  inside the card, 0 sub-36px targets, 0 console errors.
+- **The measurement harness caught itself twice** and both are recorded in CLAUDE.md §18: a stale
+  `next start` (failed loudly — the 2026-08-25 vacuous-pass trap), and a text-size sweep that was
+  vacuous because `"biggest"` is the label and `"xlarge"` is the value. It now asserts the root
+  font size actually moved.
+
+**Not opened behind the auth gate** — no Supabase credentials here. Before trusting it: as
+`owner@roles.example.com` on `ats.coreit.com.au`, open My Runs for Board 1 on a two-stop day,
+Adjust Run, swap 1 and 2, Save & Lock Run; then check `board1@ats.example.com` sees no card. That
+is also the one item the 2026-08-25 entry left open.
+
+
+## Previously: merged to Prod and Dev — that branch is live
 2026-08-26. **PR #23 → `Prod` (`00c6613`), PR #24 → `Dev`**, CI green on all three jobs for both
 (verify, gitleaks, and the DB job: 40 migrations, 431 pgTAP assertions and the seed against a
 fresh Postgres 16). `ats.coreit.com.au` carries the whole branch.

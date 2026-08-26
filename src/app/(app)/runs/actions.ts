@@ -5,7 +5,9 @@ import { revalidatePath } from "next/cache";
 import { assertCapability } from "@/lib/auth/context";
 import { createClient } from "@/lib/supabase/server";
 import { recordAudit } from "@/lib/audit";
-import { describeDbError, done, fail, firstIssue, requiredDate, toObject } from "@/lib/actions";
+import {
+  describeDbError, done, fail, firstIssue, requiredDate, returnTo, toObject,
+} from "@/lib/actions";
 import { logOrderActivity } from "@/lib/orders/activity";
 import { assignOneJobToBoard } from "@/lib/runs/assign";
 import { loadRunDay } from "@/lib/runs/run-day";
@@ -53,12 +55,16 @@ export async function reorderRunStops(formData: FormData): Promise<void> {
   const session = await assertCapability("routes.sequence");
   const raw = formData.get("plan");
   const parsed = parseSequencePlan(typeof raw === "string" ? raw : null);
-  if (!parsed.ok) return fail(RUNS, parsed.error);
+  if (!parsed.ok) return fail(returnTo(formData, RUNS), parsed.error);
 
   const {
     board_id: boardId, date, stops: proposed, expected_version: expected,
   } = parsed.plan;
-  const back = `${RUNS}?date=${date}&board=${boardId}`;
+  // My Runs draws this same board, and a manager who adjusts a run from the
+  // round's own day has to land back on it — being moved to another screen
+  // reads as the save having done something else. `returnTo` refuses anything
+  // that is not a plain same-site path, so the field cannot redirect anywhere.
+  const back = returnTo(formData, `${RUNS}?date=${date}&board=${boardId}`);
   const supabase = await createClient();
 
   // Named rather than left to RLS (§23): a platform admin's session reads every

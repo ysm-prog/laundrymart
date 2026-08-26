@@ -440,6 +440,12 @@ with it.
 date it chooses, grouped To deliver / Out for delivery / Completed, in the order the office set
 and with each stop's position printed on the card, with Confirm Load and Start Route in front of
 them. Gated on `routes.read` so a manager can open it for a board.
+**Since 2026-08-26 it also carries Adjust Run**, in a "Run order" card between the day's workflow
+and its job groups — the same `SequenceBoard` the Runs screen draws, so there is one answer to
+"how is a run ordered" rather than two. It renders **only** for a holder of `routes.sequence`
+(the Owner and the Office manager): a board, a driver and a dispatcher get no card at all rather
+than a disabled button, and no extra query either, since the read is skipped with it. The save
+posts `return_to`, so a manager who adjusts a run from the round's day lands back on it. See §28.
 `/run` survives as the second tab ("At the depot") because it owns the offline outbox, the
 service worker and the unload inventory sweep, and is the one screen that must work with no
 signal.
@@ -1634,6 +1640,75 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-08-26 · Adjust Run, on the screen the manager is standing on
+The order of a run could only be changed from `/runs`. My Runs — where a manager actually is when
+they notice the van should call at the school before the hotel — printed the position on every job
+card and offered no way to change it. **No migration; no schema, RLS, capability, policy or
+workflow change**, and no role gained or lost anything.
+
+- **The same board, not a second one.** `/my-runs` now draws the same `SequenceBoard` the Runs
+  screen draws, posting to the same `reorderRunStops`. Ordering is a rule the database enforces
+  (`can_write_run_sequence()`, `guard_job_sequence`, `apply_run_sequence()` — all 0036), and a
+  second implementation in front of it would be a second answer to a question with one answer.
+  So this is a **placement** change and a shared read, not new behaviour.
+- **`routes.sequence`, deliberately not `canWork`.** My Runs already lets a dispatcher work
+  somebody's day on their behalf (`routes.write`), and reusing that for the new control would
+  have offered a button 0036's guard trigger refuses — a control that can only ever fail, on the
+  screen the client asked for it on. The card is gated on `routes.sequence`, which is the Owner
+  and the Office manager alone, and **a board, a driver or a dispatcher gets no card at all**
+  rather than a disabled one.
+- **The read is skipped with the card, not merely hidden.** `loadBoardSequence` runs only for a
+  viewer who may act on it and only once the day has work in it, so a round opening its own
+  workspace pays for nothing.
+- **One loader for both screens, and that is a concurrency decision.** `lib/runs/sequence-stops.ts`
+  is the day's stops with their laundry under them, lifted out of `/runs/page.tsx` verbatim. The
+  version a page renders with is the token its save is compared against, so two reads of "what is
+  on this run" would be two answers waiting to disagree — a stale-version refusal a manager could
+  not explain, not a tidiness question.
+- **`return_to` is what makes the save land where it was pressed.** Without it a manager adjusting
+  a run from the round's day would be moved to `/runs`, which reads as the save having done
+  something else entirely. The action re-validates it as a plain same-site path — a form field is
+  not evidence, and an absolute one would make every sequence save an open redirect.
+- **`SequenceStop` moved into `sequence.ts` and lost its `asOrderable` adapter.** It carried
+  `progressStatus` where the rules and the database both say `progress_status`, so every call site
+  translated between the two; the type now sits beside the rules that read it, as
+  `OrderableStop & { … }`, and one mapping is gone rather than duplicated into a second screen.
+
+- 812 unit tests (was 806) and 431 pgTAP assertions (unchanged — this adds no policy). `verify`
+  green: typecheck, lint, tests and the production build.
+- **Both new assertions were confirmed to fail without their fix** rather than assumed to be doing
+  something. Renaming the posted field to `returnTo` fails the seam test — the producer/consumer
+  disagreement this repo has shipped three times behind a green `verify`, and which here would not
+  even look like a failure: the save would work and quietly move the manager to another screen.
+  Widening the gate to `routes.write` fails the capability test.
+- **Driven in a real browser, not reasoned about.** The card is in `/design-preview` as its own
+  fixture and **42 interaction assertions** pass at 390 and 1440: locked by default with no
+  draggable row, no arrow and no Save anywhere; Adjust Run revealing six 44×44 move controls;
+  stop 1 and stop 2 swapping in the list *and* in the posted payload; the version not moving until
+  it is saved; the last stop refusing to move past the end; and Cancel restoring the exact saved
+  order, returning to locked and taking every control away again.
+- Measured light and dark at 320/390/768/1440 and across all three text sizes at 390 — **12
+  combinations, 0 console errors, 0 overflow inside the card and 0 interactive targets under
+  36px**. Document overflow is 7px at 320 and 34px at 390 Biggest, **byte-identical to the
+  baseline the 2026-08-24 entry recorded**: the pre-existing dispatch-planner fixture, unchanged.
+- **The measurement harness caught itself first, which is why the numbers are worth anything.**
+  The first run reported the card missing at all twelve combinations — the id had been added after
+  the build, and `next start` was serving the old one. That is the failure the 2026-08-25 entry
+  records as having passed *vacuously*; here it failed loudly instead. The text-size sweep then
+  passed vacuously anyway, because `"biggest"` is the *label* and `"xlarge"` is the value, so the
+  attribute matched no rule. The harness now asserts the root font size actually moved
+  (16 → 18.4 → 20.8px) and the recorded overflow numbers reappeared the moment it did.
+
+**Not opened with real rows in it.** This container has no Supabase credentials, so the card was
+proved through the component gallery, the payload assertions, the source-level gate and the build
+— not by being looked at behind the auth gate. **Before trusting it: sign in as
+`owner@roles.example.com` on `ats.coreit.com.au`, open My Runs for Board 1 on a day with two
+stops, press Adjust Run, swap 1 and 2, and press Save & Lock Run** — the run should re-lock in the
+new order, the toast should read "Run sequence updated successfully. The run has been locked.",
+and you should still be on My Runs. Then sign in as `board1@ats.example.com` and confirm there is
+no Run order card at all. That also closes the one item §18's 2026-08-25 entry left open, which
+has always needed a login rather than a commit.
+
 ### 2026-08-25 · The audit record is a rule, not a literal
 The last item in the specification that could be closed without a login. **No migration; no
 schema, RLS, capability or workflow change** — one payload moved and gained tests.
@@ -4519,6 +4594,14 @@ document is what to hand somebody asking what the feature does.
   `jobs.sequence` too, so leaving it on `routes.write` would have made the boundary a fiction —
   a dispatcher refused on Runs could reorder the same day there. Two screens that write one fact
   answer to one authority.
+- **Adjust Run is drawn on My Runs as well** (2026-08-26), because that is the screen somebody is
+  standing on when they notice the van should call at the school before the hotel. The *same*
+  component, the same action and the same capability — a second implementation of ordering would
+  be a second answer to a question the database has only one answer to. The two screens share
+  `lib/runs/sequence-stops.ts`, which matters beyond tidiness: the version a page renders with is
+  the version its save is compared against, so a second read of "what is on this run" would be a
+  concurrency bug rather than a duplication. `return_to` is what makes the save land back where it
+  was pressed, re-validated as a plain same-site path because a form field is not evidence.
 - **The audit row carries both orders in full.** "What was it before?" is the question an audit
   log gets asked about a run that went wrong, and a movement count cannot answer it. Board, run
   date, run ids, previous and new sequence, actor, role and the resulting version.

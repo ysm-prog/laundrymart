@@ -311,3 +311,20 @@ export function buildSequenceAudit(input: {
     },
   };
 }
+
+/* ------------------------------------------------------- a stop, on screen */
+
+/**
+ * One position on a run, as the ordering board draws it.
+ *
+ * Here rather than beside the component because two server screens now read it
+ * — the Runs board and My Runs — and a type that lives in a `"use client"`
+ * module drags that module into the import graph of everything that names it.
+ * `OrderableStop` above is the same stop reduced to what the *rules* need; this
+ * adds only what has to be read on screen to recognise it.
+ */
+export type SequenceStop = OrderableStop & {
+  customerName: string;
+  address: string | null;
+  jobs: Array<{ id: string; orderNumber: string; itemCount: number }>;
+};
