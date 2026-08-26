@@ -1,5 +1,6 @@
 "use server";
 
+import { includedTax } from "@/lib/domain/gst";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { assertCapability, type Session } from "@/lib/auth/context";
@@ -7,7 +8,7 @@ import { createClient } from "@/lib/supabase/server";
 import { recordAudit } from "@/lib/audit";
 import { addDays } from "@/lib/domain/dates";
 import {
-  allocateWeightCharges, buildReplacementCharges, lineAmount, round2,
+  allocateWeightCharges, buildReplacementCharges, lineAmount,
   type DraftLine,
 } from "@/lib/domain/pricing";
 import {
@@ -917,7 +918,10 @@ export async function createCreditNote(formData: FormData): Promise<void> {
   const { data: tenant } = await supabase
     .from("tenants").select("gst_rate").eq("id", session.tenantId).maybeSingle();
   const gstRate = Number(tenant?.gst_rate ?? 0.1);
-  const tax = round2(parsed.data.amount * gstRate);
+  // GST is inside the amount, not added to it (0043). A credit of $110 returns
+  // $110 to the customer, $10 of which is the GST already in it — crediting
+  // $121 would hand back tax that was never collected.
+  const tax = includedTax(parsed.data.amount, gstRate);
 
   const { data: note, error } = await supabase
     .from("credit_notes")
@@ -931,7 +935,7 @@ export async function createCreditNote(formData: FormData): Promise<void> {
       reason: parsed.data.reason,
       subtotal: parsed.data.amount,
       tax_amount: tax,
-      total: round2(parsed.data.amount + tax),
+      total: parsed.data.amount,
     })
     .select("id, credit_note_number")
     .single();

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { taxInclusiveTotals } from "../gst";
 import {
   allocateWeightCharges,
   buildReplacementCharges,
@@ -7,7 +8,6 @@ import {
   lineAmount,
   resolvePrice,
   round2,
-  summariseInvoice,
 } from "../pricing";
 
 describe("resolvePrice", () => {
@@ -41,12 +41,16 @@ describe("money arithmetic", () => {
     expect(lineAmount(3, 1.115)).toBe(3.35);
   });
 
-  it("totals an invoice with GST on taxable lines only", () => {
-    const totals = summariseInvoice(
-      [{ amount: 100, taxable: true }, { amount: 50, taxable: false }],
-      0.1,
+  it("totals an invoice with the GST already inside the taxable lines", () => {
+    // Rewritten to the decision rather than satisfied: this used to assert
+    // { subtotal: 150, taxAmount: 10, total: 160 } — the exclusive model, where
+    // tax was added on top. Since 0043 the tax is a component of the price, so
+    // the total equals the subtotal and $100 of GST-bearing lines holds $9.09.
+    const totals = taxInclusiveTotals(
+      [{ amount: 100, taxCode: "GST" }, { amount: 50, taxCode: "N-T" }],
+      { rate: 0.1 },
     );
-    expect(totals).toEqual({ subtotal: 150, taxAmount: 10, total: 160 });
+    expect(totals).toEqual({ subtotal: 150, taxAmount: 9.09, total: 150 });
   });
 });
 
@@ -65,7 +69,8 @@ describe("buildServiceCharges", () => {
     const lines = buildServiceCharges({ items, minimumCharge: 100 });
     const topUp = lines.find((l) => l.chargeType === "minimum_service_fee");
     expect(topUp?.amount).toBe(33);
-    expect(summariseInvoice(lines).subtotal).toBe(100);
+    expect(taxInclusiveTotals(lines.map((l) => ({ amount: l.amount, taxCode: null })))
+      .subtotal).toBe(100);
   });
 
   it("does not top up when the service already clears the minimum", () => {
@@ -98,7 +103,8 @@ describe("buildServiceCharges", () => {
 
   it("charges the minimum in full when nothing was serviced", () => {
     const lines = buildServiceCharges({ items: [], minimumCharge: 80 });
-    expect(summariseInvoice(lines).subtotal).toBe(80);
+    expect(taxInclusiveTotals(lines.map((l) => ({ amount: l.amount, taxCode: null })))
+      .subtotal).toBe(80);
   });
 });
 

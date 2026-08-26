@@ -137,21 +137,29 @@ export type DraftLine = {
   jobId?: string | null;
 };
 
-export function lineAmount(quantity: number, unitPrice: number): number {
-  return round2(quantity * unitPrice);
+/**
+ * MYOB's `Amount ($)` column: units × unit price, less any discount.
+ *
+ * The discount is a **percentage off the line**, which is the column the client's
+ * invoice carries (`Discount (%)`, 0.00 on all three of its lines). It is applied
+ * before rounding, so a 3.33% discount on a long line does not drift a cent from
+ * what the same sum gives on a calculator.
+ *
+ * Out-of-range percentages are clamped rather than refused: the database
+ * constrains the column, and a screen that silently produced a *negative* amount
+ * from a typo would be worse than one that treats 150% as 100%.
+ */
+export function lineAmount(quantity: number, unitPrice: number, discountPercent = 0): number {
+  const discount = Math.min(100, Math.max(0, Number(discountPercent) || 0));
+  return round2(quantity * unitPrice * (1 - discount / 100));
 }
 
-export type InvoiceTotals = { subtotal: number; taxAmount: number; total: number };
-
-export function summariseInvoice(
-  lines: readonly Pick<DraftLine, "amount" | "taxable">[],
-  gstRate = 0.1,
-): InvoiceTotals {
-  const subtotal = round2(lines.reduce((sum, l) => sum + l.amount, 0));
-  const taxableBase = round2(lines.reduce((sum, l) => sum + (l.taxable ? l.amount : 0), 0));
-  const taxAmount = round2(taxableBase * gstRate);
-  return { subtotal, taxAmount, total: round2(subtotal + taxAmount) };
-}
+/**
+ * Invoice totals moved to `lib/domain/gst.ts` on 2026-08-26, when GST became a
+ * component *inside* the price rather than something added to it. `summariseInvoice`
+ * lived here and computed the old exclusive model; it had no caller outside its own
+ * tests, so it was removed rather than left looking live. Use `taxInclusiveTotals`.
+ */
 
 export type ServiceChargeInput = {
   /** Per-item service lines already priced. */
