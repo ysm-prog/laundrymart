@@ -6,11 +6,11 @@ import { getAdelaideToday, formatAdelaideDate, isCalendarDate } from "@/lib/doma
 import { addDays } from "@/lib/domain/dates";
 import { counted } from "@/lib/format";
 import { listActiveBoards, type RunBoard } from "@/lib/runs/my-runs";
-import { loadRunDay } from "@/lib/runs/run-day";
+import { loadBoardSequence } from "@/lib/runs/sequence-stops";
 import {
   Badge, ButtonLink, Card, EmptyState, Notice, PageHeader, Stat, cx,
 } from "@/components/ui";
-import { SequenceBoard, type SequenceStop } from "./sequence-board";
+import { SequenceBoard } from "./sequence-board";
 import { MoveToBoard } from "./move-to-board";
 
 export const dynamic = "force-dynamic";
@@ -44,17 +44,6 @@ export const metadata = { title: "Runs" };
  */
 
 type Search = { date?: string; board?: string };
-
-type StopRow = {
-  id: string;
-  sequence: number;
-  status: string;
-  progress_status: string;
-  customers: { id: string; business_name: string } | null;
-  customer_locations: {
-    address_line1: string | null; suburb: string | null; state: string | null;
-  } | null;
-};
 
 export default async function RunsPage({ searchParams }: { searchParams: Promise<Search> }) {
   const session = await requireCapability("routes.read");
@@ -170,65 +159,11 @@ async function BoardDay({
 
   // The same read the save action performs, so the version the page renders
   // with is the version the save is checked against — two reads of "which runs
-  // are this board's day?" would be two answers waiting to disagree.
-  const day = await loadRunDay(supabase, tenantId, board.id, date);
-  const routeIds = day.routeIds;
-
-  const { data: stopRows } = routeIds.length
-    ? await supabase
-      .from("jobs")
-      .select("id, sequence, status, progress_status, customers(id, business_name), " +
-              "customer_locations(address_line1, suburb, state)")
-      .eq("tenant_id", tenantId)
-      .in("route_id", routeIds)
-      .is("deleted_at", null)
-      .order("sequence")
-      .returns<StopRow[]>()
-    : { data: [] as StopRow[] };
-
-  const stops = stopRows ?? [];
-
-  // One read for every stop's laundry rather than one per stop.
-  const { data: jobRows } = stops.length
-    ? await supabase
-      .from("laundry_orders")
-      .select("id, order_number, stop_id, laundry_order_items(id)")
-      .eq("tenant_id", tenantId)
-      .in("stop_id", stops.map((stop) => stop.id))
-      .not("status", "in", "(cancelled)")
-      .order("order_number")
-      .returns<Array<{
-        id: string; order_number: string; stop_id: string;
-        laundry_order_items: Array<{ id: string }>;
-      }>>()
-    : { data: [] as Array<{ id: string; order_number: string; stop_id: string; laundry_order_items: Array<{ id: string }> }> };
-
-  const jobsByStop = new Map<string, SequenceStop["jobs"]>();
-  for (const job of jobRows ?? []) {
-    const bucket = jobsByStop.get(job.stop_id) ?? [];
-    bucket.push({
-      id: job.id,
-      orderNumber: job.order_number,
-      itemCount: job.laundry_order_items?.length ?? 0,
-    });
-    jobsByStop.set(job.stop_id, bucket);
-  }
-
-  const sequenceStops: SequenceStop[] = stops.map((stop) => ({
-    id: stop.id,
-    status: stop.status,
-    progressStatus: stop.progress_status,
-    customerName: stop.customers?.business_name ?? "Unknown customer",
-    address: [
-      stop.customer_locations?.address_line1,
-      stop.customer_locations?.suburb,
-      stop.customer_locations?.state,
-    ].filter(Boolean).join(", ") || null,
-    jobs: jobsByStop.get(stop.id) ?? [],
-  }));
-
-  const jobCount = (jobRows ?? []).length;
-  const worked = sequenceStops.filter((stop) => stop.progressStatus !== "not_started").length;
+  // are this board's day?" would be two answers waiting to disagree. Shared
+  // with My Runs, which draws the same board.
+  const {
+    stops: sequenceStops, version, jobCount, workedCount: worked,
+  } = await loadBoardSequence(supabase, tenantId, board.id, date);
 
   if (sequenceStops.length === 0) {
     return (
@@ -267,7 +202,7 @@ async function BoardDay({
       >
         <SequenceBoard
           boardId={board.id} boardName={board.name} date={date}
-          stops={sequenceStops} version={day.version} canSequence={canSequence}
+          stops={sequenceStops} version={version} canSequence={canSequence}
         />
       </Card>
 

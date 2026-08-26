@@ -237,3 +237,94 @@ export function movedCount(previous: readonly string[], next: readonly string[])
     0,
   );
 }
+
+/* ------------------------------------------------------------- the audit */
+
+/** What one sequence save records. `recordAudit` supplies the actor and the time. */
+export type SequenceAudit = {
+  entity: "daily_route";
+  entityId: string;
+  action: "update";
+  summary: string;
+  metadata: {
+    boardId: string;
+    runDate: string;
+    runIds: string[];
+    previousSequence: string[];
+    newSequence: string[];
+    movedCount: number;
+    changedBy: string;
+    role: string;
+    sequenceVersion: number;
+  };
+};
+
+/**
+ * The audit record for a run being reordered.
+ *
+ * **Pure, and here rather than in the action, because otherwise nothing could
+ * check it.** A `"use server"` module may export nothing but server actions, so
+ * an audit payload written inline there is unreachable from a test — and this
+ * repository has shipped three contracts broken behind a green `verify` for
+ * exactly that reason. The requirement asks that every successful save record
+ * the previous order, the new order, the board, the date, the actor, their role
+ * and a timestamp; that is a list worth asserting rather than eyeballing.
+ *
+ * **Both orders go in full.** "What was it before?" is the question an audit log
+ * gets asked about a run that went wrong, and a count of movements cannot answer
+ * it. The count rides along because it is what the summary line says, and the
+ * two must agree.
+ *
+ * The timestamp is deliberately absent: `audit_logs.created_at` defaults to
+ * `now()` in the database, so recording a client's idea of the time would be a
+ * second answer to when this happened — and the wrong one.
+ */
+export function buildSequenceAudit(input: {
+  boardId: string;
+  date: string;
+  runIds: readonly string[];
+  previous: readonly string[];
+  next: readonly string[];
+  actorId: string;
+  role: string;
+  version: number;
+}): SequenceAudit {
+  const moved = movedCount(input.previous, input.next);
+  return {
+    entity: "daily_route",
+    // The run is the thing that was changed; the board is how a person finds
+    // it. A day with no run at all cannot reach here, but the board is the
+    // honest fallback rather than an empty string.
+    entityId: input.runIds[0] ?? input.boardId,
+    action: "update",
+    summary: `Run order changed for ${input.date} (${moved} stop(s) moved)`,
+    metadata: {
+      boardId: input.boardId,
+      runDate: input.date,
+      runIds: [...input.runIds],
+      previousSequence: [...input.previous],
+      newSequence: [...input.next],
+      movedCount: moved,
+      changedBy: input.actorId,
+      role: input.role,
+      sequenceVersion: input.version,
+    },
+  };
+}
+
+/* ------------------------------------------------------- a stop, on screen */
+
+/**
+ * One position on a run, as the ordering board draws it.
+ *
+ * Here rather than beside the component because two server screens now read it
+ * — the Runs board and My Runs — and a type that lives in a `"use client"`
+ * module drags that module into the import graph of everything that names it.
+ * `OrderableStop` above is the same stop reduced to what the *rules* need; this
+ * adds only what has to be read on screen to recognise it.
+ */
+export type SequenceStop = OrderableStop & {
+  customerName: string;
+  address: string | null;
+  jobs: Array<{ id: string; orderNumber: string; itemCount: number }>;
+};

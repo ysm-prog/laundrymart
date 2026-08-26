@@ -8,6 +8,9 @@ import {
   Card, DataTable, EmptyState, PageHeader, SkeletonRows, StatusBadge, humanise,
 } from "@/components/ui";
 import { Field, Input, Select, SubmitButton } from "@/components/form";
+import { ListControls } from "@/components/list-controls";
+import { FilterChips, FilterSummary } from "@/components/filters";
+import { isFiltered } from "@/lib/filters";
 import { createVehicle } from "./actions";
 
 export const metadata = { title: "Vehicles" };
@@ -16,8 +19,16 @@ export const dynamic = "force-dynamic";
 const VEHICLE_TYPES = ["van", "truck", "ute", "trailer", "prime_mover", "other"] as const;
 const MAINTENANCE = ["ok", "due", "overdue", "in_service", "out_of_service"] as const;
 
-export default async function VehiclesPage() {
+type Search = { q?: string; maintenance?: string; type?: string; status?: string };
+const FILTER_KEYS = ["q", "maintenance", "type", "status"] as const;
+
+export default async function VehiclesPage({
+  searchParams,
+}: {
+  searchParams: Promise<Search>;
+}) {
   const session = await requireCapability("fleet.read");
+  const params = await searchParams;
 
   return (
     <div className="space-y-6">
@@ -26,8 +37,8 @@ export default async function VehiclesPage() {
         description="Routes need a vehicle, so vehicles are first-class: capacity, maintenance state and trailers."
       />
 
-      <Suspense fallback={<SkeletonRows rows={5} />}>
-        <VehicleList />
+      <Suspense key={JSON.stringify(params)} fallback={<SkeletonRows rows={5} />}>
+        <VehicleList params={params} />
       </Suspense>
 
       {can(session.role, "fleet.write") ? (
@@ -39,7 +50,7 @@ export default async function VehiclesPage() {
   );
 }
 
-async function VehicleList() {
+async function VehicleList({ params }: { params: Search }) {
   const supabase = await createClient();
   const { data } = await supabase
     .from("vehicles")
@@ -48,10 +59,62 @@ async function VehicleList() {
     .order("registration")
     .returns<Vehicle[]>();
 
+  const all = data ?? [];
+  const matches = (row: Vehicle, override: Partial<Search> = {}) => {
+    const f = { ...params, ...override };
+    const term = f.q?.trim().toLowerCase();
+    if (term && !`${row.registration} ${row.make ?? ""} ${row.model ?? ""} ${row.vin ?? ""}`
+      .toLowerCase().includes(term)) return false;
+    if (f.maintenance && row.maintenance_status !== f.maintenance) return false;
+    if (f.type && row.vehicle_type !== f.type) return false;
+    if (f.status && row.status !== f.status) return false;
+    return true;
+  };
+  const rows = all.filter((row) => matches(row));
+  const filtered = isFiltered(params, FILTER_KEYS);
+  const countWith = (override: Partial<Search>) =>
+    all.filter((row) => matches(row, override)).length;
+
   return (
+    <>
+    <ListControls
+      action="/vehicles"
+      q={params.q}
+      params={params}
+      filterKeys={FILTER_KEYS}
+      placeholder="Registration, make, model or VIN…"
+      filters={[
+        { name: "type", label: "Vehicle type", value: params.type,
+          options: VEHICLE_TYPES.map((value) => ({ value, label: humanise(value) })) },
+        { name: "status", label: "Status", value: params.status,
+          options: [
+            { value: "active", label: "Active" },
+            { value: "inactive", label: "Inactive" },
+          ] },
+      ]}
+      chips={
+        /* Maintenance leads, because it is the only question on this screen with
+           a consequence today: a van that is overdue or out of service is one a
+           run cannot be planned onto. */
+        <FilterChips
+          basePath="/vehicles" params={params} name="maintenance" label="Maintenance"
+          allLabel="All vehicles" allCount={countWith({ maintenance: undefined })}
+          options={MAINTENANCE.map((value) => ({
+            value, label: humanise(value), count: countWith({ maintenance: value }),
+          }))}
+        />
+      }
+      summary={
+        <FilterSummary basePath="/vehicles" shown={rows.length} total={all.length}
+                       noun="vehicle" filtered={filtered} />
+      }
+    />
     <DataTable
-      rows={data ?? []}
-      empty={<EmptyState title="No vehicles yet" description="Add a vehicle before planning daily routes." />}
+      rows={rows}
+      empty={filtered
+        ? <EmptyState title="No vehicles match those filters"
+                      description="Try a broader search, or clear the filters above." />
+        : <EmptyState title="No vehicles yet" description="Add a vehicle before planning daily routes." />}
       columns={[
         { header: "Registration", cell: (row) => <span className="font-medium">{row.registration}</span> },
         {
@@ -70,6 +133,7 @@ async function VehicleList() {
         { header: "Status", cell: (row) => <StatusBadge status={row.status} /> },
       ]}
     />
+    </>
   );
 }
 

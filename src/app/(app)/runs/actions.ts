@@ -5,14 +5,16 @@ import { revalidatePath } from "next/cache";
 import { assertCapability } from "@/lib/auth/context";
 import { createClient } from "@/lib/supabase/server";
 import { recordAudit } from "@/lib/audit";
-import { describeDbError, done, fail, firstIssue, requiredDate, toObject } from "@/lib/actions";
+import {
+  describeDbError, done, fail, firstIssue, requiredDate, returnTo, toObject,
+} from "@/lib/actions";
 import { logOrderActivity } from "@/lib/orders/activity";
 import { assignOneJobToBoard } from "@/lib/runs/assign";
 import { loadRunDay } from "@/lib/runs/run-day";
 import type { Session } from "@/lib/auth/context";
 import {
   SEQUENCE_CONFLICT, SEQUENCE_SAVED,
-  checkSequence, movedCount, parseSequencePlan,
+  buildSequenceAudit, checkSequence, movedCount, parseSequencePlan,
 } from "./sequence";
 
 /**
@@ -53,12 +55,16 @@ export async function reorderRunStops(formData: FormData): Promise<void> {
   const session = await assertCapability("routes.sequence");
   const raw = formData.get("plan");
   const parsed = parseSequencePlan(typeof raw === "string" ? raw : null);
-  if (!parsed.ok) return fail(RUNS, parsed.error);
+  if (!parsed.ok) return fail(returnTo(formData, RUNS), parsed.error);
 
   const {
     board_id: boardId, date, stops: proposed, expected_version: expected,
   } = parsed.plan;
-  const back = `${RUNS}?date=${date}&board=${boardId}`;
+  // My Runs draws this same board, and a manager who adjusts a run from the
+  // round's own day has to land back on it — being moved to another screen
+  // reads as the save having done something else. `returnTo` refuses anything
+  // that is not a plain same-site path, so the field cannot redirect anywhere.
+  const back = returnTo(formData, `${RUNS}?date=${date}&board=${boardId}`);
   const supabase = await createClient();
 
   // Named rather than left to RLS (§23): a platform admin's session reads every
@@ -100,24 +106,16 @@ export async function reorderRunStops(formData: FormData): Promise<void> {
       : describeDbError(error));
   }
 
-  await recordAudit(session, {
-    entity: "daily_route", entityId: day.routeIds[0] ?? boardId, action: "update",
-    summary: `Run order changed for ${date} (${moved} stop(s) moved)`,
-    // Both orders, in full. "What was it before?" is the question an audit log
-    // gets asked about a run that went wrong, and a summary counting movements
-    // cannot answer it.
-    metadata: {
-      boardId,
-      runDate: date,
-      runIds: day.routeIds,
-      previousSequence: previous,
-      newSequence: proposed,
-      movedCount: moved,
-      changedBy: session.userId,
-      role: session.role,
-      sequenceVersion: version ?? expected + 1,
-    },
-  });
+  // Built by a pure rule so the requirement's list — previous order, new order,
+  // board, date, actor, role — is asserted by a test rather than by reading.
+  await recordAudit(session, buildSequenceAudit({
+    boardId, date,
+    runIds: day.routeIds,
+    previous, next: proposed,
+    actorId: session.userId,
+    role: session.role,
+    version: version ?? expected + 1,
+  }));
 
   revalidatePath(RUNS);
   revalidatePath("/my-runs");

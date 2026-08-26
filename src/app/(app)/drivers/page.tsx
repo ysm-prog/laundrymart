@@ -8,14 +8,31 @@ import {
   Badge, Card, DataTable, EmptyState, PageHeader, SkeletonRows, StatusBadge,
 } from "@/components/ui";
 import { Field, Input, Select, SubmitButton } from "@/components/form";
+import { ListControls } from "@/components/list-controls";
+import { FilterChips, FilterSummary } from "@/components/filters";
+import { isFiltered } from "@/lib/filters";
 import { listMembers, staffMembers, type Member } from "@/lib/directory";
 import { createDriver, linkDriverLogin } from "./actions";
 
 export const metadata = { title: "Drivers" };
 export const dynamic = "force-dynamic";
 
-export default async function DriversPage() {
+type Search = { q?: string; status?: string; depot?: string; link?: string };
+const FILTER_KEYS = ["q", "status", "depot", "link"] as const;
+
+const DRIVER_STATUSES = [
+  { value: "active", label: "Active" },
+  { value: "on_leave", label: "On leave" },
+  { value: "inactive", label: "Inactive" },
+] as const;
+
+export default async function DriversPage({
+  searchParams,
+}: {
+  searchParams: Promise<Search>;
+}) {
   const session = await requireCapability("fleet.read");
+  const params = await searchParams;
 
   return (
     <div className="space-y-6">
@@ -24,8 +41,8 @@ export default async function DriversPage() {
         description="Link a driver to a login so their run — and only their run — appears on their device."
       />
 
-      <Suspense fallback={<SkeletonRows rows={5} />}>
-        <DriverList canWrite={can(session.role, "admin.write")} />
+      <Suspense key={JSON.stringify(params)} fallback={<SkeletonRows rows={5} />}>
+        <DriverList params={params} canWrite={can(session.role, "admin.write")} />
       </Suspense>
 
       {can(session.role, "fleet.write") ? (
@@ -37,24 +54,93 @@ export default async function DriversPage() {
   );
 }
 
-async function DriverList({ canWrite }: { canWrite: boolean }) {
+async function DriverList({ params, canWrite }: { params: Search; canWrite: boolean }) {
   const supabase = await createClient();
-  const { data } = await supabase
-    .from("drivers")
-    .select("id, full_name, employee_number, email, phone, licence_number, licence_expiry, depot_id, user_id, status")
-    .is("deleted_at", null)
-    .order("full_name")
-    .returns<Driver[]>();
+  const [{ data }, { data: depots }] = await Promise.all([
+    supabase
+      .from("drivers")
+      .select("id, full_name, employee_number, email, phone, licence_number, licence_expiry, depot_id, user_id, status")
+      .is("deleted_at", null)
+      .order("full_name")
+      .returns<Driver[]>(),
+    supabase.from("depots").select("id, name").order("name")
+      .returns<Pick<Depot, "id" | "name">[]>(),
+  ]);
 
   const now = today();
   // Who could be linked: this laundry's people who are not already somebody's
-  // login.
+  // login. Computed from every driver, not the filtered view — a login is taken
+  // whether or not the driver holding it is on screen.
   const linkable = canWrite ? await linkableMembers(data ?? []) : [];
 
+  /**
+   * A laundry has tens of drivers, not thousands, so the list is read once and
+   * narrowed here — which is what lets each chip carry the number of rows it
+   * would actually show, given everything else already filtered.
+   */
+  const all = data ?? [];
+  const matches = (row: Driver, override: Partial<Search> = {}) => {
+    const f = { ...params, ...override };
+    const term = f.q?.trim().toLowerCase();
+    if (term && !`${row.full_name} ${row.employee_number ?? ""} ${row.phone ?? ""} ${row.email ?? ""}`
+      .toLowerCase().includes(term)) return false;
+    if (f.status && row.status !== f.status) return false;
+    if (f.depot && row.depot_id !== f.depot) return false;
+    if (f.link === "unlinked" && row.user_id) return false;
+    if (f.link === "linked" && !row.user_id) return false;
+    return true;
+  };
+  const rows = all.filter((row) => matches(row));
+  const filtered = isFiltered(params, FILTER_KEYS);
+  const countWith = (override: Partial<Search>) =>
+    all.filter((row) => matches(row, override)).length;
+
   return (
+    <>
+    <ListControls
+      action="/drivers"
+      q={params.q}
+      params={params}
+      filterKeys={FILTER_KEYS}
+      placeholder="Name, employee number or phone…"
+      filters={(depots ?? []).length > 1 ? [{
+        name: "depot", label: "Depot", value: params.depot,
+        options: (depots ?? []).map((depot) => ({ value: depot.id, label: depot.name })),
+      }] : []}
+      chips={
+        <>
+          <FilterChips
+            basePath="/drivers" params={params} name="status" label="Driver status"
+            allLabel="All drivers" allCount={countWith({ status: undefined })}
+            options={DRIVER_STATUSES.map((option) => ({
+              ...option, count: countWith({ status: option.value }),
+            }))}
+          />
+          {/* The link chip is the one that earns its place. An unlinked driver
+              signs in successfully and sees an empty My Runs, which reads as a
+              broken app — so "who is not linked?" has to be one press. */}
+          <FilterChips
+            basePath="/drivers" params={params} name="link" label="App login"
+            allLabel="Linked or not" allCount={countWith({ link: undefined })}
+            options={[
+              { value: "unlinked", label: "No login yet", count: countWith({ link: "unlinked" }),
+                title: "These drivers can sign in to nothing — My Runs is empty for them" },
+              { value: "linked", label: "Has a login", count: countWith({ link: "linked" }) },
+            ]}
+          />
+        </>
+      }
+      summary={
+        <FilterSummary basePath="/drivers" shown={rows.length} total={all.length}
+                       noun="driver" filtered={filtered} />
+      }
+    />
     <DataTable
-      rows={data ?? []}
-      empty={<EmptyState title="No drivers yet" description="Add drivers before assigning daily routes." />}
+      rows={rows}
+      empty={filtered
+        ? <EmptyState title="No drivers match those filters"
+                      description="Try a broader search, or clear the filters above." />
+        : <EmptyState title="No drivers yet" description="Add drivers before assigning daily routes." />}
       columns={[
         { header: "Driver", cell: (row) => <span className="font-medium">{row.full_name}</span> },
         { header: "Employee #", cell: (row) => row.employee_number ?? "—", hideBelow: "md" },
@@ -99,6 +185,7 @@ async function DriverList({ canWrite }: { canWrite: boolean }) {
         { header: "Status", cell: (row) => <StatusBadge status={row.status} /> },
       ]}
     />
+    </>
   );
 }
 

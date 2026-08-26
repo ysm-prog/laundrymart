@@ -2,12 +2,14 @@ import Link from "next/link";
 import { requireCapability } from "@/lib/auth/context";
 import { createClient } from "@/lib/supabase/server";
 import { money } from "@/lib/format";
-import { periodFor, presetForRange, type IsoDate } from "@/lib/domain/dates";
-import { businessToday, isCalendarDate } from "@/lib/domain/timezone";
+import {
+  BILLING_PERIOD_PRESETS, PERIOD_PRESET_LABELS, formatIso, resolvePeriod, periodParams,
+} from "@/lib/domain/dates";
+import { businessToday } from "@/lib/domain/timezone";
 import { BILLING_METHOD_LABELS, isBillingMethod } from "@/lib/domain/billing";
 import { periodBillingSummary, type PeriodCustomerRow } from "@/lib/invoices/period";
 import { Badge, ButtonLink, Card, DataTable, EmptyState, PageHeader, Stat } from "@/components/ui";
-import { PeriodFilter } from "./period-filter";
+import { PeriodFilter } from "@/components/filters";
 
 export const dynamic = "force-dynamic";
 
@@ -31,22 +33,21 @@ export const metadata = { title: "Billing" };
  * sent to somebody else.
  */
 
-/** The period a request is asking for. Anything unreadable falls back to last month. */
-function rangeFrom(from: string | undefined, to: string | undefined, today: IsoDate) {
-  const fallback = periodFor("last_month", today)!;
-  if (!from || !to || !isCalendarDate(from) || !isCalendarDate(to) || from > to) return fallback;
-  return { start: from, end: to };
-}
-
 export default async function BillingPage({
   searchParams,
 }: {
-  searchParams: Promise<{ from?: string; to?: string }>;
+  searchParams: Promise<{ period?: string; from?: string; to?: string }>;
 }) {
   const session = await requireCapability("billing.read");
   const params = await searchParams;
   const today = businessToday();
-  const range = rangeFrom(params.from, params.to, today);
+  // Last month, not this one: a run defaulting to the month you are standing in
+  // finds nothing on the 1st and reports "nothing to invoice", which reads as
+  // *everything is billed* rather than as *wrong month*. `all` is not offered at
+  // all here — an unbounded billing period is an invitation to bill the wrong
+  // thing — so the range is always real and the `!` below is safe.
+  const period = resolvePeriod(params, today, "last_month");
+  const range = period.range!;
 
   const supabase = await createClient();
   // Named rather than left to RLS (§23): every customer id here is posted into a
@@ -76,10 +77,12 @@ export default async function BillingPage({
 
       <Card
         title="Billing period"
-        description={`${presetForRange(range.start, range.end, today) === "custom"
-          ? "Custom range" : "Quick filter"} — ${range.start} to ${range.end}.`}
+        description={`${PERIOD_PRESET_LABELS[period.preset]} — ${formatIso(range.start)} to ${formatIso(range.end)}.`}
       >
-        <PeriodFilter basePath="/billing" start={range.start} end={range.end} today={today} />
+        <PeriodFilter
+          basePath="/billing" params={params} period={period}
+          presets={BILLING_PERIOD_PRESETS} today={today} label="Billing period"
+        />
       </Card>
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -113,7 +116,7 @@ export default async function BillingPage({
                 header: "Customer",
                 cell: (row: PeriodCustomerRow) => (
                   <Link
-                    href={`/billing/${row.customerId}?from=${range.start}&to=${range.end}`}
+                    href={`/billing/${row.customerId}?${new URLSearchParams(periodParams(period)).toString()}`}
                     className="font-medium text-action hover:underline"
                   >
                     {row.businessName}

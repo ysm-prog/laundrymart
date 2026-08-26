@@ -12,6 +12,9 @@ import {
   Badge, Card, DataTable, EmptyState, Notice, PageHeader, SkeletonRows,
 } from "@/components/ui";
 import { ConfirmSubmit } from "@/components/confirm-submit";
+import { ListControls } from "@/components/list-controls";
+import { FilterChips, FilterSummary } from "@/components/filters";
+import { isFiltered } from "@/lib/filters";
 import { Field, Input, Select, SubmitButton } from "@/components/form";
 import {
   inviteMember, removeMember, sendMemberSignInLink, updateMembership,
@@ -20,8 +23,16 @@ import {
 export const metadata = { title: "People" };
 export const dynamic = "force-dynamic";
 
-export default async function UsersPage() {
+type Search = { q?: string; role?: string; named?: string };
+const FILTER_KEYS = ["q", "role", "named"] as const;
+
+export default async function UsersPage({
+  searchParams,
+}: {
+  searchParams: Promise<Search>;
+}) {
   const session = await requireCapability("admin.read");
+  const params = await searchParams;
   const canWrite = can(session.role, "admin.write");
 
   return (
@@ -42,8 +53,8 @@ export default async function UsersPage() {
         </Notice>
       )}
 
-      <Suspense fallback={<SkeletonRows rows={5} />}>
-        <MembershipList canWrite={canWrite} currentUserId={session.userId} />
+      <Suspense key={JSON.stringify(params)} fallback={<SkeletonRows rows={5} />}>
+        <MembershipList params={params} canWrite={canWrite} currentUserId={session.userId} />
       </Suspense>
 
       <Card
@@ -169,8 +180,8 @@ async function InviteCard() {
 
 
 async function MembershipList({
-  canWrite, currentUserId,
-}: { canWrite: boolean; currentUserId: string }) {
+  params, canWrite, currentUserId,
+}: { params: Search; canWrite: boolean; currentUserId: string }) {
   const [members, depots] = await Promise.all([listMembers(), activeDepots()]);
   const depotName = new Map(depots.map((depot) => [depot.id, depot.name]));
 
@@ -179,13 +190,61 @@ async function MembershipList({
   // support one, and listing them here reads as two strangers on the payroll —
   // the owner's decision. Platform → Administrators is where that list lives,
   // and it is the only screen that shows it.
-  const rows = staffMembers(members);
+  const all = staffMembers(members);
+
+  const term = params.q?.trim().toLowerCase();
+  const rows = all.filter((row) => {
+    if (term && !`${row.label} ${row.email ?? ""}`.toLowerCase().includes(term)) return false;
+    if (params.role && row.roleValue !== params.role) return false;
+    if (params.named === "unnamed" && row.named) return false;
+    return true;
+  });
+  const filtered = isFiltered(params, FILTER_KEYS);
+  const roleCount = (role: string) => all.filter((row) => row.roleValue === role).length;
+  const unnamed = all.filter((row) => !row.named).length;
 
   return (
     <Card title="Members" description="Only administrators can see and change this list.">
+      {/* Worth a bar once the list is long enough to hunt through. A laundry
+          with five people can read five rows. */}
+      {all.length > 6 ? (
+        <ListControls
+          action="/admin/users"
+          q={params.q}
+          params={params}
+          filterKeys={FILTER_KEYS}
+          placeholder="Name or email address…"
+          filters={[{
+            name: "role", label: "Role", value: params.role,
+            options: MEMBERSHIP_ROLES
+              .filter((role) => roleCount(role) > 0)
+              .map((role) => ({ value: role, label: roleName(role) })),
+          }]}
+          chips={unnamed > 0 ? (
+            /* A person with no name renders as an address or a short id in every
+               picker in the app, which reads as a different person each time —
+               so "who still needs one?" is worth one press. */
+            <FilterChips
+              basePath="/admin/users" params={params} name="named" label="Names"
+              allLabel="Everyone" allCount={all.length}
+              options={[{
+                value: "unnamed", label: "No name yet", count: unnamed,
+                title: "These people show as an email address or a short id wherever they appear",
+              }]}
+            />
+          ) : null}
+          summary={
+            <FilterSummary basePath="/admin/users" shown={rows.length} total={all.length}
+                           noun="person" nouns="people" filtered={filtered} />
+          }
+        />
+      ) : null}
       <DataTable
         rows={rows}
-        empty={<EmptyState title="Nobody on the list yet"
+        empty={filtered
+          ? <EmptyState title="Nobody matches those filters"
+                        description="Try a broader search, or clear the filters above." />
+          : <EmptyState title="Nobody on the list yet"
                            description="Invite your staff above. Platform administrators are not shown here — they support every laundry on this system rather than working in one." />}
         columns={[
           {

@@ -7,11 +7,22 @@ import {
   ButtonLink, DataTable, EmptyState, PageHeader, SkeletonRows, StatusBadge,
 } from "@/components/ui";
 import { ListControls, Pagination, pageFrom, rangeFor } from "@/components/list-controls";
+import { FilterChips } from "@/components/filters";
+import { isFiltered } from "@/lib/filters";
 
 export const metadata = { title: "Customers" };
 export const dynamic = "force-dynamic";
 
 type Search = { q?: string; status?: string; page?: string; error?: string; ok?: string };
+const FILTER_KEYS = ["q", "status"] as const;
+
+const CUSTOMER_STATUSES = [
+  { value: "active", label: "Active" },
+  { value: "prospect", label: "Prospect" },
+  { value: "on_hold", label: "On hold" },
+  { value: "inactive", label: "Inactive" },
+  { value: "archived", label: "Archived" },
+] as const;
 
 export default async function CustomersPage({
   searchParams,
@@ -33,16 +44,21 @@ export default async function CustomersPage({
       <ListControls
         action="/customers"
         q={params.q}
-        filters={[{
-          name: "status", label: "Status", value: params.status,
-          options: [
-            { value: "active", label: "Active" },
-            { value: "prospect", label: "Prospect" },
-            { value: "on_hold", label: "On hold" },
-            { value: "inactive", label: "Inactive" },
-            { value: "archived", label: "Archived" },
-          ],
-        }]}
+        params={params}
+        filterKeys={FILTER_KEYS}
+        placeholder="Business name, trading name or customer number…"
+        chips={
+          /* Chips rather than a select: five statuses is a short enough
+             vocabulary to read at a glance, and "who is on hold?" is then one
+             press instead of open-choose-submit. The counts are deliberately
+             absent — this list is paginated, so a count per status would be five
+             more round trips for a number `Pagination` already gives for the one
+             status you picked. */
+          <FilterChips
+            basePath="/customers" params={params} name="status" label="Customer status"
+            allLabel="All customers" options={CUSTOMER_STATUSES}
+          />
+        }
       />
       <Suspense key={JSON.stringify(params)} fallback={<SkeletonRows rows={6} />}>
         <CustomerList params={params} canWrite={can(session.role, "customers.write")} />
@@ -86,11 +102,11 @@ async function CustomerList({ params, canWrite }: { params: Search; canWrite: bo
         rowHref={(row) => `/customers/${row.id}`}
         empty={
           <EmptyState
-            title={params.q || params.status ? "No customers match those filters" : "No customers yet"}
-            description={params.q || params.status
-              ? "Try a broader search."
+            title={isFiltered(params, FILTER_KEYS) ? "No customers match those filters" : "No customers yet"}
+            description={isFiltered(params, FILTER_KEYS)
+              ? "Try a broader search, or clear the filters above."
               : "Add your first customer to start building routes and agreements."}
-            action={canWrite && !params.q && !params.status
+            action={canWrite && !isFiltered(params, FILTER_KEYS)
               ? <ButtonLink href="/customers/new" variant="primary">New customer</ButtonLink>
               : null}
           />

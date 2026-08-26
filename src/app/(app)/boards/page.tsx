@@ -7,6 +7,9 @@ import {
   Badge, Card, DataTable, EmptyState, Notice, PageHeader, SkeletonRows, StatusBadge,
 } from "@/components/ui";
 import { Field, Input, Select, SubmitButton, Textarea } from "@/components/form";
+import { ListControls } from "@/components/list-controls";
+import { FilterChips, FilterSummary } from "@/components/filters";
+import { isFiltered } from "@/lib/filters";
 import { listMembers, staffMembers, type Member } from "@/lib/directory";
 import { createBoard, linkBoardLogin } from "./actions";
 import { counted } from "@/lib/format";
@@ -33,8 +36,16 @@ export const dynamic = "force-dynamic";
  * here once already with an unlinked driver, so the state is called out rather
  * than left as a blank cell.
  */
-export default async function BoardsPage() {
+type Search = { q?: string; status?: string; link?: string };
+const FILTER_KEYS = ["q", "status", "link"] as const;
+
+export default async function BoardsPage({
+  searchParams,
+}: {
+  searchParams: Promise<Search>;
+}) {
   const session = await requireCapability("fleet.read");
+  const params = await searchParams;
 
   return (
     <div className="space-y-6">
@@ -43,8 +54,8 @@ export default async function BoardsPage() {
         description="The delivery rounds. Jobs are assigned to a board, and whoever is running that board today signs in as it."
       />
 
-      <Suspense fallback={<SkeletonRows rows={4} />}>
-        <BoardList canWrite={can(session.role, "fleet.write")} />
+      <Suspense key={JSON.stringify(params)} fallback={<SkeletonRows rows={4} />}>
+        <BoardList params={params} canWrite={can(session.role, "fleet.write")} />
       </Suspense>
 
       {can(session.role, "fleet.write") ? (
@@ -56,7 +67,7 @@ export default async function BoardsPage() {
   );
 }
 
-async function BoardList({ canWrite }: { canWrite: boolean }) {
+async function BoardList({ params, canWrite }: { params: Search; canWrite: boolean }) {
   const supabase = await createClient();
   const { data } = await supabase
     .from("boards")
@@ -65,9 +76,26 @@ async function BoardList({ canWrite }: { canWrite: boolean }) {
     .order("code")
     .returns<Board[]>();
 
-  const boards = data ?? [];
-  const linkable = canWrite ? await linkableMembers(boards) : [];
-  const unlinked = boards.filter((board) => !board.user_id && board.status === "active").length;
+  const all = data ?? [];
+  // Every board, not the filtered view: a login is taken whether or not the
+  // board holding it is on screen, and the warning below is about the laundry
+  // rather than about what somebody has narrowed to.
+  const linkable = canWrite ? await linkableMembers(all) : [];
+  const unlinked = all.filter((board) => !board.user_id && board.status === "active").length;
+
+  const matches = (row: Board, override: Partial<Search> = {}) => {
+    const f = { ...params, ...override };
+    const term = f.q?.trim().toLowerCase();
+    if (term && !`${row.name} ${row.code}`.toLowerCase().includes(term)) return false;
+    if (f.status && row.status !== f.status) return false;
+    if (f.link === "unlinked" && row.user_id) return false;
+    if (f.link === "linked" && !row.user_id) return false;
+    return true;
+  };
+  const boards = all.filter((row) => matches(row));
+  const filtered = isFiltered(params, FILTER_KEYS);
+  const countWith = (override: Partial<Search>) =>
+    all.filter((row) => matches(row, override)).length;
 
   return (
     <div className="space-y-3">
@@ -80,14 +108,49 @@ async function BoardList({ canWrite }: { canWrite: boolean }) {
         </Notice>
       ) : null}
 
+      {/* Only worth a bar once there are enough rounds to hunt through. Four
+          chips over four boards is more furniture than filter. */}
+      {all.length > 4 ? (
+        <ListControls
+          action="/boards"
+          q={params.q}
+          params={params}
+          filterKeys={FILTER_KEYS}
+          placeholder="Board name or code…"
+          chips={
+            <FilterChips
+              basePath="/boards" params={params} name="link" label="Board login"
+              allLabel="All boards" allCount={countWith({ link: undefined, status: undefined })}
+              options={[
+                { value: "unlinked", label: "No login yet", count: countWith({ link: "unlinked" }),
+                  title: "Nobody can work these rounds — the account signs in and sees nothing" },
+                { value: "linked", label: "Has a login", count: countWith({ link: "linked" }) },
+              ]}
+            />
+          }
+          filters={[{
+            name: "status", label: "Status", value: params.status,
+            options: [
+              { value: "active", label: "Active" },
+              { value: "inactive", label: "Inactive" },
+            ],
+          }]}
+          summary={
+            <FilterSummary basePath="/boards" shown={boards.length} total={all.length}
+                           noun="board" filtered={filtered} />
+          }
+        />
+      ) : null}
+
       <DataTable
         rows={boards}
-        empty={
-          <EmptyState
+        empty={filtered
+          ? <EmptyState title="No boards match those filters"
+                        description="Try a broader search, or clear the filters above." />
+          : <EmptyState
             title="No boards yet"
             description="Create one board per delivery round — most laundries run three or four. Jobs are assigned to a board, not to a person."
-          />
-        }
+          />}
         columns={[
           {
             header: "Board",

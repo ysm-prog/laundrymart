@@ -12,6 +12,9 @@ import {
 } from "@/components/ui";
 import { Field, Input, Select, SubmitButton } from "@/components/form";
 import { ListControls, Pagination, pageFrom, rangeFor } from "@/components/list-controls";
+import { FilterChips, PeriodFilter } from "@/components/filters";
+import { ACTIVITY_PERIOD_PRESETS, resolvePeriod } from "@/lib/domain/dates";
+import { businessToday } from "@/lib/domain/timezone";
 import { emailIsConfigured } from "@/lib/email/send";
 import {
   createManualInvoice, emailInvoice, generateInvoices, issueInvoice, recordPayment,
@@ -23,9 +26,25 @@ export const metadata = { title: "Invoices" };
 export const dynamic = "force-dynamic";
 
 type Search = {
-  q?: string; status?: string; customer?: string; page?: string;
-  selected?: string; tool?: string; error?: string; ok?: string;
+  q?: string; status?: string; customer?: string; period?: string; from?: string; to?: string;
+  page?: string; selected?: string; tool?: string; error?: string; ok?: string;
 };
+
+/**
+ * What counts as narrowing the register — `selected` and `tool` deliberately do
+ * not. Opening an invoice in the working pane is not a filter, and clearing the
+ * filters must not close what somebody is reading.
+ */
+const FILTER_KEYS = ["q", "status", "customer", "period", "from", "to"] as const;
+
+const INVOICE_STATUSES = [
+  { value: "draft", label: "Draft" },
+  { value: "issued", label: "Issued" },
+  { value: "part_paid", label: "Part paid" },
+  { value: "paid", label: "Paid" },
+  { value: "overdue", label: "Overdue" },
+  { value: "void", label: "Void" },
+] as const;
 
 /**
  * Billing, as the pack's two-pane (screen 07).
@@ -42,6 +61,9 @@ type Search = {
  */
 export default async function InvoicesPage({ searchParams }: { searchParams: Promise<Search> }) {
   const params = await searchParams;
+  // All time by default: the register is the whole ledger, and a chase list that
+  // opened on this month would hide precisely the invoices that are late.
+  const period = resolvePeriod(params, businessToday(), "all");
   const session = await requireCapability("invoices.read");
   const writable = can(session.role, "invoices.write");
   // Sending in bulk is two capabilities, not one: putting documents in front of
@@ -95,17 +117,24 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
           <ListControls
             action="/invoices"
             q={params.q}
-            filters={[{
-              name: "status", label: "Status", value: params.status,
-              options: [
-                { value: "draft", label: "Draft" },
-                { value: "issued", label: "Issued" },
-                { value: "part_paid", label: "Part paid" },
-                { value: "paid", label: "Paid" },
-                { value: "overdue", label: "Overdue" },
-                { value: "void", label: "Void" },
-              ],
-            }]}
+            params={params}
+            filterKeys={FILTER_KEYS}
+            placeholder="Invoice number…"
+            chips={
+              <>
+                <FilterChips
+                  basePath="/invoices" params={params} name="status" label="Invoice status"
+                  allLabel="All invoices" options={INVOICE_STATUSES}
+                />
+                {/* Issue date, not due date: this is the chase list, and the
+                    question asked of it is "what did we bill in August?". */}
+                <PeriodFilter
+                  basePath="/invoices" params={params} period={period}
+                  presets={ACTIVITY_PERIOD_PRESETS} today={businessToday()} label="Issued in"
+                  hideCustomWhenPreset
+                />
+              </>
+            }
           />
           <Suspense key={JSON.stringify(params)} fallback={<SkeletonRows rows={10} />}>
             <Register params={params} />
@@ -220,6 +249,10 @@ async function Register({ params }: { params: Search }) {
   if (params.status) query = query.eq("status", params.status);
   if (params.customer) query = query.eq("customer_id", params.customer);
   if (params.q) query = query.ilike("invoice_number", `%${params.q}%`);
+  const period = resolvePeriod(params, businessToday(), "all");
+  if (period.range) {
+    query = query.gte("issue_date", period.range.start).lte("issue_date", period.range.end);
+  }
 
   const { data, count } = await query.returns<RegisterRow[]>();
   const rows = data ?? [];
