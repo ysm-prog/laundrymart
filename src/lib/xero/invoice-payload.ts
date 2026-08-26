@@ -207,7 +207,23 @@ export function buildInvoicePayload({
   const payload: XeroInvoicePayload = {
     Type: "ACCREC",
     Status: "AUTHORISED",
-    LineAmountTypes: "Exclusive",
+    // **A line amount here already includes GST, so Xero must be told to
+    // extract the tax rather than add it.** This said `"Exclusive"` until
+    // 2026-08-26, which was correct while `recalculate_invoice` added GST on top
+    // of the lines (0006: `total = subtotal + tax`). `0043_myob_invoice_lines`
+    // moved that to inclusive — `total = subtotal`, with the tax taken out of
+    // the same figure — and this string did not follow, so Xero was being asked
+    // to add 10% on top of a number that already carried it. A $72.70 line was
+    // $72.70 on our invoice and $79.97 in the customer's books.
+    //
+    // The invariant that makes `"Inclusive"` the right answer, rather than just
+    // the opposite of the wrong one: our invoice total **is** the sum of its
+    // line amounts (`recalculate_invoice` adds nothing to it), and under
+    // `"Inclusive"` Xero's total is the sum of its line amounts too. Under
+    // `"Exclusive"` it is that sum plus tax, which is a different document.
+    // `payloadTotal()` is that invariant as a function, so the two cannot drift
+    // apart again without a test failing.
+    LineAmountTypes: "Inclusive",
     Contact: buildContact(customer),
     InvoiceNumber: invoice.invoice_number,
     Reference: invoice.purchase_order_number || invoice.invoice_number,
@@ -221,6 +237,47 @@ export function buildInvoicePayload({
   if (invoice.due_date) payload.DueDate = invoice.due_date;
 
   return payload;
+}
+
+/**
+ * What Xero will make this invoice come to, on the payload as written.
+ *
+ * A model of Xero's own arithmetic rather than a restatement of ours, which is
+ * the only version worth having: it reads `LineAmountTypes` and therefore
+ * **changes answer if the basis changes**. A helper that summed the lines
+ * regardless would have agreed with itself just as happily while Xero billed
+ * 10% more, which is the defect this exists to stop coming back.
+ *
+ *   Inclusive → the invoice is the sum of the line amounts; GST is inside them.
+ *   Exclusive → it is that sum plus GST on every taxable line.
+ *
+ * Since `0043_myob_invoice_lines`, `recalculate_invoice` computes
+ * `invoices.total` as the plain sum of the line amounts — the tax is taken out
+ * of that figure, never added to it — so `Inclusive` is the basis that makes
+ * Xero's document and ours the same document.
+ *
+ * **Not our stored total to the cent, and deliberately not claimed to be.**
+ * `consolidateChargeLines` *sums* frozen charge amounts rather than recomputing
+ * `quantity × unit_price`, because an invoice has to equal the audit trail
+ * behind it exactly — so a merged line's stored amount can sit a cent from its
+ * own quantity times its own unit price. Xero recomputes from quantity and unit
+ * amount and cannot be told otherwise unless the payload carries `LineAmount`,
+ * which it does not. See §20.
+ */
+export function payloadTotal(payload: XeroInvoicePayload, gstRate = 0.1): number {
+  const lines = (payload.LineItems as Array<Record<string, unknown>> | undefined) ?? [];
+  const exclusive = payload.LineAmountTypes === "Exclusive";
+
+  const total = lines.reduce((running, line) => {
+    const quantity = typeof line.Quantity === "number" ? line.Quantity : 0;
+    const unit = typeof line.UnitAmount === "number" ? line.UnitAmount : 0;
+    const amount = quantity * unit;
+    // Under Exclusive, Xero adds the tax to every line it treats as taxable.
+    const tax = exclusive && line.TaxType === TAX_TYPE_TAXABLE ? amount * gstRate : 0;
+    return running + amount + tax;
+  }, 0);
+
+  return Math.round(total * 100) / 100;
 }
 
 /**

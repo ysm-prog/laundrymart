@@ -2291,6 +2291,31 @@ invoice goes, because this app has no counter-cash concept.
     which `job_charge_snapshots` already holds. Both embeds are unambiguous (one FK per hop),
     checked rather than assumed — this repo has shipped an ambiguous embed that was
     compile-clean and dead in production.
+- **A line amount sent to Xero already includes GST, and `LineAmountTypes` says so**
+  (2026-08-26). It said `"Exclusive"` from the day the payload was written, which was right while
+  `recalculate_invoice` added GST on top of the lines — and wrong from the moment
+  `0043_myob_invoice_lines` made the total *inclusive*. Xero was being asked to add 10% to a
+  figure that already carried it: a $72.70 line is $72.70 on our invoice and would have been
+  **$79.97** in the customer's books.
+  - **The invariant, not the string, is what is pinned.** `payloadTotal()` models *Xero's* sum —
+    it reads `LineAmountTypes` and adds tax under `Exclusive` — so it changes answer when the
+    basis changes. A helper that summed the lines regardless would agree with itself while Xero
+    billed 10% more, which is exactly the shape of the original defect. All three assertions were
+    confirmed to fail with the string flipped back.
+  - **Nothing was mis-posted.** This deployment has no `XERO_CLIENT_ID`, holds **0**
+    `xero_connections` rows and has never pushed an invoice, so the window closed before it opened.
+- **Two gaps in the same payload are known and deliberately still open**, because both need a
+  decision this session cannot make and neither can be tried against a real Xero from here:
+  - **Freight is not sent at all.** `invoices.freight_amount`/`freight_tax_code` (0043) are not in
+    `PayloadInvoice`, so an invoice carrying freight would push short by that amount. Inert today —
+    nothing in `src/` writes either column and no screen offers them — and adding it means choosing
+    a description and an account code for a line Xero has no dedicated field for.
+  - **Xero recomputes each line as `Quantity × UnitAmount`, and we sum instead.**
+    `consolidateChargeLines` deliberately sums the frozen charge amounts rather than recomputing,
+    so the invoice equals its audit trail to the cent; a merged line's stored amount can therefore
+    sit a cent from its own quantity times its own unit price. Closing it means sending
+    `LineAmount` explicitly, which Xero validates against the other two fields — worth doing on
+    the first real connection, not blind.
 - `summariseXeroError` in `lib/xero/errors.ts` is shared by all three pushes. It was a private
   copy in two of them and the void path would have made three, at which point they drift and the
   least-used one stops parsing the shape Xero actually sends.
@@ -2299,7 +2324,7 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
-### 2026-08-26 · 0043 comes into the repo, and the Xero basis no longer matches it
+### 2026-08-26 · 0043 comes into the repo, and the Xero basis follows it
 The owner's instruction, after the merge record noted the hosted project carrying a migration
 this repository did not have. **No `src/` change; one migration file added, reconstructed rather
 than authored.**
@@ -2317,7 +2342,7 @@ customer is billed on the other is a defect shape this file already records more
 - **It changes nothing about production**, which has had it since 11:52 on 2026-08-26. What it
   changes is CI's database, which now matches.
 - **46 migrations, 485 pgTAP assertions, 0 failing, 0 plan mismatches** on a fresh Postgres 16
-  with the seed on top.
+  with the seed on top. **994 unit tests** (was 991 — the three that pin the Xero basis).
 
 **The suite passing over it is a vacuous pass, and saying so is the point.** **Nothing in
 `supabase/tests/` calls `recalculate_invoice`** — the only two mentions of invoice totals insert
@@ -2327,18 +2352,28 @@ taxable line returns subtotal 72.70, tax **6.61**, total 72.70; a line inserted
 `taxable = true, tax_code = 'FRE'` reads back **`taxable = false`**; and $11.00 of GST freight on
 top gives subtotal 93.70, tax 7.61, total 93.70.
 
-**A real inconsistency fell out of reading it, and it is reported rather than fixed.**
-`buildInvoicePayload` sends `LineAmountTypes: "Exclusive"` with `UnitAmount: line.unit_price`
-(`src/lib/xero/invoice-payload.ts:210`) — so Xero is told to add 10% **on top of** the very
-number the database now treats as already including it. A $72.70 line is $72.70 here and $79.97
-in Xero.
-- **Latent, not live:** this deployment has no `XERO_CLIENT_ID`, holds **0** `xero_connections`
-  rows, and has never pushed an invoice, so nothing has been mis-posted.
-- **Deliberately not fixed here**, because the one-word answer is probably not the right one.
-  `items.sell_price_basis` exists precisely so the basis can differ per item, while Xero's
-  `LineAmountTypes` is a property of the whole invoice — so a mixed-basis invoice cannot be
-  expressed by flipping that string, and guessing would trade a visible inconsistency for an
-  invisible one. It belongs with whoever designed the inclusive-price model.
+**A real inconsistency fell out of reading it, and it is now fixed** (same day, on the owner's
+instruction). `buildInvoicePayload` sent `LineAmountTypes: "Exclusive"` with
+`UnitAmount: line.unit_price` — so Xero was told to add 10% **on top of** the very number the
+database now treats as already including it. A $72.70 line is $72.70 here and would have been
+$79.97 in Xero.
+- **Latent throughout:** this deployment has no `XERO_CLIENT_ID`, holds **0** `xero_connections`
+  rows, and has never pushed an invoice, so nothing was ever mis-posted.
+- **`"Inclusive"` is right, and the reason it is right is checkable rather than argued.** Our
+  `invoices.total` *is* the sum of the line amounts (0043 takes the tax out of that sum rather
+  than adding to it), and under `Inclusive` Xero totals its lines the same way — under
+  `Exclusive` it is that sum plus tax, a different document. `payloadTotal()` states that as a
+  function and **models Xero's basis**, so it changes answer if the string changes; all three new
+  assertions were proved to fail with it flipped back.
+- **The caution recorded here first — that `items.sell_price_basis` makes the basis per-item
+  while Xero's setting is per-invoice — turned out not to apply**, and saying so is the point.
+  That column describes how an *item's list price* is to be read when a line is composed;
+  `recalculate_invoice` totals `invoice_lines` **unconditionally inclusive** regardless of it, so
+  a stored invoice has one basis and not a mixture. The right check was the arithmetic of the
+  document, not the vocabulary of the column.
+- **Two gaps in the same payload stay open and are recorded in §20**: freight is not sent at all,
+  and Xero recomputes `Quantity × UnitAmount` where we deliberately sum frozen amounts. Both are
+  inert today and both want the first real Xero connection rather than a blind guess.
 
 ### 2026-08-26 · A deploy says so on the commit that caused it
 `vercel.json` carried `"github": { "silent": true }`. **No migration, no schema change, nothing
