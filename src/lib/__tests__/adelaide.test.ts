@@ -24,13 +24,19 @@ function at(instant: string) {
   vi.setSystemTime(new Date(instant));
 }
 
-describe("the operational timezone", () => {
-  it("is Adelaide, and is not the business timezone", () => {
+describe("the timezones", () => {
+  it("both run on Adelaide, because that is where the business is", () => {
+    // Stated as an assertion rather than a comment, so moving either one has to
+    // be a decision somebody makes on purpose.
+    //
+    // **`BUSINESS_TIMEZONE` was `Australia/Sydney` until 2026-08-26.** It came
+    // from the skeleton this build started from, not from anything about the
+    // client, and it decided the instant composed from a counter's "received
+    // today", the day an invoice period ends and the day a notification is
+    // filed under — so for half an hour either side of midnight it answered
+    // with another state's date.
+    expect(BUSINESS_TIMEZONE).toBe("Australia/Adelaide");
     expect(OPERATIONS_TIMEZONE).toBe("Australia/Adelaide");
-    // Stated as an assertion rather than a comment: they are deliberately two
-    // different zones, and someone unifying them should have to change a test
-    // that explains why they are separate.
-    expect(BUSINESS_TIMEZONE).toBe("Australia/Sydney");
   });
 });
 
@@ -46,12 +52,14 @@ describe("getAdelaideToday", () => {
     expect(getAdelaideToday()).toBe("2026-08-14");
   });
 
-  it("is Adelaide's day, not Sydney's", () => {
-    // 14:00 UTC: midnight in Sydney, but still 11:30pm the previous day in
-    // Adelaide. Half an hour a day where the two disagree, every day.
+  it("agrees with the business day, now that both are Adelaide", () => {
+    // 14:00 UTC is midnight in Sydney and 11:30pm the previous day in Adelaide
+    // — the half hour a day the two used to disagree, and the window in which
+    // the old Sydney business zone filed a counter's work under tomorrow's
+    // date. Both answers are Adelaide's now, so they match.
     at("2026-08-14T14:00:00Z");
     expect(getAdelaideToday()).toBe("2026-08-14");
-    expect(businessToday()).toBe("2026-08-15");
+    expect(businessToday()).toBe("2026-08-14");
   });
 
   it("does not move when the machine's own timezone does", () => {

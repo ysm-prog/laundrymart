@@ -28,12 +28,12 @@ describe("delivery confirmation", () => {
     expect(email.html).toContain("Level 3 linen room");
   });
 
-  it("renders in Sydney time, not UTC", () => {
-    // 04:30Z on 5 Aug is 14:30 in Sydney (AEST) — the same calendar day, but a
-    // template formatting in UTC would say 4:30 am.
+  it("renders in Adelaide time, not UTC", () => {
+    // 04:30Z on 5 Aug is 14:00 in Adelaide (ACST, +9:30) — the same calendar
+    // day, but a template formatting in UTC would say 4:30 am.
     const email = buildDeliveryEmail(base);
     expect(email.subject).toContain("05/08/2026");
-    expect(email.subject).toContain("2:30 pm");
+    expect(email.subject).toContain("2:00 pm");
   });
 
   it("escapes a customer name that contains markup", () => {

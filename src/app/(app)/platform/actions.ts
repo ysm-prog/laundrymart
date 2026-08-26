@@ -60,7 +60,7 @@ export async function switchTenant(formData: FormData): Promise<void> {
 const tenantSchema = z.object({
   name: z.string().trim().min(2, "Give the laundry a name"),
   abn: optionalText,
-  timezone: z.string().trim().min(3).default("Australia/Sydney"),
+  timezone: z.string().trim().min(3).default("Australia/Adelaide"),
 });
 
 /** Add a laundry to this deployment. */

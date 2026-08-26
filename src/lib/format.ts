@@ -22,7 +22,7 @@ export function date(value: string | null | undefined): string {
   });
 }
 
-export function dateTime(value: string | null | undefined, timeZone = "Australia/Sydney"): string {
+export function dateTime(value: string | null | undefined, timeZone = "Australia/Adelaide"): string {
   if (!value) return "—";
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return "—";
@@ -37,7 +37,7 @@ export function time(value: string | null | undefined): string {
   return value.slice(0, 5);
 }
 
-export function today(timeZone = "Australia/Sydney"): string {
+export function today(timeZone = "Australia/Adelaide"): string {
   // `en-CA` formats as YYYY-MM-DD, which is exactly the shape Postgres wants.
   return new Intl.DateTimeFormat("en-CA", {
     timeZone, year: "numeric", month: "2-digit", day: "2-digit",

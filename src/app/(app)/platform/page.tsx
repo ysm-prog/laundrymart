@@ -20,8 +20,11 @@ type TenantRow = {
 };
 
 const TIMEZONES = [
-  "Australia/Sydney", "Australia/Melbourne", "Australia/Brisbane",
-  "Australia/Adelaide", "Australia/Perth", "Australia/Hobart", "Australia/Darwin",
+  // Adelaide leads because that is where this business is; the rest follow in
+  // population order. The list is the same set either way — only the default
+  // and the first thing an owner sees have moved.
+  "Australia/Adelaide", "Australia/Sydney", "Australia/Melbourne", "Australia/Brisbane",
+  "Australia/Perth", "Australia/Hobart", "Australia/Darwin",
 ].map((value) => ({ value, label: value.replace("Australia/", "") }));
 
 const STATUSES = [
@@ -56,7 +59,7 @@ export default async function PlatformPage() {
             <Input name="abn" inputMode="numeric" placeholder="12 345 678 901" />
           </Field>
           <Field label="Timezone" name="timezone">
-            <Select name="timezone" defaultValue="Australia/Sydney" options={TIMEZONES} />
+            <Select name="timezone" defaultValue="Australia/Adelaide" options={TIMEZONES} />
           </Field>
           <div className="flex items-end">
             <SubmitButton pendingLabel="Adding…">Add laundry</SubmitButton>
