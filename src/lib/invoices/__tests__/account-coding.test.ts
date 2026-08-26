@@ -1,42 +1,101 @@
 import { describe, expect, it } from "vitest";
-import { accountForLine } from "@/lib/invoices/account-coding";
+import {
+  NO_ACCOUNTS, resolveChargeAccount, type AccountLookups,
+} from "@/lib/invoices/account-coding";
 
 /**
- * `incomeAccountsForItems` is a query and is not tested here; `accountForLine`
- * is the rule, and it is the one both invoice writers call. Small, and worth
- * pinning: this is where the fallback order is stated, and getting it wrong is
- * silent — a line simply comes out uncoded, which looks exactly like a line
- * somebody chose not to code.
+ * `incomeAccountsForItems`, `chargeTypeAccounts` and `accountLookupsFor` are
+ * queries and are not tested here; `resolveChargeAccount` is the rule, and the
+ * rule is the part that can be wrong in a way a green build hides — an invoice
+ * coded to the wrong account looks exactly like one coded to the right one until
+ * somebody reconciles it.
  */
-describe("accountForLine", () => {
-  const coded = new Map([["item-1", "acct-1"], ["item-2", "acct-2"]]);
+function lookups(
+  items: Record<string, string> = {}, charges: Record<string, string> = {},
+): AccountLookups {
+  return {
+    accountByItem: new Map(Object.entries(items)),
+    defaultByChargeType: new Map(Object.entries(charges)),
+  };
+}
 
-  it("codes a line to its item's income account", () => {
-    expect(accountForLine("item-1", coded)).toBe("acct-1");
-    expect(accountForLine("item-2", coded)).toBe("acct-2");
+describe("resolveChargeAccount", () => {
+  it("prefers the charge's own account over everything below it", () => {
+    // The tier order is the whole function. Resolving the item ahead of the
+    // charge would quietly send a different account from the one somebody
+    // deliberately picked on the Charges card, and nobody would find out until a
+    // bookkeeper reconciled — so this is asserted first and asserted hardest.
+    const found = resolveChargeAccount(
+      { gl_account_id: "chosen", source_item_id: "towel", charge_type: "wash_only" },
+      lookups({ towel: "via-item" }, { wash_only: "via-type" }),
+    );
+    expect(found).toBe("chosen");
   });
 
-  it("leaves a line uncoded when the item has no account", () => {
-    // Absent from the map is how `incomeAccountsForItems` reports "this item
-    // names no account" — it filters those out rather than returning nulls.
-    expect(accountForLine("item-3", coded)).toBeNull();
+  it("falls to the item's income account when the charge names none", () => {
+    const found = resolveChargeAccount(
+      { gl_account_id: null, source_item_id: "towel", charge_type: "wash_only" },
+      lookups({ towel: "via-item" }, { wash_only: "via-type" }),
+    );
+    expect(found).toBe("via-item");
   });
 
-  it("leaves a line with no item uncoded", () => {
-    // Fuel levies, minimums, surcharges and every rolled-up line that spans
-    // more than one item. Honestly uncoded and counted on the invoice, rather
-    // than guessed at from the charge type.
-    expect(accountForLine(null, coded)).toBeNull();
-    expect(accountForLine(undefined, coded)).toBeNull();
+  it("falls to the charge type's default for a line that names no item", () => {
+    // The case the whole third tier exists for: `LJ00007 — fuel` reached the
+    // invoice with a code of "—" because a fuel levy names no item, so it had no
+    // first tier and no second and there was nowhere to give it one.
+    const found = resolveChargeAccount(
+      { gl_account_id: null, source_item_id: null, charge_type: "fuel_levy" },
+      lookups({}, { fuel_levy: "4-2000" }),
+    );
+    expect(found).toBe("4-2000");
   });
 
-  it("returns null rather than an empty string for an empty item id", () => {
-    // `""` would be written into a uuid column and fail the insert, so the
-    // falsy case has to collapse to null and not to the id it was given.
-    expect(accountForLine("", coded)).toBeNull();
+  it("uses the charge type when the item exists but names no account", () => {
+    // An item that has never been coded is *absent* from the map, not present
+    // with a null — so a tier that tested `has()` rather than the value would
+    // stop here and return nothing.
+    const found = resolveChargeAccount(
+      { gl_account_id: null, source_item_id: "uncoded-item", charge_type: "fuel_levy" },
+      lookups({ towel: "via-item" }, { fuel_levy: "4-2000" }),
+    );
+    expect(found).toBe("4-2000");
   });
 
-  it("is null when nothing is coded at all", () => {
-    expect(accountForLine("item-1", new Map())).toBeNull();
+  it("comes back null when no tier can answer", () => {
+    // Honestly uncoded, counted on the invoice screen, never guessed at.
+    expect(resolveChargeAccount(
+      { gl_account_id: null, source_item_id: "towel", charge_type: "other" },
+      lookups({}, { fuel_levy: "4-2000" }),
+    )).toBeNull();
+    expect(resolveChargeAccount({ charge_type: "fuel_levy" }, NO_ACCOUNTS)).toBeNull();
+  });
+
+  it("treats an empty string as absent rather than as an answer", () => {
+    // A control posting "" for "none" must not code a line to nothing-in-
+    // particular — `optionalUuid` maps it away, but this is the last line of
+    // defence and it is one character of difference.
+    expect(resolveChargeAccount(
+      { gl_account_id: "", source_item_id: "towel", charge_type: "fuel_levy" },
+      lookups({ towel: "via-item" }),
+    )).toBe("via-item");
+    expect(resolveChargeAccount(
+      { gl_account_id: "", source_item_id: "", charge_type: "" },
+      lookups({}, { fuel_levy: "4-2000" }),
+    )).toBeNull();
+  });
+
+  it("does not invent an account for a charge type nobody has mapped", () => {
+    expect(resolveChargeAccount(
+      { charge_type: "weekend_surcharge" }, lookups({}, { fuel_levy: "4-2000" }),
+    )).toBeNull();
+  });
+
+  it("reads a missing charge type as no answer rather than throwing", () => {
+    // Every writer passes one, but a `Map.get(undefined)` would be a runtime
+    // fault in the middle of a month-end run rather than an uncoded line.
+    expect(resolveChargeAccount(
+      { gl_account_id: null, source_item_id: null }, lookups({}, { fuel_levy: "4-2000" }),
+    )).toBeNull();
   });
 });

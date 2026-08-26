@@ -402,6 +402,27 @@ describe("the chart of accounts (0037)", () => {
     expect(can("dispatcher", "purchases.read")).toBe(false);
   });
 
+  it("lets everybody who can approve a job also read the charge-account defaults", () => {
+    /*
+     * **Load-bearing, and not obviously so.** `charge_type_accounts` (0044) is
+     * gated on `purchases.read`, and it is read by `rebuildJobLines` on the
+     * *caller's* client at the moment a job is approved. If the two sets ever
+     * part company, that read comes back empty for the approver — and an empty
+     * map is indistinguishable from "no defaults have been set", so every fuel
+     * levy would quietly stop being coded and nothing anywhere would say so.
+     *
+     * Asserted over `rolesWith` rather than by naming two roles, so a capability
+     * moved in either direction fails here rather than in a bookkeeper's ledger.
+     */
+    // An empty list would make the loop below pass over nothing at all — the
+    // vacuous pass this repo has recorded twice.
+    expect(rolesWith("invoices.approve").length).toBeGreaterThan(0);
+    for (const role of rolesWith("invoices.approve")) {
+      expect(can(role, "purchases.read"), `${role} approves jobs but cannot read the defaults`)
+        .toBe(true);
+    }
+  });
+
   it("lets everybody who can code an item also see the accounts to code it to", () => {
     // The item form offers a picker of `gl_accounts`. A role that may edit an
     // item but may not read the chart would get an empty picker with no

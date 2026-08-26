@@ -16,6 +16,50 @@ logins — which live there precisely so they cannot read the real business's re
 **The multi-tenancy architecture stays.** One operating tenancy is a fact about today's data, not
 a reason to drop `tenant_id`, RLS, or §23's rule that a read feeding a write names its tenant.
 
+## Latest: a line's code is a real account, and a levy gets one unasked
+2026-08-26, branch `claude/account-chat-linking-bknjn3`. Reported against `LJ00007`: an
+invoice line `LJ00007 — fuel` coded `—`, under *"Remove and re-add a line to give it a
+code."* One migration (`0044`); **nothing dropped, no row changed, no capability moved.**
+
+- **Two faults.** Nothing could ever code that line — a fuel levy names no item, and the
+  Charges card's account picker was removed on the owner's instruction, so it had no first
+  tier and no second. And **the advice would have billed twice**: a job line removed and
+  re-added returns `origin='manual'`, the next `rebuildJobLines` re-derives the job line
+  beside it, and the invoice carries the charge twice.
+- **`resolveChargeAccount` is now the one ladder** — charge → item → **charge type** — used
+  by all four writers (three had the first two rungs inlined). `charge_type_accounts`
+  (0044) is the new rung: a real table, FK `on delete set null`, gated on
+  `can_write_purchases()`, validated by `guard_charge_type_account`.
+- **Where a code is written depends on where the line reads it from.** A job line's account
+  is derived and re-derived on every rebuild, so an override on the *line* would vanish
+  silently. It goes to the **frozen charges** instead; `0044` narrows
+  `guard_job_charge_snapshot` to permit `gl_account_id` **alone** while the invoice is a
+  draft, refused once issued. Money stays as immutable as it was.
+- **This reverses §27's own "a per-charge-type map was left out".** Owner's call,
+  2026-08-26. Both halves answered: the item's account still wins, and it is a table with a
+  foreign key rather than a settings blob that could dangle.
+- **New screen** `/invoices/charge-accounts` (Money, last tab, `purchases.read`). Placed
+  last deliberately — first, it became finance's landing page for the whole area, caught by
+  `nav.test.ts`.
+- **Load-bearing role assumption, now pinned:** every `invoices.approve` holder must hold
+  `purchases.read`, because `rebuildJobLines` reads the map on the caller's client. If they
+  part company the read is empty, which reads as "no defaults set", and levies quietly stop
+  being coded.
+- 1,004 unit tests (was 991), **504 pgTAP across 27 files** (was 485/26), `verify` green,
+  45 migrations to a fresh PG16. New assertions confirmed to fail without their fix.
+- **The migration's own assertion caught a bug in the migration** (`NULL || with_check`
+  swallowed the two policies with no USING half). **The proof's first draft was wrong the
+  way this repo keeps recording** — it expected 42501 from an UPDATE a policy excludes,
+  which matches zero rows and raises nothing. By outcome now.
+- Browser-driven at 320/390/768/1440, both themes: 16 assertions, 0 console errors, 0
+  overflow in-section, 0 targets <36px. Found the links at 18–23px; and a "clean" pass that
+  was **measuring a dead server on the wrong port**, given away only by console errors.
+
+**NOT YET APPLIED to `laundrymart-syd`.** The schema must lead the code, as every release
+since 2026-08-18 records. Apply `0044`, then merge. Then, in a browser: code the fuel line
+on a draft, set Money › Charge accounts › Fuel levy to the same account, approve a second
+job for that customer, and confirm the rebuilt fuel line comes back coded unasked.
+
 ## Latest: 0043 is in the repo, and the Xero basis disagrees with it
 2026-08-26, branch `claude/invoice-creation-job-workflow-11mobw`. The owner asked for the live
 migration this repo lacked. **No `src/` change; one migration file, reconstructed not authored.**

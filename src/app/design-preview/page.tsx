@@ -27,6 +27,8 @@ import { ItemPickerPreview } from "./item-picker-preview";
 import {
   InvoiceLineForm, type LineFormAccount, type LineFormItem,
 } from "@/app/(app)/invoices/[id]/line-form";
+import { LineCode, LineCoding } from "@/app/(app)/invoices/[id]/line-coding";
+import { ChargeAccountTable } from "@/app/(app)/invoices/charge-accounts/charge-account-table";
 import {
   InvoiceSelection, type SelectableInvoice,
 } from "@/app/(app)/invoices/invoice-selection";
@@ -1188,6 +1190,59 @@ export default function DesignPreviewPage() {
               />
             </Card>
             </div>
+          </section>
+
+          {/* ------------------------------------------------ coding a line ---- */}
+          {/* The Code cell, and where a kind of charge posts when nothing more
+              specific says. Both are here because both are client components on
+              pages that read Supabase at module scope, so this gallery is the
+              only place either can be looked at — and looking is what found the
+              two defects §27 records on the screen next door. */}
+          <section id="line-coding-preview" className="space-y-4 border-t pt-8">
+            <PageHeader
+              eyebrow="Money"
+              title="Coding a line"
+              description="Press the code to change it. A line with no code says so, and can be given one without being removed."
+            />
+
+            <Card title="The Code cell on a draft"
+                  description="Coded, and not. Pressing either opens the search; the uncoded one is the state the report was made about.">
+              <div className="flex flex-wrap items-center gap-6">
+                <LineCoding
+                  lineId="p1" invoiceId="preview" accounts={PREVIEW_CHART}
+                  accountId="g2" code="4-1100" description="Towels - Wash & Dry Only"
+                  action={async () => { "use server"; }}
+                />
+                <LineCoding
+                  lineId="p2" invoiceId="preview" accounts={PREVIEW_CHART}
+                  accountId={null} code={null} description="LJ00007 — fuel"
+                  action={async () => { "use server"; }}
+                />
+                <LineCoding
+                  lineId="p3" invoiceId="preview" accounts={[]}
+                  accountId={null} code={null} description="A laundry with no chart yet"
+                  action={async () => { "use server"; }}
+                />
+              </div>
+            </Card>
+
+            <Card title="The same cell once the invoice has gone"
+                  description="A record, not a form. The code links through to the account; a deleted account leaves the code standing with nothing to link to.">
+              <div className="flex flex-wrap items-center gap-6">
+                <LineCode accountId="g2" code="4-1100" />
+                <LineCode accountId={null} code="4-1150" />
+                <LineCode accountId={null} code={null} />
+              </div>
+            </Card>
+
+            <Card title="Where each kind of charge posts"
+                  description="The third tier of the ladder. It answers for the lines that name no item — a fuel levy, a minimum, a delivery.">
+              <ChargeAccountTable
+                accounts={PREVIEW_CHART}
+                current={{ fuel_levy: "g5", wash_only: "g2", minimum_service_fee: "g6" }}
+                action={async () => { "use server"; }}
+              />
+            </Card>
           </section>
 
           {/* ------------------------------------------------- period billing --- */}

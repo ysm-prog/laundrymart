@@ -7,7 +7,7 @@ import type { BillingPeriod } from "@/lib/domain/billing-period";
 import {
   jobInvoiceLines, type ChargeEntry, type InvoiceLineDraft,
 } from "@/lib/domain/invoice-consolidation";
-import { accountForLine, incomeAccountsForItems } from "@/lib/invoices/account-coding";
+import { accountLookupsFor, resolveChargeAccount } from "@/lib/invoices/account-coding";
 import { loadChargesForJobs } from "@/lib/orders/job-billing";
 
 /**
@@ -284,6 +284,18 @@ async function rebuildOnce(
     (a.completed_at ?? "￿").localeCompare(b.completed_at ?? "￿")
     || a.order_number.localeCompare(b.order_number));
 
+  /*
+   * **Resolved before consolidation, not after, and the order is the point.**
+   * `consolidationKey` carries the account, so two towel charges at one rate —
+   * one carrying its item's account and one carrying nothing — used to key
+   * differently (`acct:<id>` against `acct:none`) and come out as two lines that
+   * were then written with the *same* account. Resolving first makes the key
+   * honest, so they merge into the one line the customer should read.
+   */
+  const lookups = await accountLookupsFor(
+    supabase, session.tenantId, [...chargesByJob.values()].flat(),
+  );
+
   const entries: ChargeEntry[] = ordered.flatMap((job) =>
     (chargesByJob.get(job.id) ?? []).map((charge) => ({
       job: {
@@ -291,7 +303,7 @@ async function rebuildOnce(
         orderNumber: job.order_number,
         date: job.completed_at ? toZonedDate(job.completed_at) : null,
       },
-      charge,
+      charge: { ...charge, gl_account_id: resolveChargeAccount(charge, lookups) },
     })));
 
   const lines: InvoiceLineDraft[] = jobInvoiceLines(entries, {
@@ -307,10 +319,6 @@ async function rebuildOnce(
   if (clearError) return { ok: false, error: describeDbError(clearError) };
 
   if (lines.length > 0) {
-    const accountByItem = await incomeAccountsForItems(
-      supabase, session.tenantId, lines.map((line) => line.source_item_id),
-    );
-
     const { error: insertError } = await supabase.from("invoice_lines").insert(
       lines.map((line, index) => ({
         tenant_id: session.tenantId,
@@ -318,9 +326,9 @@ async function rebuildOnce(
         invoice_id: invoiceId,
         laundry_order_id: line.jobId,
         item_id: line.source_item_id,
-        // The charge's own account first (0039), the item's as the fallback —
-        // the same precedence the Xero push uses on the line.
-        gl_account_id: line.gl_account_id ?? accountForLine(line.source_item_id, accountByItem),
+        // Already resolved, above, through the whole ladder — the charge's own
+        // account (0039), then the item's, then the charge type's default (0044).
+        gl_account_id: line.gl_account_id,
         agreement_id: line.source_agreement_id,
         description: line.description,
         charge_type: line.charge_type,

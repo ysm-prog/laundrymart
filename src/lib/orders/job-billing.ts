@@ -1,6 +1,6 @@
 import type { createClient } from "@/lib/supabase/server";
 import type { Session } from "@/lib/auth/context";
-import { accountForLine, incomeAccountsForItems } from "@/lib/invoices/account-coding";
+import { accountLookupsFor, resolveChargeAccount } from "@/lib/invoices/account-coding";
 import { recordAudit } from "@/lib/audit";
 import { describeDbError } from "@/lib/actions";
 import {
@@ -327,10 +327,13 @@ export async function priceAndSaveJob(
  *
  * **This is also where a charge gets its GL code, and it is the only such
  * place.** Both writers come through here — the automatic pricer and the review
- * screen's own save — so resolving `item → items.income_account_id` once here
- * means a priced line and a hand-picked one are coded identically, and neither
- * caller can forget. A line that already names an account keeps it: choosing a
- * code on the Charges screen is a deliberate override of whatever the item says.
+ * screen's own save — so resolving the whole ladder once here means a priced
+ * line and a hand-picked one are coded identically, and neither caller can
+ * forget. A line that already names an account keeps it: choosing a code on the
+ * Charges screen is a deliberate override of whatever the item says. Below that
+ * the item's income account answers, and below *that* the charge type's default
+ * (0044) — which is what codes a fuel levy, the line that names no item at all
+ * and so reached the books uncoded however carefully the items were set up.
  */
 export async function saveJobCharges(
   supabase: Client, tenantId: string, orderId: string, lines: readonly JobChargeLine[],
@@ -338,13 +341,11 @@ export async function saveJobCharges(
   // §23: a read that feeds a write names its tenant. A platform admin's session
   // reads every laundry, and an item resolved across the boundary would code one
   // business's charge to another's chart.
-  const accountByItem = await incomeAccountsForItems(
-    supabase, tenantId, lines.map((line) => line.source_item_id),
-  );
+  const lookups = await accountLookupsFor(supabase, tenantId, lines);
 
   const coded = lines.map((line) => ({
     ...line,
-    gl_account_id: line.gl_account_id ?? accountForLine(line.source_item_id, accountByItem),
+    gl_account_id: resolveChargeAccount(line, lookups),
   }));
 
   const { data, error } = await supabase.rpc("save_job_charge_snapshot", {

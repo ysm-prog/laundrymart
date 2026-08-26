@@ -198,6 +198,15 @@ Resource-scoped beyond tenancy:
 - `notifications`: RLS scopes them to the tenant, as everywhere. The `audience` capability on
   each row narrows them further to the people who can act on it — but that is a UI filter
   applied in `src/lib/notifications/query.ts`, layered on top of RLS and never instead of it.
+- **`charge_type_accounts` is gated on `purchases.*` too, and not on `invoices.*`**
+  (0044). Every value in it is an account id and 0036 put the chart itself behind
+  `can_read_purchases()`, so reading the map through a weaker gate would be a side
+  channel onto the chart it points into. The catch worth writing down: it is read by
+  `rebuildJobLines` **on the caller's client** at the moment a job is approved, so
+  every holder of `invoices.approve` must also hold `purchases.read` — if the two sets
+  ever part company that read comes back empty, which is indistinguishable from "no
+  defaults set", and every fuel levy would quietly stop being coded. `roles.test.ts`
+  pins it over `rolesWith` rather than by naming two roles.
 - **The payable side and the chart of accounts are `purchases.*`, since `0036`** —
   `gl_accounts`, `suppliers`, `supplier_bills`, `purchase_orders`,
   `supplier_payments`, `import_activation_state`. All six shipped on
@@ -519,7 +528,8 @@ now on each; the month-end question the register could not answer) ·
 `/items[/:id]` · `/drivers` · `/vehicles` · `/routes/templates[/:id]` ·
 `/routes/daily[/:id|/:id/sheet]` · `/routes/planner` · `/jobs[/:id]` ·
 `/operations/{pickups,deliveries,exceptions}` · `/run` · `/warehouse[/:id]` · `/inventory` ·
-`/invoices[/:id|/prices]` · `/reports` · `/search` · `/help` · `/notifications` ·
+`/invoices[/:id|/prices|/charge-accounts]` · `/reports` · `/search` · `/help` ·
+`/notifications` ·
 `/admin` (redirects) `[/depots|/users|/holidays|/audit|/notifications|/data]` ·
 `/platform[/admins|/settings|/release]` (platform admin only)
 
@@ -827,6 +837,33 @@ renders no tab strip. Tested in `src/lib/__tests__/nav.test.ts`.
   inside its own transaction: a second open draft refused, a line on an issued
   invoice refused, and the cascade still deleting. Both halves were proved to
   fail without the fix rather than assumed to be doing something.
+- `0044_charge_type_accounts` — **a kind of charge knows where its money lands, and
+  a code may still be corrected while the invoice is a draft.** `charge_type_accounts`
+  (one row per kind of charge per laundry, `gl_account_id` nullable and
+  `on delete set null`), four explicit policies on `can_read_purchases()` /
+  `can_write_purchases()`, `guard_charge_type_account()`, and
+  **`guard_job_charge_snapshot` rebuilt**. Adds one table and one trigger; drops
+  nothing, and changes no existing row.
+  - **Not `apply_tenant_policy`**, whose permissive `for all` would let any member
+    rewrite where the laundry's revenue posts — the shape replaced four times already
+    (0006→0017, 0018→0033, 0021→0036, 0002→0040). Not repeated a fifth time.
+  - **The guard rebuild is the half that is not additive.** An update touching
+    **nothing but `gl_account_id`** is now allowed on a frozen charge, and refused the
+    moment any invoice carrying that job stops being a draft. Everything that decides
+    what the customer pays — quantity, unit price, amount, taxable, description, the
+    provenance columns and `frozen_at` — stays exactly as immutable as it was,
+    `super_admin` included. §20's own words are the warrant: *"a code is a
+    classification, not money … What is frozen is the amount."* Asked of the whole row
+    as `to_jsonb(new) - 'gl_account_id' - 'updated_at'`, so a column added later is
+    covered without anybody remembering to.
+  - Rebuilt from **0017's** body, which is the latest ancestor — 0039 added a *second*
+    trigger and left this function alone, checked rather than assumed. Now SECURITY
+    DEFINER, which **strengthens** it: the billing-status read was invoker-rights, so a
+    caller RLS hid the job from read null and sailed past the invoiced check.
+    `authenticated` is named in the revoke, the trap 0019 recorded and 0036 shipped.
+  - Nine self-assertions, one of which **caught a defect in this very migration**: the
+    policy count read `qual || coalesce(with_check,'')`, and an INSERT policy has no
+    USING clause, so `NULL || …` swallowed two of the four and the count came back 3.
 - `0043_myob_invoice_lines` — **GST inside the price, and the columns a MYOB
   invoice line carries.** Three columns each on `invoice_lines` and
   `job_charge_snapshots` (`discount_percent`, `unit_label`, `tax_code`), three on
@@ -957,7 +994,7 @@ Proofs in `supabase/tests/`: `rls_isolation`, `rls_coverage`, `driver_scope`,
 `job_billing`, `purchases_scope`, `supplier_payments_scope`, `import_helpers`,
 `import_activation`, `member_directory`, `boards_scope`, `item_master`,
 `audit_log_scope`, `run_sequence`, `accounts_scope`, `open_draft_invoices`,
-`single_laundry` (**485 assertions** across 26 files).
+`single_laundry`, `charge_accounts` (**504 assertions** across 27 files).
 
 **`run-db-tests.sh` parses the output rather than trusting the exit code, and that is not
 pedantry.** `psql` exits 0 for a pgTAP file that runs to completion, and a failed assertion is a
@@ -2324,6 +2361,101 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-08-26 · The code on a line is a real account, and a levy has one without being asked
+Reported from the deployed app against `LJ00007`: an invoice line reading
+`LJ00007 — fuel` with a code of `—`, under a notice whose only advice was *"Remove and
+re-add a line to give it a code."* One migration (`0044`), one new table, one rebuilt
+guard; **nothing dropped, no row changed, and no role gained or lost a capability.**
+§27 holds the design, §3 the gate, §7 the migration.
+
+**Two separate faults behind one screenshot, and the second is the more serious.**
+
+- **Nothing could ever code that line.** A job charge takes its account from the item it
+  names, or from an account picked by hand on the Charges card — and that picker was
+  removed on 2026-08-26 at the owner's instruction, MYOB's model being that you choose the
+  Item and the Category follows it. **A fuel levy names no item.** So it had no first tier
+  and no second, and there was nowhere in the application to give it one. Not a rare shape:
+  every levy, minimum, surcharge and delivery fee this app raises is in it.
+- **The advice would have billed the customer twice.** `LJ00007 — fuel` is an
+  `origin = 'job'` line. Removed and re-added through the composer it comes back
+  `origin = 'manual'`; the next job to join the running draft runs `rebuildJobLines`, which
+  deletes only the *job* lines and re-derives them from the frozen charges. The fuel comes
+  back **and** the manual copy stays — $100 of fuel on a $50 levy, with nothing on screen
+  saying so. Found by reading what the sentence would actually do, not by running it.
+
+**The fix is one ladder with a third rung, and one rule about where a code is written.**
+
+- `resolveChargeAccount` is the ladder — charge, then item, then **charge type** — pure,
+  tested, and now used by all four writers (the per-job generator, the running draft's
+  rebuild, the month-end contract run and `saveJobCharges`). Three of them had the first
+  two rungs inlined and would have drifted.
+- **Where a code is written depends on where the line reads it from.** A job line's
+  account is *derived* and re-derived on every rebuild, so an override written onto the
+  line would be silently discarded the next time somebody approved a job — the class of
+  failure this file records shipping three times. So it goes to the **source**: the frozen
+  charges behind the line. `manual` and `contract` lines are written directly, because the
+  rebuild never touches either.
+- **`0044` narrows the frozen-charge guard to allow exactly that**, on §20's own
+  reasoning — *"a code is a classification, not money … What is frozen is the amount."* An
+  update touching nothing but `gl_account_id` is permitted while the invoice is still a
+  draft and refused the moment it is issued. Quantity, unit price, amount, taxable,
+  description, provenance and `frozen_at` stay exactly as immutable as they were.
+- **The account is resolved *before* consolidation, not after**, which quietly fixes a
+  pre-existing split: `consolidationKey` carries the account, so two towel charges at one
+  rate — one carrying its item's account and one carrying nothing — keyed differently
+  (`acct:<id>` against `acct:none`) and came out as two lines that were then written with
+  the *same* account. They merge now.
+- **The code links through to the account**, editable or not. "What is 4-1200?" is the
+  first question anybody reconciling asks.
+
+**This reverses a decision `CLAUDE.md` recorded, and the reversal is argued rather than
+quietly made.** §27 said a per-charge-type map was *"a second place a laundry has to keep
+in step with its own books … the first wrong entry would mis-post every invoice after
+it."* The owner overruled it. Both halves are answered: an item's account still wins, so
+nothing already coded moves and the map only answers where the item master **cannot**; and
+it is a real table with a real foreign key, gated on `can_write_purchases()`, validated by
+trigger, and `on delete set null` — so a tidied chart degrades to *uncoded* rather than to
+an insert that raises and takes a month's invoicing with it. The failure that note feared
+was a dangling id in a settings blob. There is no blob.
+
+**Two §23 reads were fixed on the way through**, both feeding a write: the invoice page's
+chart-of-accounts read and its item catalogue named no tenant, so a platform admin — whose
+`is_member()` is true of every laundry — could be offered one business's accounts while
+the write is scoped to another's.
+
+- 1,004 unit tests (was 991) and **504 pgTAP assertions across 27 files (was 485/26)**.
+  `verify` green — typecheck, lint, tests and the production build; all 45 migrations
+  applied to a fresh Postgres 16 with the whole suite on top.
+- **Every new assertion was confirmed to fail without its fix** rather than assumed to be
+  doing something: restoring 0017's guard body fails four of the new proof's assertions,
+  and weakening the read policy to `is_member` fails the driver's.
+- **The migration's own assertion caught a defect in the migration**, which is what they
+  are for: the policy count read `qual || coalesce(with_check,'')`, and an INSERT policy
+  has no USING clause — so `NULL || …` swallowed two of the four and it reported 3.
+- **The proof's first draft was wrong in the way this repo keeps recording.** It asserted
+  the auditor's UPDATE raises `42501`. It does not: an UPDATE a policy's USING clause
+  excludes matches **no rows and raises nothing at all**, so that assertion would have
+  passed the moment the gate was removed. It is by outcome now. An INSERT is different —
+  its WITH CHECK really does raise — which is why the driver's insert is asserted the
+  other way.
+- Driven in a real browser at 320/390/768/1440 in **both themes**: **16 interaction
+  assertions**, 0 console errors, 0 overflow inside the section, 0 targets under 36px.
+  Document overflow is 7px at 320 and 0 elsewhere — **byte-identical to the recorded
+  baseline** (the pre-existing dispatch-planner fixture), so this adds none.
+- **Measuring found a real defect and then a vacuous run.** The account links were 18–23px
+  against §10b's 36px floor; and the first "clean" pass was measuring a **dead server on
+  the wrong port**, its console errors the only thing that gave it away. The harness now
+  fails on any console error, which is what caught it.
+- A link inside the open coding dialog was removed rather than resized: it navigated away
+  from an unsaved form, which is a trap dressed as a convenience.
+
+**Applied to nothing yet — `0044` has not gone on `laundrymart-syd`.** Every release since
+2026-08-18 records the schema leading the code, and this one still needs that: apply the
+migration first, then merge. **Then, before trusting it: open a draft invoice on
+`ats.coreit.com.au`, press the code on the fuel line and give it an account; set Money ›
+Charge accounts › Fuel levy to the same account; approve a second job for that customer
+and confirm the fuel line on the draft comes back coded without anybody touching it.**
+
 ### 2026-08-26 · 0043 comes into the repo, and the Xero basis follows it
 The owner's instruction, after the merge record noted the hosted project carrying a migration
 this repository did not have. **No `src/` change; one migration file added, reconstructed rather
@@ -6726,19 +6858,64 @@ line by hand. `0036` closes that.
   roll-up is the same shape as one typed at a desk. The mode switch is an entry
   affordance: with three pickers on screen at once the form asks four questions and
   none of them says which to answer.
-- **`items.income_account_id` is the only bridge, and it is a decision.** MYOB keeps
-  the same fact under the same words ("Income Account for Tracking Sales"), so an
-  item carries its account and every line naming that item is coded by itself —
-  typed, generated by the per-job run, or rolled up by the month end.
-  `lib/invoices/account-coding.ts` is the one implementation both writers share.
-  **A per-charge-type map was considered and left out**: it would be a second place
-  a laundry has to keep in step with its own books, this app has no way to check its
-  answers, and the first wrong entry would mis-post every invoice after it.
+- **The coding ladder is three tiers, and the item master is the middle one**
+  (`resolveChargeAccount` in `lib/invoices/account-coding.ts` — one implementation
+  every writer shares): the charge's own account, chosen by hand on the job
+  (0039); then the item's income account, which is where MYOB keeps the same fact
+  under the same words ("Income Account for Tracking Sales"); then **the charge
+  type's default** (`charge_type_accounts`, 0044). Getting the order the other way
+  round is the failure worth naming — resolving the item ahead of the charge would
+  quietly send a different account from the one somebody deliberately chose, and
+  nobody would find out until a bookkeeper reconciled.
+- **The third tier reverses a decision this section used to record, and the
+  reversal is the part worth reading.** It said: *"A per-charge-type map was
+  considered and left out: it would be a second place a laundry has to keep in
+  step with its own books, this app has no way to check its answers, and the first
+  wrong entry would mis-post every invoice after it."* The owner overruled that on
+  2026-08-26, and the objection stops biting because both halves of it were
+  answered rather than waved away:
+  - **It is not a second place for anything that had a first one.** An item's
+    account still wins, so nothing coded through the item master moves. The map
+    answers only where the item master *cannot* — a fuel levy, a minimum service
+    fee, a delivery charge: the lines that name **no item at all** and therefore
+    reached the books uncoded however carefully the items were set up. Not a
+    hypothetical class; it is the line the change was reported on.
+  - **A wrong entry cannot silently mis-post, because it is a real table with a
+    real foreign key.** Gated on `can_write_purchases()`, validated by
+    `guard_charge_type_account` against the same three rules every other writer of
+    an account id obeys, and `on delete set null` so a tidied chart degrades to
+    *uncoded* rather than to an insert that raises and takes a month's invoicing
+    with it. The failure the old note feared was a dangling id in a settings blob.
+    There is no blob.
 - **An uncoded line is legal, and counted.** A free-text line with no account is
   precisely what the client asked to be able to write, so the app makes the gap
   visible instead of refusing the work: `uncodedLineCount` drives a notice on the
   invoice, on a sent one too — that is when somebody is reconciling it. The same
   call the pricer makes about laundry nobody has priced.
+- **A line's code is changed in place, and *where it is written* depends on where
+  the line reads it from** (`setInvoiceLineAccount`). Not a detail: a job line's
+  account is **derived**, and `rebuildJobLines` re-derives every `origin = 'job'`
+  line each time a job joins the running draft — so an override written onto the
+  line would be discarded the next time somebody approved a job, with nothing
+  saying so. That is the class of silent failure this file records shipping three
+  times, so the code goes to the **source** instead: the frozen charges the line
+  was rolled up from, which `0044` permits while the invoice is still a draft. A
+  `manual` or `contract` line is written directly, because the rebuild never
+  touches either.
+  - **The notice used to read "Remove and re-add a line to give it a code", and
+    following that advice would have billed the customer twice.** A job line
+    removed and re-added through the composer comes back `origin = 'manual'`; the
+    next rebuild re-derives the job line beside it, and the invoice carries the
+    charge twice. Gone, with the only route it described.
+  - **Which charges are behind a line** is the consolidation key with the account
+    taken out — item, charge type, unit price and GST — compared against the
+    line's *effective* account, because a charge whose own column is null may
+    still be on the line by way of its item. A line spanning several jobs carries
+    no `laundry_order_id`, so the search widens to the invoice's whole source list
+    rather than being skipped.
+  - **The code links through to the account** in both the editable and the
+    read-only cell. "What is 4-1200?" is the first question anybody reconciling
+    asks, and the answer was a search away.
 - **Two columns for one fact, and the trigger refuses every way they could
   disagree.** `gl_account_id` is what a report joins on; `account_code` is the
   snapshot that survives a chart being tidied, because an invoice is a record of

@@ -19,11 +19,12 @@ import {
 import { ConfirmSubmit } from "@/components/confirm-submit";
 import { Field, Input, Select, SubmitButton } from "@/components/form";
 import { InvoiceLineForm, type LineFormAccount, type LineFormItem } from "./line-form";
+import { LineCode, LineCoding } from "./line-coding";
 import { PrintButton } from "@/components/print-button";
 import { emailIsConfigured } from "@/lib/email/send";
 import {
   addInvoiceLine, createCreditNote, emailInvoice, issueInvoice, recordPayment,
-  removeInvoiceLine, removeJobFromInvoice, voidInvoice,
+  removeInvoiceLine, removeJobFromInvoice, setInvoiceLineAccount, voidInvoice,
 } from "../actions";
 
 export const dynamic = "force-dynamic";
@@ -127,7 +128,7 @@ export default async function InvoiceDetailPage({
       <div className="grid gap-6 xl:grid-cols-3">
         <div className="space-y-6 xl:col-span-2">
           <Suspense fallback={<SkeletonRows rows={5} />}>
-            <Lines invoiceId={id} editable={editable} />
+            <Lines invoiceId={id} editable={editable} tenantId={session.tenantId} />
             <ServiceBreakdown invoiceId={id} tenantId={session.tenantId} />
           </Suspense>
 
@@ -376,7 +377,10 @@ async function ServiceBreakdown({ invoiceId, tenantId }: { invoiceId: string; te
   );
 }
 
-async function Lines({ invoiceId, editable }: { invoiceId: string; editable: boolean }) {
+async function Lines(
+  { invoiceId, editable, tenantId }:
+  { invoiceId: string; editable: boolean; tenantId: string },
+) {
   const supabase = await createClient();
 
   /*
@@ -392,8 +396,8 @@ async function Lines({ invoiceId, editable }: { invoiceId: string; editable: boo
               + "sequence, gl_account_id, account_code")
       .eq("invoice_id", invoiceId).order("sequence")
       .returns<InvoiceLine[]>(),
-    editable ? loadItemCatalogue() : Promise.resolve([]),
-    editable ? loadChartOfAccounts() : Promise.resolve([]),
+    editable ? loadItemCatalogue(tenantId) : Promise.resolve([]),
+    editable ? loadChartOfAccounts(tenantId) : Promise.resolve([]),
   ]);
 
   const lines = data ?? [];
@@ -412,11 +416,15 @@ async function Lines({ invoiceId, editable }: { invoiceId: string; editable: boo
             // than a blank: "not coded" is an answer, and an empty cell reads as
             // a rendering fault.
             header: "Code",
-            cell: (row) => (
-              <span className={row.account_code ? "font-mono" : "text-muted-foreground"}>
-                {row.account_code ?? "—"}
-              </span>
-            ),
+            cell: (row) => (editable ? (
+              <LineCoding
+                lineId={row.id} invoiceId={invoiceId} accounts={chart}
+                accountId={row.gl_account_id} code={row.account_code}
+                description={row.description} action={setInvoiceLineAccount}
+              />
+            ) : (
+              <LineCode accountId={row.gl_account_id} code={row.account_code} />
+            )),
             hideBelow: "sm",
           },
           {
@@ -453,7 +461,9 @@ async function Lines({ invoiceId, editable }: { invoiceId: string; editable: boo
         <div className="mt-4">
           <Notice tone="info" title={`${counted(uncoded, "line")} not coded to an account`}>
             {editable
-              ? "They will reach your books with no account on them. Remove and re-add a line to give it a code."
+              ? "They will reach your books with no account on them. Press the code on a line to "
+                + "give it one — or set a default for that kind of charge, and every line like it "
+                + "is coded from now on."
               : "They reached your books with no account on them."}
           </Notice>
         </div>
@@ -475,11 +485,14 @@ async function Lines({ invoiceId, editable }: { invoiceId: string; editable: boo
  * over is an arbitrary slice. Inactive items are left out: an invoice is written
  * today, and offering something the laundry has retired is offering a mistake.
  */
-async function loadItemCatalogue(): Promise<LineFormItem[]> {
+async function loadItemCatalogue(tenantId: string): Promise<LineFormItem[]> {
   const supabase = await createClient();
   const { data } = await supabase
     .from("items")
     .select("id, item_code, name, description, laundry_category, sell_price, tax_code, income_account_id")
+    // §23, as for the chart below: the item picked here carries an account id
+    // onto the line, so the read that offers it names its tenant.
+    .eq("tenant_id", tenantId)
     .is("deleted_at", null)
     .eq("status", "active")
     // An item the laundry only *buys* is not something a customer is charged
@@ -507,11 +520,16 @@ async function loadItemCatalogue(): Promise<LineFormItem[]> {
  * `invoices.write` also holds that today, a role split tomorrow must degrade to
  * "no codes offered" rather than to a 500 on the invoice screen.
  */
-async function loadChartOfAccounts(): Promise<LineFormAccount[]> {
+async function loadChartOfAccounts(tenantId: string): Promise<LineFormAccount[]> {
   const supabase = await createClient();
   const { data } = await supabase
     .from("gl_accounts")
     .select("id, code, name, account_type, tax_code, is_header")
+    // §23's standing rule for a read that feeds a write: the id picked here is
+    // posted straight back onto an invoice line. `is_member()` is true of every
+    // laundry for a platform admin, so an unfiltered read would offer one
+    // business's chart while the write is scoped to another's.
+    .eq("tenant_id", tenantId)
     .is("deleted_at", null)
     .eq("is_header", false)
     .order("code")
