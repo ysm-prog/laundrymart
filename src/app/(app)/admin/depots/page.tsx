@@ -7,6 +7,9 @@ import {
   Card, DataTable, EmptyState, PageHeader, SkeletonRows, StatusBadge,
 } from "@/components/ui";
 import { Field, Input, Select, SubmitButton } from "@/components/form";
+import { ListControls } from "@/components/list-controls";
+import { FilterChips, FilterSummary } from "@/components/filters";
+import { isFiltered } from "@/lib/filters";
 import { createDepot, updateDepotStatus } from "../actions";
 
 export const metadata = { title: "Sites" };
@@ -20,8 +23,16 @@ const TIMEZONES = [
   "Australia/Adelaide", "Australia/Perth", "Australia/Hobart", "Australia/Darwin",
 ].map((value) => ({ value, label: value.replace("Australia/", "") }));
 
-export default async function DepotsPage() {
+type Search = { q?: string; status?: string };
+const FILTER_KEYS = ["q", "status"] as const;
+
+export default async function DepotsPage({
+  searchParams,
+}: {
+  searchParams: Promise<Search>;
+}) {
   const session = await requireCapability("admin.read");
+  const params = await searchParams;
   const writable = can(session.role, "admin.write");
 
   return (
@@ -31,8 +42,8 @@ export default async function DepotsPage() {
         description="Each place you operate from. Runs, trucks, drivers and stock all belong to one site — most laundries only ever need one."
       />
 
-      <Suspense fallback={<SkeletonRows rows={4} />}>
-        <DepotList writable={writable} />
+      <Suspense key={JSON.stringify(params)} fallback={<SkeletonRows rows={4} />}>
+        <DepotList params={params} writable={writable} />
       </Suspense>
 
       {writable ? (
@@ -70,7 +81,7 @@ export default async function DepotsPage() {
   );
 }
 
-async function DepotList({ writable }: { writable: boolean }) {
+async function DepotList({ params, writable }: { params: Search; writable: boolean }) {
   const supabase = await createClient();
   const { data } = await supabase
     .from("depots")
@@ -78,10 +89,51 @@ async function DepotList({ writable }: { writable: boolean }) {
     .is("deleted_at", null).order("code")
     .returns<Depot[]>();
 
+  const all = data ?? [];
+  const term = params.q?.trim().toLowerCase();
+  const rows = all.filter((row) => {
+    if (term && !`${row.code} ${row.name} ${row.suburb ?? ""}`.toLowerCase().includes(term)) {
+      return false;
+    }
+    if (params.status && row.status !== params.status) return false;
+    return true;
+  });
+  const filtered = isFiltered(params, FILTER_KEYS);
+  const statusCount = (status: string) => all.filter((row) => row.status === status).length;
+
   return (
+    <>
+    {/* Most laundries have one site, and a filter bar over one row is furniture.
+        It appears when there are enough sites to hunt through. */}
+    {all.length > 3 ? (
+      <ListControls
+        action="/admin/depots"
+        q={params.q}
+        params={params}
+        filterKeys={FILTER_KEYS}
+        placeholder="Code, name or suburb…"
+        chips={
+          <FilterChips
+            basePath="/admin/depots" params={params} name="status" label="Site status"
+            allLabel="All sites" allCount={all.length}
+            options={[
+              { value: "active", label: "Active", count: statusCount("active") },
+              { value: "inactive", label: "Inactive", count: statusCount("inactive") },
+            ]}
+          />
+        }
+        summary={
+          <FilterSummary basePath="/admin/depots" shown={rows.length} total={all.length}
+                         noun="site" filtered={filtered} />
+        }
+      />
+    ) : null}
     <DataTable
-      rows={data ?? []}
-      empty={<EmptyState title="No depots yet" description="Add your first depot before creating routes." />}
+      rows={rows}
+      empty={filtered
+        ? <EmptyState title="No sites match those filters"
+                      description="Try a broader search, or clear the filters above." />
+        : <EmptyState title="No depots yet" description="Add your first depot before creating routes." />}
       columns={[
         { header: "Code", cell: (row) => row.code },
         { header: "Name", cell: (row) => row.name },
@@ -108,5 +160,6 @@ async function DepotList({ writable }: { writable: boolean }) {
         },
       ]}
     />
+    </>
   );
 }

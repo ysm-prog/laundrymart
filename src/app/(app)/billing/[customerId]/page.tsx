@@ -3,15 +3,17 @@ import { requireCapability } from "@/lib/auth/context";
 import { createClient } from "@/lib/supabase/server";
 import { can } from "@/lib/roles";
 import { money } from "@/lib/format";
-import { formatIso, periodFor, type IsoDate } from "@/lib/domain/dates";
-import { businessToday, isCalendarDate } from "@/lib/domain/timezone";
+import {
+  BILLING_PERIOD_PRESETS, formatIso, periodParams, resolvePeriod,
+} from "@/lib/domain/dates";
+import { businessToday } from "@/lib/domain/timezone";
 import { BILLING_STATUS_LABELS } from "@/lib/domain/billing";
 import { customerPeriodDetail } from "@/lib/invoices/period";
 import {
   Badge, ButtonLink, Card, DataTable, EmptyState, Notice, PageHeader, Stat,
 } from "@/components/ui";
 import { SubmitButton } from "@/components/form";
-import { PeriodFilter } from "../period-filter";
+import { PeriodFilter } from "@/components/filters";
 import { generateCustomerPeriodInvoice } from "../actions";
 
 export const dynamic = "force-dynamic";
@@ -39,23 +41,20 @@ export const metadata = { title: "Customer billing" };
  * them, clearly marked and excluded from every total.
  */
 
-function rangeFrom(from: string | undefined, to: string | undefined, today: IsoDate) {
-  const fallback = periodFor("last_month", today)!;
-  if (!from || !to || !isCalendarDate(from) || !isCalendarDate(to) || from > to) return fallback;
-  return { start: from, end: to };
-}
-
 export default async function CustomerBillingPage({
   params, searchParams,
 }: {
   params: Promise<{ customerId: string }>;
-  searchParams: Promise<{ from?: string; to?: string; show?: string }>;
+  searchParams: Promise<{ period?: string; from?: string; to?: string; show?: string }>;
 }) {
   const session = await requireCapability("billing.read");
   const { customerId } = await params;
   const query = await searchParams;
   const today = businessToday();
-  const range = rangeFrom(query.from, query.to, today);
+  // `last_month` for the reason `/billing` gives, and `all` is not on offer, so
+  // the range is always real.
+  const period = resolvePeriod(query, today, "last_month");
+  const range = period.range!;
   const showAll = query.show === "all";
 
   const supabase = await createClient();
@@ -81,7 +80,7 @@ export default async function CustomerBillingPage({
 
   const canGenerate = can(session.role, "invoices.write");
   const base = `/billing/${customerId}`;
-  const periodQuery = `from=${range.start}&to=${range.end}`;
+  const periodQuery = new URLSearchParams(periodParams(period)).toString();
 
   return (
     <div className="space-y-4">
@@ -99,8 +98,10 @@ export default async function CustomerBillingPage({
 
       <Card title="Billing period">
         <PeriodFilter
-          basePath={base} start={range.start} end={range.end} today={today}
-          extra={showAll ? { show: "all" } : {}}
+          basePath={base}
+          params={showAll ? { ...query, show: "all" } : { ...query, show: undefined }}
+          period={period} presets={BILLING_PERIOD_PRESETS} today={today}
+          label="Billing period"
         />
       </Card>
 

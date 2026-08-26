@@ -8,11 +8,29 @@ import {
   DataTable, EmptyState, PageHeader, SkeletonRows, humanise,
 } from "@/components/ui";
 import { ListControls, Pagination, pageFrom, rangeFor } from "@/components/list-controls";
+import { FilterChips, PeriodFilter } from "@/components/filters";
+import { isFiltered } from "@/lib/filters";
+import {
+  ACTIVITY_PERIOD_PRESETS, resolvePeriod, type ResolvedPeriod,
+} from "@/lib/domain/dates";
+import { businessToday, getAdelaideDayRange } from "@/lib/domain/timezone";
 
 export const metadata = { title: "Activity log" };
 export const dynamic = "force-dynamic";
 
-type Search = { q?: string; entity?: string; page?: string; error?: string; ok?: string };
+type Search = {
+  q?: string; entity?: string; action?: string; period?: string; from?: string; to?: string;
+  page?: string; error?: string; ok?: string;
+};
+const FILTER_KEYS = ["q", "entity", "action", "period", "from", "to"] as const;
+
+/** The four verbs `recordAudit()` writes. Read once, acted on constantly. */
+const ACTIONS = [
+  { value: "create", label: "Created" },
+  { value: "update", label: "Changed" },
+  { value: "delete", label: "Deleted" },
+  { value: "status_change", label: "Status changed" },
+] as const;
 
 const ENTITIES = [
   "customer", "service_agreement", "item", "vehicle", "driver", "depot",
@@ -23,6 +41,9 @@ const ENTITIES = [
 
 export default async function AuditPage({ searchParams }: { searchParams: Promise<Search> }) {
   const params = await searchParams;
+  // All time by default: the log is the whole history and narrowing it on open
+  // would hide the thing somebody came here to find.
+  const period = resolvePeriod(params, businessToday(), "all");
   await requireCapability("admin.read");
 
   return (
@@ -34,19 +55,38 @@ export default async function AuditPage({ searchParams }: { searchParams: Promis
       <ListControls
         action="/admin/audit"
         q={params.q}
+        params={params}
+        filterKeys={FILTER_KEYS}
+        placeholder="What was written in the detail…"
         filters={[{
           name: "entity", label: "record type", value: params.entity,
           options: ENTITIES.map((value) => ({ value, label: humanise(value) })),
         }]}
+        chips={
+          <>
+            {/* The period is the filter this screen was missing. An audit log is
+                read to answer "what happened on the 14th?", and without a window
+                that is a hunt through pages of everything. */}
+            <PeriodFilter
+              basePath="/admin/audit" params={params} period={period}
+              presets={ACTIVITY_PERIOD_PRESETS} today={businessToday()} label="Happened in"
+              hideCustomWhenPreset
+            />
+            <FilterChips
+              basePath="/admin/audit" params={params} name="action" label="What was done"
+              allLabel="Everything" options={ACTIONS}
+            />
+          </>
+        }
       />
       <Suspense key={JSON.stringify(params)} fallback={<SkeletonRows rows={10} />}>
-        <AuditList params={params} />
+        <AuditList params={params} period={period} />
       </Suspense>
     </div>
   );
 }
 
-async function AuditList({ params }: { params: Search }) {
+async function AuditList({ params, period }: { params: Search; period: ResolvedPeriod }) {
   const supabase = await createClient();
   const page = pageFrom(params.page);
   const [from, to] = rangeFor(page);
@@ -58,7 +98,16 @@ async function AuditList({ params }: { params: Search }) {
     .range(from, to);
 
   if (params.entity) query = query.eq("entity", params.entity);
+  if (params.action) query = query.eq("action", params.action);
   if (params.q) query = query.ilike("summary", `%${params.q}%`);
+  if (period.range) {
+    // `created_at` is a timestamp and the window is a pair of operational days,
+    // so the end has to reach the *end* of its day — `<= 2026-08-26` on a
+    // timestamp means midnight, and would drop everything that happened during it.
+    query = query
+      .gte("created_at", getAdelaideDayRange(period.range.start).start)
+      .lt("created_at", getAdelaideDayRange(period.range.end).end);
+  }
 
   const { data, count } = await query.returns<AuditLog[]>();
 
@@ -73,7 +122,10 @@ async function AuditList({ params }: { params: Search }) {
     <>
       <DataTable
         rows={data ?? []}
-        empty={<EmptyState title="Nothing recorded yet" description="Writes appear here as soon as they happen." />}
+        empty={isFiltered(params, FILTER_KEYS)
+          ? <EmptyState title="Nothing matches those filters"
+                        description="Try a wider period, or clear the filters above." />
+          : <EmptyState title="Nothing recorded yet" description="Writes appear here as soon as they happen." />}
         columns={[
           { header: "When", cell: (row) => dateTime(row.created_at) },
           { header: "Entity", cell: (row) => humanise(row.entity) },

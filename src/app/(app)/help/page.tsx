@@ -109,6 +109,22 @@ const GLOSSARY: Array<{ term: string; also?: string; meaning: string }> = [
     meaning: "A job whose date has gone by and is not finished or cancelled. It is worked out from today's date every time you look — nobody sets it, and it clears itself the moment the job is done.",
   },
   {
+    term: "Filter chips",
+    meaning: "The row of small buttons above a list. Press one to narrow the list to it, press it again to go back. The number on each says how many rows you would be left with, so nothing surprises you.",
+  },
+  {
+    term: "Clear filters",
+    meaning: "Puts everything back. It only appears when something is actually narrowing the list — so if you cannot see it, you are looking at the whole list.",
+  },
+  {
+    term: "Period",
+    meaning: "The stretch of time a list is showing. Today, this week, last month and so on, or two dates of your own under Custom range. The dates it works out are printed underneath, so you can always see exactly what you are looking at.",
+  },
+  {
+    term: "This financial year",
+    meaning: "1 July to 30 June — the Australian year the books run on, not January to December.",
+  },
+  {
     term: "Bulk lot",
     meaning: "Laundry taken in by the bag rather than counted piece by piece. A bulk lot still needs a number of bags, a rough count or a note, so there is something to check it back against.",
   },

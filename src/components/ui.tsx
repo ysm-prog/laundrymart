@@ -386,6 +386,25 @@ export const CONTROL =
  * string exported from a `"use client"` module reaches a server component as a
  * client reference rather than as its value.
  */
+/**
+ * The same control skin, sized to its content instead of to its row.
+ *
+ * It exists because **`cx(CONTROL, "w-auto")` does not work, and never has.**
+ * Both are plain `width` utilities of equal specificity, and Tailwind emits
+ * `.w-full` *after* `.w-auto`, so the later rule wins and the control fills its
+ * row regardless. Ten call sites across the filter bars were written that way —
+ * the whole of the Customer laundry filter row, both My Runs pickers and the
+ * period range — and every one of them was rendering full width. Measured, not
+ * guessed: `.w-auto` sits at byte 22698 of the built stylesheet and `.w-full` at
+ * 22717.
+ *
+ * Replacing the class rather than layering another one over it takes the
+ * ordering out of the question. A *responsive* override (`sm:w-auto`) is fine
+ * and is left alone — Tailwind emits variants after the base utilities, so those
+ * genuinely do win.
+ */
+export const CONTROL_AUTO = CONTROL.replace("w-full ", "w-auto ");
+
 export const SELECT_CHEVRON =
   "appearance-none bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22" +
   "%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%236b7280%22%20stroke-width%3D%222%22" +
