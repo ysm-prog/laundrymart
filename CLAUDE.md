@@ -1665,6 +1665,25 @@ through Adjust Run → Save & Lock Run as `owner@roles.example.com` on `ats.core
 Everything else is proved at the database level, in the component gallery, by live probe, or by
 the pure rules above.
 
+**Merged to `Prod` on 2026-08-26** (PR #23, merge commit `00c6613`), and **`Dev` brought up to it**
+the same minute (PR #24), so `ats.coreit.com.au` carries the whole of this branch. CI green on all
+three jobs for both — verify, gitleaks, and the DB job against a fresh Postgres 16 with the whole
+pgTAP suite and the seed. **Nothing was left to apply**: `0036_run_sequence_control`, `0037` and
+`0038` went on the hosted project before the merge, which is the safe order this file records for
+every release since 2026-08-18 — the schema leads the code.
+
+**A merge commit rather than the fast-forward the last six entries record**, because pushing to
+`Prod` directly was refused in that session and the merge went through a pull request instead. The
+tree is identical either way and `Prod` was never force-pushed; it is written down because
+`git log --oneline` on `Prod` now reads differently from the entries above it.
+
+**The one thing this closes and the one it does not.** The live regression the 2026-08-25
+reconciliation entry records is now gone: `0036_run_sequence_control` had been applied to the
+hosted project while its code sat unmerged, so the database refused a dispatcher reordering a stop
+from a control the deployed screen still offered. The deployed screen and the database agree from
+this merge on. Still open, and still needing a login rather than a commit: taking a real run
+through Adjust Run → Save & Lock Run as the owner.
+
 ### 2026-08-25 · A line's own account code is the one that reaches Xero
 Working the backlog the requirements document leaves open. One migration (`0038`), **no new
 table, no new policy, no new function, no new capability, and no row changed** — the column it

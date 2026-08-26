@@ -1,7 +1,28 @@
 # MEMORY — working session handoff
 > Auto-loaded each session. Canonical state is CLAUDE.md; this is the live delta.
 
-## Latest: merged with Prod — the coding ladder and the audit rule
+## Latest: merged to Prod and Dev — the branch is live
+2026-08-26. **PR #23 → `Prod` (`00c6613`), PR #24 → `Dev`**, CI green on all three jobs for both
+(verify, gitleaks, and the DB job: 40 migrations, 431 pgTAP assertions and the seed against a
+fresh Postgres 16). `ats.coreit.com.au` carries the whole branch.
+
+- **Nothing was outstanding to apply.** `0036_run_sequence_control`, `0037_account_and_item_codes`
+  and `0038_invoice_line_account` all went on `laundrymart-syd` *before* the merge — the schema
+  leads the code, the same order every release since 2026-08-18.
+- **Merge commits, not the fast-forwards the changelog records**, because pushing to `Prod`
+  directly was refused in this session and it went through pull requests instead. Same tree,
+  `Prod` never force-pushed. Recorded in CLAUDE.md §18 so the shape of `git log` on `Prod` is not
+  a surprise.
+- **The live regression is closed.** `0036_run_sequence_control` had been applied while its code
+  sat unmerged, so the database refused a dispatcher reordering a stop from a control the deployed
+  screen still showed. Screen and database agree from this merge on.
+
+**Still open and needing a login, not a commit:** take one real run through Adjust Run → Save &
+Lock Run as `owner@roles.example.com`, and the coding ladder has never met real data — no
+`XERO_CLIENT_ID`, 0 `xero_connections`, and all 647 invoices carry 0 lines.
+
+
+## Previously: merged with Prod — the coding ladder and the audit rule
 2026-08-25. **Most of this branch is already live on `ats.coreit.com.au`**; another session
 merged the run-sequencing work and the account-codes work to `Prod` while this branch was still
 open. `origin/Prod` was merged **into** this branch and the four conflicts resolved before
