@@ -1,7 +1,69 @@
 # MEMORY — working session handoff
 > Auto-loaded each session. Canonical state is CLAUDE.md; this is the live delta.
 
-## Latest: what kind of laundry each item is
+## Latest: one invoice per customer per month, and it fills up as it goes
+2026-08-26, branch `claude/invoice-draft-consolidation-eqr3o7`. **One migration (`0040`)**, no new
+table, no new role, no new capability, nothing dropped. `docs/REQUIREMENTS-RUNNING-DRAFT-INVOICE.md`
+is the BA statement; CLAUDE.md §30 the rationale, §4 the database rules, §7 the migration.
+
+**The defect: consolidation belonged to a button press, not to the customer.**
+`generateInvoicesForJobs` always **inserted** and `groupJobsForInvoicing` grouped only the jobs it
+was handed — so a `monthly_consolidated` customer got one invoice per *press*. Approve on the 3rd
+and Generate, approve on the 11th and Generate: two August invoices. Nothing double-billed
+(`uq_invoice_source_jobs_once`); the month was split.
+
+- **Approving a job places its charges on that customer's open draft for the period.** Next job
+  joins the same one; same item at the same rate merges into one line. `manual` is the opt-out —
+  no new setting, because that billing method already means "a person decides each time".
+- **New board: Money › Open drafts** (`/invoices/drafts`), one card per running invoice with
+  **Issue now** on every row and a bulk Issue selected. Issuing at any time is the point.
+- **Take a job back off a draft** — voiding releases *all* of them, which is wrong for a draft
+  carrying eleven good jobs and one bad one.
+- **The month-end run writes onto the same draft**, so §4's "one invoice per customer per period,
+  contracts *and* jobs" is true for the first time; it used to raise two.
+- **An invoice is dated the day it is issued** (`issueOneInvoice` re-stamps `issue_date`/`due_date`).
+  A behaviour change, and necessary: a draft opened on the 3rd would otherwise arrive on the 31st
+  a fortnight overdue.
+
+**Two holes found on the way, neither about the feature:**
+- **A line could be added to an issued, sent, paid or voided invoice** — `addInvoiceLine` checks the
+  capability and never the status, and `invoice_lines` is on `/rest/v1/…`.
+  `guard_invoice_line_draft_only` refuses with 42501 (trigger, not restrictive policy: the rule is
+  about the *parent's* state, and a restrictive policy writes zero rows in silence).
+- **Nothing said where a line came from**, so "rebuild the generator's lines, leave typed ones
+  alone" was inexpressible. `invoice_lines.origin` = job / contract / manual, default manual.
+
+**Decisions:** job lines are **rebuilt, never patched** (consolidated lines are sums of frozen
+amounts; recomputing loses the cent), `jobInvoiceLines` is the single line writer shared by create
+and append, and the draft is found via a **partial unique index** rather than remembered. The
+residual two-writer race is documented and narrowed by one retry inside `rebuildJobLines`; closing
+it fully needs a database function.
+
+**913 unit tests (was 894), 460 pgTAP assertions (was 439), `verify` green**, 41 migrations against
+a fresh Postgres 16 with the suite and seed. Every new assertion proved to fail without its fix.
+Gallery measured: 24 combinations, 0 console errors, 0 section overflow, 0 sub-36px targets,
+document overflow byte-identical to the baseline.
+
+**Applied to `laundrymart-syd` before the merge** (`20260826040754`), so the schema led the code.
+Rehearsed against the real 647 invoices and rolled back first — and the rollback mechanism itself
+was proved before being trusted. After the apply: index unique, `origin` defaulting to `manual`,
+guard attached and **not** callable by `authenticated`/`anon`, 0 probe leftovers, every count
+unchanged. Advisors 22 → 23, the addition being `can_write_items` from the *other* 0040 — mine adds
+none.
+
+**There are two 0040s on the project and both are ours** — `0040_item_master_write` (03:08) and
+`0040_open_draft_invoices` (04:07). Disjoint objects, so unlike the 0036/0037 collision there was
+nothing to reconcile; **proved** by applying both to a fresh Postgres 16 in filename order with the
+whole suite on top. Merged tree: **928 unit tests, 469 pgTAP assertions**, `verify` green.
+
+**Still not opened behind the auth gate** (no credentials here). Next: take a job in on
+`ats.coreit.com.au`, approve it, check Money › Open drafts; take a second job in for the same
+customer, approve it, confirm the *same* invoice number picks it up with quantities added rather
+than a second line; press Issue now and check it is dated today. All 647 invoices still carry 0
+lines, so the first running draft has yet to collect anything.
+
+
+## Previously: what kind of laundry each item is
 2026-08-26, branch `claude/invoice-item-code-selection-vlwwb4`. **No migration** — one pure
 rule (`src/lib/domain/laundry-category.ts`), its tests, and a live data write. CLAUDE.md §25
 and the newest changelog entry have it.
@@ -44,7 +106,7 @@ Terry Nappies`, which is laundry and fits none of the nine kinds.
 
 ---
 
-## Previous: the item master is one list, named one way, changed by two people
+## Previously: the item master is one list, named one way, changed by two people
 2026-08-26, branch `claude/invoice-item-code-selection-vlwwb4`. One migration
 (`0040_item_master_write`) — no new table, no new column, no new trigger, nothing dropped
 but the policy it replaces, no row changed. CLAUDE.md §3, §7, §25 and the newest changelog
@@ -108,7 +170,7 @@ line arrives already coded.
 
 ---
 
-## Previous: the Jay CT test data is deleted
+## Previously: the Jay CT test data is deleted
 2026-08-26, at the owner's instruction. **Live data deletion only — no migration, no schema, no code
 change.** 58 rows across 11 tables, all in Adelaide, all belonging to the two duplicate `Jay CT`
 customer records: 2 customers, 2 locations, LJ00002–LJ00006, 7 items, 31 activity rows, 4 stops,

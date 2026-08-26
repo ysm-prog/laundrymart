@@ -363,3 +363,81 @@ export function itemTotals(entries: readonly ChargeEntry[]): ItemTotal[] {
 
   return order.map((key) => byKey.get(key)!);
 }
+
+/* ------------------------------------------------------ the lines to write */
+
+/**
+ * The shape of an invoice line, before it is a row. Pure output — the writers
+ * add tenant, invoice, sequence and the account fallback.
+ */
+export type InvoiceLineDraft = {
+  description: string;
+  charge_type: string;
+  quantity: number;
+  unit_price: number;
+  amount: number;
+  taxable: boolean;
+  source_item_id: string | null;
+  gl_account_id: string | null;
+  source_agreement_id: string | null;
+  /** The one job this line belongs to, or null once it spans several. */
+  jobId: string | null;
+};
+
+/**
+ * The lines a set of frozen job charges should become.
+ *
+ * Two shapes from one rule, because there are two shapes of invoice:
+ *
+ * - `perJob` — one line per charge, exactly as the charges were frozen. There is
+ *   nothing to roll up: the customer is reading one job.
+ * - otherwise — rolled up per item by `consolidateChargeLines`, which is what
+ *   turns ten jobs of towels into one line carrying 1,450.
+ *
+ * **This is shared by the two writers on purpose.** `generateInvoicesForJobs`
+ * uses it when it raises an invoice, and `rebuildJobLines` uses it every time a
+ * job joins or leaves a running draft. The second is a *re-derivation of the
+ * whole set*, so if the two disagreed by so much as a description prefix, adding
+ * a twelfth job to a draft would silently rewrite the first eleven lines.
+ *
+ * The job-number prefix is the one piece of presentation in here, and it earns
+ * its place: a fuel levy has to say which delivery it was charged on, and a
+ * rolled-up towel line must **not** name one of its ten jobs, because that would
+ * be a lie the customer can check.
+ */
+export function jobInvoiceLines(
+  entries: readonly ChargeEntry[],
+  options: { perJob?: boolean } = {},
+): InvoiceLineDraft[] {
+  if (options.perJob) {
+    return entries.map((entry) => ({
+      description: entry.charge.description,
+      charge_type: entry.charge.charge_type,
+      quantity: entry.charge.quantity,
+      unit_price: entry.charge.unit_price,
+      amount: entry.charge.amount,
+      taxable: entry.charge.taxable,
+      source_item_id: entry.charge.source_item_id,
+      gl_account_id: entry.charge.gl_account_id ?? null,
+      source_agreement_id: entry.charge.source_agreement_id,
+      jobId: entry.job.id,
+    }));
+  }
+
+  return consolidateChargeLines(entries).map((line) => ({
+    description: line.contributions.length === 1 && !line.merged
+      ? `${line.contributions[0]!.orderNumber} — ${line.description}`
+      : line.description,
+    charge_type: line.charge_type,
+    quantity: line.quantity,
+    unit_price: line.unit_price,
+    amount: line.amount,
+    taxable: line.taxable,
+    source_item_id: line.source_item_id,
+    gl_account_id: line.gl_account_id,
+    source_agreement_id: line.source_agreement_id,
+    // Null once a line spans more than one job. Safe because the billed-once
+    // constraint is `invoice_source_jobs`, not this column.
+    jobId: line.contributions.length === 1 ? line.contributions[0]!.jobId : null,
+  }));
+}

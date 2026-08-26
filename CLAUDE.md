@@ -355,6 +355,17 @@ key remains the way to reset or re-assert them through the Auth API, but nothing
   charges, which belong to no contract) and a laundry line keeps its `laundry_order_id`.
   **A customer with no contract at all is invoiced when they handed laundry over the counter**,
   which is why contracts are no longer a precondition of the run.
+- **There is at most one open draft per customer per billing period, and a closed invoice's
+  lines are closed** (`uq_invoices_open_draft` and `guard_invoice_line_draft_only`, 0040). The
+  first is a partial unique index, not a convention: two reviewers approving two jobs for one
+  customer in the same second both find nothing and both insert, so a reader that merely looks
+  first is a race. Issuing closes the draft, which is what lets the next approval open a fresh one
+  rather than being refused by a document the customer has already been sent. The second refuses
+  every INSERT, UPDATE and DELETE of a line on an invoice that is not a draft — a void included,
+  because a void is a record of what was said — and raises **42501** out loud where a restrictive
+  policy would have written zero rows in silence. It lets a delete through when the parent invoice
+  row is already gone, which is the `on delete cascade` path; refusing there would make an invoice
+  undeletable. §30 has the reasoning.
 - **Laundry is priced per customer, and a missing price is reported rather than billed at
   zero.** `laundry_prices` (0017) holds one row per kind of laundry either for a customer or
   for the tenant (`customer_id is null`); the customer's own row wins, the default is the only
@@ -431,6 +442,8 @@ branches deploy. Never force-push `Prod`.
 `/invoices/awaiting` (the billing queue — a list of *jobs*, under Money because the decision is a
 billing one; `sectionFor` takes the longest match so it lands there rather than on the register;
 Price Selected → Approve Selected → Generate Selected) ·
+`/invoices/drafts` (the open-drafts board — one card per customer's running invoice, with Issue
+now on each; the month-end question the register could not answer) ·
 `/orders[/new|/:id|/:id/edit]` ·
 `/items[/:id]` · `/drivers` · `/vehicles` · `/routes/templates[/:id]` ·
 `/routes/daily[/:id|/:id/sheet]` · `/routes/planner` · `/jobs[/:id]` ·
@@ -691,6 +704,41 @@ renders no tab strip. Tested in `src/lib/__tests__/nav.test.ts`.
   USING half grants SELECT too: **the fourth time** that shape has had to be
   replaced (0006→0017, 0018→0033, 0021→0036). Six self-assertions, one of which
   caught a defect in this very migration — see the note under 0011.
+  **Numbered 0040 twice**, like 0015, the two 0017s and the two 0036s before it: this file
+  and `0040_open_draft_invoices` came from two branches the same afternoon and both are live.
+  Filename order puts `_item_` first (`i` < `o`), which is also the order they were applied
+  (`20260826030846` then `20260826040754`), so nothing depends on renumbering. They touch
+  **disjoint objects** — this one `items` and `can_write_items()`, that one `invoices`,
+  `invoice_lines` and `guard_invoice_line_draft_only()` — so unlike the 0036/0037 collision
+  there was nothing to reconcile; proved by applying both to a fresh Postgres 16 in filename
+  order with the whole pgTAP suite on top, rather than reasoned about.
+
+- `0040_open_draft_invoices` — **one running draft per customer per period, and a
+  closed invoice is closed.** `uq_invoices_open_draft` (a partial unique index on
+  `(tenant_id, customer_id, period_start, period_end)` where the invoice is a
+  `consolidated` `draft` carrying both period ends and is neither deleted nor
+  archived); `invoice_lines.origin` (`job`/`contract`/`manual`, defaulting to
+  `manual`) with its index and a backfill that states what each existing line
+  already is; `guard_invoice_line_draft_only()` and its trigger. **Adds no table,
+  drops nothing and changes no row's meaning.**
+  Three things, each closing a hole the running draft cannot be built over:
+  the index is what makes "one open draft" a *fact* rather than a convention —
+  two reviewers approving at the same instant both find nothing and both insert,
+  so a reader that merely looks first is a race; `origin` is what lets a rebuild
+  delete the generator's lines and leave a typed one alone; and the guard is the
+  boundary around a document that has left the building, which **did not exist** —
+  `addInvoiceLine`/`removeInvoiceLine` check the caller's capability and never the
+  invoice's status, and `invoice_lines` is on `/rest/v1/…`, so a line could be
+  added to an issued, sent, paid or **voided** invoice from a browser's network
+  tab. A trigger and not a restrictive policy, for 0036's reason: the rule is
+  about the *parent's* state, and a restrictive policy writes zero rows in silence
+  where a trigger raises `42501` and reaches the flash toast as a sentence. It
+  lets a delete through when the parent row is already gone, which is the
+  `on delete cascade` path — refusing there would make an invoice undeletable.
+  Self-asserting on all four outcomes **and behaviourally**, against real rows
+  inside its own transaction: a second open draft refused, a line on an issued
+  invoice refused, and the cascade still deleting. Both halves were proved to
+  fail without the fix rather than assumed to be doing something.
 - `0013_notifications` — `tenants.settings jsonb` (AD-3) and the `notifications` table
   (AD-4). Beware the numbering drift: the unmerged branch
   `claude/warehouse-inventory-flow-psooyq` carries its own `0012_return_count.sql`, which
@@ -745,7 +793,8 @@ Proofs in `supabase/tests/`: `rls_isolation`, `rls_coverage`, `driver_scope`,
 `run_assignment`, `archive_records`, `laundry_pricing`, `platform_admin`, `main_flow_scope`,
 `job_billing`, `purchases_scope`, `supplier_payments_scope`, `import_helpers`,
 `import_activation`, `member_directory`, `boards_scope`, `item_master`,
-`audit_log_scope`, `run_sequence`, `accounts_scope` (**439 assertions**).
+`audit_log_scope`, `run_sequence`, `accounts_scope`, `open_draft_invoices`
+(**469 assertions**).
 
 **`run-db-tests.sh` parses the output rather than trusting the exit code, and that is not
 pedantry.** `psql` exits 0 for a pgTAP file that runs to completion, and a failed assertion is a
@@ -1124,6 +1173,40 @@ list that opened on this month would hide precisely the invoices that are late);
 on **last month**, which is `previousMonth`'s own reasoning.
 
 ## 11. Hosted project
+**`0040_open_draft_invoices` was applied on 2026-08-26** (`20260826040754`) and is now the
+ledger's last entry, behind `0040_item_master_write` (`20260826030846`) — **the project carries two
+migrations numbered 0040**, from two branches the same afternoon, exactly as it carries two 0015s,
+two 0017s and two 0036s. They touch disjoint objects, so unlike the 0036/0037 pair there was
+nothing to reconcile and the repo file is what went on, unaltered.
+
+- **Pre-flight, before anything was written:** every object it creates absent (0 index, 0 column,
+  0 function, 0 trigger); `archived_at` and `deleted_at` both present on `invoices`, since the
+  index's WHERE clause names them; and — **the check that mattered** — **0** existing groups of
+  invoices would have violated the new unique index, asked of the live rows rather than assumed.
+  `invoice_lines` was **0 rows**, so the backfill had nothing to touch. The one draft on the
+  project (`INV00001`, `manual`, no period) sits outside the index predicate entirely.
+- **The rehearsal mechanism was proved before it was trusted.** A `create table` followed by a
+  deliberate `raise` in the same call left **0** tables behind, so a multi-statement call really is
+  one transaction and a rehearsal really does roll back.
+- **Rehearsed against real rows, then aborted.** The unique index built over the **647** live
+  invoices; a second open draft for the same customer and period was refused (23505); a line on an
+  invoice moved to `issued` was refused (42501); the probe invoice deleted through the cascade with
+  **0** survivors. Read back after the rollback: **0** index, **0** column, **0** trigger, **0**
+  probe rows, 647 invoices.
+- **After the apply:** the index reads back **unique**; `invoice_lines.origin` present, defaulting
+  to `'manual'`; the guard attached and SECURITY DEFINER; and `authenticated` and `anon` both
+  **cannot execute it** — the trap 0019 recorded and 0036 shipped. **0** probe leftovers. Counts
+  unchanged: 647 invoices, 0 invoice lines, 512 customers, 5 laundry jobs, 260 items, **0** `anon`
+  table grants and **0** tables without RLS.
+- **Advisors went 22 → 23, and the addition is not this migration's.** The new one is
+  `can_write_items` from `0040_item_master_write`; `guard_invoice_line_draft_only` is **absent**
+  from the list, which is the whole point of the revoke. The list is 22 documented SECURITY
+  DEFINER helpers plus the auth leaked-password toggle.
+
+**Nothing on the project exercises this yet.** All 647 invoices still carry **0** lines, so no
+running draft has ever collected anything — the first one opens when somebody approves a job on
+`ats.coreit.com.au`.
+
 **Verified against `laundrymart-syd` on 2026-08-26 after the Adjust Run merge, and there was nothing
 to apply.** The branch adds no migration, so this was a conformance check rather than a deployment:
 does the live database carry everything the merged code calls?
@@ -1840,6 +1923,125 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-08-26 · One invoice per customer per month, and it fills up as it goes
+The owner's flow, reviewed as a business analyst first and then built. One migration (`0040`),
+**no new table, no new role, no new capability, nothing dropped and no row's meaning changed**.
+`docs/REQUIREMENTS-RUNNING-DRAFT-INVOICE.md` is the client-facing statement — the scenario, the
+eleven gaps, the decisions, the acceptance table; §30 is the engineering rationale.
+
+**The gap, in one sentence: consolidation was a property of a button press, not of the customer.**
+`generateInvoicesForJobs` always **inserted**, and `groupJobsForInvoicing` grouped the jobs *in the
+call it was given*. So a `monthly_consolidated` customer got one invoice per press — approve a job
+on the 3rd and press Generate, approve another on the 11th and press Generate, and August arrives
+as two invoices. Nothing was billed twice (`uq_invoice_source_jobs_once` saw to that); the month
+was simply split across two documents. "One invoice a month" held only if every one of the month's
+jobs happened to be generated in a single press, which is precisely the month-end-only working
+pattern the client asked to be freed from.
+
+- **Approving a job now puts its charges on that customer's open draft for the period.** The next
+  job joins the same one; two lots of the same item at the same rate become one line, not two.
+  `manual` is the opt-out and needed no new setting — that billing method already means "a person
+  decides each time", and a tenant-level auto-draft switch beside it would be a second answer to a
+  question one column answers.
+- **Issue whenever you like.** The new *Open drafts* board under Money is one card per running
+  invoice — customer, period, jobs on it, running total — with **Issue now** on every row whatever
+  its stage, and a bulk Issue selected beside it. *Ready* (the period has ended) is a suggestion
+  and never a gate: billing on the 9th is the thing that was asked for.
+- **A job can be taken back off a draft.** Voiding is the other way back and it releases *every*
+  job on the invoice, which is fine for a per-job invoice and quite wrong for a draft carrying
+  eleven good jobs and one that should not be there.
+- **The month-end run writes onto the same draft**, so §4's "one invoice per customer per period,
+  carrying every contract they hold **and** every laundry job they had completed in it" is true
+  for the first time. It was not: the run wrote a `recurring` invoice from the contracts and then
+  a **second**, `consolidated` one from the jobs, and a customer with both received two documents
+  for one month.
+- **An invoice is now dated the day it is issued**, and `due_date` is re-derived from it. A change
+  to existing behaviour, and it has to be: a draft is *designed* to sit open for a month, so one
+  opened on the 3rd with 14-day terms would reach the customer on the 31st already a fortnight
+  overdue. The period it covers is carried in `period_start`/`period_end` and is what it prints.
+
+**Two holes found on the way that had nothing to do with the feature and everything to do with
+being able to build it safely:**
+- **A line could be changed on an invoice that had already gone to the customer.**
+  `addInvoiceLine` and `removeInvoiceLine` check the caller's capability and **never the invoice's
+  status**, and `invoice_lines` is published on `/rest/v1/invoice_lines` — so a line could be added
+  to an issued, sent, paid or **voided** invoice from a browser's network tab, and the customer's
+  copy and ours would disagree with nothing raising. `guard_invoice_line_draft_only` refuses it
+  with `42501`. A trigger and not a restrictive policy, for 0036's reason: the rule is about the
+  *parent's* state, and a restrictive policy writes zero rows in silence.
+- **Nothing said where a line came from**, so "rebuild the generator's lines and leave a typed one
+  alone" was not expressible at all. `invoice_lines.origin` is `job` / `contract` / `manual`,
+  defaulting to `manual` — the safe direction for a column that gates a delete.
+
+**Decisions worth not re-opening:**
+- **Job lines are rebuilt, never patched.** A diff was the alternative and is worse: consolidated
+  lines are *sums of frozen amounts*, and recomputing one from quantity × price is not guaranteed
+  to give back the cent the snapshots add up to. `jobInvoiceLines` is the single line writer,
+  shared by the create and the append — two writers would mean a twelfth job silently rewriting the
+  first eleven lines in a different shape.
+- **The draft is found in the database, not remembered.** `uq_invoices_open_draft` is a partial
+  unique index and every term in its WHERE clause is load-bearing; losing the insert race is
+  answered by reading again and joining the winner, at the cost of one burnt invoice number.
+- **The residual race is recorded rather than hidden.** Two placements onto one draft can leave a
+  claimed job off the lines if one reads before the other's claim and writes after it.
+  `rebuildJobLines` re-reads the claim count and takes one more pass, which closes that window; a
+  third claim inside the retry would need a third. Closing it completely means a database function.
+  What it leaves is **visible** — the invoice's job list and its lines disagree — not silent money.
+
+- **Pages read in columns now** (§10b), which is the other half of what was asked for. The invoice
+  screen was a single column of lines, breakdown, payments, credit notes and five action cards;
+  it is two from `xl`, with the details, the jobs on it and the controls in a rail beside the
+  money. The billing queue's two groups sit side by side, and the drafts board is a grid.
+- 913 unit tests (was 894) and **460 pgTAP assertions (was 439)** on the branch; **928 and 469**
+  with `Dev` merged in, which brought the item master's own two entries. `verify` green —
+  typecheck, lint, tests and the production build; all forty-two migrations applied to a fresh
+  Postgres 16 with the whole pgTAP suite and the seed on top.
+- **Every new assertion was confirmed to fail without its fix** rather than assumed to be doing
+  something: dropping the period from the grouping key fails two unit tests, dropping the account
+  from the consolidation key fails a third, disabling the line guard fails five pgTAP assertions
+  and de-uniquing the index fails three. 0040's own behavioural block was checked the same way,
+  by disabling the trigger and by replacing the index with a plain one.
+- The gallery gained the drafts board in its four real states — collecting, ready, an emptied draft
+  that says there is nothing to issue, and a periodless per-job invoice — and was measured light
+  and dark at 320/390/768/1440 across all three text sizes: **24 combinations, 0 console errors,
+  0 overflow inside the section and 0 interactive targets under 36px**. Document overflow is
+  **byte-identical to the recorded baseline** (7px / 55px / 104px at 320, 34px at 390 Biggest — the
+  pre-existing dispatch-planner fixture), so this adds none. The harness asserts the root font size
+  really moved and that the four cards, three Issue buttons and three badge words are present, and
+  was proved non-vacuous by pointing it at a section that does not exist.
+
+**Applied to `laundrymart-syd` before the merge**, so the schema led the code as every release
+since 2026-08-18 has done. §11 has the read-backs. Rehearsed first the way §11 requires — and the
+rehearsal mechanism itself was proved before it was trusted: a `create table` followed by a
+deliberate `raise` was confirmed to leave nothing behind, so a multi-statement call really is one
+transaction. The rehearsal then built the unique index over the **647 real invoices**, was refused
+a second open draft, was refused a line on an issued invoice, deleted its probe through the cascade
+and aborted; the read-back after the rollback found **0** of its objects and **0** probe rows.
+
+**There is a second migration numbered 0040 on this project, and both are ours.**
+`0040_item_master_write` went on at 03:08 from `claude/item-master-two-people-…`; this one at
+04:07. The same situation §7 records for 0015, the two 0017s and the two 0036s — except that
+unlike the 0036/0037 collision **there was nothing to reconcile**: the two touch disjoint objects
+(`items` and `can_write_items()` against `invoices`, `invoice_lines` and
+`guard_invoice_line_draft_only()`), which was **proved** by applying both to a fresh Postgres 16 in
+filename order with the whole pgTAP suite on top rather than reasoned about. Filename order matches
+the order they were applied, so nothing depends on renumbering.
+
+**Still not verified behind the auth gate** — this container has no Supabase credentials, so no
+authenticated screen was opened with real rows in it. **Before trusting it: take one job in on
+`ats.coreit.com.au`, price and approve it, check Money › Open drafts shows a draft for that
+customer; take a second job in for the same customer, approve it, and confirm the same invoice
+number picks it up with the item quantities added together rather than a second line. Then press
+Issue now and check the invoice is dated today.** That last step is the one nothing here can prove.
+
+**Merged to `Dev` and then `Prod` on 2026-08-26.** `Dev` had moved four commits while this branch
+was in flight — the item master gate (`0040_item_master_write`), its capability block in
+`roles.ts`, the "Items" rename in the rail and the `laundry_category` rule — so those came in with
+the merge. **Only the two documentation files conflicted**; `nav.ts` and the component gallery,
+which both branches touched, merged clean. Both changelog entries and both schema entries are kept,
+with the collision note above. `Prod` was an ancestor of `Dev`, so it fast-forwarded to the
+identical tree rather than taking a second resolution.
+
 ### 2026-08-26 · What kind of laundry each item is, read off its name
 The client's instruction: set `laundry_category` on the items customers hand in. **No migration;
 no schema, RLS, capability or policy change** — one pure rule, its tests, and a live data write.
@@ -5445,6 +5647,16 @@ operational  new → in_progress → ready_for_delivery → assigned → out_for
 financial    pending → awaiting_review → approved → invoice_generated → invoice_sent → paid
 ```
 
+**Approving a job puts its charges on the customer's *running draft*, and that is the whole of
+2026-08-26** (`0040`, §30). Approval used to freeze the charges and stop — the job moved to
+`approved`, sat in *Awaiting invoice*, and waited for somebody to come back on another screen and
+press Generate. Worse, `generateInvoicesForJobs` always **inserted**, so a `monthly_consolidated`
+customer got one invoice per *button press*: approve on the 3rd and press Generate, approve on the
+11th and press Generate, and August arrives as two invoices. Nothing was billed twice — the month
+was split. Now the charge lands on the customer's open invoice for the period, the next job joins
+the same one, and the owner issues it whenever they choose. `manual` is the opt-out and it needed
+no new setting: that billing method already means "a person decides each time".
+
 - **Current price editable, historical price immutable.** A customer's rate card is
   `customers.rate_card_agreement_id` → a *version* of a service agreement, which is the pricing
   model 0003 already had — no `rate_cards` table was invented. Approval copies today's rates into
@@ -5532,3 +5744,70 @@ audience for it.
 
 Consequence worth remembering: the money **reports** are filtered out of `/reports` for a role
 without `billing.read`, because a revenue report rendering "$0" is a wrong answer that looks right.
+
+
+## 30. The running draft
+A job's approved charges land on the customer's **open draft invoice for the period**, and the
+next job that customer sends in joins the same one. The owner issues it when they choose — the
+31st, the 9th, or twice in a month. `docs/REQUIREMENTS-RUNNING-DRAFT-INVOICE.md` is the
+client-facing statement: the scenario, the eleven gaps found in the build, the decisions, and the
+acceptance table. This section is the engineering rationale.
+
+```
+  approve LJ00007 ─┐
+                   ├──► INV00042 · draft · Acme · August 2026 ──► issue ──► sent
+  approve LJ00011 ─┘         towels merged, levies kept apart
+```
+
+- **The defect it closes was that consolidation belonged to a button press.**
+  `groupJobsForInvoicing` grouped the jobs *in the call it was given*, and `generateInvoicesForJobs`
+  always inserted. So "one invoice a month" held only if every one of the month's jobs happened to
+  be generated in a single press — which is the month-end-only working pattern the client asked to
+  be freed from. The grouping key gained the **period**, and the writer gained a lookup.
+- **The draft is a database fact, not a remembered id.** `uq_invoices_open_draft` (0040) is a
+  partial unique index; the lookup in `findOrOpenDraft` is the fast path and losing the insert
+  race is answered by reading again and joining the winner. A reader that merely looks first is a
+  race, and two approvals in the same second is not hypothetical at month end. The cost of losing
+  is one burnt invoice number, which is the right trade against a lock held across a request.
+- **The period is a pure rule** (`lib/domain/billing-period.ts`): calendar month, ISO week, or a
+  fortnight on a fixed 1970 Monday anchor, resolved in the **business timezone** — a job finished
+  at 09:00 Sydney on 1 September is a September job, and composing that boundary in UTC would put
+  it on August's invoice, silently. `invoice_per_job` and `manual` have no period, which is a real
+  answer and not a failure.
+- **Job lines are rebuilt, never patched.** Adding a job re-derives *every* job-origin line from
+  the frozen charges of *all* the jobs the invoice bills, so 100 towels plus 50 is a line of 150
+  rather than two lines. A diff was the alternative and is worse: consolidated lines are sums of
+  frozen amounts, and recomputing one from quantity × price is not guaranteed to give back the
+  cent the snapshots add up to. `jobInvoiceLines` is the one line writer, shared by the create and
+  the append, so a twelfth job cannot silently rewrite the first eleven lines in another shape.
+- **`invoice_lines.origin` is what makes that expressible.** `job` is re-derivable and is the only
+  thing a rebuild deletes; `contract` is the recurring run's; `manual` is somebody's typing and is
+  never touched. The default is `manual`, which is the safe direction for a column that gates a
+  delete.
+- **A job can be taken back off a draft** (`removeJobFromDraft`). The reverse gear that did not
+  exist: voiding is the other way back and it releases *every* job, which is fine for a per-job
+  invoice and quite wrong for a draft carrying eleven good jobs and one that should not be there.
+  The job returns to `approved` with its charges still frozen. An emptied draft keeps its number
+  rather than being deleted — an invoice number that has been on a screen is not silently reused.
+- **An invoice is dated the day it is issued.** `issueOneInvoice` re-stamps `issue_date` and
+  re-derives `due_date`, which is a change from what shipped before. It has to be: a draft opened
+  on the 3rd with 14-day terms and issued on the 31st would otherwise reach the customer a
+  fortnight overdue. The period it covers is not lost — `period_start`/`period_end` carry it and
+  are what the invoice prints.
+- **The month-end run writes onto the same draft**, so `CLAUDE.md` §4's "one invoice per customer
+  per period, carrying every contract they hold and every laundry job they had completed in it" is
+  true for the first time. It was not: the run wrote a `recurring` invoice from the contracts and
+  then a second, `consolidated` one from the jobs, and a customer with both received two documents
+  for one month. The "already billed?" check moved from `invoice_type` to the **lines**, because
+  one document now holds both and a type cannot say which.
+- **Nothing new is gated.** `invoices.write`, `invoices.approve` and `invoices.send` are already
+  the Owner's and the Office manager's alone (`JOB_TO_INVOICE`), which is exactly the two people
+  the client named. No capability, no role, no tenant setting.
+- **The residual race is written down rather than hidden.** Two placements onto one draft each
+  claim their job and then rebuild; if the first reads the source list before the second's claim
+  and writes after it, the second job's charges are on the invoice's job list and not on its
+  lines. `rebuildJobLines` re-reads the claim count after writing and takes one more pass, which
+  closes that window; a third claim inside the retry would need a third. Closing it completely
+  means doing the rebuild inside one statement — a database function, and a bigger change than the
+  window justifies. What it leaves is **visible** (the job list and the lines disagree) rather
+  than silent money.

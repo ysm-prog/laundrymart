@@ -7,8 +7,9 @@ import { createClient } from "@/lib/supabase/server";
 import { recordAudit } from "@/lib/audit";
 import { done, fail, returnTo } from "@/lib/actions";
 import { businessToday } from "@/lib/domain/timezone";
-import { money } from "@/lib/format";
+import { counted, money } from "@/lib/format";
 import { approveJob, priceAndSaveJob } from "@/lib/orders/job-billing";
+import { placeApprovedJobs } from "@/lib/orders/approve";
 import { generateInvoicesForJobs } from "@/lib/invoices/from-jobs";
 import { issueOneInvoice } from "@/lib/invoices/issue";
 import { sendInvoice } from "@/lib/invoices/send";
@@ -34,6 +35,7 @@ import { sendInvoice } from "@/lib/invoices/send";
 
 const QUEUE = "/invoices/awaiting";
 const REGISTER = "/invoices";
+const DRAFTS = "/invoices/drafts";
 
 /**
  * The selected ids, from a checkbox group.
@@ -154,6 +156,7 @@ export async function approveSelectedJobs(formData: FormData): Promise<void> {
   // this is genuinely per job rather than one UPDATE — and it goes through the
   // very function the single-job button uses, so twenty cannot take a different
   // path from one.
+  const approvedIds: string[] = [];
   const approved: string[] = [];
   const refused: string[] = [];
   let total = 0;
@@ -161,6 +164,7 @@ export async function approveSelectedJobs(formData: FormData): Promise<void> {
   for (const id of ids) {
     const result = await approveJob(supabase, session, id);
     if (result.ok) {
+      approvedIds.push(id);
       approved.push(result.orderNumber);
       total += result.subtotal;
     } else {
@@ -168,23 +172,62 @@ export async function approveSelectedJobs(formData: FormData): Promise<void> {
     }
   }
 
+  // **Placed in one pass, not one per job.** Forty of one customer's jobs
+  // approved together join one draft in a single grouped run, which is both
+  // faster and the only way the roll-up can be computed once over the lot.
+  const placements = await placeApprovedJobs(supabase, session, approvedIds);
+  const placedOn = new Map<string, number>();
+  let held = 0;
+  let unplaced = 0;
+  for (const placement of placements.values()) {
+    if (placement.kind === "placed") {
+      placedOn.set(placement.invoiceNumber, (placedOn.get(placement.invoiceNumber) ?? 0) + 1);
+    } else if (placement.kind === "held") held += 1;
+    else unplaced += 1;
+  }
+
   await recordAudit(session, {
     entity: "laundry_order", action: "status_change",
     summary: `bulk approve: ${approved.length} of ${ids.length}`,
-    metadata: { approved: approved.length, refused: refused.length },
+    metadata: {
+      approved: approved.length, refused: refused.length,
+      invoices: [...placedOn.keys()], held, unplaced,
+    },
   });
 
   revalidatePath(QUEUE);
   revalidatePath(REGISTER);
+  revalidatePath(DRAFTS);
 
   if (approved.length === 0) {
     return fail(QUEUE, refused[0] ?? "None of those jobs could be approved.");
   }
+
+  // Counted in *invoices*, because that is the number the owner is checking: a
+  // month's approvals landing on three drafts is the promise being kept, and
+  // landing on thirty is the defect this whole change exists to close.
+  const draftNote = placedOn.size > 0
+    ? ` They are on ${counted(placedOn.size, "draft invoice")}`
+      + `${placedOn.size <= 3 ? ` (${[...placedOn.keys()].join(", ")})` : ""}.`
+    : "";
+  const heldNote = held > 0
+    ? ` ${held} belong to customers billed manually and were not invoiced.`
+    : "";
+  const unplacedNote = unplaced > 0
+    ? ` ${unplaced} could not be put on an invoice — they are still in this queue.`
+    : "";
   const note = refused.length > 0
     ? ` ${refused.length} could not be approved — ${refused[0]}`
     : "";
-  return done(QUEUE,
-    `Approved ${approved.length} job(s), ${money(total)} before GST.${note}`);
+
+  const summary = `Approved ${approved.length} job(s), ${money(total)} before GST.`
+    + `${draftNote}${heldNote}${unplacedNote}${note}`;
+
+  // An unplaced job is reported as a failure even though its approval stood: it
+  // has left the review list either way, and an invoice that was never raised
+  // looks exactly like one that was.
+  return unplaced > 0 ? fail(QUEUE, summary) : done(QUEUE, summary,
+    placedOn.size > 0 ? { href: DRAFTS, label: "Open drafts" } : undefined);
 }
 
 /* ------------------------------------------------------ generate selected --- */
@@ -211,6 +254,7 @@ export async function generateSelectedInvoices(formData: FormData): Promise<void
 
   revalidatePath(QUEUE);
   revalidatePath(REGISTER);
+  revalidatePath(DRAFTS);
 
   if (result.created.length === 0) {
     const first = result.skipped[0];
@@ -220,9 +264,13 @@ export async function generateSelectedInvoices(formData: FormData): Promise<void
   }
 
   const jobCount = result.created.reduce((sum, entry) => sum + entry.jobIds.length, 0);
-  const consolidated = result.created.filter((entry) => entry.jobIds.length > 1).length;
-  const shape = consolidated > 0
-    ? ` (${consolidated} consolidated across several jobs)`
+  const opened = result.created.filter((entry) => entry.opened).length;
+  const joined = result.created.length - opened;
+  // Raised and added-to are different facts, and the second is the one the
+  // running draft makes common. An operator who reads "generated 4" every time
+  // has no way to notice whether that was four documents or one.
+  const shape = joined > 0
+    ? ` ${opened} raised, ${joined} added to a draft that was already open.`
     : "";
   const skipped = result.skipped.length > 0
     ? ` ${result.skipped.length} job(s) skipped — ${result.skipped[0]?.reason}.`
@@ -231,8 +279,9 @@ export async function generateSelectedInvoices(formData: FormData): Promise<void
   // Said out loud: generating is not sending. The whole point of phase 5 is
   // that a customer has not been contacted at this moment.
   return done(REGISTER,
-    `Generated ${result.created.length} draft invoice(s) from ${jobCount} job(s)${shape}. `
-    + `Nothing has been sent yet.${skipped}`);
+    `${counted(jobCount, "job")} on ${counted(result.created.length, "draft invoice")}.${shape} `
+    + `Nothing has been sent yet.${skipped}`,
+    { href: DRAFTS, label: "Open drafts" });
 }
 
 /* --------------------------------------------------------- issue selected --- */

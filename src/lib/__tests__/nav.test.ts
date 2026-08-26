@@ -101,7 +101,7 @@ describe("navigationFor", () => {
     // The Office manager keeps both sides.
     const office = navigationFor("operations_manager").find((item) => item.label === "Money");
     expect(office?.children?.map((child) => child.label)).toEqual([
-      "Invoices", "Billing", "Awaiting invoice", "Laundry prices", "Xero",
+      "Invoices", "Billing", "Awaiting invoice", "Open drafts", "Laundry prices", "Xero",
       "Bills", "Suppliers", "Accounts",
     ]);
 

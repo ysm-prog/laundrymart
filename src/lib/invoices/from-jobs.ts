@@ -5,11 +5,11 @@ import { describeDbError } from "@/lib/actions";
 import { addDays } from "@/lib/domain/dates";
 import { toZonedDate } from "@/lib/domain/timezone";
 import { isBillingMethod, type BillingMethod } from "@/lib/domain/billing";
+import { billingPeriodFor, type BillingPeriod } from "@/lib/domain/billing-period";
 import { groupJobsForInvoicing } from "@/lib/domain/invoice-grouping";
-import { consolidateChargeLines, type ChargeEntry } from "@/lib/domain/invoice-consolidation";
-import { accountForLine, incomeAccountsForItems } from "@/lib/invoices/account-coding";
+import { findOrOpenDraft, rebuildJobLines, type DraftCustomer } from "@/lib/invoices/open-draft";
 import { logOrderActivity } from "@/lib/orders/activity";
-import { loadChargesForJobs, type StoredCharge } from "@/lib/orders/job-billing";
+import { loadChargesForJobs } from "@/lib/orders/job-billing";
 
 /**
  * Turning approved jobs into invoices.
@@ -21,27 +21,34 @@ import { loadChargesForJobs, type StoredCharge } from "@/lib/orders/job-billing"
  * `invoice_source_jobs` row per job — so switching a customer from per-job to
  * monthly is a column change and never a schema change.
  *
- *     Job ─────────────────────────► Invoice        (invoice_per_job)
+ *     Job ─────────────────────────► Invoice              (invoice_per_job)
  *
  *     Job 1 ┐
- *     Job 2 ├──────────────────────► Invoice        (…_consolidated)
- *     Job 3 ┘
+ *     Job 2 ├──────────────────────► the customer's       (…_consolidated)
+ *     Job 3 ┘                        OPEN DRAFT for the period
+ *
+ * **Since 0040 a consolidated group joins the customer's running draft** rather
+ * than always inserting a new invoice. That single word — join, not insert — is
+ * what makes "one invoice per customer per month" true: before it, a
+ * consolidated customer got one invoice per *button press*, so approving a job
+ * on the 3rd and another on the 11th produced two August invoices. Nothing was
+ * billed twice (`uq_invoice_source_jobs_once` saw to that); the month was simply
+ * split across two documents. `lib/invoices/open-draft.ts` holds the draft.
  *
  * **Generating never sends.** Nothing in this file emails anybody; the invoice
  * lands as a draft, and `invoice_sent` is reached only through the send action.
  * That separation is the whole of phase 5 and it is why the two live apart.
  *
- **Consolidated invoices roll up per item.** Ten jobs' worth of towels become one
- * line carrying 1,450, not thirty lines each naming a job number — the rule is
- * `consolidateChargeLines`, which is pure and tested. The per-job detail is not
- * lost: `invoice_source_jobs` and the frozen `job_charge_snapshots` behind each
- * job are the breakdown, and the invoice screen renders it underneath.
+ * **Consolidated invoices roll up per item.** Ten jobs' worth of towels become
+ * one line carrying 1,450, not thirty lines each naming a job number — the rule
+ * is `jobInvoiceLines`, which is pure and tested. The per-job detail is not lost:
+ * `invoice_source_jobs` and the frozen `job_charge_snapshots` behind each job are
+ * the breakdown, and the invoice screen renders it underneath.
  *
- * **`invoice_lines.laundry_order_id` is null on a rolled-up line**, and that is
- * safe for one specific reason: the billed-once constraint is
- * `uq_invoice_source_jobs_once`, not that column. The pointer is still written
- * whenever a line belongs to exactly one job, so a per-job invoice is unchanged
- * and a consolidated invoice keeps the pointer on the lines that can carry one.
+ * **Creating and appending go through the same line writer**, `rebuildJobLines`.
+ * A first job and a twelfth are the same operation: re-derive every job line on
+ * the invoice from every job it bills. Two writers here would mean adding a
+ * twelfth job silently rewrote the first eleven lines in some other shape.
  *
  * The same job cannot be billed twice, and that is enforced in the database
  * rather than here: `uq_invoice_source_jobs_once` is a unique index on
@@ -67,122 +74,98 @@ export type GeneratedInvoice = {
   customerId: string;
   jobIds: string[];
   total: number;
+  /** False when the jobs joined a draft that already existed. */
+  opened: boolean;
+  period: BillingPeriod | null;
 };
 
 export type GenerationResult = {
   created: GeneratedInvoice[];
-  /** Jobs that could not be billed, each with the reason a person can act on. */
-  skipped: Array<{ orderNumber: string; reason: string }>;
+  /**
+   * Jobs that could not be billed, each with the reason a person can act on.
+   * The id travels beside the number so a caller reporting per job can match a
+   * reason back to the row it belongs to rather than pairing them by position.
+   */
+  skipped: Array<{ orderId: string; orderNumber: string; reason: string }>;
 };
 
+type CustomerRow = DraftCustomer & { billing_method: string };
+
 /**
- * Write one invoice for a group of jobs.
+ * Put a group of jobs onto an invoice — an existing open draft when the group
+ * has a period, a brand-new invoice when it does not.
  *
  * The order of writes matters and is chosen so a failure never leaves a job
  * looking billed when it is not:
  *
- *   1. the invoice header (no `source_job_id` yet — the guard in 0017 refuses
- *      one that does not yet have a matching source row);
- *   2. `invoice_source_jobs`, which is where the "billed once" constraint bites;
- *   3. the lines — rolled up per item on a consolidated invoice, one per charge
- *      on a per-job one, and in both cases copied from the **frozen snapshot**
- *      and never re-priced;
- *   4. `recalculate_invoice`, then `source_job_id` for the single-job case;
- *   5. last of all, the jobs move to `invoice_generated`.
+ *   1. refuse early if the group's jobs carry no charges at all, so an empty
+ *      draft is never opened;
+ *   2. resolve the invoice — join the running draft, or insert one;
+ *   3. `invoice_source_jobs`, which is where the "billed once" constraint bites;
+ *   4. the lines, re-derived from the **frozen snapshots** of every job the
+ *      invoice now bills and never re-priced;
+ *   5. `source_job_id` for the single-job case;
+ *   6. last of all, the jobs move to `invoice_generated`.
  *
  * A job only leaves the queue once its money is actually on an invoice.
  */
-async function writeInvoiceForGroup(
+async function placeGroupOnInvoice(
   supabase: Client,
   session: Session,
-  group: { customerId: string; method: BillingMethod; jobs: BillableJob[] },
-  chargesByJob: ReadonlyMap<string, StoredCharge[]>,
-  customer: { payment_terms_days: number; depot_id: string | null; purchase_order_number: string | null },
+  group: { customerId: string; method: BillingMethod; period: BillingPeriod | null; jobs: BillableJob[] },
+  chargeCountByJob: ReadonlyMap<string, number>,
+  customer: CustomerRow,
   issueDate: string,
-  period?: { start: string; end: string } | null,
 ): Promise<{ ok: true; invoice: GeneratedInvoice } | { ok: false; error: string }> {
   const jobIds = group.jobs.map((job) => job.id);
-  const entries: ChargeEntry[] = group.jobs.flatMap((job) =>
-    (chargesByJob.get(job.id) ?? []).map((charge) => ({
-      job: {
-        id: job.id,
-        orderNumber: job.order_number,
-        // The business-timezone day the work finished — what the breakdown groups
-        // into weeks. Null is carried rather than guessed at.
-        date: job.completed_at ? toZonedDate(job.completed_at) : null,
-      },
-      charge,
-    })),
-  );
 
-  if (entries.length === 0) {
+  const chargeCount = jobIds.reduce((sum, id) => sum + (chargeCountByJob.get(id) ?? 0), 0);
+  if (chargeCount === 0) {
     return { ok: false, error: "no charges on the approved job(s)" };
   }
 
-  const { data: invoiceNumber, error: numberError } = await supabase
-    .rpc("next_number", { t: session.tenantId, k: "invoice", p: "INV" });
-  if (numberError) return { ok: false, error: describeDbError(numberError) };
-
-  const terms = Number(customer.payment_terms_days ?? 14);
   const singleJob = group.jobs.length === 1 && group.method === "invoice_per_job";
-  // A per-job invoice keeps one line per charge, as it always has: there is
-  // nothing to roll up, and the customer is reading one job.
-  const lines = singleJob
-    ? entries.map((entry) => ({
-        description: entry.charge.description,
-        charge_type: entry.charge.charge_type,
-        quantity: entry.charge.quantity,
-        unit_price: entry.charge.unit_price,
-        amount: entry.charge.amount,
-        taxable: entry.charge.taxable,
-        source_item_id: entry.charge.source_item_id,
-        gl_account_id: entry.charge.gl_account_id,
-        source_agreement_id: entry.charge.source_agreement_id,
-        jobId: entry.job.id as string | null,
-      }))
-    : consolidateChargeLines(entries).map((line) => ({
-        // A line that came from exactly one job keeps its job number in front of
-        // it — a fuel levy says which delivery it was charged on. A rolled-up
-        // line drops the prefix, because naming one of its ten jobs would be a lie.
-        description: line.contributions.length === 1 && !line.merged
-          ? `${line.contributions[0]!.orderNumber} — ${line.description}`
-          : line.description,
-        charge_type: line.charge_type,
-        quantity: line.quantity,
-        unit_price: line.unit_price,
-        amount: line.amount,
-        taxable: line.taxable,
-        source_item_id: line.source_item_id,
-        gl_account_id: line.gl_account_id,
-        source_agreement_id: line.source_agreement_id,
-        // Null once a line spans more than one job. Safe because the billed-once
-        // constraint is `invoice_source_jobs`; see this file's header.
-        jobId: line.contributions.length === 1 ? line.contributions[0]!.jobId : null,
-      }));
 
-  const { data: invoice, error } = await supabase
-    .from("invoices")
-    .insert({
-      tenant_id: session.tenantId,
-      created_by: session.userId,
-      customer_id: group.customerId,
-      depot_id: group.jobs.find((job) => job.depot_id)?.depot_id ?? customer.depot_id,
-      invoice_number: invoiceNumber as string,
-      // The type says which shape produced it, which is what makes a register
-      // readable when a customer holds both kinds.
-      invoice_type: singleJob ? "per_job" : "consolidated",
-      status: "draft",
-      issue_date: issueDate,
-      due_date: addDays(issueDate, terms),
-      payment_terms_days: terms,
-      purchase_order_number: customer.purchase_order_number,
-      // Stamped when the invoice came from a billing period, so the register says
-      // what it covers and a second run over the same month can recognise it.
-      ...(period ? { period_start: period.start, period_end: period.end } : {}),
-    })
-    .select("id, invoice_number")
-    .single();
-  if (error) return { ok: false, error: describeDbError(error) };
+  let invoiceId: string;
+  let invoiceNumber: string;
+  let opened: boolean;
+
+  if (group.period) {
+    const draft = await findOrOpenDraft(supabase, session, customer, group.period, issueDate);
+    if (!draft.ok) return { ok: false, error: draft.error };
+    invoiceId = draft.draft.id;
+    invoiceNumber = draft.draft.invoiceNumber;
+    opened = draft.draft.opened;
+  } else {
+    const { data: nextNumber, error: numberError } = await supabase
+      .rpc("next_number", { t: session.tenantId, k: "invoice", p: "INV" });
+    if (numberError) return { ok: false, error: describeDbError(numberError) };
+
+    const terms = Number(customer.payment_terms_days ?? 14);
+    const { data: invoice, error } = await supabase
+      .from("invoices")
+      .insert({
+        tenant_id: session.tenantId,
+        created_by: session.userId,
+        customer_id: group.customerId,
+        depot_id: group.jobs.find((job) => job.depot_id)?.depot_id ?? customer.depot_id,
+        invoice_number: nextNumber as string,
+        // The type says which shape produced it, which is what makes a register
+        // readable when a customer holds both kinds.
+        invoice_type: singleJob ? "per_job" : "consolidated",
+        status: "draft",
+        issue_date: issueDate,
+        due_date: addDays(issueDate, terms),
+        payment_terms_days: terms,
+        purchase_order_number: customer.purchase_order_number,
+      })
+      .select("id, invoice_number")
+      .single();
+    if (error) return { ok: false, error: describeDbError(error) };
+    invoiceId = invoice.id;
+    invoiceNumber = invoice.invoice_number;
+    opened = true;
+  }
 
   // Claim the jobs before writing anything else. This is the row the unique
   // index guards, so a concurrent run that got here first makes this fail —
@@ -191,12 +174,24 @@ async function writeInvoiceForGroup(
     jobIds.map((orderId) => ({
       tenant_id: session.tenantId,
       created_by: session.userId,
-      invoice_id: invoice.id,
+      invoice_id: invoiceId,
       order_id: orderId,
     })),
   );
   if (sourceError) {
-    await supabase.from("invoices").delete().eq("id", invoice.id).eq("tenant_id", session.tenantId);
+    // Only unwind an invoice this call brought into existence, and only while it
+    // is still empty. Deleting a *running* draft because one job could not be
+    // claimed would throw away every job already on it.
+    if (opened) {
+      const { count } = await supabase
+        .from("invoice_source_jobs")
+        .select("id", { count: "exact", head: true })
+        .eq("invoice_id", invoiceId).eq("tenant_id", session.tenantId);
+      if ((count ?? 0) === 0) {
+        await supabase.from("invoices").delete()
+          .eq("id", invoiceId).eq("tenant_id", session.tenantId);
+      }
+    }
     return {
       ok: false,
       error: sourceError.code === "23505"
@@ -205,44 +200,17 @@ async function writeInvoiceForGroup(
     };
   }
 
-  // The GL code, inherited from the item. `lib/invoices/account-coding.ts` holds
-  // the rule and the reasoning; both invoice writers share it so they cannot drift.
-  const accountByItem = await incomeAccountsForItems(
-    supabase, session.tenantId, lines.map((line) => line.source_item_id),
-  );
-
-  const { error: lineError } = await supabase.from("invoice_lines").insert(
-    lines.map((line, index) => ({
-      tenant_id: session.tenantId,
-      created_by: session.userId,
-      invoice_id: invoice.id,
-      laundry_order_id: line.jobId,
-      item_id: line.source_item_id,
-      // **The charge's own account first.** 0039 lets a code be chosen on the
-      // job's Charges screen, which is a deliberate decision about that charge;
-      // the item's account is the fallback for anything written before, or
-      // priced without one. Same precedence the Xero push uses on the line.
-      gl_account_id: line.gl_account_id ?? accountForLine(line.source_item_id, accountByItem),
-      agreement_id: line.source_agreement_id,
-      description: line.description,
-      charge_type: line.charge_type,
-      quantity: line.quantity,
-      unit_price: line.unit_price,
-      amount: line.amount,
-      taxable: line.taxable,
-      sequence: index + 1,
-    })),
-  );
-  if (lineError) return { ok: false, error: describeDbError(lineError) };
-
-  const { error: totalError } = await supabase.rpc("recalculate_invoice", { p_invoice: invoice.id });
-  if (totalError) return { ok: false, error: describeDbError(totalError) };
+  // One writer for the lines, whether this is the invoice's first job or its
+  // twelfth. It re-consolidates across everything the invoice bills, so towels
+  // from the new job are added to the towel line rather than written beneath it.
+  const rebuilt = await rebuildJobLines(supabase, session, invoiceId);
+  if (!rebuilt.ok) return { ok: false, error: rebuilt.error };
 
   if (singleJob) {
     const { error: pointerError } = await supabase
       .from("invoices")
       .update({ source_job_id: jobIds[0] })
-      .eq("id", invoice.id).eq("tenant_id", session.tenantId);
+      .eq("id", invoiceId).eq("tenant_id", session.tenantId);
     if (pointerError) return { ok: false, error: describeDbError(pointerError) };
   }
 
@@ -255,38 +223,41 @@ async function writeInvoiceForGroup(
   if (statusError) return { ok: false, error: describeDbError(statusError) };
 
   const { data: totals } = await supabase
-    .from("invoices").select("total").eq("id", invoice.id).maybeSingle<{ total: number }>();
+    .from("invoices").select("total").eq("id", invoiceId).maybeSingle<{ total: number }>();
 
   for (const job of group.jobs) {
     await logOrderActivity(supabase, session, job.id, {
       activity_type: "status_changed",
       previous: { billing_status: "approved" },
-      next: { billing_status: "invoice_generated", invoice: invoice.invoice_number },
+      next: { billing_status: "invoice_generated", invoice: invoiceNumber },
     });
   }
 
   return {
     ok: true,
     invoice: {
-      invoiceId: invoice.id,
-      invoiceNumber: invoice.invoice_number,
+      invoiceId,
+      invoiceNumber,
       customerId: group.customerId,
       jobIds,
       total: Number(totals?.total ?? 0),
+      opened,
+      period: group.period,
     },
   };
 }
 
 /**
- * Generate invoices for a set of approved jobs.
+ * Generate — or extend — invoices for a set of approved jobs.
  *
- * The one entry point, used by the single-job action, the bulk queue action and
- * the recurring run — so a selection of one, a selection of forty and a
- * scheduled sweep cannot drift apart in what they produce.
+ * The one entry point, used by the approval, the single-job action, the bulk
+ * queue action, the per-customer period button and the month-end run — so a
+ * selection of one, a selection of forty and a scheduled sweep cannot drift
+ * apart in what they produce.
  *
  * Set-based where it can be: the jobs, their charges and the customers are each
  * read in one query rather than per job. The per-invoice write loop is genuinely
- * per-invoice, because each needs its own number from `next_number()`.
+ * per-invoice, because each needs its own draft resolved and its own lines built.
  */
 export async function generateInvoicesForJobs(
   supabase: Client,
@@ -295,8 +266,13 @@ export async function generateInvoicesForJobs(
   options: {
     issueDate: string;
     respectManual?: boolean;
-    /** Stamped on the invoices, when this run covers a billing period. */
-    period?: { start: string; end: string } | null;
+    /**
+     * The window every consolidated group is billed into, overriding each job's
+     * own. Passed by the month-end run and by the per-customer period button —
+     * the operator chose that window, so it is the window the draft is keyed on.
+     * Omitted, each job finds its own period from its customer's billing method.
+     */
+    period?: BillingPeriod | null;
   },
 ): Promise<GenerationResult> {
   const result: GenerationResult = { created: [], skipped: [] };
@@ -306,11 +282,13 @@ export async function generateInvoicesForJobs(
     .from("laundry_orders")
     .select("id, order_number, customer_id, depot_id, completed_at, billing_status")
     .in("id", [...orderIds])
+    .eq("tenant_id", session.tenantId)
     .returns<BillableJob[]>();
 
   const approved = (jobs ?? []).filter((job) => {
     if (job.billing_status === "approved") return true;
     result.skipped.push({
+      orderId: job.id,
       orderNumber: job.order_number,
       reason: job.billing_status === "invoice_generated" || job.billing_status === "invoice_sent"
         ? "already invoiced"
@@ -326,10 +304,8 @@ export async function generateInvoicesForJobs(
       .from("customers")
       .select("id, billing_method, payment_terms_days, depot_id, purchase_order_number")
       .in("id", customerIds)
-      .returns<Array<{
-        id: string; billing_method: string; payment_terms_days: number;
-        depot_id: string | null; purchase_order_number: string | null;
-      }>>(),
+      .eq("tenant_id", session.tenantId)
+      .returns<CustomerRow[]>(),
     loadChargesForJobs(supabase, approved.map((job) => job.id)),
   ]);
 
@@ -340,6 +316,9 @@ export async function generateInvoicesForJobs(
       isBillingMethod(row.billing_method) ? row.billing_method : "monthly_consolidated",
     ]),
   );
+  const chargeCountByJob = new Map(
+    [...chargesByJob].map(([jobId, charges]) => [jobId, charges.length]),
+  );
 
   // A scheduled run leaves `manual` customers alone; a person who explicitly
   // selected the jobs has already made the decision `manual` is asking for, so
@@ -348,39 +327,57 @@ export async function generateInvoicesForJobs(
   const eligible = options.respectManual
     ? approved.filter((job) => {
         if (methodByCustomer.get(job.customer_id) !== "manual") return true;
-        result.skipped.push({ orderNumber: job.order_number, reason: "billed manually" });
+        result.skipped.push({ orderId: job.id, orderNumber: job.order_number, reason: "billed manually" });
         return false;
       })
     : approved;
 
-  for (const group of groupJobsForInvoicing(eligible, methodByCustomer)) {
+  /**
+   * Which draft each job belongs on.
+   *
+   * A per-job customer never has one — their job *is* the invoice. Otherwise the
+   * caller's explicit window wins, and failing that the job finds its own from
+   * its completion date. **Resolved in the business timezone**: a job finished at
+   * 09:00 Sydney on 1 September is a September job, and composing that boundary
+   * in UTC would put it on August's invoice, silently.
+   */
+  const periodOf = (job: BillableJob, method: BillingMethod): BillingPeriod | null => {
+    if (method === "invoice_per_job") return null;
+    if (options.period) return options.period;
+    return billingPeriodFor(method, job.completed_at ? toZonedDate(job.completed_at) : null);
+  };
+
+  for (const group of groupJobsForInvoicing(eligible, methodByCustomer, periodOf)) {
     const customer = customerById.get(group.customerId);
     if (!customer) {
       for (const job of group.jobs) {
-        result.skipped.push({ orderNumber: job.order_number, reason: "customer not found" });
+        result.skipped.push({ orderId: job.id, orderNumber: job.order_number, reason: "customer not found" });
       }
       continue;
     }
 
-    const written = await writeInvoiceForGroup(
-      supabase, session, group, chargesByJob, customer, options.issueDate, options.period ?? null,
+    const placed = await placeGroupOnInvoice(
+      supabase, session, group, chargeCountByJob, customer, options.issueDate,
     );
-    if (!written.ok) {
+    if (!placed.ok) {
       for (const job of group.jobs) {
-        result.skipped.push({ orderNumber: job.order_number, reason: written.error });
+        result.skipped.push({ orderId: job.id, orderNumber: job.order_number, reason: placed.error });
       }
       continue;
     }
-    result.created.push(written.invoice);
+    result.created.push(placed.invoice);
   }
 
   if (result.created.length > 0) {
+    const opened = result.created.filter((entry) => entry.opened).length;
     await recordAudit(session, {
       entity: "invoice", action: "generate",
       summary: `${result.created.length} invoice(s) from ${
-        result.created.reduce((sum, entry) => sum + entry.jobIds.length, 0)} job(s)`,
+        result.created.reduce((sum, entry) => sum + entry.jobIds.length, 0)} job(s)`
+        + ` — ${opened} raised, ${result.created.length - opened} added to an open draft`,
       metadata: {
         invoices: result.created.map((entry) => entry.invoiceNumber),
+        opened,
         skipped: result.skipped.length,
       },
     });

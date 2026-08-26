@@ -13,8 +13,10 @@ import { jobChargeSubtotal } from "@/lib/domain/job-pricing";
 import { money } from "@/lib/format";
 import { logOrderActivity } from "@/lib/orders/activity";
 import {
-  approveJob, loadJobCharges, loadJobForBilling, priceAndSaveJob, saveJobCharges,
+  loadJobCharges, loadJobForBilling, priceAndSaveJob, saveJobCharges,
 } from "@/lib/orders/job-billing";
+import { approveAndPlaceJob } from "@/lib/orders/approve";
+import { describePlacementOutcome } from "@/lib/domain/placement";
 import { parseJobCharges } from "./job-charges";
 
 /**
@@ -39,6 +41,7 @@ import { parseJobCharges } from "./job-charges";
  */
 
 const LIST = "/invoices/awaiting";
+const DRAFTS = "/invoices/drafts";
 
 /** Where these actions bounce back to — the job, or the queue they were run from. */
 function backTo(formData: FormData, orderId: string): string {
@@ -146,6 +149,12 @@ export async function updateJobCharges(formData: FormData): Promise<void> {
  * Its own capability (`invoices.approve`), separate from `invoices.write`:
  * raising a draft and signing off the price a customer will be held to are
  * different decisions, and the brief asks for exactly that split.
+ *
+ * **Approving also puts the charges on the customer's invoice**, which is the
+ * owner's flow and the step this app did not have: the charge used to be frozen
+ * and then sit in a queue waiting for somebody to come back and press Generate.
+ * `approveAndPlaceJob` holds both halves and the rule that a failed placement
+ * never un-approves the job — see `lib/orders/approve.ts`.
  */
 export async function approveJobCharges(formData: FormData): Promise<void> {
   const session = await assertCapability("invoices.approve");
@@ -155,12 +164,26 @@ export async function approveJobCharges(formData: FormData): Promise<void> {
   const back = backTo(formData, parsed.data.id);
   const supabase = await createClient();
 
-  const result = await approveJob(supabase, session, parsed.data.id);
+  const result = await approveAndPlaceJob(supabase, session, parsed.data.id);
   if (!result.ok) return fail(back, result.error);
 
   revalidatePath(`/orders/${parsed.data.id}`);
   revalidatePath(LIST);
-  return done(back, `Job ${result.orderNumber} approved at ${money(result.subtotal)} before GST.`);
+  revalidatePath(DRAFTS);
+  revalidatePath("/invoices");
+
+  const summary = `Job ${result.orderNumber} approved at ${money(result.subtotal)} before GST.`
+    + describePlacementOutcome(result.placement);
+
+  // A placement that did not happen is reported as a failure even though the
+  // approval stood, because it is the half nobody can see: the job leaves the
+  // review list either way, and an invoice that was never raised looks exactly
+  // like one that was.
+  if (result.placement.kind === "failed") return fail(back, summary);
+
+  return done(back, summary, result.placement.kind === "placed"
+    ? { href: `/invoices/${result.placement.invoiceId}`, label: "Open the invoice" }
+    : undefined);
 }
 
 /* ------------------------------------------------------- send it back ----- */

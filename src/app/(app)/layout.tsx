@@ -29,7 +29,9 @@ async function navCounts(): Promise<NavCounts> {
 
     // No runs-today count: the rail no longer has a Runs row to hang it on, and
     // querying for a badge nothing renders is a request every page load pays for.
-    const [exceptions, batches, unpaid, overdueJobs, bills, awaitingInvoice] = await Promise.all([
+    const [
+      exceptions, batches, unpaid, overdueJobs, bills, awaitingInvoice, openDrafts,
+    ] = await Promise.all([
       supabase.from("jobs").select("id", head).eq("status", "exception"),
       supabase.from("production_batches").select("id", head)
         .in("stage", ["received", "washing", "drying", "folding", "packing", "ready_for_dispatch"])
@@ -53,6 +55,12 @@ async function navCounts(): Promise<NavCounts> {
       // shown — but it still costs a query, which is why it is head-only.
       supabase.from("laundry_orders").select("id", head)
         .in("billing_status", ["awaiting_review", "approved"]),
+      // Invoices still collecting. Head-only like the rest, and deliberately
+      // counted on `status` alone rather than on the open-draft predicate: a
+      // per-job draft nobody has issued is equally something waiting to be
+      // dealt with, and the screen itself is what separates the three stages.
+      supabase.from("invoices").select("id", head)
+        .eq("status", "draft").is("deleted_at", null),
     ]);
 
     return {
@@ -62,6 +70,7 @@ async function navCounts(): Promise<NavCounts> {
       overdueJobs: overdueJobs.count ?? undefined,
       unpaidBills: bills.count ?? undefined,
       awaitingInvoice: awaitingInvoice.count ?? undefined,
+      openDrafts: openDrafts.count ?? undefined,
     };
   } catch {
     return {};

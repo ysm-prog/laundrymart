@@ -198,7 +198,7 @@ export function SubmitButton({
   className, formAction,
 }: {
   children?: ReactNode;
-  variant?: "primary" | "danger" | "secondary" | "ghost";
+  variant?: "primary" | "danger" | "secondary" | "ghost" | "dangerGhost";
   pendingLabel?: string;
   size?: "md" | "lg";
   formId?: string;
@@ -224,6 +224,11 @@ export function SubmitButton({
     // For a third verb in a row that already has two: present, and not
     // competing with them. Mirrors `ghost` in BUTTON_VARIANTS.
     ghost: "text-primary hover:bg-primary/8",
+    // A destructive control inside a list row — Remove beside a line, not the
+    // action the reader came for. §10b: teal means "this is the action", so a
+    // Remove drawn in it competes with the one that is. Mirrors
+    // `dangerGhost` in BUTTON_VARIANTS.
+    dangerGhost: "text-danger hover:bg-danger/8",
   } as const;
   const sizes = { md: "min-h-10 px-4", lg: "min-h-11 px-5" } as const;
   return (

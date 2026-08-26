@@ -26,7 +26,7 @@ import { can, type Capability, type Role } from "@/lib/roles";
 /** Counts the rail can surface. Resolved once per request in the layout. */
 export type NavCountKey =
   | "exceptions" | "batches" | "unpaidInvoices" | "overdueJobs"
-  | "unpaidBills" | "awaitingInvoice";
+  | "unpaidBills" | "awaitingInvoice" | "openDrafts";
 
 /**
  * The rail's icon, named rather than imported.
@@ -236,6 +236,16 @@ export const NAVIGATION: NavItem[] = [
         label: "Awaiting invoice", href: "/invoices/awaiting", capability: "billing.read",
         count: "awaitingInvoice",
         blurb: "Finished work that has not been billed. Approve the charges, then generate.",
+      },
+      {
+        // The invoices still collecting: one per customer per billing period,
+        // gaining each job as it is approved. A tab of its own rather than a
+        // filter on the register, because "what is ready to go out?" is the
+        // month-end question and the register answers a different one — a list
+        // of every invoice, in every state, ever raised.
+        label: "Open drafts", href: "/invoices/drafts", capability: "invoices.read",
+        count: "openDrafts",
+        blurb: "Invoices still collecting this period\u2019s approved jobs. Issue one when you are ready.",
       },
       {
         // The price list belongs to billing, not to Settings: it is what the

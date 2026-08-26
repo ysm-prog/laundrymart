@@ -189,7 +189,9 @@ export default async function AwaitingInvoicePage({
       <PageHeader
         eyebrow="Billing"
         title="Awaiting invoice"
-        description="Work that is finished and not yet billed. Completing a job never raises an invoice on its own."
+        description="Work that is finished and not yet billed. Completing a job never raises an
+                     invoice on its own \u2014 approving its charges puts them on that customer\u2019s
+                     invoice for the period."
       />
 
       {/* The tiles follow the filters. A filter narrows the screen, all of it —
@@ -200,7 +202,9 @@ export default async function AwaitingInvoicePage({
       <div className="grid gap-3 sm:grid-cols-3">
         <Stat label="Awaiting review" value={String(awaiting.length)}
               hint={unpriced > 0 ? `${unpriced} not priced yet` : "All priced"} />
-        <Stat label="Approved" value={String(approved.length)} hint="Ready to invoice" />
+        <Stat label="Approved, not invoiced" value={String(approved.length)}
+              hint={approved.length > 0 ? "Billed manually, or held back" : "Nothing held back"}
+              tone={approved.length > 0 ? "warning" : "default"} />
         <Stat label="Approved value" value={money(approvedValue)}
               hint={filtered ? "Before GST, filtered" : "Before GST"} />
       </div>
@@ -258,9 +262,15 @@ export default async function AwaitingInvoicePage({
         }
       />
 
+      {/* Two columns from `xl` (\u00a710b). The two groups are two decisions and are
+          worked in parallel at month end, so reading one under the other is a
+          long page and a lot of scrolling back. Below `xl` they stack in the
+          order they always did. */}
+      <div className="grid gap-4 xl:grid-cols-2 xl:items-start">
       <Card
         title="Awaiting review"
-        description="Price the jobs that need it, check the charges, then approve them. Approving freezes the price."
+        description="Price the jobs that need it, check the charges, then approve them. Approving
+                     freezes the price and puts it on the customer\u2019s draft invoice."
         actions={filtered && awaiting.length > 0
           ? <span className="text-2xs text-muted-foreground">Filtered</span> : null}
       >
@@ -282,16 +292,19 @@ export default async function AwaitingInvoicePage({
       </Card>
 
       <Card
-        title="Approved — ready to invoice"
-        description="Generating creates draft invoices. Nothing is sent to a customer until you send it."
+        title="Approved, not on an invoice"
+        description="Approving normally puts a job straight onto the customer\u2019s draft. A job
+                     sits here when that customer is billed manually, or when the invoice could
+                     not be raised \u2014 generating puts it on one."
       >
         {approved.length === 0 ? (
           <EmptyState
-            title={filtered ? "No approved jobs match those filters" : "Nothing approved yet"}
+            title={filtered ? "No approved jobs match those filters" : "Nothing is waiting"}
             description={filtered
               ? "Try a wider date range, or clear the filters above."
-              : "Approve a job above and it appears here, ready to become an invoice."}
-            action={<Link href="/invoices" className="text-sm text-primary hover:underline">Open the invoice register</Link>}
+              : "Approved jobs go straight onto their customer\u2019s draft invoice, so this "
+                + "list is empty unless one was held back."}
+            action={<Link href="/invoices/drafts" className="text-sm text-primary hover:underline">Open drafts</Link>}
           />
         ) : (
           <BillingQueue
@@ -301,6 +314,8 @@ export default async function AwaitingInvoicePage({
           />
         )}
       </Card>
+
+      </div>
 
       <p className="text-sm text-muted-foreground">
         A customer&rsquo;s billing method decides the shape of what is generated:{" "}
