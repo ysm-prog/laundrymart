@@ -7,6 +7,7 @@ import {
   Card, DataTable, EmptyState, PageHeader, SkeletonRows, SkeletonStats, Stat, StatusBadge,
 } from "@/components/ui";
 import { ListControls, Pagination, pageFrom, rangeFor } from "@/components/list-controls";
+import { FilterChips } from "@/components/filters";
 
 export const metadata = { title: "Bills" };
 export const dynamic = "force-dynamic";
@@ -31,14 +32,22 @@ export default async function BillsPage({ searchParams }: { searchParams: Promis
       <ListControls
         action="/bills"
         q={params.q}
-        filters={[
-          {
-            name: "outstanding", label: "Show", value: params.outstanding,
-            options: [
+        params={params}
+        filterKeys={["q", "outstanding", "status"]}
+        chips={
+          /* "What do we still owe, and what is late?" is the question this
+             screen is opened with, so it is chips rather than a select called
+             "Show" — which named the control instead of the answer. */
+          <FilterChips
+            basePath="/bills" params={params} name="outstanding" label="What to show"
+            allLabel="All bills"
+            options={[
               { value: "unpaid", label: "Still owed" },
               { value: "overdue", label: "Past due" },
-            ],
-          },
+            ]}
+          />
+        }
+        filters={[
           {
             name: "status", label: "Status", value: params.status,
             options: [

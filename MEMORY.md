@@ -24,6 +24,28 @@ The next run-through will be the first against a real customer.
 **Two claims merged an hour earlier are now corrected in §11** — they asserted INV00001 exists and
 that Jay CT was being left in place.
 
+## Previously: the YSM Hub filter language, on every list
+2026-08-26, branch `claude/ysm-hub-style-filters-84bgd5`. **No migration** — the ledger's last
+entry is still `0038_invoice_line_account` and `git diff` over `supabase/` is empty. 837 unit
+tests (was 806) — **843 with `Prod` merged in** — and `verify` green.
+
+- **`components/filters.tsx` + `lib/filters.ts` are the new surface**: `FilterChips`,
+  `ToggleChips`, `PeriodFilter`, `FilterSummary`, with the rules pure and tested beside them.
+  `ListControls` composes chips → fields → summary. CLAUDE.md **§29** is the design.
+- **Ten canonical period presets** in `lib/domain/dates.ts` (`resolvePeriod` is the one reader of
+  `?period=&from=&to=`). `this_fy` is the Australian financial year.
+- **Every list page reviewed.** Filters added where there were none — the billing queue, Drivers,
+  Vehicles, Boards, Stock, the plant, Problems, People, Sites, Public holidays, the bell — preset
+  chips added to Collections and Deliveries, and the ten `ListControls` pages given chips, a
+  Clear and a filtered-vs-empty empty state. `/billing`'s own `period-filter.tsx` is deleted in
+  favour of the shared one.
+- **Four defects the gallery caught**, all in CLAUDE.md's entry: `cx(CONTROL, "w-auto")` has
+  never worked (→ `CONTROL_AUTO`, ten call sites were rendering full width), `ListControls`
+  hard-coded `id="q"`, two Clear links, and a `rem` `min-w` floor that scaled with the text.
+
+**Not opened with real rows.** No Supabase credentials here. First thing to check on
+`ats.coreit.com.au`: Money › Awaiting invoice → press "Not priced yet" and confirm the chip's
+count matches the rows under it.
 
 ## Previously: Adjust Run merged, and verified against the live database
 2026-08-26. **`Prod` = `f8eb138` (PR #26), `Dev` = `6c1dd4c` (PR #27)**, identical trees, CI green on
@@ -64,7 +86,7 @@ data. Both corrected in §11.
 card.
 
 
-## Previously: Adjust Run reaches My Runs
+## Earlier: Adjust Run reaches My Runs
 2026-08-26, branch `claude/adjust-run-button-roles-ushdk9`. The owner asked for the button on the
 screen they are actually looking at, restricted to the Owner and the Office manager. **No
 migration, no schema, no RLS, no capability, no new role.**
@@ -94,28 +116,12 @@ Adjust Run, swap 1 and 2, Save & Lock Run; then check `board1@ats.example.com` s
 is also the one item the 2026-08-25 entry left open.
 
 
-## Previously: merged to Prod and Dev — that branch is live
+## Earlier still: merged to Prod and Dev
 2026-08-26. **PR #23 → `Prod` (`00c6613`), PR #24 → `Dev`**, CI green on all three jobs for both
 (verify, gitleaks, and the DB job: 40 migrations, 431 pgTAP assertions and the seed against a
 fresh Postgres 16). `ats.coreit.com.au` carries the whole branch.
 
-- **Nothing was outstanding to apply.** `0036_run_sequence_control`, `0037_account_and_item_codes`
-  and `0038_invoice_line_account` all went on `laundrymart-syd` *before* the merge — the schema
-  leads the code, the same order every release since 2026-08-18.
-- **Merge commits, not the fast-forwards the changelog records**, because pushing to `Prod`
-  directly was refused in this session and it went through pull requests instead. Same tree,
-  `Prod` never force-pushed. Recorded in CLAUDE.md §18 so the shape of `git log` on `Prod` is not
-  a surprise.
-- **The live regression is closed.** `0036_run_sequence_control` had been applied while its code
-  sat unmerged, so the database refused a dispatcher reordering a stop from a control the deployed
-  screen still showed. Screen and database agree from this merge on.
-
-**Still open and needing a login, not a commit:** take one real run through Adjust Run → Save &
-Lock Run as `owner@roles.example.com`, and the coding ladder has never met real data — no
-`XERO_CLIENT_ID`, 0 `xero_connections`, and all 647 invoices carry 0 lines.
-
-
-## Previously: merged with Prod — the coding ladder and the audit rule
+## Older: merged with Prod — the coding ladder and the audit rule
 2026-08-25. **Most of this branch is already live on `ats.coreit.com.au`**; another session
 merged the run-sequencing work and the account-codes work to `Prod` while this branch was still
 open. `origin/Prod` was merged **into** this branch and the four conflicts resolved before

@@ -13,10 +13,12 @@ import {
   addDays, businessToday, formatAdelaideDate, toInstant, weekBounds,
 } from "@/lib/domain/timezone";
 import {
-  Badge, ButtonLink, CONTROL, DataTable, EmptyState, Notice,
+  Badge, ButtonLink, CONTROL, CONTROL_AUTO, DataTable, EmptyState, Notice,
   PageHeader, SkeletonRows, SkeletonStats, Stat, StatusBadge, cx,
 } from "@/components/ui";
 import { Pagination, pageFrom, rangeFor } from "@/components/list-controls";
+import { FilterChips } from "@/components/filters";
+import { filterHref } from "@/lib/filters";
 import { listActiveBoards } from "@/lib/runs/my-runs";
 
 export const metadata = { title: "Customer laundry" };
@@ -91,7 +93,7 @@ export default async function JobsPage({ searchParams }: { searchParams: Promise
       />
 
       <Suspense fallback={<div className="mb-4"><SkeletonStats count={7} /></div>}>
-        <SummaryStrip />
+        <SummaryStrip params={params} />
       </Suspense>
 
       <Filters params={params} />
@@ -114,7 +116,7 @@ export default async function JobsPage({ searchParams }: { searchParams: Promise
  * Each card is a link that applies its own filter to the list below, so the
  * number and the rows behind it can never disagree.
  */
-async function SummaryStrip() {
+async function SummaryStrip({ params }: { params: Search }) {
   const supabase = await createClient();
   const today = businessToday();
   const head = { count: "exact" as const, head: true };
@@ -137,14 +139,29 @@ async function SummaryStrip() {
   ]);
 
   const cards = [
-    { label: "New", value: fresh.count, href: "/orders?status=new" },
-    { label: "In progress", value: working.count, href: "/orders?status=in_progress" },
-    { label: "Ready", value: ready.count, href: "/orders?status=ready_for_delivery" },
-    { label: "Assigned", value: assigned.count, href: "/orders?status=assigned" },
-    { label: "Out for delivery", value: out.count, href: "/orders?status=out_for_delivery" },
-    { label: "Completed today", value: completedToday.count, href: "/orders?status=completed" },
-    { label: "Overdue", value: overdue.count, href: "/orders?when=overdue", danger: true },
-  ];
+    { label: "New", value: fresh.count, on: { status: "new" } },
+    { label: "In progress", value: working.count, on: { status: "in_progress" } },
+    { label: "Ready", value: ready.count, on: { status: "ready_for_delivery" } },
+    { label: "Assigned", value: assigned.count, on: { status: "assigned" } },
+    { label: "Out for delivery", value: out.count, on: { status: "out_for_delivery" } },
+    { label: "Completed today", value: completedToday.count, on: { status: "completed" } },
+    { label: "Overdue", value: overdue.count, on: { when: "overdue" }, danger: true },
+  ].map((card) => {
+    // These tiles have always been filter links; what they never did was say
+    // which one you had pressed, so the list narrowed and nothing on the page
+    // admitted why. Pressing the active tile clears it, like every chip.
+    const [key, value] = Object.entries(card.on)[0] as [keyof Search, string];
+    const active = params[key] === value;
+    return {
+      ...card,
+      active,
+      // The tiles carry the *status*, so pressing one drops the other status-ish
+      // filter rather than silently ANDing "Ready" with "Overdue".
+      href: filterHref("/orders", params, {
+        status: undefined, when: undefined, [key]: active ? undefined : value,
+      }),
+    };
+  });
 
   // Separate cards rather than one joined strip: the strip left an empty grey
   // cell whenever the count did not fill the row, and square corners among
@@ -154,7 +171,7 @@ async function SummaryStrip() {
       {cards.map((card) => (
         <Stat
           key={card.label}
-          label={card.label}
+          label={card.active ? `${card.label} · showing` : card.label}
           value={card.value ?? 0}
           href={card.href}
           tone={card.danger && (card.value ?? 0) > 0 ? "danger" : "default"}
@@ -206,7 +223,29 @@ async function Filters({ params }: { params: Search }) {
   ]);
 
   return (
-    <form method="get" action="/orders" className="mb-4 flex flex-wrap items-end gap-2">
+    <div className="mb-4 flex flex-col gap-3">
+      {/* Two chip rows above the fields, the layout `ListControls` uses
+          everywhere else. Both were selects whose first option was "Any …",
+          which is a chip group's All chip written the long way — and both
+          answer a question ("what is late?", "what still has no board?") that
+          is worth one press. The form below stays hand-rolled for the reason
+          the note above gives: it needs date pickers. */}
+      <FilterChips
+        basePath="/orders" params={params} name="when" label="When it is due"
+        allLabel="Any date"
+        options={WHEN_OPTIONS.filter((option) => option.value !== "")}
+      />
+      <FilterChips
+        basePath="/orders" params={params} name="run" label="Delivery assignment"
+        allLabel="Any assignment"
+        options={RUN_OPTIONS.filter((option) => option.value !== "")}
+      />
+    <form method="get" action="/orders" className="flex flex-wrap items-end gap-2">
+      {/* The chip selections ride through the search, or typing a customer name
+          would silently drop the chip somebody just pressed. */}
+      {(["when", "run"] as const).map((key) => (params[key]
+        ? <input key={key} type="hidden" name={key} value={params[key]} />
+        : null))}
       <div className="min-w-[14rem] flex-1">
         <label htmlFor="q" className="sr-only">Search jobs</label>
         <input id="q" name="q" type="search" defaultValue={params.q} className={CONTROL}
@@ -216,7 +255,7 @@ async function Filters({ params }: { params: Search }) {
       <div>
         <label htmlFor="status" className="sr-only">Status</label>
         <select id="status" name="status" defaultValue={params.status ?? ""}
-                className={cx(CONTROL, "w-auto")}>
+                className={CONTROL_AUTO}>
           <option value="">Any status</option>
           {ORDER_STATUSES.map((value) => (
             <option key={value} value={value}>{ORDER_STATUS_LABELS[value]}</option>
@@ -227,7 +266,7 @@ async function Filters({ params }: { params: Search }) {
       <div>
         <label htmlFor="priority" className="sr-only">Priority</label>
         <select id="priority" name="priority" defaultValue={params.priority ?? ""}
-                className={cx(CONTROL, "w-auto")}>
+                className={CONTROL_AUTO}>
           <option value="">Any priority</option>
           {ORDER_PRIORITIES.map((value) => (
             <option key={value} value={value}>{PRIORITY_LABELS[value]}</option>
@@ -238,7 +277,7 @@ async function Filters({ params }: { params: Search }) {
       <div>
         <label htmlFor="customer" className="sr-only">Customer</label>
         <select id="customer" name="customer" defaultValue={params.customer ?? ""}
-                className={cx(CONTROL, "w-auto max-w-[14rem]")}>
+                className={cx(CONTROL_AUTO, "max-w-[14rem]")}>
           <option value="">Any customer</option>
           {(customers ?? []).map((customer) => (
             <option key={customer.id} value={customer.id}>{customer.business_name}</option>
@@ -247,29 +286,9 @@ async function Filters({ params }: { params: Search }) {
       </div>
 
       <div>
-        <label htmlFor="when" className="sr-only">Due</label>
-        <select id="when" name="when" defaultValue={params.when ?? ""}
-                className={cx(CONTROL, "w-auto")}>
-          {WHEN_OPTIONS.map((option) => (
-            <option key={option.value} value={option.value}>{option.label}</option>
-          ))}
-        </select>
-      </div>
-
-      <div>
-        <label htmlFor="run" className="sr-only">Delivery run</label>
-        <select id="run" name="run" defaultValue={params.run ?? ""}
-                className={cx(CONTROL, "w-auto")}>
-          {RUN_OPTIONS.map((option) => (
-            <option key={option.value} value={option.value}>{option.label}</option>
-          ))}
-        </select>
-      </div>
-
-      <div>
         <label htmlFor="board" className="sr-only">Assigned board</label>
         <select id="board" name="board" defaultValue={params.board ?? ""}
-                className={cx(CONTROL, "w-auto max-w-[12rem]")}>
+                className={cx(CONTROL_AUTO, "max-w-[12rem]")}>
           <option value="">Any board</option>
           {boards.map((board) => (
             <option key={board.id} value={board.id}>{board.name}</option>
@@ -280,13 +299,13 @@ async function Filters({ params }: { params: Search }) {
       <div>
         <label htmlFor="date" className="sr-only">Due on a specific date</label>
         <input id="date" name="date" type="date" defaultValue={params.date}
-               className={cx(CONTROL, "w-auto")} title="Due date" />
+               className={CONTROL_AUTO} title="Due date" />
       </div>
 
       <div>
         <label htmlFor="assigned" className="sr-only">Assigned delivery date</label>
         <input id="assigned" name="assigned" type="date" defaultValue={params.assigned}
-               className={cx(CONTROL, "w-auto")} title="Assigned delivery date" />
+               className={CONTROL_AUTO} title="Assigned delivery date" />
       </div>
 
       <button type="submit"
@@ -296,11 +315,12 @@ async function Filters({ params }: { params: Search }) {
       </button>
       {isFiltered(params) ? (
         <Link href="/orders"
-              className="inline-flex min-h-9 items-center px-2 text-sm text-primary hover:underline">
+              className="inline-flex min-h-11 items-center px-2 text-sm font-medium text-primary hover:underline">
           Clear
         </Link>
       ) : null}
     </form>
+    </div>
   );
 }
 

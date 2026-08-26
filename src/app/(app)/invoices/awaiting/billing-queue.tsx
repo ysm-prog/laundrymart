@@ -35,7 +35,10 @@ export type QueueRow = {
   orderNumber: string;
   customerId: string;
   customerName: string;
+  /** The method spelled for a person. */
   billingMethod: string;
+  /** The stored value, which is what the method filter matches on. */
+  billingMethodValue: string;
   completedAt: string | null;
   chargeCount: number;
   subtotal: number;
