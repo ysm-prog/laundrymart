@@ -77,3 +77,63 @@ describe("chargePatchForItem · what the typed text actually was", () => {
       .toBe("Towels - Wash & Dry Only");
   });
 });
+
+describe("chargePatchForItem and the GST basis", () => {
+  /*
+   * **The worse half of the under-billing, because approval freezes this row.**
+   * A job charge feeds an invoice line, and a line amount is GST-inclusive
+   * (0043) — so an item stating its price GST-exclusive has to be grossed up
+   * before it becomes a rate here. Until it was, the customer was short-charged
+   * by the whole GST component on a row nobody can edit afterwards.
+   */
+  const PRICED = { ...TW, sell_price: 100, tax_code: "GST" };
+
+  it("grosses an exclusive item's price up before freezing it", () => {
+    const patch = chargePatchForItem(BLANK, { ...PRICED, sell_price_basis: "exclusive" },
+                                     { gstRate: 0.1 });
+    expect(patch.unit_price).toBe(110);
+  });
+
+  it("uses an inclusive item's price as it stands", () => {
+    const patch = chargePatchForItem(BLANK, { ...PRICED, sell_price_basis: "inclusive" },
+                                     { gstRate: 0.1 });
+    expect(patch.unit_price).toBe(100);
+  });
+
+  it("leaves an item with no basis exactly as it behaved before", () => {
+    // All 254 of this laundry's items. The ordinary path must not move.
+    const patch = chargePatchForItem(BLANK, PRICED, { gstRate: 0.1 });
+    expect(patch.unit_price).toBe(100);
+  });
+
+  it("adds nothing to an exclusive item on a GST-free line", () => {
+    const patch = chargePatchForItem(BLANK, { ...PRICED, tax_code: "FRE", sell_price_basis: "exclusive" },
+                                     { gstRate: 0.1 });
+    expect(patch.unit_price).toBe(100);
+    expect(patch.taxable).toBe(false);
+  });
+
+  it("takes the GST answer from the account where the item is silent", () => {
+    // The item says nothing, its account says FRE — so there is no GST to add
+    // even though the item calls its price exclusive.
+    const patch = chargePatchForItem(BLANK, { ...PRICED, tax_code: null, sell_price_basis: "exclusive" },
+                                     { accountTaxCode: "FRE", gstRate: 0.1 });
+    expect(patch.taxable).toBe(false);
+    expect(patch.unit_price).toBe(100);
+  });
+
+  it("falls back to 10% when the caller has not read the laundry's rate", () => {
+    // A default rather than a required argument, so a call site that predates
+    // the rate behaves as it did — and 10% is what tenants.gst_rate defaults to.
+    const patch = chargePatchForItem(BLANK, { ...PRICED, sell_price_basis: "exclusive" });
+    expect(patch.unit_price).toBe(110);
+  });
+
+  it("still never overwrites a rate somebody typed, whatever the basis", () => {
+    const patch = chargePatchForItem(
+      { ...BLANK, unit_price: "0.22" },
+      { ...PRICED, sell_price_basis: "exclusive" }, { gstRate: 0.1 },
+    );
+    expect(patch.unit_price).toBeUndefined();
+  });
+});

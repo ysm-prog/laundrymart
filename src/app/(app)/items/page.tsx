@@ -12,7 +12,9 @@ import { ListControls } from "@/components/list-controls";
 import { FilterChips } from "@/components/filters";
 import { IncomeAccountField } from "./income-account-field";
 import { ITEM_TYPES, ITEM_TYPE_LABELS } from "@/lib/domain/laundry-orders";
+import { PRICE_BASIS_OPTIONS, sellPriceLabel } from "@/lib/domain/items";
 import { ITEM_CATEGORIES } from "./categories";
+import { ITEM_COLUMNS } from "./columns";
 import { createItem } from "./actions";
 
 export const metadata = { title: "Items" };
@@ -59,10 +61,7 @@ async function ItemList({ params }: { params: Search }) {
   const supabase = await createClient();
   let query = supabase
     .from("items")
-    .select("id, sku, item_code, name, description, category, laundry_category, " +
-            "ownership_type, is_sell, is_buy, sell_price, cost_price, tax_code, " +
-            "replacement_cost, rental_price, wash_only_price, weight_kg, reorder_level, " +
-            "myob_item_id, myob_item_code, external_synced_at, income_account_id, status")
+    .select(ITEM_COLUMNS)
     .is("deleted_at", null)
     // By code, because that is what the list is scanned by. Staff look for
     // TOW001 and read down; alphabetical by name puts the towels in three places.
@@ -103,7 +102,14 @@ async function ItemList({ params }: { params: Search }) {
           cell: (row) => [row.is_sell ? "Sell" : null, row.is_buy ? "Buy" : null]
             .filter(Boolean).join(" · ") || "—",
         },
-        { header: "Sell price", cell: (row) => money(row.sell_price), align: "right" },
+        {
+          // **The unit rides with the price.** A rate on its own is ambiguous the
+          // moment a laundry sells anything by the box: $0.22 and $0.22 read
+          // identically whether one is per towel and the other per hundred, and
+          // the unit is the only thing on the row that tells them apart.
+          header: "Sell price", align: "right",
+          cell: (row) => sellPriceLabel(money(row.sell_price), row.selling_unit),
+        },
         { header: "Cost", cell: (row) => money(row.cost_price), align: "right", hideBelow: "sm" },
         { header: "Rental", cell: (row) => money(row.rental_price), align: "right", hideBelow: "lg" },
         { header: "Weight", cell: (row) => `${number(row.weight_kg)} kg`, align: "right", hideBelow: "lg" },
@@ -156,6 +162,22 @@ async function NewItemForm({ tenantId }: { tenantId: string }) {
         </Field>
         <Field label="Sell price" name="sell_price">
           <Input name="sell_price" type="number" step="0.01" min={0} defaultValue="0" />
+        </Field>
+        {/*
+          The two selling fields that have to be answered *at creation time*,
+          because they change what the price above means. Everything else 0044
+          added is edited on the detail page — an add form asking twenty-odd
+          questions is the wall of inputs `FormSection` exists to prevent, and
+          none of the rest is needed before the item can be used.
+        */}
+        <Field label="Selling unit" name="selling_unit"
+               hint="What the price is per — ea, doz, ctn. Shown beside the rate everywhere.">
+          <Input name="selling_unit" placeholder="ea" />
+        </Field>
+        <Field label="Selling price is" name="sell_price_basis"
+               hint="Whether the price above already contains GST.">
+          <Select name="sell_price_basis" placeholder="Not stated"
+                  options={PRICE_BASIS_OPTIONS} />
         </Field>
         <Field label="Cost price" name="cost_price">
           <Input name="cost_price" type="number" step="0.01" min={0} defaultValue="0" />

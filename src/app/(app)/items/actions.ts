@@ -21,6 +21,63 @@ import { ITEM_CATEGORIES } from "./categories";
  */
 const flag = z.preprocess((value) => value === "true" || value === true, z.boolean());
 
+/**
+ * **Not posted** and **posted empty** are two different answers, and 0044's
+ * optional fields have to tell them apart.
+ *
+ * One schema serves both item forms, and the add form deliberately asks only two
+ * of 0044's fifteen questions (§25 — an add form asking thirty is the wall of
+ * inputs `FormSection` exists to prevent). So a field the add form never renders
+ * arrives `undefined` and must be **left to the column default**, while the same
+ * field cleared on the detail form arrives `""` and must be **written as null**.
+ *
+ * `undefined` and `null` are not interchangeable here, which is the opposite of
+ * the call `optionalText` makes: it folds both to `undefined`, and because
+ * `JSON.stringify` drops undefined keys, a field it governs cannot be *cleared*
+ * once set — clearing it posts `""`, which becomes `undefined`, which is never
+ * sent. That is long-standing behaviour across every form in the app and is not
+ * changed here; these new fields simply do not inherit it, because a price basis
+ * that cannot be put back to "not stated" is a field with a one-way door on it.
+ */
+const clearable = <T extends z.ZodTypeAny>(inner: T) => z.preprocess(
+  (value) => {
+    if (value === undefined) return undefined;
+    if (value === null) return null;
+    return typeof value === "string" && value.trim() === "" ? null : value;
+  },
+  inner.nullable().optional(),
+);
+
+/**
+ * MYOB's "Selling price is" / "Buying price is", or nothing.
+ *
+ * The two values match the `chk_items_sell_price_basis` and
+ * `chk_items_buy_price_basis` check constraints exactly, so anything else is
+ * refused here with a sentence rather than by the database with a constraint
+ * name. **Not stated** is the honest answer for every one of this laundry's 254
+ * imported items, so null has to be as saveable as either value.
+ */
+const priceBasis = clearable(z.enum(["inclusive", "exclusive"]));
+
+/**
+ * An optional positive number from an `<input type="number">`.
+ *
+ * Distinct from `money`, which turns a blank into 0. Zero items per selling unit
+ * is not a quantity anybody means, so storing 0 for "nobody said" would make the
+ * two indistinguishable — and `chk_items_buy_units_per` refuses it outright.
+ */
+const optionalNumber = clearable(z.coerce.number().positive("That has to be more than zero"));
+
+/**
+ * An account or supplier chosen from a select whose placeholder posts `""`.
+ *
+ * `optionalUuid` for the shape; `clearable` for the reason above, so "Not coded"
+ * can be chosen *back* after an account has been set. The neighbouring
+ * `income_account_id` deliberately still uses the shared `optionalUuid` — this
+ * change adds fields, it does not alter how an existing one saves.
+ */
+const clearableUuid = clearable(z.string().uuid());
+
 const itemSchema = z.object({
   // The code staff actually type. Uniqueness is the database's (a
   // case-insensitive unique index per laundry), because two people can type the
@@ -36,11 +93,46 @@ const itemSchema = z.object({
     (value) => (typeof value === "string" && value.trim() === "" ? null : value),
     z.enum(ITEM_TYPES).nullable(),
   ),
+  /**
+   * MYOB's "Use item description on sales and purchases" (0044). A `<select>`
+   * rather than a checkbox, because an unticked checkbox posts *nothing* and
+   * this form is also the edit form — a checkbox turned off would be
+   * indistinguishable from a field the form never sent, which is how a save
+   * silently reverts a value.
+   */
+  use_item_description: flag,
   is_sell: flag,
   is_buy: flag,
   sell_price: money,
   cost_price: money,
+  /** The **selling** tax code. `buy_tax_code` below is the buying one (0044). */
   tax_code: optionalText,
+  /*
+   * The selling half of MYOB's item page. The first three are 0043's columns
+   * getting their first writer; the fourth is 0044's.
+   *
+   * `sell_price_basis` is what `priceBasisHint` reads on an invoice line — the
+   * one line of text saying whether the rate already contains GST. Optional
+   * everywhere: 254 of this laundry's items carry no basis, so "not stated" is
+   * the ordinary answer and must stay saveable.
+   */
+  sell_price_basis: priceBasis,
+  selling_unit: optionalText,
+  items_per_selling_unit: optionalNumber,
+  cost_of_sales_account_id: clearableUuid,
+  /* The buying half, mirroring the selling half field for field. */
+  buy_price_basis: priceBasis,
+  buy_unit: optionalText,
+  buy_units_per: optionalNumber,
+  buy_tax_code: optionalText,
+  expense_account_id: clearableUuid,
+  supplier_item_code: optionalText,
+  /* Restocking. `reorder_level` (when to order) is below and stays as it was. */
+  track_stock: flag,
+  asset_account_id: clearableUuid,
+  primary_supplier_id: clearableUuid,
+  /** How *much* to order, per buying unit — not the same number as `reorder_level`. */
+  default_reorder_qty: money,
   /*
    * MYOB's "Income Account for Tracking Sales", and the item's code as it is in
    * **Xero** (0036 + 0037). Both optional and both null by default: an item
