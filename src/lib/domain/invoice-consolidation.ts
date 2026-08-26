@@ -48,6 +48,12 @@ export type ConsolidatableCharge = {
   source_item_id: string | null;
   source_agreement_id: string | null;
   source_laundry_item_type: string | null;
+  /**
+   * Where this charge's money lands (0039). Optional so a caller that predates
+   * the column still typechecks; part of the consolidation key either way, so
+   * two charges coded differently never merge into one line.
+   */
+  gl_account_id?: string | null;
 };
 
 /** The job a charge came off. `date` is the day it counts as, already resolved. */
@@ -83,6 +89,8 @@ export type ConsolidatedLine = {
   source_item_id: string | null;
   source_agreement_id: string | null;
   source_laundry_item_type: string | null;
+  /** Where this line's money lands (0039), carried from the charges it rolls up. */
+  gl_account_id: string | null;
   /** True when more than one job's charge was folded into this line. */
   merged: boolean;
   contributions: LineContribution[];
@@ -126,8 +134,18 @@ export function consolidationKey(charge: ConsolidatableCharge): string | null {
   const identity = charge.source_item_id
     ? `item:${charge.source_item_id}`
     : `type:${charge.source_laundry_item_type}`;
-  return [identity, charge.charge_type, charge.unit_price.toFixed(4), charge.taxable ? "gst" : "free"]
-    .join("|");
+  return [
+    identity,
+    charge.charge_type,
+    charge.unit_price.toFixed(4),
+    charge.taxable ? "gst" : "free",
+    // **The account is part of the key for the same reason GST is.** Where the
+    // money lands is a property of the line, not a detail to average away: two
+    // charges for the same item coded to different accounts — which happens the
+    // moment somebody overrides one on the Charges screen — must stay two lines,
+    // or the whole amount posts to whichever account happened to be first.
+    `acct:${charge.gl_account_id ?? "none"}`,
+  ].join("|");
 }
 
 /* ------------------------------------------------------------ the roll-up */
@@ -187,6 +205,9 @@ export function consolidateChargeLines(entries: readonly ChargeEntry[]): Consoli
       source_item_id: charge.source_item_id,
       source_agreement_id: charge.source_agreement_id,
       source_laundry_item_type: charge.source_laundry_item_type,
+      // Safe to take from the first contributor: the account is part of the
+      // consolidation key, so every charge folded into this line shares it.
+      gl_account_id: charge.gl_account_id ?? null,
       merged: false,
       contributions: [contribution],
     };

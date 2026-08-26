@@ -1,14 +1,102 @@
 # MEMORY — working session handoff
 > Auto-loaded each session. Canonical state is CLAUDE.md; this is the live delta.
 
-## Latest: merged to Prod and Dev — the filter language is live
+## Latest: the item list arrives, and 254 items are live in Adelaide
+2026-08-26, branch `claude/invoice-item-code-selection-vlwwb4`. **No migration** — the
+reader, the pickers and a live data import. CLAUDE.md §11, §25, §27 and the newest
+changelog entry have it.
+
+The client's updated requirement: pick the **ItemCode and price**, not the account code.
+Half is built; the other half cannot come from this file, which is the finding.
+
+- **The item leads, the account follows** — MYOB's own shape. The coding strip asks for
+  the item and shows the account beneath it, with "Use a different account" as the escape.
+- **The price is not in this export**: 2 of 257 rows carry one, and every sellable service
+  code (`TW`, `GTW`, `HTW`, `BT`, `Del`) is blank. Most of these are things the laundry
+  *buys*. So the rate keeps coming from `laundry_prices` — where the client's own rates
+  already are (their invoice bills `TW` at $0.22, a customer rate, not a list price).
+- **`Item Number` is the code staff type, not `Item ID`** — the latter is MYOB's internal
+  row number. Reading it would have imported 257 items nobody could find.
+- **A defect proved against a real database:** `items` is unique on
+  `(tenant_id, lower(item_code))` and partial, so PostgREST's `on_conflict=` cannot name it
+  (`42P10`). `PlannedTable.matchBy` reads, updates by id and inserts the rest.
+- `MAX_ITEM_CODE` 20 → 30: their real codes reach 23.
+
+**Imported live.** 254 items into `Adelaide Towel Service`, rehearsed in a rolled-back
+transaction first, then applied behind eight assertions (including that the table still
+started empty). Read back **as `board1@ats.example.com`**, a real Adelaide-only session:
+254 items, Harbour's 6 not among them, and still 0 accounts / 0 invoices / 0 prices — so
+0036's gate and the billing narrowing both held. 268 accounts, 647 invoices, 6 jobs
+unchanged.
+
+**Two things stated rather than glossed**, because both differ from what was offered:
+- **All 254 are `is_sell` *and* `is_buy`** — the export carries neither flag, so neither is
+  inferred. The two coding pickers now filter `is_sell`, which they never did before, so
+  the flag is a lever an owner can pull (untick "I sell this" on the detergent) rather than
+  decoration. Inert on this data.
+- **All 254 have no `laundry_category` and no `income_account_id`.** The export says
+  neither. So the item picker works today and the *account* is still chosen per line until
+  somebody codes the items. Owner's next step, not something the import could answer.
+
+**`0039` is applied** (`20260826022128`, the ledger's last entry). Eleven verifications,
+six of them behavioural against real rows in an aborted transaction; **no new security
+advisor**, so the `public, anon, authenticated` revoke on the definer trigger function
+held — the check 0036 failed.
+
+**Another session deleted Adelaide's test data at 02:12:59**, between the import and the
+0039 apply: 2 customers, 5 jobs, 1 invoice, the 1 frozen charge and the paperwork under
+them. Deliberate and rehearsed, not an accident, and **the 254 items were untouched**.
+Adelaide is down to LJ00001. So §27's motivating count (1 frozen charge, 0 with an item)
+is now 0 charges — the argument stands on the reasoning, not on a live row.
+
+### Next
+End to end, still never run: take a job in → code one charge → approve → generate the
+invoice → confirm the line arrives already coded; then push one invoice and watch
+`AccountCode` populate for the first time.
+
+---
+
+## Previous: code the charge where the charge is made
+2026-08-26, branch `claude/invoice-item-code-selection-vlwwb4`. One migration
+(`0039_job_charge_codes`) — no new table, no new role, no new capability, nothing
+dropped, no row changed. CLAUDE.md §7, §27 and the newest changelog entry have it.
+
+The client's comparison: MYOB puts **Item ID** and **Category** (the account code) on
+the line as it is written. This app asked twice — a charge added by hand on a job
+carried no item and *could* carry no account, so the invoice line came out uncoded and
+somebody re-keyed it. Counted first: Adelaide holds **1** frozen charge, **0** with an
+item, and has no rate card and no price list — so every charge it raises is hand-added
+and the coding feature was inert for the one real business using it.
+
+- Each charge row names an item and an account, same code-first type-ahead as the
+  invoice composer. Pickers are now **shared** (`components/coding-pickers.tsx`).
+- **`saveJobCharges` is the one place a charge gets its code** — both writers pass
+  through it. An account already on the charge wins (a hand override is deliberate).
+- **The account is part of the consolidation key**, like unit price and `taxable`:
+  two charges for one item coded differently must not merge into one line.
+- Generation prefers the charge's account, item as fallback — same precedence as
+  `lib/xero/push.ts`.
+
+**Found by driving it:** every row rendered the same DOM ids, so each row's label
+pointed at the first row's box. Pickers take an `idPrefix` now. Invisible to
+typecheck, unit tests and screenshots alike.
+
+- 802 unit tests, **439 pgTAP assertions**, verify green, whole suite + seed on a
+  fresh Postgres 16. New assertions confirmed to fail without 0039.
+- Gallery: 24 combinations, 0 console errors, 0 overflow, 0 targets under 36px,
+  document overflow byte-identical to baseline. 12 interaction assertions.
+
+---
+
+## Previous: merged to Prod and Dev — the filter language is live
 2026-08-26. **PR [#30](https://github.com/ysm-prog/laundrymart/pull/30) → `Prod` (`8510154`), PR
 [#32](https://github.com/ysm-prog/laundrymart/pull/32) → `Dev` (`2bcd4fe`)**, identical trees, CI
 green on all three jobs for both (verify, gitleaks, and the DB job: 40 migrations, 431 pgTAP
 assertions and the seed against a fresh Postgres 16). 843 unit tests.
 
-- **Nothing to apply to Supabase.** `git diff` over `supabase/` is empty and the ledger's last
-  entry is still `0038_invoice_line_account`.
+- **Nothing to apply to Supabase** for that work: `git diff` over `supabase/` was empty and the
+  ledger's last entry was `0038_invoice_line_account`. `0039_job_charge_codes` went on later the
+  same day, from this branch.
 - **What landed:** the YSM Hub filter language on every list — `components/filters.tsx`
   (`FilterChips`, `ToggleChips`, `PeriodFilter`, `FilterSummary`) with the rules pure and tested in
   `lib/filters.ts`, ten canonical period presets in `lib/domain/dates.ts` behind `resolvePeriod`,

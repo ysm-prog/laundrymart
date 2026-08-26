@@ -1,6 +1,7 @@
 import { parseCsvRecords, csvHeader } from "./csv";
 import { readXlsx } from "./xlsx";
 import { CellError, day, money, text } from "./values";
+import { readInventory, type InventoryItem } from "./inventory";
 
 /**
  * One reader per MYOB export, and the rules for recognising which is which.
@@ -83,7 +84,7 @@ export type Read<T> = { rows: T[]; problems: Problem[] };
 /** The eight exports this importer understands, plus the two that add nothing. */
 export const MYOB_KINDS = [
   "contacts", "bills", "orders", "credits", "accounts",
-  "contactsReport", "invoices", "remittances",
+  "contactsReport", "invoices", "remittances", "inventory",
 ] as const;
 
 export type MyobKind = (typeof MYOB_KINDS)[number];
@@ -131,6 +132,15 @@ export const MYOB_FILES: Record<MyobKind, {
     label: "Remittance advice", suffix: "remittance_advice.csv", format: "csv",
     columns: ["Reference No", "Supplier", "Amount Paid"],
     fills: "Payments that actually left the business.",
+  },
+  // §25 kept this out until the real export had been read rather than guessed
+  // at. It has been: the code staff type is `Item Number`, not `Item ID`, and
+  // the cleaning the file needs is in `myob/inventory.ts` with tests against the
+  // actual 257 rows.
+  inventory: {
+    label: "Items", suffix: "inventory.xlsx", format: "xlsx",
+    columns: ["Item Number", "Name", "Selling price ($)"],
+    fills: "The item codes staff type, so a charge can name one.",
   },
 };
 
@@ -324,6 +334,34 @@ export function readCredits(file: string, source: string): Read<Credit> {
       paid: Math.round((amount - balance) * 100) / 100,
     };
   });
+}
+
+/**
+ * The item list, from MYOB's inventory export.
+ *
+ * A thin shell over `myob/inventory.ts`, which holds the rules and the tests —
+ * the same split every reader here uses, and the reason the rules are the tested
+ * half. This translates its own `skipped`/`notes` into the `Problem` shape the
+ * import screen already renders, so a dropped row is *shown* rather than being a
+ * count that silently differs from the file.
+ */
+export function readInventoryFile(file: string, bytes: Buffer): Read<InventoryItem> {
+  let sheet: string[][];
+  try {
+    sheet = readXlsx(bytes);
+  } catch (cause) {
+    return { rows: [], problems: [{ file, row: null, fatal: true, message: String((cause as Error).message) }] };
+  }
+
+  const read = readInventory(sheet);
+  const problems: Problem[] = [
+    ...read.skipped.map((entry) => ({
+      file, row: entry.row, fatal: false,
+      message: `${entry.code ?? "(no code)"} was not imported — ${entry.reason}.`,
+    })),
+    ...read.notes.map((message) => ({ file, row: null, fatal: read.items.length === 0, message })),
+  ];
+  return { rows: read.items, problems };
 }
 
 export function readAccounts(file: string, source: string): Read<Account> {

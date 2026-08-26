@@ -9,6 +9,7 @@ import {
   count, describeDbError, done, fail, firstIssue, money, optionalText, optionalUuid, toObject,
 } from "@/lib/actions";
 import { ITEM_TYPES } from "@/lib/domain/laundry-orders";
+import { MAX_ITEM_CODE } from "@/lib/domain/items";
 import { ITEM_CATEGORIES } from "./categories";
 
 /**
@@ -25,7 +26,7 @@ const itemSchema = z.object({
   // case-insensitive unique index per laundry), because two people can type the
   // same code at the same moment and only one of them can be told by a screen —
   // the action turns that refusal into a sentence below.
-  item_code: z.string().trim().min(1, "An item code is required").max(20)
+  item_code: z.string().trim().min(1, "An item code is required").max(MAX_ITEM_CODE)
     .refine((value) => !/\s/.test(value), "An item code cannot contain spaces"),
   sku: z.string().trim().min(1, "SKU is required").max(40),
   name: z.string().trim().min(2, "Name is required"),

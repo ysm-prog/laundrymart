@@ -54,6 +54,14 @@ const chargeSchema = z.object({
   source_item_id: nullableUuid,
   source_laundry_item_type: nullableText,
   pricing_model: nullableText,
+  /*
+   * The account this charge codes to (0039). Optional in both directions, like
+   * the item beside it: a charge nobody has coded is a real thing and the
+   * invoice counts it rather than refusing the work. The database re-checks the
+   * account belongs to this laundry and is not a heading, because the browser
+   * is not the boundary.
+   */
+  gl_account_id: nullableUuid,
 });
 
 export const jobChargesSchema = z.array(chargeSchema);
@@ -78,6 +86,7 @@ export type JobChargeInput = {
   source_item_id: string | null;
   source_laundry_item_type: string | null;
   pricing_model: string | null;
+  gl_account_id: string | null;
 };
 
 export type ParsedJobCharges =
@@ -129,6 +138,7 @@ export function parseJobCharges(raw: FormDataEntryValue | null): ParsedJobCharge
       source_item_id: line.source_item_id ?? null,
       source_laundry_item_type: line.source_laundry_item_type ?? null,
       pricing_model: line.pricing_model ?? null,
+      gl_account_id: line.gl_account_id ?? null,
     })),
   };
 }

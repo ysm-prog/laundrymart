@@ -1,7 +1,7 @@
 import {
   MYOB_FILES, detectFile, headerOf,
   readAccounts, readBills, readContacts, readContactsReport, readCredits,
-  readInvoices, readOrders, readRemittances,
+  readInventoryFile, readInvoices, readOrders, readRemittances,
   type MyobKind, type ParsedFiles, type Problem,
 } from "@/lib/domain/myob";
 
@@ -128,6 +128,12 @@ function readOne(kind: MyobKind, upload: UploadedFile): {
     case "remittances": {
       const read = readRemittances(upload.name, source());
       return { rows: read.rows.length, problems: read.problems, assign: { remittances: read.rows } };
+    }
+    case "inventory": {
+      // xlsx, so the raw bytes rather than a decoded string — the same as the
+      // contacts report, and the reason `source()` is a function and not a value.
+      const read = readInventoryFile(upload.name, upload.bytes);
+      return { rows: read.rows.length, problems: read.problems, assign: { inventory: read.rows } };
     }
   }
 }

@@ -75,6 +75,16 @@ export type JobChargeLine = {
   source_item_id: string | null;
   source_laundry_item_type: string | null;
   pricing_model: string | null;
+  /**
+   * The income account this charge codes to (0039).
+   *
+   * Chosen on the job's Charges screen or inherited from the item the pricer
+   * used, and carried onto the invoice line at generation — so the code is
+   * decided once, where the work is, instead of being re-entered on the invoice.
+   * Null is legal and visible: an uncoded charge is counted on the invoice, not
+   * refused.
+   */
+  gl_account_id: string | null;
 };
 
 export type JobPricingResult = {
@@ -250,6 +260,7 @@ export function priceJob(input: {
         source_item_id: item.item_id ?? rate.item_id,
         source_laundry_item_type: item.item_type,
         pricing_model: rate.pricing_model,
+        gl_account_id: null,
       });
       continue;
     }
@@ -269,6 +280,7 @@ export function priceJob(input: {
       source_item_id: item.item_id ?? rate.item_id,
       source_laundry_item_type: item.item_type,
       pricing_model: rate.pricing_model,
+      gl_account_id: null,
     });
   }
 
@@ -296,6 +308,7 @@ export function priceJob(input: {
         source_item_id: null,
         source_laundry_item_type: null,
         pricing_model: "percentage",
+        gl_account_id: null,
       });
     }
   }
@@ -350,6 +363,7 @@ function priceFromList(
     source_item_id: item.item_id ?? null,
     source_laundry_item_type: item.item_type,
     pricing_model: useBags ? "per_bag" : "per_item",
+    gl_account_id: null,
   };
 }
 

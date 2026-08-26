@@ -11,6 +11,9 @@
  * keystroke, not after scrolling a list ordered by something else.
  */
 
+/** MYOB truncates an item number at 30 characters, so nothing longer can be real. */
+export const MAX_ITEM_CODE = 30;
+
 /** What these rules need to know about an item. Deliberately less than a row. */
 export type PickableItem = {
   id: string;
@@ -93,7 +96,12 @@ export function checkItemCode(
 ): { ok: true } | { ok: false; reason: string } {
   const trimmed = code.trim();
   if (!trimmed) return { ok: false, reason: "An item code is required." };
-  if (trimmed.length > 20) return { ok: false, reason: "Keep the item code to 20 characters." };
+  // 30, because that is MYOB's own field width and this business's real codes go
+  // to 23 (`2-GLOVECLASTRAPF_PK1000`). A cap below what their books already hold
+  // would refuse a code they type every week.
+  if (trimmed.length > MAX_ITEM_CODE) {
+    return { ok: false, reason: `Keep the item code to ${MAX_ITEM_CODE} characters.` };
+  }
   if (/\s/.test(trimmed)) {
     return { ok: false, reason: "An item code cannot contain spaces." };
   }

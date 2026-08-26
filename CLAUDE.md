@@ -656,6 +656,18 @@ renders no tab strip. Tested in `src/lib/__tests__/nav.test.ts`.
   sent to Xero. Its load-bearing assertion is that `invoice_lines` has **exactly one** foreign
   key to `gl_accounts`: the push embeds through it, and a second would make that embed ambiguous
   and kill the push with PGRST201 at request time.
+- `0039_job_charge_codes` — **code the charge where the charge is decided.**
+  `job_charge_snapshots.gl_account_id`, a partial index, `guard_job_charge_account()`
+  and its trigger, and `save_job_charge_snapshot()` re-created to carry the column.
+  **Adds no table, drops nothing and changes no row.** Deliberately **no backfill**:
+  `guard_job_charge_snapshot` refuses every UPDATE on a frozen row, so one would be
+  refused and take the migration with it — the live frozen charge keeps a null
+  account, which is the truth. One column and not two: `invoice_lines` keeps both
+  the link and an `account_code` snapshot because an invoice is a record of what a
+  customer was told; a job charge is internal provenance and the invoice raised
+  from it is where the record lives. Five self-assertions, including that the
+  writer stays SECURITY INVOKER and that the trigger function is not on the RPC
+  surface.
 - `0013_notifications` — `tenants.settings jsonb` (AD-3) and the `notifications` table
   (AD-4). Beware the numbering drift: the unmerged branch
   `claude/warehouse-inventory-flow-psooyq` carries its own `0012_return_count.sql`, which
@@ -710,7 +722,7 @@ Proofs in `supabase/tests/`: `rls_isolation`, `rls_coverage`, `driver_scope`,
 `run_assignment`, `archive_records`, `laundry_pricing`, `platform_admin`, `main_flow_scope`,
 `job_billing`, `purchases_scope`, `supplier_payments_scope`, `import_helpers`,
 `import_activation`, `member_directory`, `boards_scope`, `item_master`,
-`audit_log_scope`, `run_sequence`, `accounts_scope` (**431 assertions**).
+`audit_log_scope`, `run_sequence`, `accounts_scope` (**439 assertions**).
 
 **`run-db-tests.sh` parses the output rather than trusting the exit code, and that is not
 pedantry.** `psql` exits 0 for a pgTAP file that runs to completion, and a failed assertion is a
@@ -1150,9 +1162,12 @@ activity.
 Deployed on Vercel at `ats.coreit.com.au`. All migrations through `0030_member_directory`
 applied (0014 on 2026-08-13, 0015 and 0016 on 2026-08-14, 0017, 0018, 0019 and 0025 on
 2026-08-16, 0026 and 0027 on 2026-08-17, 0030 on 2026-08-18), each verified by rolled-back probe
-rather than trusted. **Every migration through `0036_invoice_account_codes` is applied**, and the
-ledger's last four entries are `0033_laundry_prices_read`, `0034_counter_takes_jobs`,
-`0035_audit_log_read` and `0036_invoice_account_codes`. 0020–0024 are the renumbered branch migrations, already live under their original
+rather than trusted. **Every migration through `0039_job_charge_codes` is applied**, and the ledger's last entry is
+`0039_job_charge_codes` (`20260826022128`, applied 2026-08-26), behind `0038_invoice_line_account`
+— whose file is in `supabase/migrations/` as of the 2026-08-26 merge and is a no-op against a
+database built from this repo, since 0036 already creates the column. Before those,
+`0033_laundry_prices_read`,
+`0034_counter_takes_jobs`, `0035_audit_log_read` and the two `0036`s. 0020–0024 are the renumbered branch migrations, already live under their original
 names (§7).
 
 **`0038_invoice_line_account` was applied on 2026-08-25** and is a **no-op** there — the column
@@ -1210,6 +1225,11 @@ accounts (268 rows) belongs to **Adelaide**, which holds **no items**; the six i
 **Harbour**, which holds **no accounts**. So coding an item to an account needs one or the other
 filling in first. And all **647 invoices carry 0 `invoice_lines`** — they came from the import as
 headers — so there is nothing yet for the Xero line coding to act on.
+
+**The first half of that was closed on 2026-08-26: Adelaide holds 254 items.** They came from the
+client's MYOB inventory export, so the chart and the item list are now in the same laundry and an
+item can be coded to an account without anything else arriving first. The second half stands —
+those 647 invoices still carry no lines. See the 2026-08-26 entry for the import itself.
 
 **`0031_boards` and `0032_item_master` were applied on 2026-08-20**, in that order, each
 verified before the next. **`0033_laundry_prices_read` followed the same day.**
@@ -1360,8 +1380,9 @@ Advisors stayed at **18** — 0033 adds no function.
 - **Item categories.** The five Harbour items that are laundry a customer hands in carry a
   `laundry_category` (apron → `uniforms`, bath towel → `bath_towels`, hand towel → `hand_towels`,
   tea towel → `towels`, table cloth → `linen`). `LB-STD-01` is deliberately left null: a laundry
-  bag is a container the laundry lends, not laundry. Adelaide has **no items at all**, so there
-  was nothing to categorise there.
+  bag is a container the laundry lends, not laundry. Adelaide had **no items at all** then, so
+  there was nothing to categorise there; it holds 254 since 2026-08-26 and **none carries a
+  category**, because the MYOB export does not say which of them is laundry a customer hands in.
 - **The first price list on the project.** There were **zero** `laundry_prices` rows and **zero**
   rate cards, so "Price this job" could only ever answer *nothing came back priced* — correct, and
   inert for every job in both laundries. Harbour now carries a tenant default for all nine kinds.
@@ -1454,8 +1475,9 @@ and both are the owner's to act on rather than the code's:
 
 **Still to do in the app, not the database:** invite one person into Adelaide who is not a platform
 administrator, enter its price list, and set `laundry_category` on the items that are laundry a
-customer hands in (§25) — Adelaide holds no `items` rows at all, so that one waits on the item
-master arriving. Creating and linking the boards is **done**.
+customer hands in (§25). Creating and linking the boards is **done**, and the item master is
+**done** — 254 items since 2026-08-26, which is what the third of those was waiting on. All 254
+arrived uncategorised and marked both sold and bought, because the export says neither.
 
 For **0030** that was: pre-flight (function absent, **0** `anon`-executable functions so the
 migration's own assertion would pass, 0 `anon` table grants, 15 memberships, 2 platform admins);
@@ -1793,6 +1815,200 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-08-26 · The item list arrives, and it brings codes but not prices
+The client sent their MYOB inventory export with an updated requirement: pick the
+**ItemCode and price**, not the account code. Half of that is now built and the
+other half cannot come from this file — which is the finding, not an excuse. No
+migration; no schema, RLS, capability or workflow change.
+
+- **The item leads and the account follows.** That is how MYOB works — you choose
+  the Item ID and the Category comes with it — and it is how the coding strip now
+  reads: the item is the question asked, the account is shown beneath it as a
+  consequence, with "Use a different account" for the cases an item cannot answer.
+  Nobody sits and picks a ledger account per line any more.
+- **The price cannot come from this export, and the numbers say so plainly.** It
+  carries a selling price on **2 of 257** items ($2 on `42469`, $0.95 on `Mop`).
+  Every sellable service code is blank — `TW`, `GTW`, `HTW`, `BT`, `Del`, `Capes`,
+  `GL`. That is not a broken export: most of these are things the laundry *buys*.
+  So the rate keeps coming from `laundry_prices`, per customer with a tenant
+  default, which is where it has always lived and where their own rates already
+  are — their MYOB invoice bills `TW` at $0.22, a customer rate, not a list price.
+  The picker now says **"no price set"** instead of leaving a blank, because with
+  255 of 257 unpriced that is the ordinary case and a blank reads as free.
+- **The importer §25 deliberately withheld is built**, because the file finally
+  arrived to read. The inspection paid for itself on the first column: **the code
+  staff type is `Item Number`, not `Item ID`** — the latter is MYOB's internal row
+  number, and reading it would have imported 257 items nobody could find.
+
+**Four things in the real file that would otherwise have landed in front of staff**,
+each found by reading the 257 rows rather than anticipated:
+- **16 codes carry a stray backslash** (`2-B201\_PK100`) — markdown escaping leaked
+  into the export. Unescaped, because that is a code nothing will ever match.
+- **2 rows are GUIDs with no name.** Dropped, and named in the problem list.
+- **1 duplicate differs only in case** (`5A-LAUNDRYSE200`), which our
+  case-insensitive unique index would have refused at the insert. Caught by the
+  reader instead, so the message names a row rather than a constraint.
+- **58 names are truncated at exactly 30 characters** — MYOB's field width, not a
+  fault here. Imported as they are and **counted**, so the ones that matter can be
+  fixed rather than silently accepted.
+
+**A defect proved against a real database, not reasoned about.** `items` is unique
+on `(tenant_id, lower(item_code))` and partial, so PostgREST's `on_conflict=` cannot
+name it and Postgres refuses the statement outright:
+
+    42P10: there is no unique or exclusion constraint matching the ON CONFLICT
+           specification
+
+Every item import would have failed at request time, where no typecheck and no unit
+test can see it. `PlannedTable.matchBy` is the remedy — read, update by id, insert
+the rest — and it is the same call `laundry_prices` already documents for the same
+reason.
+
+- **`MAX_ITEM_CODE` went 20 → 30.** Their real codes reach 23
+  (`2-GLOVECLASTRAPF_PK1000`), so the old cap would have refused a code they type
+  every week. 30 is MYOB's own field width.
+- **`tax_code` and `is_sell`/`is_buy` are not inferred.** MYOB's Included/Excluded
+  answers "does the price include GST", not "which ledger code applies"; the
+  sell/buy split is not in this export at all. Every item imports as both, which is
+  what 0032 says those booleans are for. Guessing either would have put a wrong
+  answer on 254 items — the mistake §25 exists to prevent.
+- 819 unit tests (was 802), 439 pgTAP assertions, `verify` green. The reader was
+  **run against the real file**: 254 items, 3 rows skipped with reasons, longest
+  code 23, and all 254 then inserted into a fresh Postgres 16 against the real
+  schema to prove the planned rows are what the table accepts.
+
+**Imported to `laundrymart-syd` on 2026-08-26, and Adelaide holds 254 items.** Rehearsed first
+the way §11 requires: the whole insert plus seven assertions in a transaction that was then
+aborted, so the numbers below were known before anything was committed. Then applied for real
+behind the same assertions plus one more — that the table still started empty — so a rollback
+that had not rolled back could not have doubled the list.
+
+- **Read back as a real Adelaide session** (`board1@ats.example.com`, a `board` membership in
+  that laundry and nowhere else): **254 items**, 2 priced, longest code 23, and `TW`, `GTW`,
+  `HTW`, `BT` and `Del` all reading back with their names. Harbour's 6 are **not** among them —
+  260 would have been the tenancy failure — and the same session still reads **0** accounts, **0**
+  invoices and **0** prices, so 0036's gate and the billing narrowing both survived the write.
+- **Nothing else moved:** 268 accounts, 647 invoices, 6 jobs, and Harbour's 6 items all exactly
+  as recorded — measured at 02:07. **Five minutes later another session deleted Adelaide's test
+  data** (2 customers, 5 jobs, 1 invoice, the 1 frozen charge and the paperwork under them), so
+  the job and invoice figures here are a reading of that moment rather than the state today. The
+  254 items were not touched. The 0039 entry above has the detail.
+- **The pickers now filter `is_sell`, and that was a gap in the app rather than in the file.**
+  Nothing in `src/` had ever narrowed an item picker to what the laundry sells, so the flag 0032
+  added was decorative. It is the lever now — inert on this import, since the export carries no
+  sell/buy flag and every row arrived true, but an owner who unticks "I sell this" on the
+  detergent and the fan shafts takes them out of both coding pickers without deleting stock
+  records the plant still needs.
+- **Every one of the 254 arrived with no `laundry_category` and no `income_account_id`**, which
+  is the honest state: the export says neither. So the item picker works today and the account
+  still has to be chosen per line until somebody codes the items — recorded in §25 as the
+  owner's next step, not as something the import could have answered.
+
+### 2026-08-26 · Code the charge where the charge is made
+The client's own comparison: MYOB puts the **Item ID** and the **Category** (its
+name for the account code) on an invoice line at the moment the line is written, so
+the invoice never asks twice. This app asked twice. One migration (`0039`), no new
+table, no new role, no new capability, nothing dropped and no row changed. §27 holds
+the design.
+
+- **The gap was not a convenience, and the live data said so.** A charge added by
+  hand on a job carried no item and could carry no account, so
+  `invoice_lines.gl_account_id` — resolved from `source_item_id → items.income_account_id`
+  — came out null and the code was re-keyed on the invoice. Counted before anything
+  was written: `Adelaide Towel Service` holds **1** frozen job charge and **0** of
+  them carry an item. That laundry has no rate card and no price list, so *every*
+  charge it raises is hand-added: the coding feature was, for the one real business
+  using it, entirely inert.
+- **Each charge row now names an item and an account**, with the same code-first
+  type-ahead the invoice composer uses — picking an item brings its price, its GST
+  answer and its account with it, and never overwrites a description somebody wrote.
+  The strip is collapsed to one readable line per row, so "is this coded?" is
+  answerable without a click and an uncoded charge says exactly what will happen to
+  it.
+- **The pickers are now shared** (`components/coding-pickers.tsx`). Two copies of the
+  same search would drift — which is precisely what happened to the item form,
+  built twice in one afternoon on two branches that then disagreed about tenancy.
+- **`saveJobCharges` is the one place a charge gets its code.** Both writers pass
+  through it, so the pricer and the review screen code identically; an account
+  already on the charge wins, because choosing one by hand is a deliberate override.
+- **The account joined the consolidation key**, for the same reason unit price and
+  `taxable` are in it: two charges for one item coded to different accounts must stay
+  two lines, or the whole amount posts to whichever came first.
+
+**Two defects found by driving the screen rather than reading it**, which is the
+argument for §10b's gallery rule:
+- every charge row rendered the **same DOM ids** (`line-item`, `line-account`), so
+  each row's `<label>` pointed at the first row's box and a screen reader would
+  announce the wrong field. The pickers take an `idPrefix` now. A duplicate id is
+  invisible to a typecheck, a unit test and a screenshot alike.
+- the first fixture set had all three rows uncoded, so the gallery could not show the
+  state that matters. It now carries one row coded from its item, one coded straight
+  to an account and one deliberately uncoded — the three real states.
+
+- 802 unit tests (was 792) and **439 pgTAP assertions (was 431)**. `verify` green; all
+  thirty-nine migrations applied to a fresh Postgres 16 with the whole suite and the
+  seed on top. The new assertions were **confirmed to fail without `0039`** rather
+  than assumed to be doing something.
+- The gallery gained the charges editor in two states (a full chart, and none) and was
+  measured light and dark at 320/390/768/1440 across all three text sizes: **24
+  combinations, 0 console errors, 0 overflow inside either section and 0 interactive
+  targets under 36px**. Document overflow is **byte-identical to the recorded
+  baseline**, so this adds none. Twelve interaction assertions drive the whole path.
+
+**Applied to `laundrymart-syd` on 2026-08-26** as `20260826022128`, now the ledger's last entry.
+Rehearsed first the way §11 requires, and the pre-flight carried the check that mattered: the
+live `save_job_charge_snapshot` body was confirmed **identical** to 0017's — compared
+mechanically rather than by eye, by stripping this migration's two additions and diffing — so
+rebuilding it dropped nothing. That is the 2026-08-20 trap, checked before rather than after.
+
+- **Eleven verifications after the apply**, the six behavioural ones against real rows in a
+  transaction that was then aborted: a real income account **accepted** (`4-1000`), a heading
+  refused (*"that is a heading, not an account you can code to"*), another laundry's account
+  refused (*"that account belongs to another business"*), an unknown account refused, an
+  **uncoded charge still legal** — the free-text line the client asked for — and re-costing a
+  coded charge not re-judging the code. Column, trigger and index all present; the writer still
+  SECURITY INVOKER and carrying the column.
+- **No new security advisor**, which is the check 0036 failed: `guard_job_charge_account` is a
+  SECURITY DEFINER trigger function and is **absent** from the list, so the
+  `public, anon, authenticated` revoke held. `save_job_charge_snapshot` is INVOKER and so is not
+  on it either. The list stands at 21 documented definer helpers plus the auth
+  leaked-password toggle.
+- **There was nothing to backfill, and less than expected.** The pre-flight counted **1** frozen
+  charge; by the time the migration went on there were **0** — see the note below.
+
+**Another session deleted Adelaide's test data while this was in flight, and it is recorded here
+because several figures above are now stale.** At 02:12:59, between the item import and this
+apply, a scoped cleanup ran against `laundrymart-syd` from outside this session. Its own
+rehearsal line names the scope: **2 customers and their 2 locations, 5 laundry jobs, 7 job items,
+31 activity rows, 4 stops, 3 runs, 1 invoice with its line and source-job link, and the 1 frozen
+`job_charge_snapshots` row.** It left *"active customers 0, archived 508, jobs 1, runs 1, invoices
+646"* in Adelaide, which is exactly what the tenant reads now. It was deliberate and rehearsed,
+not an accident, and **the 254 imported items were not touched**.
+
+Two consequences worth carrying forward: §27's motivating measurement — *Adelaide holds 1 frozen
+job charge and 0 carry an item* — was true when it was written and is now **0 charges**, so the
+argument stands on the reasoning rather than on a live row; and Adelaide is down to **LJ00001**,
+the cross-tenant job §11 records as deliberately left alone, so the end-to-end run below starts
+from a job that has yet to be taken in.
+
+**Before trusting it: code one charge on a job, approve it, generate the invoice and confirm the
+line arrives already coded** — that last step is the whole point of the change, and it has still
+not been run. Adelaide is down to `LJ00001` after the cleanup above, so the run starts by taking
+a job in.
+
+**Merged to `Dev` and `Prod` on 2026-08-26**, so this and the item import are live on
+`ats.coreit.com.au`. `Prod` had moved fourteen commits while this branch was in flight — the YSM
+Hub filter language, Adjust Run on My Runs, and `0038_invoice_line_account` — so it was merged in
+first and the two documentation files were the only conflicts; every source file merged clean.
+`src/lib/xero/push.ts` was the one both sides had changed, and **theirs was kept because it is the
+better shape**: it splits the line's own account from the item's and lets `invoice-payload.ts`
+walk the ladder, which is what leaves room for the connection's default sales account underneath.
+The migration went on **before** the merge, so the schema led the code — the safe order, and the
+same one the last several releases record. 41 migrations applied to a fresh Postgres 16 with the
+whole pgTAP suite on top (**439 assertions**, none failing) and 870 unit tests green, which is the
+check that mattered: this is the first time both `0036`s, `0037`, `0038` and `0039` have been in
+one tree.
+
 ### 2026-08-26 · One way to filter a list, and it is YSM Hub's
 The filter language adopted from `ysm-prog/ysm-hub` and applied across every list in the app.
 **No migration; no schema, RLS, capability, policy or workflow change** — no route moved and no
@@ -4696,14 +4912,57 @@ bag, under the code the business already uses (0032). Staff type TOW001.
   the exact item beats a line for its category; within the price list, the same. The card still
   beats the list however specific the list is, because somebody negotiated it. `priceListFor`
   excludes per-item rows, so a rate agreed for TOW001 can never answer for every kind of towel.
-- **The MYOB importer is not built, and that is the correct state.** The client's own note says
-  the developer should inspect the real export rather than assume its field names; guessing is
-  how the dropped-column bug in the bills import happened. `MYOB_KINDS` still lists eight kinds
-  and items is not one. The columns are here and waiting for the file.
-- **Categories are set on the demo laundry only, because the real one has no items.**
-  `Adelaide Towel Service` holds **zero** `items` rows — its item master is exactly what the
-  unbuilt MYOB import would fill. Harbour's five laundry items carry a category; its laundry bag
-  does not, on purpose, because a container the laundry lends is not laundry a customer hands in.
+- **The MYOB item importer exists now, and only because the real export was read.** This said
+  for months that it was deliberately unbuilt, on the client's own note that the developer
+  should inspect the export rather than assume its field names — guessing is how the
+  dropped-column bug in the bills import happened. The file arrived on 2026-08-26 and the
+  inspection earned its keep immediately: **the code staff type is `Item Number`, not
+  `Item ID`** — that second column is MYOB's internal row number (239, 229, 265), and reading
+  it would have imported 257 items nobody could find. `myob/inventory.ts` holds the rules,
+  tested against the real 257 rows; `readInventoryFile` is the shell that fits them to the
+  existing import screen. Four things it cleans, each measured rather than anticipated: 16
+  codes carrying a stray backslash (`2-B201\_PK100` → `2-B201_PK100`), 2 nameless GUID rows of
+  sync debris, 1 duplicate differing only in case, and 58 names truncated at MYOB's
+  30-character field width — imported as they are, but **counted and reported** so somebody can
+  fix the ones that matter. Nothing is dropped silently.
+  - **`items` is written by reading first, not by upserting.** `uq_items_code` is on
+    `(tenant_id, lower(item_code))` and partial, so PostgREST's `on_conflict=` cannot name it
+    and Postgres refuses the statement outright with **42P10**. Proved against a real database
+    rather than reasoned about, because it fails at request time where no typecheck and no unit
+    test can see it. The remedy is the one `laundry_prices` already documents — read, update by
+    id, insert the rest — and `PlannedTable.matchBy` is that path.
+  - **`tax_code` and `is_sell`/`is_buy` are deliberately not inferred.** MYOB's
+    Included/Excluded says whether the *price* includes GST, a different question from which
+    ledger code applies; and the sell/buy split is simply not in this export. Every item
+    imports as both, which is what 0032 says those booleans are for. MYOB's Items List
+    [Summary] export carries the real flags, and this reader gains two columns when it lands.
+  - **`MAX_ITEM_CODE` is 30, not 20.** This business's real codes reach 23
+    (`2-GLOVECLASTRAPF_PK1000`), so the old cap would have refused a code they type every week.
+    30 is MYOB's own field width.
+- **An item's code comes from MYOB; its price does not.** The inventory export carries a
+  selling price on **2 of 257** items — the rest are things the laundry *buys*, and even the
+  sellable service codes (`TW`, `GTW`, `HTW`, `BT`, `Del`, `Capes`, `GL`) are blank. So what a
+  customer is charged stays in `laundry_prices`, per customer with a tenant default, which is
+  where this app has always kept it and where the client's own rates already live — their MYOB
+  invoice bills `TW` at $0.22, a customer rate rather than a list price. `items.sell_price`
+  carries MYOB's figure for the two that have one and **nothing invented for the rest**; the
+  item picker says "no price set" rather than showing a blank, because with 255 of 257 unpriced
+  that is the ordinary case and a blank reads as free.
+- **Categories are set on the demo laundry only, and the real one's 254 items carry none.**
+  Harbour's five laundry items carry a `laundry_category`; its laundry bag does not, on purpose,
+  because a container the laundry lends is not laundry a customer hands in. `Adelaide Towel
+  Service` held **zero** `items` rows until 2026-08-26 and now holds **254**, imported from the
+  client's MYOB inventory export — **all of them uncategorised**, because that export says nothing
+  about which of them is laundry a customer hands in. That is the owner's to fill in, and until
+  they do those items price through the rate card and the price list exactly as they did before:
+  `laundry_category` feeds `sync_laundry_item_type`, which only ever *derives* a kind of laundry
+  and never overrides the caller's own answer.
+- **All 254 are marked both sold and bought, because the export carries neither flag.** The two
+  coding pickers (the job's Charges card and the invoice line composer) filter on `is_sell`, so
+  the lever exists: untick "I sell this" on the drums of detergent, the gloves and the fan shafts
+  and they stop being offered on a sale without deleting stock records the plant still needs.
+  Inert on the imported data, since every row arrived true. MYOB's *Items List [Summary]* export
+  carries the real flags; when it arrives the reader gains two columns and no new rules.
 - **An item now carries where its money lands** (0037): `income_account_id` points at a row in
   the chart of accounts, and `xero_item_code` is the item's code in Xero. Both nullable and both
   null, so an item nobody has coded behaves exactly as it did before. The Owner can add to the
@@ -4796,10 +5055,34 @@ line by hand. `0036` closes that.
   has mapped `account_code` to `AccountCode` from the day it was written and nothing
   selected the column, so every pushed line has landed in Xero's default sales
   account. One word in one `select`.
+- **The code is chosen on the *charge*, not just on the invoice line** (`0039`). MYOB
+  puts the Item ID and the Category on the line as it is written; this app split that
+  across the job's Charges screen — where the price is agreed and frozen — and the
+  invoice composer. Only the second half could carry a code, so a hand-added charge
+  reached the invoice uncoded and somebody re-keyed it there. Worse than an
+  inconvenience: `invoice_lines.gl_account_id` was resolved from
+  `source_item_id → items.income_account_id`, and a hand-added charge has no item, so
+  it could not be coded at the job stage **at all**. Measured before it was built:
+  `Adelaide Towel Service` held **1** frozen charge and **0** carried an item, because
+  that laundry has no rate card and no price list — every charge it raises is
+  hand-added, so the feature was inert for the one real business using it.
+  - **`saveJobCharges` is the single place a charge gets its code**, and both writers
+    come through it — the automatic pricer and the review screen's own save — so a
+    priced line and a hand-picked one are coded identically and neither caller can
+    forget. A charge that already names an account keeps it: choosing a code by hand
+    is a deliberate override of whatever the item says.
+  - **The account is part of the consolidation key**, for the same reason unit price
+    and `taxable` are. Two charges for the same item coded to different accounts must
+    stay two lines, or the whole amount posts to whichever account came first.
+  - Generation prefers the charge's own account and falls back to the item's — the
+    same precedence `lib/xero/push.ts` uses on the line.
 - **The composer defaults to the mode that produces a coded line with the least
-  work**, which is not simply "item": `Adelaide Towel Service` holds 268 accounts and
-  **zero items** today, so falling to free text would make the default route the one
-  that produces uncoded lines, for the one laundry with a chart to code to.
+  work**, which is item where there is an item list and the account code where there
+  is only a chart. That fallback was not hypothetical: `Adelaide Towel Service` held
+  268 accounts and **zero items** until 2026-08-26, so opening on free text would have
+  made the default route the one that produces uncoded lines, for the one laundry with
+  a chart to code to. With its 254 items imported the composer now opens on the item
+  there — the same rule, a different answer, because the data moved.
 - **What is not built: an importer for this file.** The uploaded workbook is an
   `.xlsx` whose headers are `Code | Name | Type | Tax code | Level | Current balance ($)`,
   while `readAccounts` (0023) expects a **CSV** with `Tax Code`, `Linked` and

@@ -136,6 +136,7 @@ async function writeInvoiceForGroup(
         amount: entry.charge.amount,
         taxable: entry.charge.taxable,
         source_item_id: entry.charge.source_item_id,
+        gl_account_id: entry.charge.gl_account_id,
         source_agreement_id: entry.charge.source_agreement_id,
         jobId: entry.job.id as string | null,
       }))
@@ -152,6 +153,7 @@ async function writeInvoiceForGroup(
         amount: line.amount,
         taxable: line.taxable,
         source_item_id: line.source_item_id,
+        gl_account_id: line.gl_account_id,
         source_agreement_id: line.source_agreement_id,
         // Null once a line spans more than one job. Safe because the billed-once
         // constraint is `invoice_source_jobs`; see this file's header.
@@ -216,7 +218,11 @@ async function writeInvoiceForGroup(
       invoice_id: invoice.id,
       laundry_order_id: line.jobId,
       item_id: line.source_item_id,
-      gl_account_id: accountForLine(line.source_item_id, accountByItem),
+      // **The charge's own account first.** 0039 lets a code be chosen on the
+      // job's Charges screen, which is a deliberate decision about that charge;
+      // the item's account is the fallback for anything written before, or
+      // priced without one. Same precedence the Xero push uses on the line.
+      gl_account_id: line.gl_account_id ?? accountForLine(line.source_item_id, accountByItem),
       agreement_id: line.source_agreement_id,
       description: line.description,
       charge_type: line.charge_type,

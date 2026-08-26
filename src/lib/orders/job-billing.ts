@@ -1,5 +1,6 @@
 import type { createClient } from "@/lib/supabase/server";
 import type { Session } from "@/lib/auth/context";
+import { accountForLine, incomeAccountsForItems } from "@/lib/invoices/account-coding";
 import { recordAudit } from "@/lib/audit";
 import { describeDbError } from "@/lib/actions";
 import {
@@ -72,6 +73,8 @@ export type StoredCharge = {
   source_item_id: string | null;
   source_laundry_item_type: string | null;
   pricing_model: string | null;
+  /** The income account this charge codes to (0039). Carried onto the invoice. */
+  gl_account_id: string | null;
   frozen_at: string | null;
 };
 
@@ -81,7 +84,7 @@ export async function loadJobCharges(supabase: Client, orderId: string): Promise
     .from("job_charge_snapshots")
     .select("id, sequence, description, charge_type, quantity, unit_price, amount, taxable, " +
             "source_agreement_id, source_agreement_line_id, source_item_id, " +
-            "source_laundry_item_type, pricing_model, frozen_at")
+            "source_laundry_item_type, pricing_model, gl_account_id, frozen_at")
     .eq("order_id", orderId)
     .order("sequence")
     .returns<StoredCharge[]>();
@@ -99,7 +102,7 @@ export async function loadChargesForJobs(
     .from("job_charge_snapshots")
     .select("id, order_id, sequence, description, charge_type, quantity, unit_price, amount, " +
             "taxable, source_agreement_id, source_agreement_line_id, source_item_id, " +
-            "source_laundry_item_type, pricing_model, frozen_at")
+            "source_laundry_item_type, pricing_model, gl_account_id, frozen_at")
     .in("order_id", [...orderIds])
     .order("sequence")
     .returns<Array<StoredCharge & { order_id: string }>>();
@@ -285,7 +288,7 @@ export async function priceAndSaveJob(
     );
   }
 
-  const saved = await saveJobCharges(supabase, job.id, lines);
+  const saved = await saveJobCharges(supabase, session.tenantId, job.id, lines);
   if (!saved.ok) return refuse(`${job.order_number}: ${saved.error}`, card);
 
   const source = pricingSourceLabel(lines, card);
@@ -321,13 +324,32 @@ export async function priceAndSaveJob(
  *
  * The function refuses outright unless the job is `awaiting_review`, so this
  * cannot re-price an approved job even if a caller forgets to check.
+ *
+ * **This is also where a charge gets its GL code, and it is the only such
+ * place.** Both writers come through here — the automatic pricer and the review
+ * screen's own save — so resolving `item → items.income_account_id` once here
+ * means a priced line and a hand-picked one are coded identically, and neither
+ * caller can forget. A line that already names an account keeps it: choosing a
+ * code on the Charges screen is a deliberate override of whatever the item says.
  */
 export async function saveJobCharges(
-  supabase: Client, orderId: string, lines: readonly JobChargeLine[],
+  supabase: Client, tenantId: string, orderId: string, lines: readonly JobChargeLine[],
 ): Promise<{ ok: true; count: number } | { ok: false; error: string }> {
+  // §23: a read that feeds a write names its tenant. A platform admin's session
+  // reads every laundry, and an item resolved across the boundary would code one
+  // business's charge to another's chart.
+  const accountByItem = await incomeAccountsForItems(
+    supabase, tenantId, lines.map((line) => line.source_item_id),
+  );
+
+  const coded = lines.map((line) => ({
+    ...line,
+    gl_account_id: line.gl_account_id ?? accountForLine(line.source_item_id, accountByItem),
+  }));
+
   const { data, error } = await supabase.rpc("save_job_charge_snapshot", {
     p_order_id: orderId,
-    p_lines: lines,
+    p_lines: coded,
   });
   if (error) {
     return { ok: false, error: error.message.replace(/^ERROR:\s*/, "") };

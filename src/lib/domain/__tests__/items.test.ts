@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  checkItemCode, itemLabel, itemMatches, searchItems, type PickableItem,
+  MAX_ITEM_CODE, checkItemCode, itemLabel, itemMatches, searchItems, type PickableItem,
 } from "@/lib/domain/items";
 
 const item = (over: Partial<PickableItem> = {}): PickableItem => ({
@@ -78,8 +78,16 @@ describe("checkItemCode", () => {
 
   it("refuses blank, over-long and spaced codes", () => {
     expect(checkItemCode("  ", []).ok).toBe(false);
-    expect(checkItemCode("A".repeat(21), []).ok).toBe(false);
+    expect(checkItemCode("A".repeat(MAX_ITEM_CODE + 1), []).ok).toBe(false);
     expect(checkItemCode("TOW 001", []).ok).toBe(false);
+  });
+
+  it("accepts the longest code this business actually uses", () => {
+    // 23 characters, straight out of their MYOB inventory. A 20-character cap
+    // would have refused a code they type every week — which is why the limit
+    // is MYOB's own field width rather than a number somebody liked.
+    expect(checkItemCode("2-GLOVECLASTRAPF_PK1000", [])).toEqual({ ok: true });
+    expect("2-GLOVECLASTRAPF_PK1000".length).toBeLessThanOrEqual(MAX_ITEM_CODE);
   });
 
   it("accepts a free code", () => {
