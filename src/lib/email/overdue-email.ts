@@ -14,7 +14,9 @@
  * "Pay now" button that goes nowhere would be worse than the plain ask.
  */
 
-import { escapeHtml } from "@/lib/email/invoice-email";
+import {
+  emailShell, mutedParagraph, paragraph, summary, withTextCredit,
+} from "@/lib/email/layout";
 import { formatMoney } from "@/lib/domain/pricing";
 
 export type OverdueEmailData = {
@@ -73,40 +75,27 @@ export function buildOverdueEmail(data: OverdueEmailData): OverdueEmail {
     data.tenantName,
   ].join("\n");
 
-  const row = (label: string, value: string) => `
-      <tr>
-        <td style="padding:4px 0;color:#6b7280;">${escapeHtml(label)}</td>
-        <td style="padding:4px 0;text-align:right;font-weight:600;">${escapeHtml(value)}</td>
-      </tr>`;
+  const html = emailShell({
+    audience: "customer",
+    brandName: data.tenantName,
+    eyebrow: `Invoice ${data.invoiceNumber}`,
+    // A chase is read in the inbox list more often than it is opened, so the
+    // preview carries the two facts that decide whether to open it.
+    preview: `${amount} outstanding, due ${due}.`,
+    body: [
+      paragraph(`Hello ${data.customerName}, ${lead}`),
+      summary([
+        { label: "Amount outstanding", value: amount },
+        { label: "Due", value: `${due} (${data.daysOverdue} days ago)` },
+      ]),
+      mutedParagraph(
+        "If it is already on its way, thank you — please ignore this. If you need the "
+        + "invoice sent again, or something about it does not look right, just reply to "
+        + "this email and we will sort it out.",
+      ),
+    ].join("\n"),
+    footNote: data.tenantName,
+  });
 
-  const html = `<!doctype html>
-<html lang="en-AU">
-  <body style="margin:0;padding:24px;background:#f6f7f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#111827;">
-    <div style="max-width:560px;margin:0 auto;background:#ffffff;border-radius:8px;padding:28px;">
-      <h1 style="margin:0 0 4px;font-size:18px;">${escapeHtml(data.tenantName)}</h1>
-      <p style="margin:0 0 20px;font-size:13px;color:#6b7280;">
-        Invoice ${escapeHtml(data.invoiceNumber)}
-      </p>
-
-      <p style="margin:0 0 12px;font-size:14px;line-height:1.6;">
-        Hello ${escapeHtml(data.customerName)}, ${escapeHtml(lead)}
-      </p>
-
-      <table style="width:100%;border-collapse:collapse;font-size:14px;margin:16px 0;">
-        ${row("Amount outstanding", amount)}
-        ${row("Due", `${due} (${data.daysOverdue} days ago)`)}
-      </table>
-
-      <p style="margin:16px 0 0;font-size:13px;line-height:1.6;color:#6b7280;">
-        If it is already on its way, thank you — please ignore this. If you need the
-        invoice sent again, or something about it does not look right, just reply to
-        this email and we will sort it out.
-      </p>
-
-      <p style="margin:20px 0 0;font-size:12px;color:#9ca3af;">${escapeHtml(data.tenantName)}</p>
-    </div>
-  </body>
-</html>`;
-
-  return { subject, html, text };
+  return { subject, html, text: withTextCredit("customer", text) };
 }

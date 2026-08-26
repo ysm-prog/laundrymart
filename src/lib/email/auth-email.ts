@@ -13,7 +13,9 @@
  * "membership" — because the person reading it has not seen the app yet.
  */
 
-import { escapeHtml } from "@/lib/email/invoice-email";
+import {
+  EMAIL_PALETTE, button, emailShell, escapeHtml, mutedParagraph, paragraph,
+} from "@/lib/email/layout";
 import type { AuthLinkKind } from "@/lib/auth/auth-links";
 
 export type AuthEmailData = {
@@ -91,46 +93,35 @@ export function buildAuthEmail(data: AuthEmailData): AuthEmail {
 
   const safeLink = escapeHtml(data.link);
 
-  const html = `<!doctype html>
-<html lang="en-AU">
-  <body style="margin:0;padding:24px;background:#f6f7f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#111827;">
-    <div style="max-width:560px;margin:0 auto;background:#ffffff;border-radius:8px;padding:28px;">
-      <h1 style="margin:0 0 16px;font-size:18px;">${escapeHtml(data.tenantName)}</h1>
-
-      <p style="margin:0 0 12px;font-size:15px;line-height:1.6;">
-        ${escapeHtml(greeting(data.recipientName))}
-      </p>
-      <p style="margin:0 0 24px;font-size:15px;line-height:1.6;">
-        ${escapeHtml(lead(data))}
-      </p>
-
-      <p style="margin:0 0 24px;">
-        <a href="${safeLink}"
-           style="display:inline-block;padding:14px 24px;border-radius:6px;background:#01696f;
-                  color:#ffffff;font-size:15px;font-weight:600;text-decoration:none;">
-          ${escapeHtml(action)}
-        </a>
-      </p>
-
-      <p style="margin:0 0 6px;font-size:13px;color:#6b7280;">
-        If the button does not work, copy this address into your browser:
-      </p>
-      <p style="margin:0 0 24px;font-size:13px;word-break:break-all;">
-        <a href="${safeLink}" style="color:#01696f;">${safeLink}</a>
-      </p>
-
-      <p style="margin:0 0 12px;font-size:13px;line-height:1.6;color:#6b7280;">
-        ${escapeHtml(stale)}
-      </p>
-      <p style="margin:0;font-size:13px;line-height:1.6;color:#6b7280;">
-        If you were not expecting this email, you can ignore it — nothing happens
-        until somebody opens the link.
-      </p>
-
-      <p style="margin:20px 0 0;font-size:12px;color:#9ca3af;">${escapeHtml(data.tenantName)}</p>
-    </div>
-  </body>
-</html>`;
+  // **Staff-facing, so no Core IT credit.** An invitation telling a counter hand
+  // to choose a password is not marketing surface — YSM Hub draws the same line
+  // at the top of its own `lib/_credit.js`, and this is the audience it excludes.
+  const html = emailShell({
+    audience: "staff",
+    brandName: data.tenantName,
+    eyebrow: data.kind === "invite" ? "You have been invited" : "Sign-in link",
+    preview: data.kind === "invite"
+      ? `Set a password and get into ${data.tenantName}.`
+      : `Your link into ${data.tenantName}, good for ${LIFETIME[data.kind]}.`,
+    body: [
+      paragraph(greeting(data.recipientName)),
+      paragraph(lead(data)),
+      button(data.link, action),
+      // The link repeated as text, because a client that strips the button must
+      // not strip the only way in. `word-break` so a long token cannot stretch
+      // the card past the viewport on a phone.
+      `<p style="margin:0 0 6px;font-size:13px;color:${EMAIL_PALETTE.inkMuted};">`
+      + `If the button does not work, copy this address into your browser:</p>`,
+      `<p style="margin:0 0 20px;font-size:13px;word-break:break-all;">`
+      + `<a href="${safeLink}" style="color:${EMAIL_PALETTE.accent};">${safeLink}</a></p>`,
+      mutedParagraph(stale),
+      mutedParagraph(
+        "If you were not expecting this email, you can ignore it — nothing happens "
+        + "until somebody opens the link.",
+      ),
+    ].join("\n"),
+    footNote: data.tenantName,
+  });
 
   return { subject, html, text };
 }
