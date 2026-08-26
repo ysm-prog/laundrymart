@@ -261,6 +261,14 @@ movement count, the resulting version and **both sequences in full** — because
 went wrong, and a movement count cannot answer it. The trail is append-only
 (`0035`): there is no UPDATE and no DELETE policy on `audit_logs` at all.
 
+The record is built by a **pure rule** (`buildSequenceAudit`) rather than inline
+in the action, so the list above is asserted by tests rather than by reading. A
+`"use server"` module may export nothing but server actions, so a payload
+written inside one is unreachable from a test — and this codebase has shipped
+three such contracts broken behind a green build for exactly that reason. No
+timestamp is recorded: the database stamps it, and a client's idea of the time
+would be a second answer to when this happened.
+
 ### The driver's view `[§17]`
 `/my-runs` shows the saved order and prints each stop's position. A board or
 driver sees no Adjust Run, no handles, no move controls and no Save. Inspection,
@@ -275,6 +283,12 @@ Verified with no horizontal overflow at 390 / 768 / 1440px in both themes.
 ---
 
 ## 11. Verification
+
+### Logic — 36 assertions on the pure rules
+Payload parsing, the movement count, what may move and what may not, the
+concurrency token, and the audit record — the last checked against the list §15
+names, field by field, including that both orders are copied rather than aliased
+to arrays the action still owns.
 
 ### Database — `supabase/tests/run_sequence.test.sql`, 30 assertions
 
@@ -382,7 +396,13 @@ permanently editable.
 - **`compact_run_sequence()` is admitted to any member of the tenant**, by
   design (section 10). It is order-preserving by construction, so the worst it
   can do is renumber `1, 3, 7` as `1, 2, 3`.
+- **Persistence across a refresh, a fresh login and another device** `[§23, §27]`
+  rests on both screens being `force-dynamic`: neither the office screen nor the
+  driver's is cached, so every visit re-reads the saved order, and a save
+  revalidates both. That is the mechanism; observing it in a browser belongs to
+  the item below.
 - **The screens have not been opened against live rows.** Every claim above is
-  proved at the database level, in the component gallery, or by live probe.
-  Signing in as `owner@roles.example.com` and taking one real run through
-  Adjust Run → Save & Lock Run remains outstanding.
+  proved at the database level, in the component gallery, by live probe, or by
+  the pure rules. Signing in as `owner@roles.example.com` and taking one real run
+  through Adjust Run → Save & Lock Run is **the only part of this specification
+  that cannot be settled without a login**.

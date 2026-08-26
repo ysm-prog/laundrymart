@@ -35,15 +35,7 @@ type InvoiceRow = PayloadInvoice & {
 };
 
 /**
- * Push, then record the outcome on the invoice.
- *
- * `skipped` outcomes (no Xero configured, laundry not connected, a draft) are
- * *not* errors and are deliberately not written to `xero_push_error`: a laundry
- * that has never connected Xero should not have every invoice wearing a red
- * failure it cannot act on.
- */
-/**
- * A line as it comes back, with the embedded item and its account.
+ * A line as it comes back, with both accounts it might be coded to.
  *
  * PostgREST returns a to-one embed as an object, but the generated types and
  * some versions hand back a single-element array — both are read here rather
@@ -89,12 +81,27 @@ function toPayloadLine(row: LineRow): PayloadLine {
      * The line's own account first, the item's second: the composer sets the
      * direct link for a line coded straight to an account, where there is no
      * item to reach through.
+     *
+     * Both tiers are handed to the payload builder rather than chained here, so
+     * the whole ladder — line, then item, then the laundry's default sales
+     * account — is one pure rule with its own tests, and a **blank** tier falls
+     * through to the next rather than terminating the chain. A `??` here would
+     * stop on an empty string and send `AccountCode: ""`, which Xero rejects.
+     * See `resolveAccountCode`.
      */
-    account_code: one(row.gl_accounts)?.xero_account_code
-      ?? one(item?.gl_accounts)?.xero_account_code
-      ?? null,
+    account_code: one(row.gl_accounts)?.xero_account_code ?? null,
+    item_account_code: one(item?.gl_accounts)?.xero_account_code ?? null,
   };
 }
+
+/**
+ * Push, then record the outcome on the invoice.
+ *
+ * `skipped` outcomes (no Xero configured, laundry not connected, a draft) are
+ * *not* errors and are deliberately not written to `xero_push_error`: a laundry
+ * that has never connected Xero should not have every invoice wearing a red
+ * failure it cannot act on.
+ */
 
 /**
  * The laundry's default sales account, for every line no item codes.
@@ -146,16 +153,20 @@ export async function pushInvoiceToXero(
               "billing_postcode")
       .eq("id", invoice.customer_id).eq("tenant_id", tenantId)
       .maybeSingle<PayloadCustomer>(),
-    // The codes travel through the item: `invoice_lines.item_id → items →
-    // gl_accounts`. Read at push time rather than snapshotted onto the line,
-    // deliberately — a code is a *classification*, not money, so a laundry that
-    // fills its codes in later, or corrects a wrong one and presses Retry,
-    // should have the corrected code sent. What is frozen is the amount, which
-    // `job_charge_snapshots` already holds.
+    // Two accounts per line, because there are two ways one can be decided: the
+    // line's own (`gl_account_id`, somebody's deliberate choice about this line)
+    // and its item's (`item_id → items.income_account_id`, the standing answer
+    // for that kind of work). Both are read; `resolveAccountCode` picks.
     //
-    // Both embeds are unambiguous — `invoice_lines` has one FK to `items` and
-    // `items` one to `gl_accounts` — which matters here: this repo has shipped
-    // an ambiguous embed that was compile-clean and dead in production (PGRST201).
+    // Read at push time rather than snapshotted, deliberately — a code is a
+    // *classification*, not money, so a laundry that fills its codes in later,
+    // or corrects a wrong one and presses Retry, should have the corrected code
+    // sent. What is frozen is the amount, which `job_charge_snapshots` holds.
+    //
+    // Aliased, and every hop unambiguous: `invoice_lines` has exactly one FK to
+    // `gl_accounts` and one to `items`, and `items` one to `gl_accounts`. This
+    // repo has shipped an ambiguous embed that was compile-clean, test-clean and
+    // dead in production with PGRST201.
     supabase.from("invoice_lines")
       .select("description, quantity, unit_price, taxable, " +
               "items(xero_item_code, gl_accounts(xero_account_code)), " +

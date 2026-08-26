@@ -12,7 +12,7 @@ import { loadRunDay } from "@/lib/runs/run-day";
 import type { Session } from "@/lib/auth/context";
 import {
   SEQUENCE_CONFLICT, SEQUENCE_SAVED,
-  checkSequence, movedCount, parseSequencePlan,
+  buildSequenceAudit, checkSequence, movedCount, parseSequencePlan,
 } from "./sequence";
 
 /**
@@ -100,24 +100,16 @@ export async function reorderRunStops(formData: FormData): Promise<void> {
       : describeDbError(error));
   }
 
-  await recordAudit(session, {
-    entity: "daily_route", entityId: day.routeIds[0] ?? boardId, action: "update",
-    summary: `Run order changed for ${date} (${moved} stop(s) moved)`,
-    // Both orders, in full. "What was it before?" is the question an audit log
-    // gets asked about a run that went wrong, and a summary counting movements
-    // cannot answer it.
-    metadata: {
-      boardId,
-      runDate: date,
-      runIds: day.routeIds,
-      previousSequence: previous,
-      newSequence: proposed,
-      movedCount: moved,
-      changedBy: session.userId,
-      role: session.role,
-      sequenceVersion: version ?? expected + 1,
-    },
-  });
+  // Built by a pure rule so the requirement's list — previous order, new order,
+  // board, date, actor, role — is asserted by a test rather than by reading.
+  await recordAudit(session, buildSequenceAudit({
+    boardId, date,
+    runIds: day.routeIds,
+    previous, next: proposed,
+    actorId: session.userId,
+    role: session.role,
+    version: version ?? expected + 1,
+  }));
 
   revalidatePath(RUNS);
   revalidatePath("/my-runs");
