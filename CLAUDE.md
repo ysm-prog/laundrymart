@@ -1873,10 +1873,27 @@ whole argument:
   response is not 200 or the section is absent. Both are the trap the 2026-08-25 entry records.
 
 **Not verified against a live project.** This container has no Supabase credentials, so the
-authenticated lists were checked by typecheck, lint, 837 tests, the production build and the
+authenticated lists were checked by typecheck, lint, 843 tests, the production build and the
 component gallery — not by being opened with real rows in them. **Before trusting it: open Money
 › Awaiting invoice on `ats.coreit.com.au`, press "Not priced yet", and check the count on the chip
 matches the rows underneath.**
+
+**Merged to `Prod` on 2026-08-26** (PR #30, merge commit `8510154`) and **`Dev` brought up to it**
+the same minute (PR #32, `2bcd4fe`), so `ats.coreit.com.au` carries it and the two branches hold
+identical trees. CI green on all three jobs for both — verify, gitleaks, and the DB job against a
+fresh Postgres 16 with the whole pgTAP suite and the seed. **Nothing to apply**: `git diff` over
+`supabase/` is empty and the ledger's last entry is still `0038_invoice_line_account`.
+
+**Two process faults on the way out, recorded because both cost time and neither was the code.**
+The first merge commit recorded **only one parent**: a `git checkout` run mid-merge to count tests
+on the merge base cleared `MERGE_HEAD`, so the follow-up `git commit` wrote an ordinary commit with
+the right tree and no link to `Prod`. GitHub then reported the pull request as conflicted — and
+**a conflicted pull request has no merge ref, so `pull_request` workflows never run on it at all**,
+which is why only the Vercel check reported for twenty minutes. Redone from the pre-merge commit
+with the same resolutions and the tree proved byte-identical to the one already verified. The
+second is smaller and worth knowing: GitHub's **check-runs API served a stale `in_progress`** for a
+job that had finished four minutes earlier, and the run's own jobs endpoint had the truth. Read the
+run, not the check, before concluding a job is stuck.
 
 ### 2026-08-26 · Adjust Run, on the screen the manager is standing on
 The order of a run could only be changed from `/runs`. My Runs — where a manager actually is when
