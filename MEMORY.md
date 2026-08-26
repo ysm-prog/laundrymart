@@ -63,6 +63,16 @@ not from a job, also a draft).
 invoices exist, so neither closed door was in use. Forward-looking narrowing, checked against the
 database rather than assumed.
 
+**Merged to `Dev` (`5736797`) and `Prod` (`077a73b`)**, identical trees, CI green on all three
+jobs for both. No migration; nothing to apply. `Prod` moved twice mid-flight (the status track +
+`0042`, then the `vercel.json` deploy change) and was merged in each time — only the two doc files
+ever conflicted. MEMORY.md was rebuilt on `Prod`'s tidied 96-line structure rather than
+concatenated.
+
+**Live ledger carries `0043_myob_invoice_lines` (`20260826115214`) and no branch here has the
+file** — another session's, the §11 pattern again. Additive and harmless to this work: every
+column it adds is nullable or `not null default`, checked against the applied statements.
+
 **Before trusting it:** take a job in on `ats.coreit.com.au`, approve it, confirm the toast says
 *Started draft invoice…* (not "raised"), that "Approved, not yet on a draft" is empty, and that
 the invoice reaches the register only after Issue on the drafts board.

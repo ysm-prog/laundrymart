@@ -2402,6 +2402,35 @@ authenticated screen was opened with real rows in it. **Before trusting it: take
 not "raised" — then confirm Money › Awaiting invoice shows nothing in "Approved, not yet on a
 draft", and that the invoice only appears in the register once you press Issue on the drafts
 board.**
+
+**Merged to `Dev` (`5736797`) and `Prod` (`077a73b`) on 2026-08-26**, identical trees, CI green on
+all three jobs for both — verify, gitleaks, and the DB job against a fresh Postgres 16 with the
+whole pgTAP suite and the seed. **Nothing to apply**: this adds no migration and `git diff` over
+`supabase/` is empty against both parents.
+
+- **`Prod` moved twice while this was in flight** and was merged in each time rather than rebased
+  over: first six commits (the status track and `0042_free_status_moves`, the removal of the
+  charge editor's account picker, and the one-tenancy rewrite of §11 and MEMORY.md), then the
+  `vercel.json` deploy-visibility change. **Only the two documentation files ever conflicted**;
+  every source file merged clean, and the two features are disjoint in substance — 0042 rewrites
+  the *operational* transition guard and asserts 0017's billing hooks survive it, which this
+  branch does not touch, and `gl_account_id` still travels in the charge payload, so
+  `rebuildJobLines` still reads it.
+- **MEMORY.md was rebuilt on `Prod`'s tidied 96-line structure** with this entry on top, rather
+  than by concatenating the two files. That side deliberately shrank it from ~1,200 lines and
+  undoing that in a merge would be the wrong trade; the naive resolution was tried, produced a
+  file with three "Latest" sections, and was discarded.
+- **The whole DB job was run locally** on a fresh Postgres 16 before pushing — 45 migrations in
+  filename order, **485** pgTAP assertions, 0 failing, 0 plan mismatches, `supabase/seed.sql` on
+  top — because this was the first tree to hold both `0042` and this branch.
+
+**One thing the read-back turned up that is not this branch's, and is recorded rather than
+glossed:** the hosted project's ledger carries **`0043_myob_invoice_lines`** (`20260826115214`),
+applied at 11:52, whose file is in **no branch of this repo**. The same situation §11 records for
+`0015_import_activation`, the two `0017`s and `0038`. It is additive and harmless to this work —
+every column it adds to `invoice_lines`, `job_charge_snapshots`, `invoices` and `items` is either
+nullable or `not null default`, so the inserts here name none of them and still succeed, checked
+against the applied statements rather than assumed. It is that session's to merge.
 ### 2026-08-26 · A job's stage is picked, not walked
 Reported from the deployed app on `LJ00007`, a customer pickup: the *What happens next* card
 offered **Mark ready for delivery** and **Cancel job**, and nothing else. The ask was YSM Hub's
