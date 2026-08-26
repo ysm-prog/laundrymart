@@ -10,13 +10,14 @@ earlier PRs are merged). Three pull requests had been sitting open. **No migrati
   Verified before merging, not waved through: `resend` is the transport every email now goes
   through and the templates had been rewritten onto it hours earlier. Merged with Prod locally,
   `npm ci` clean, full gate green (965 tests) on the new versions; CI then repeated it.
-- **#22 closed, its safe third taken in #45.** **Both pins were re-tested rather than defended
-  from the note.** TS 7 → `typescript-eslint does not support TS 7.0`, raised from the copy
-  **nested inside `eslint-config-next`** (so no root override lifts it — that is which package has
-  to move first). ESLint 10 → `TypeError: scopeManager.addGlobals is not a function` on every
-  file. Each fails alone, so the pair fails too. `eslint-config-next` → `^16.3.1` (resolves 16.3.3)
-  lints clean; lockfile compared as **package sets**, not line count: 2 version changes, **0 added,
-  0 removed**.
+- **#22 and #44 closed, what was safe in them taken in #45.** Same group re-offered as its
+  versions moved. **Both pins were re-tested rather than defended from the note.** TS 7 →
+  `typescript-eslint does not support TS 7.0`, raised from the copy **nested inside
+  `eslint-config-next`** (so no root override lifts it — that is which package has to move first).
+  ESLint 10 → `TypeError: scopeManager.addGlobals is not a function` on every file. Each fails
+  alone, so the pair fails too. Taken: `eslint-config-next` `^16.3.1` (→16.3.3) and `vitest`
+  `^4.1.11`. Lockfiles compared as **package sets**, not line count — the vitest patch moved **26
+  packages**, carrying rolldown and vite, all `dev: true`.
 - **#17 closed** — §19 records the owner dropping `feature/job-billing-workflow` on 2026-08-17.
   Branch left on the remote per that convention; closing the PR is what stops it reading as
   pending work.

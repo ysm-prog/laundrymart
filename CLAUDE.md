@@ -969,9 +969,21 @@ run, and each fails on its own, so neither could be taken without the other and 
   typescript-eslint 8's scope manager does not implement, so every file errors rather than one
   rule misbehaving.
 
-**The salvageable third of that PR was taken**: `eslint-config-next` is `^16.3.1`, which resolves
-to 16.3.3 and lints clean on TypeScript 6 + ESLint 9. Keeping it current is also what makes the
-next attempt at the other two cheap — the pin that has to move first is inside this package.
+**Dependabot re-offers this group as its versions move** — the same two blocked bumps arrived
+again as #44 with `vitest` added — so the errors above are the thing to re-run, not the PR number
+to remember.
+
+**What was salvageable was taken**: `eslint-config-next` `^16.3.1` (resolving to 16.3.3) and
+`vitest` `^4.1.11`, both green on TypeScript 6 + ESLint 9. Keeping `eslint-config-next` current is
+also what makes the next attempt at the other two cheap — the dependency that has to move first
+lives inside it.
+
+**A vitest patch is not a small lockfile change**, which is worth knowing before the next one:
+4.1.10 → 4.1.11 moved **26 packages**, carrying `rolldown` 1.2.2 → 1.2.5 and `vite` 8.2.0 → 8.2.2
+with it. All `dev: true`, so none of it reaches the production bundle, and the one package added is
+an optional Android ARM binding no runner installs. Checked as package sets rather than read off
+the diff's line count — the lockfile churns re-emitted `resolved` fields, so the line count says
+nothing.
 
 `eslint.config.mjs` adds one rule on top of `eslint-config-next`:
 **`@typescript-eslint/no-unused-vars` as an error**, because a value fetched and then dropped
@@ -2125,15 +2137,16 @@ evidence.
   the templates had been rewritten onto it the same day: merged with current `Prod` locally,
   `npm ci` clean, and the whole verify gate — typecheck, lint, **965 tests**, production build —
   green on the new versions before the PR was touched.
-- **#22 closed, and its third that was safe taken separately.** It bundled TypeScript 7, ESLint 10
-  and `eslint-config-next` 16.3.1. **Both held-back pins were re-tested rather than defended from
-  the note**, and each fails on its own: TS 7 raises
+- **#22 and #44 closed, and what was safe in them taken separately.** They are the same
+  dev-dependency group re-offered as its versions moved: TypeScript 7 and ESLint 10, with
+  `eslint-config-next` and (in #44) `vitest` alongside. **Both held-back pins were re-tested rather
+  than defended from the note**, and each fails on its own: TS 7 raises
   `typescript-eslint does not support TS 7.0` from the *nested* copy inside `eslint-config-next`
   (so no root override lifts it), and ESLint 10 raises
-  `TypeError: scopeManager.addGlobals is not a function` on every file. `eslint-config-next` alone
-  moves to `^16.3.1` — resolving to 16.3.3, two version changes in the lockfile and **0 packages
-  added or removed**, checked by comparing the two package sets rather than by reading the diff's
-  line count. Lint is clean on it.
+  `TypeError: scopeManager.addGlobals is not a function` on every file. Taken instead:
+  `eslint-config-next` `^16.3.1` → 16.3.3, and `vitest` `^4.1.11`. Lockfiles checked by comparing
+  **package sets** rather than by reading the diff's line count — the first moved 2 packages with
+  none added or removed; the second moved 26, all `dev: true`, carrying rolldown and vite with it.
 - **#17 closed** — `feature/job-billing-workflow`, which §19 records the owner dropping on
   2026-08-17. Merging it would have deleted 337 lines of `nav.ts` and 625 of `orders/actions.ts`
   and carried a third migration numbered 0017; its one good idea was adopted from another branch
