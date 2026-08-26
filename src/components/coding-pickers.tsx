@@ -276,3 +276,115 @@ export function TypeAhead({
     </div>
   );
 }
+
+/**
+ * A description box that also finds an item by its code.
+ *
+ * **Typing `tw` here offers `TW · Towels - Wash & Dry Only`.** That is how MYOB
+ * behaves and it is what people actually reach for — the item search used to sit
+ * behind a small "Add item or code" link at the end of the row, so somebody
+ * typing a code into the description saw nothing happen and concluded the codes
+ * were missing. This is the fast path; the item field under the row is the same
+ * choice made deliberately, and both go through `chargePatchForItem`.
+ *
+ * **Free text still wins, and that is the constraint the whole component is
+ * shaped by.** A charge line is often "Bath towels — 40 collected 14 Aug", which
+ * is in no item list. So suggestions are *offered*, never imposed: they appear
+ * only while the box has focus, Escape dismisses them, and typing past a match
+ * simply stops matching. Nothing is chosen without a deliberate Enter or click.
+ *
+ * Once the row names an item there is nothing left to suggest, so the list stops
+ * appearing — the row's item field is then the place to change or clear it.
+ */
+export function DescriptionWithItems<T extends PickerItem>({
+  id, value, onChange, onChooseItem, items, placeholder, hasItem,
+}: {
+  id: string;
+  value: string;
+  onChange: (value: string) => void;
+  onChooseItem: (item: T) => void;
+  items: readonly T[];
+  placeholder: string;
+  /** True once the row names an item: there is nothing left to suggest. */
+  hasItem: boolean;
+}) {
+  const [focused, setFocused] = useState(false);
+  const [dismissed, setDismissed] = useState(false);
+  const [active, setActive] = useState(0);
+
+  const matches = useMemo(
+    () => (hasItem || !value.trim() || items.length === 0 ? [] : searchItems(items, value, 6)),
+    [items, value, hasItem],
+  );
+  const open = focused && !dismissed && matches.length > 0;
+
+  function pick(item: T) {
+    onChooseItem(item);
+    setDismissed(true);
+    setActive(0);
+  }
+
+  return (
+    // `relative` is load-bearing, not decorative: the list is absolutely
+    // positioned, and without a containing block it escapes an ancestor's
+    // overflow clip — the defect §10b records from the planner.
+    <div className="relative">
+      <input
+        id={id}
+        className={CONTROL}
+        value={value}
+        placeholder={placeholder}
+        autoComplete="off"
+        role="combobox"
+        aria-expanded={open}
+        aria-controls={`${id}-items`}
+        aria-autocomplete="list"
+        aria-activedescendant={open ? `${id}-item-${active}` : undefined}
+        onChange={(event) => { onChange(event.target.value); setDismissed(false); setActive(0); }}
+        onFocus={() => setFocused(true)}
+        // A click on a suggestion blurs the box before it lands, so closing is
+        // deferred a tick. Without it every pick would be swallowed.
+        onBlur={() => window.setTimeout(() => setFocused(false), 120)}
+        onKeyDown={(event) => {
+          if (!open) return;
+          if (event.key === "ArrowDown") {
+            event.preventDefault(); setActive((i) => (i + 1) % matches.length);
+          } else if (event.key === "ArrowUp") {
+            event.preventDefault(); setActive((i) => (i - 1 + matches.length) % matches.length);
+          } else if (event.key === "Enter") {
+            // Only ever inside an open list — otherwise Enter belongs to the form.
+            // Guarded rather than asserted: the list can reshuffle under a
+            // keystroke, and picking `undefined` would clear the row's item.
+            const chosen = matches[active];
+            if (chosen) { event.preventDefault(); pick(chosen); }
+          } else if (event.key === "Escape") {
+            event.preventDefault(); setDismissed(true);
+          }
+        }}
+      />
+
+      {open ? (
+        <ul id={`${id}-items`} role="listbox"
+            className="absolute inset-x-0 top-full z-20 mt-1 max-h-64 overflow-y-auto
+                       rounded-xl border bg-surface py-1 shadow-lg">
+          {matches.map((item, index) => (
+            <li key={item.id} id={`${id}-item-${index}`} role="option" aria-selected={index === active}>
+              <button
+                type="button"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => pick(item)}
+                className={cx(
+                  "flex min-h-12 w-full flex-col items-start justify-center px-4 py-2 text-left transition",
+                  index === active ? "bg-surface-muted" : "hover:bg-surface-muted",
+                )}
+              >
+                <span className="font-mono text-sm font-medium">{item.item_code ?? "—"}</span>
+                <span className="text-xs text-muted-foreground">{item.name}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
