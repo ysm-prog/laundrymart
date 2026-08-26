@@ -2162,6 +2162,21 @@ authenticated screen was opened. **Before trusting it: sign in as `owner@roles.e
 `ats.coreit.com.au`, check Platform shows "This laundry" with no Add form, and confirm Customers
 lists the 508 that came back.**
 
+**Merged to `Prod` (`bf92cbc`, PR #38) and `Dev` (`1b799f9`, PR #39) on 2026-08-26**, so
+`ats.coreit.com.au` carries it and the two branches hold identical trees. CI green on all three
+jobs — verify, gitleaks, and the DB job against a fresh Postgres 16 with the whole pgTAP suite
+**and the seed**; the Vercel production deploy from `Prod` completed. `0041` went on the hosted
+project **before** the merge, so the schema led the code — the safe order for a narrowing, and the
+same one every release since 2026-08-18 records.
+
+**`Prod` moved while this branch was in flight** (PR #36, the coding control that stopped promising
+absent codes), so it was merged in first; only the two documentation files conflicted and both
+changelog entries are kept, with a note on the incoming one that the laundry it diagnoses no longer
+exists. **Read the run, not the check**: the check-runs API served `in_progress` for a Verify job
+whose every step, including "Complete job", had already reported success — the same stale response
+the 2026-08-26 filter-language entry records.
+
+
 ### 2026-08-26 · A control that promises a code the laundry does not have
 
 > **Read with the entry above.** The laundry this describes — `Harbour Commercial Laundry`, and

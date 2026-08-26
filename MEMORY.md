@@ -68,6 +68,12 @@ object under the old tenant's prefix survives: Supabase refuses a direct delete 
 as `owner@roles.example.com` on `ats.coreit.com.au`, check Platform shows "This laundry" with no
 Add form, and that Customers lists the 508 that came back.
 
+**Merged to `Prod` (`bf92cbc`, PR #38) and `Dev` (`1b799f9`, PR #39)** — identical trees, CI green
+on all three jobs, Vercel production deploy completed. `Prod` had moved (PR #36, the coding
+control) and was merged in first; only the two doc files conflicted. Direct pushes to `Prod` are
+refused in this environment, so the merge went through pull requests.
+
+
 ## Previously: the coding control stopped promising codes that are not there
 
 > **Superseded in its data, not its fix.** `Harbour Commercial Laundry` and `LJ00006` were deleted
