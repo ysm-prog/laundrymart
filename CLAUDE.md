@@ -2362,6 +2362,13 @@ glossary gained **Draft invoice** and **Issue** and lost *Generate*.
   where it had always taken the customer's. Restored: a draft carrying a month of work has no one
   job to take a site from, while a document raised for a single job should say where that job was
   done.
+- **`findOpenDraft` now filters `deleted_at`, so it really does mirror its index.** Its comment
+  claimed it did and it did not: `uq_invoices_open_draft` excludes soft-deleted rows and the
+  lookup did not, so a draft somebody had deleted would be found and joined, and the next
+  approval's charges would land on it. `archived_at` is deliberately *not* named beside it —
+  0017 puts that clause in every policy, so RLS has already answered it, while **no policy
+  mentions `deleted_at`**. Dormant today (nothing in `src/` writes it on an invoice and the live
+  project holds **0**), which is exactly when a predicate disagreeing with its index is cheap.
 - **A test reads the sources and refuses a second door.** `one-door.test.ts` asserts
   `open-draft.ts` is the only module that inserts an invoice and that it only ever writes
   `draft`. Source rather than behaviour, for §2's reason — `lib/invoices/*` reaches `recordAudit`

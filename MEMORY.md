@@ -49,6 +49,10 @@ not from a job, also a draft).
 - `generatesAutomatically` removed — same question as `sweptByMonthEndRun`, no caller in `src/`.
   Depot stamping kept asymmetric on purpose: customer's for a periodic draft, the job's for a
   period-less one (merging the branches nearly lost that).
+- **`findOpenDraft` filters `deleted_at`** — its comment claimed it mirrored
+  `uq_invoices_open_draft` and it did not, so a deleted draft could be found and joined.
+  `archived_at` stays out: RLS answers that, and **no policy mentions `deleted_at`**. 0 such rows
+  live, nothing in `src/` writes it.
 - `one-door.test.ts` reads the **sources** and fails if a second insert appears (`lib/invoices/*`
   → `lib/env` is unimportable from vitest). Proved to catch the regression, and guarded against
   passing vacuously.

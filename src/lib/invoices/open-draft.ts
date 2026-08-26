@@ -76,10 +76,20 @@ export type OpenDraft = {
 /**
  * The customer's open draft for this period, or null.
  *
- * The predicate mirrors `uq_invoices_open_draft` exactly — status, type and both
- * period ends. It has to: a lookup narrower than the index would miss a draft
- * the index then refuses to let us open, and a lookup wider than the index would
- * hand back an invoice nothing stops a second copy of.
+ * The predicate mirrors `uq_invoices_open_draft` exactly — status, type, both
+ * period ends and `deleted_at`. It has to: a lookup narrower than the index
+ * would miss a draft the index then refuses to let us open, and a lookup wider
+ * than the index would hand back an invoice nothing stops a second copy of.
+ *
+ * **`deleted_at` is named here and `archived_at` is not**, and the asymmetry is
+ * the point rather than an oversight. The index excludes both; RLS already
+ * excludes archived rows from every read (0017 appends `archived_at is null` to
+ * each policy), so asking again would be noise. Nothing excludes a *soft-deleted*
+ * one — no policy mentions the column — so without this clause a draft somebody
+ * deleted would be found and joined, and the next approval's charges would land
+ * on it. Dormant today (nothing in `src/` writes `deleted_at` on an invoice, and
+ * the live project holds none), which is exactly when a predicate that disagrees
+ * with its index is cheap to correct.
  */
 export async function findOpenDraft(
   supabase: Client, tenantId: string, customerId: string, period: BillingPeriod,
@@ -93,6 +103,7 @@ export async function findOpenDraft(
     .eq("invoice_type", "consolidated")
     .eq("period_start", period.start)
     .eq("period_end", period.end)
+    .is("deleted_at", null)
     .maybeSingle<{ id: string; invoice_number: string }>();
   return data ?? null;
 }
