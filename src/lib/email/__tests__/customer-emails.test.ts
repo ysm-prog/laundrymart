@@ -55,6 +55,12 @@ describe("delivery confirmation", () => {
     expect(email.text).not.toMatch(/\$/);
     expect(email.html).not.toMatch(/\$/);
   });
+
+  it("credits Core IT, because a delivery note is customer-facing", () => {
+    const email = buildDeliveryEmail(base);
+    expect(email.html).toContain("https://coreit.com.au/");
+    expect(email.text).toContain("App is developed & designed by CoreIT");
+  });
 });
 
 describe("overdue reminder", () => {
@@ -91,7 +97,28 @@ describe("overdue reminder", () => {
   });
 
   it("offers no payment link, because the schema holds none", () => {
+    // This used to assert `not.toContain("href=")`, which said the rule by
+    // saying "no links at all" — true until the Core IT credit made the chase
+    // carry its first hyperlink, and then it failed for a reason that had
+    // nothing to do with the rule it was defending. Rewritten to the decision:
+    // **nothing in this email invites a payment**, because the schema holds no
+    // payment URL and inventing one would send customers somewhere real money
+    // could go astray.
     const email = buildOverdueEmail(base);
-    expect(email.html).not.toContain("href=");
+    const hrefs = [...email.html.matchAll(/href="([^"]*)"/g)].map((match) => match[1]);
+
+    expect(hrefs).toEqual(["https://coreit.com.au/"]);
+    expect(email.html.toLowerCase()).not.toMatch(/pay now|pay online|payment link|checkout/);
+    expect(email.text.toLowerCase()).not.toMatch(/pay now|pay online|payment link|checkout/);
+  });
+
+  it("credits Core IT on customer mail, in both halves", () => {
+    // YSM Hub's own rule, from the top of its `lib/_credit.js`: the credit goes
+    // on mail a customer reads. Both halves, because a plain-text client is
+    // still a customer reading it.
+    const email = buildOverdueEmail(base);
+    expect(email.html).toContain("https://coreit.com.au/");
+    expect(email.html).toContain("App is developed &amp; designed by");
+    expect(email.text).toContain("App is developed & designed by CoreIT");
   });
 });
