@@ -1,7 +1,33 @@
 # MEMORY — working session handoff
 > Auto-loaded each session. Canonical state is CLAUDE.md; this is the live delta.
 
-## Latest: the dependency backlog, decided rather than left open
+## Latest: the item code is typed where the charge is written
+2026-08-26, branch `claude/code-review-requirements-ns6bav`. Reported twice; the second screenshot
+had `tw` sitting in the Description box. **No migration.**
+
+**The first fix answered the wrong question.** It corrected a control that promised codes a
+laundry did not hold — real, but not the ask. The owner was typing an item code into the
+**Description** box expecting the item, MYOB-style; that box was free text and the item search sat
+behind an *"Add item or code"* link.
+
+- The description box is now an item type-ahead (`tw` → `TW · Towels - Wash & Dry Only`), filling
+  description, rate, GST and account. **Free text still wins** — Escape dismisses, nothing is
+  chosen without Enter or a click.
+- The item field is **drawn open on every row**; the collapsible strip now owns the account alone.
+- **`chargePatchForItem`** is the one pure rule for what an item fills in, shared by both entry
+  points. `descriptionIsQuery` is the distinction it cannot infer — the browser caught it leaving
+  `tow0` as a description, because "never overwrite what somebody typed" had fired on a *search*.
+- Field ids are unique per editor now, not just per row.
+- 974 unit tests (was 962). 38 browser assertions at 390/1440, 0 console errors, 0 overflow.
+
+**Still true and not a code change:** `LJ00006` is a **Harbour** job (demo, 6 items, 0 accounts).
+`TW` and the other 253 items plus 261 accounts are **Adelaide Towel Service**'s. Typing `tw` in
+Harbour finds nothing because nothing there is called that — switch laundry in the account menu.
+**And 0 of Adelaide's 254 items carry an income account**, so picking one fills the description
+and rate but brings no code until that is set on `/items/:id`.
+
+
+## Previously: the dependency backlog, decided rather than left open
 2026-08-26, branch `claude/adelaide-towel-single-tenant-tbyy06` (restarted from `Prod` — its
 earlier PRs are merged). Three pull requests had been sitting open. **No migration; nothing under
 `src/` or `supabase/` changed.** CLAUDE.md §10a holds the pin evidence.
