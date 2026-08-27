@@ -937,6 +937,40 @@ renders no tab strip. Tested in `src/lib/__tests__/nav.test.ts`.
     re-added `for all`, a dropped `tax_code`, a dropped `reorder_level`, an
     `anon` grant, a dropped policy and a mistyped new column.
 
+- `0045_supplier_contact_details` — **the rest of a supplier's contact card, and the
+  account its purchases post to.** Nine nullable columns on `suppliers` (`abn`,
+  `address_line1`, `address_line2`, `suburb`, `state`, `postcode`, `contact_name`,
+  `website`, `expense_account_id`), a partial index, and
+  `guard_supplier_expense_account()` with its trigger. **Adds no table, no policy
+  and no capability; drops nothing and changes no row** — every column is nullable
+  with no default, so a caller that never names one still does not.
+  - **`expense_account_id` is what earns the migration.** MYOB's contact card names
+    the account a supplier's purchases post to — its "Category" — and the live books
+    held **1,515 supplier bills with a null `account_id`**, because the bills export
+    carries no account column and nothing else ever knew one. 177 of 191 suppliers
+    state theirs.
+  - The guard makes the three refusals every writer of an account id in this schema
+    already makes (`sync_invoice_line_account` 0036, `guard_job_charge_account` 0039,
+    `guard_charge_type_account` 0044): not a heading, not another laundry's account,
+    not an id that is no account at all. A trigger rather than a check constraint
+    because two of the three questions are about *another row*; and it raises out
+    loud where a restrictive policy would write zero rows in silence.
+  - **`on delete set null`**, so a tidied chart degrades the default to *unset*
+    rather than blocking the delete or dangling an id — 0044's call for
+    `charge_type_accounts.gl_account_id`.
+  - **RLS: nothing new, asserted rather than assumed.** 0036's four explicit policies
+    on `can_read_purchases()`/`can_write_purchases()` cover a column added here the
+    moment it exists. What the file proves is that it did not undo them — no
+    permissive `for all` is back (the shape replaced four times in this schema), all
+    four are present, RLS is on, and `anon` holds no grant. `suppliers` is not in
+    `archivable_tables()`, so the 0028 trap does not apply.
+  - Eight self-assertions, **every one confirmed to fire** by breaking what it guards
+    against a real Postgres 16. One of them caught a defect in this very migration:
+    `v_missing := v_missing || 'literal'` resolves as array-to-array concatenation,
+    so a failing assertion reported `malformed array literal` rather than its own
+    sentence — the protection fired and the message was wrong. Fixed with `::text`;
+    **`0044` carries the same latent shape** in its plain-string branches.
+
 - `0043_myob_invoice_lines` — **GST inside the price, and the columns a MYOB
   invoice line carries.** Three columns each on `invoice_lines` and
   `job_charge_snapshots` (`discount_percent`, `unit_label`, `tax_code`), three on
@@ -1590,6 +1624,24 @@ the chase says *"reply if you need the invoice sent again"*, which is only true 
 sent it to.
 
 ## 11. Hosted project
+**`0045_supplier_contact_details` was applied on 2026-08-27** and is the ledger's last entry. The
+MYOB contact card went on with it: **397 customer ABNs, 443 billing addresses, 471 contact people
+and 446 delivery locations where there had been 0, 0, 0 and 3**; suppliers gained 184 ABNs, 117
+addresses, 55 contact names and **176 default expense accounts**, and **1,347 of 1,515 supplier
+bills are now coded** where none was. Two suppliers were created (`OTR Glenside`,
+`Built Aluminium Windows Pty Ltd`) and the number sequence moved 193 → 195. Rehearsed end to end
+on a local Postgres against the same names first, then applied with every statement asserting its
+own row count. Proved as real sessions: a **board** reads 511 customers and 446 locations and
+**0** suppliers/accounts/bills with its write touching **0 rows**, while the office manager's
+re-code touched **1**. Advisors 23, unchanged; **0** `anon` grants, **0** tables without RLS.
+Customers 511, invoices 648, jobs 15, items 254 — untouched. See the changelog entry and §32.
+
+**`board1@`…`board4@ats.example.com` hold no membership**, found while looking for a session to
+probe with. That contradicts the 2026-08-27 entry below, which records the board memberships as
+restored; today the only real `board` member is `marsy.forte69@gmail.com` (Mario Forte). A probe
+run as `board1@` therefore reads 0 of everything **whatever the policies say**, which is a vacuous
+proof rather than a passing one — it was caught and re-run rather than reported.
+
 **There is one tenancy: `Adelaide Towel Service`.** The owner's instruction, 2026-08-26. It is
 the business — `ats.coreit.com.au`, its customers, its 647 invoices, its 254 items and its 268
 chart-of-accounts rows. **Every question about live data is a question about that tenant**, and
@@ -2569,6 +2621,130 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-08-27 · The MYOB contact card lands, and a supplier's bills know where they post
+`MYOB_Contacts_Full_Details.xlsx` — 640 active contacts (449 customers, 191 suppliers), 37
+columns, captured the same day. One migration (`0045`), nine nullable columns on `suppliers`
+and one guard trigger; **nothing dropped, no capability moved, and no policy rewritten.** §32
+holds the mapping.
+
+**The app held almost none of this, which is the finding rather than the feature.** Read off the
+live database before anything was written: **0** customers with an ABN, **0** with an address of
+any kind, `customer_contacts` **empty**, `customer_locations` at **3 rows** for 511 customers,
+and **1,515 supplier bills with not one coded to an account**. The 2026-08-13 import brought a
+name, a phone, an email and a balance; everything else on the MYOB card had been dropped on the
+floor ever since.
+
+**Reconciliation first, because none of the rest is worth anything if the names do not line up.**
+448 of 449 customers and 189 of 191 suppliers matched exactly on a normalised name. Every one of
+the 63 live-only customers and 4 live-only suppliers is an **inactive** record the export
+deliberately left out (its own About sheet says the filter was off) plus three app-created test
+customers — so the two sides agree completely rather than approximately.
+
+- **The "codes" in this file are the `Category` column, and it is on suppliers only** — 177 of
+  177, zero customers. It is MYOB's *expense account for this supplier*, not a customer income
+  account, which is what the ask turned out to mean. All **52 distinct codes resolve exactly**
+  against the live chart — same code, same name, none a heading — checked before a column existed
+  to put them in.
+- **`suppliers.expense_account_id` is a real FK with a guard, not a settings blob.**
+  `guard_supplier_expense_account` makes the same three refusals every other writer of an account
+  id in this schema already makes (0036, 0039, 0044) — a heading, another laundry's account, an id
+  that is not an account — and `on delete set null` degrades a tidied chart to *unset* rather than
+  dangling. All five behaviours were proved against a real Postgres and rolled back.
+- **1,347 of 1,515 bills are now coded**, at the owner's instruction. The 168 left are suppliers
+  MYOB gives no Category — 158 of them `Services SA` alone — and the four inactive suppliers the
+  export omits. Stated rather than papered over: a supplier's default is what MYOB *suggests for a
+  new bill*, so this is a defensible backfill and not a restatement of what each historical bill
+  was actually coded to.
+
+**Three values were deliberately not written, and each would have done damage:**
+- **Three ABNs fail the ATO check digit** (`Cleverbridge E- Commerce`, `Trend Micro Australia`,
+  and the customer `Jessica Schwartz`). `customers.abn` is refused on save by `isValidAbn`, so
+  importing one would have made that customer **un-editable on a field nobody touched**. Skipped
+  and named.
+- **One email is malformed** — `AdelaideRotary@HelpThe Kids.com.au`, with a space in the domain.
+  Not guessed at, not stored: a broken address that looks stored is worse than a blank one.
+- **Balances and `AvgDaysToPay` are not written at all.** The 648 invoices already carry the
+  receivable, so an opening balance would double-count — the importer's own `clearOpenings` rule;
+  and average days to pay is *observed behaviour*, which written into `payment_terms_days` would
+  misstate the agreed terms.
+
+**What the customers got needed no schema change, because the destinations already existed and
+were already rendered** — the customer detail page has read `customer_contacts` and
+`customer_locations` since it was written, and `customer_locations` also feeds the job form, the
+run screen, contracts and the route planner. ABN **0 → 397**, billing address **0 → 443**, contact
+people **0 → 471**, delivery locations **3 → 446**. A location takes the **Ship** address where
+MYOB has one and the billing address otherwise, so `128 Hair` bills to Norwood and is *delivered*
+to Glynde — 56 customers genuinely differ that way and the app could not previously express it.
+
+- **States were normalised and that is a repair, not tidying**: `S.A.`, `S.A`, `sa`, `Vic`, `Vic.`
+  and `Qld` all appeared, so any grouping by state was wrong. 434 SA, 4 QLD, 4 NSW, 2 VIC, 1 ACT.
+- **Extra emails, extra phones, websites and faxes go into `notes`**, which is the pattern the
+  2026-08-13 import already set (*"kept as a note rather than dropped"*) — lossless, and it avoids
+  adding columns to `customers` for 17 websites. All 54 pre-existing notes were confirmed
+  machine-written before being regenerated: **0** were typed by a person.
+- **`Test Jay CT` was not created.** It is the one file-only customer, and the owner had that test
+  data deleted on 2026-08-26; re-creating it would undo their decision. The two genuinely new
+  **suppliers** were created (`OTR Glenside`, and `Built Aluminium Windows Pty Ltd` — which MYOB
+  holds as both a customer *and* a supplier card, and which the app had only as a customer).
+
+**The screen the data needed.** `/suppliers/[id]` is new — read-only, gated on `purchases.read`,
+showing the contact card, the default account (linked through to `/accounts/:id`) and that
+supplier's bills with the account each was really coded to. Read-only on purpose: MYOB is still
+where a supplier is maintained, so an edit form here would be a second place to change one fact.
+The list links to it and gains Contact and Account columns; `SUPPLIER_COLUMNS` states the select
+once, the `items/columns.ts` precedent, because two hand-maintained strings drift.
+
+- 1098 unit tests and **557 pgTAP assertions across 27 files, unchanged** — this adds no policy
+  and no capability, so it adds no proof, and 0045's own eight self-assertions are the proof.
+  `verify` green; all 46 migrations applied to a fresh Postgres 16 with the whole suite on top,
+  and the assertion count is **identical with and without 0045**.
+- **Every one of the eight self-assertions was confirmed to fire** by breaking what it guards
+  against a real database — a permissive `for all` policy re-added, the FK made `restrict`, the
+  guard put back on the RPC surface, the trigger dropped, RLS disabled.
+- **The migration's own assertions caught a defect in the migration**, which is what they are for:
+  `v_missing := v_missing || 'literal'` resolves as *array-to-array* concatenation, so a failing
+  assertion reported `malformed array literal` instead of its own sentence. The protection fired;
+  the message was wrong. Fixed with an explicit `::text`. **`0044` carries the same latent shape**
+  in its plain-string branches — its outcome is the same (the apply still fails) but the message
+  would be confusing.
+
+**Applied to `laundrymart-syd` on 2026-08-27**, `0045` before the data, and every data statement
+wrapped in a `do $$ … $$` that asserts its own row count — so a mismatch rolls the statement back
+rather than half-landing, which is what §11 gives as making a self-asserting change safe to apply
+directly. The whole pipeline was **rehearsed end to end on a local Postgres first**, against the
+same 448 customer and 188 supplier names, and the values read back and compared to the file
+before anything touched production.
+
+- **Proved as real sessions afterwards**, in a transaction that ended by raising. A **board**
+  (Mario Forte, a real `board` member) reads **511 customers and 446 locations** — its run sheet
+  works, which is 0040's SELECT decision holding — and **0 suppliers, 0 accounts, 0 bills**, with
+  its attempt to clear supplier accounts touching **0 rows**. The **office manager** re-coded a
+  real supplier and touched **1 row**, which is the assertion that matters: a policy refusing a
+  caller writes zero rows in silence. The **owner** reads 194 / 1,515 / 1,347.
+- **The first attempt at that proof was vacuous and was caught rather than reported.**
+  `board1@ats.example.com` and `customer-service@roles.example.com` read 0 of everything — not
+  because the gate held but because **neither holds a membership**. That contradicts this file's
+  own 2026-08-27 entry, which records the board memberships as restored; `board1@`…`board4@` have
+  none today and the only real `board` member is `marsy.forte69@gmail.com`.
+- **Advisors are 23**, unchanged — 22 documented SECURITY DEFINER helpers plus the auth
+  leaked-password toggle. `guard_supplier_expense_account` is **absent**, so the revoke naming
+  `authenticated` held: the trap 0019 recorded and 0036 shipped. **0** `anon` table grants, **0**
+  tables without RLS, **0** orphaned or cross-tenant contact or location rows.
+- Counts moved only where intended: customers 511 and invoices 648 and jobs 15 and items 254 all
+  unchanged; suppliers 192 → 194 with the number sequence 193 → 195.
+
+**Three addresses are wrong in MYOB and were carried across faithfully rather than corrected**:
+`Simba Global` (SA/3153, which is Bayswater North VIC), `Ink Station` (NSW/6081) and
+`Hunter Premium Funding` (VIC/7229). Guessing at somebody's address is not a repair. Four others
+that look wrong are not — 5950, 8001 and 8101 are valid large-volume postcodes.
+
+**Not verified behind the auth gate.** This container has no Supabase credentials, so `/suppliers`
+and `/suppliers/[id]` were proved by typecheck, lint, 1098 tests, the production build and the
+live database read-back rather than by being opened. **Before trusting it: open Money › Suppliers
+on `ats.coreit.com.au`, press `Simba Global`, and check the card shows the Bayswater North address,
+Jill La Pira, and account `5-1000 Towel Purchases` — then open a customer and confirm the contact
+person and delivery address are on their record.**
+
 ### 2026-08-27 · The prices are actually in the list
 Reported in three words — *"YOU HAVENT ADDED PRICE"* — with `MYOB_Items_Register.xlsx`
 attached, the file §25 had been waiting on since the item master landed. Fair: the previous
@@ -8267,6 +8443,50 @@ refusal rather than a screen choice. Both halves are stated on the screen itself
   it is what stops an amount the customer may already have been told from re-pricing itself. The
   remedies are the two that already exist: re-price the job before approving it, or take it off
   the draft. The screen carries that sentence rather than leaving it to be discovered.
+
+## 32. The MYOB contact card
+`MYOB_Contacts_Full_Details.xlsx` (2026-08-27) is the full detail behind the contact list the
+2026-08-13 import read. That one carried a name, a phone, an email and a balance; this one carries
+the whole card, and where each field lands is stated here so the next export is not re-derived.
+
+| MYOB column | rows | lands in |
+|---|---|---|
+| `Name` | 640 | the match key — `customers.business_name` / `suppliers.name`, normalised |
+| `ABN` | 585 | `customers.abn` / `suppliers.abn`, **11 digits, no spaces** |
+| `Bill*` address | 560 | `customers.billing_*` / `suppliers.address_line1` + suburb/state/postcode |
+| `BillContactPerson` | 493 | `customer_contacts.name` / `suppliers.contact_name` |
+| `BillEmails` / `BillPhones` | 458 / 544 | the **first** to `billing_email`/`phone`; the rest to `notes` |
+| `Ship*` address | 384 | `customer_locations` — the **delivery** address |
+| `ShipContactPerson` | 33 differ | a second `customer_contacts` row, role *Delivery contact* |
+| `Category` | 177, **suppliers only** | `suppliers.expense_account_id` |
+| `Notes` | 79 | `notes` |
+| `InvoiceReminders` | 640 | `customers.reminders_enabled` |
+| `BillWebsite` / `BillFax` | 31 / 24 | `suppliers.website`; otherwise `notes` |
+| `BalanceDue` / `Overdue` / `AvgDaysToPay` | 640 | **deliberately nowhere** — see below |
+| `ContactCode` | 640, all `*None` | nothing to carry |
+| `Designation`, `First/LastName` | 640 / 24 | the contact person's name where there is no `BillContactPerson` |
+
+- **The `Category` is a *supplier* expense account.** All 177 are supplier rows and none is a
+  customer, so this is not a customer income account and there is no column for one. Every code in
+  it resolved exactly against the live chart, which is what made the link safe to write.
+- **A price of admission: the ABN must pass the ATO check digit before it is stored.**
+  `customers.abn` is refused on save by `isValidAbn`, so an invalid ABN imported here makes the
+  record **un-editable on a field nobody touched**. Three of the 585 fail and are skipped, by name.
+- **Balances are never written.** The invoices already carry the receivable, so an opening balance
+  double-counts — the importer's own `clearOpenings` rule. **`AvgDaysToPay` is never written**
+  either: it is observed behaviour, and `payment_terms_days` is an agreed term. The two are not
+  the same fact and conflating them misstates the contract.
+- **A customer's location prefers the Ship address and falls back to the billing one**, because
+  that is where the van goes; 56 customers genuinely differ. One `Main site` per customer, marked
+  primary, pickup and delivery — which is what the job form, the run screen, contracts and the
+  planner all read.
+- **States are normalised to the standard abbreviation** (`S.A.`, `S.A`, `sa`, `Vic.` and `Qld`
+  all appeared). Addresses that are simply *wrong* in MYOB are carried across unchanged: guessing
+  at somebody's address is not a repair.
+- **Nothing here is an importer.** The mapping was applied by hand against the database with
+  per-statement row-count assertions, the way §11 records every other live data change. A reader
+  for this export shape would belong beside `myob/inventory.ts` and would read the real file, as
+  §25 requires — it does not exist yet.
 
 ## 21. Customer pricing and job billing
 **Two lifecycles on one job, and they meet at exactly one point.** The operational status says

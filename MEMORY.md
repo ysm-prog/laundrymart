@@ -9,7 +9,34 @@ where that is genuinely what it is. The multi-tenancy architecture stays: one op
 fact about today's data, not a reason to drop `tenant_id`, RLS, or §23's rule that a read feeding a
 write names its tenant.
 
-## Latest: the prices are actually in the list
+## Latest: the MYOB contact card is in
+2026-08-27, branch `claude/contacts-sync-code-links-b4f5os`. Owner sent
+`MYOB_Contacts_Full_Details.xlsx` — 640 active contacts, 37 columns — to go "into contacts", linked
+to codes. One migration (**`0045`**), nine nullable columns on `suppliers` + one guard. §32 has the
+field mapping.
+
+- **The app held almost none of it.** Before: **0** customer ABNs, **0** addresses,
+  `customer_contacts` empty, `customer_locations` 3 rows, **1,515 bills with 0 coded**.
+  After: **397 / 443 / 471 / 446**, and **1,347 bills coded**.
+- **The "codes" are the `Category` column and it is on suppliers only** (177/177, zero customers) —
+  a supplier *expense* account, not a customer income account. All 52 codes resolved exactly.
+  `suppliers.expense_account_id` + `guard_supplier_expense_account` (no heading, no other laundry's
+  account, `on delete set null`).
+- **448/449 customers and 189/191 suppliers matched by name.** Every live-only record is an
+  inactive one the export deliberately omits. 2 new suppliers created; `Test Jay CT` deliberately
+  not (the owner had that test data deleted on 26 Aug).
+- **Not written, on purpose:** 3 ABNs that fail the ATO check digit (would make those records
+  un-editable), 1 malformed email, and all balances / `AvgDaysToPay` (double-counts the 648
+  invoices; observed behaviour is not agreed terms).
+- **`/suppliers/[id]` is new** — read-only contact card + default account + that supplier's bills.
+- **Watch out: `board1@`…`board4@ats.example.com` hold NO membership**, so probing as one reads 0
+  of everything whatever the policies say. CLAUDE.md's 27 Aug entry says otherwise. The real
+  `board` member is `marsy.forte69@gmail.com`.
+- 1098 tests, 557 pgTAP assertions (unchanged — no new policy). `verify` green.
+- **Not opened behind the auth gate.** Check Money › Suppliers › `Simba Global` shows Bayswater
+  North, Jill La Pira, account `5-1000 Towel Purchases`.
+
+## Previously: the prices are actually in the list
 2026-08-27. Owner, three words: *"YOU HAVENT ADDED PRICE"*, with `MYOB_Items_Register.xlsx`
 attached. Fair — the work below built the screen and left the list empty, so all 140 rows read
 "No price set". **No migration.**

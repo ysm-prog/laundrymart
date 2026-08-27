@@ -647,6 +647,21 @@ export type Supplier = {
   opening_balance: number;
   notes: string | null;
   status: string;
+  /** The rest of the contact card (0045). All nullable — MYOB fills what it has. */
+  abn: string | null;
+  address_line1: string | null;
+  address_line2: string | null;
+  suburb: string | null;
+  state: string | null;
+  postcode: string | null;
+  contact_name: string | null;
+  website: string | null;
+  /**
+   * The account this supplier's bills post to by default — MYOB's "Category".
+   * A default for a *new* bill, not a restatement of what any historical bill
+   * was coded to: `supplier_bills.account_id` is the record of that.
+   */
+  expense_account_id: Uuid | null;
 };
 
 export type SupplierBill = {
