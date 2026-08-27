@@ -2533,6 +2533,40 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-08-27 · The import hold is released: 448 customers and 188 suppliers
+Reported from the deployed app: *"Customer doesn't pick up when we create new laundry from
+customer data base."* **No migration, no schema/RLS/capability/code change** — `git diff` over
+`src/` and `supabase/` is empty. A live data change and nothing else.
+
+**Not a bug — a switch nobody had flipped back.** The MYOB import of 2026-08-13 deliberately set
+every imported customer and supplier `inactive`, recording each row's real status in
+`import_activation_state` so it could be undone (0024). The job form's picker filters to
+`status in ('active','prospect','on_hold')` (`orders/form-data.ts`), so all 508 imported customers
+were excluded and it offered **2**. The filter is right — an inactive customer should not be
+offered for new work — and the data was the stale half.
+
+- **Replayed, not blanket-activated**, which is 0024's whole reason for existing. 448 customers
+  and 188 suppliers went back to `active`; **60 customers and 4 suppliers stayed `inactive`**
+  because they were already inactive in the source system. Those two numbers are exactly what
+  0024's own header predicted, which is the check that the state table was still telling the
+  truth after five months. Blanket-setting `active` would have silently switched on 64 records
+  the business had deliberately turned off, with nothing left recording that it should not have.
+- **Customers first, suppliers only when asked.** The report was about the job form, so the
+  customers half ran alone; the owner then asked for the suppliers. The second run used
+  `reactivate_tenant_records()` itself — with the customer state rows already cleared, its
+  customers loop is a no-op — rather than the hand-written equivalent the first run needed.
+- Both halves rehearsed in a transaction that ended by raising and read back clean before
+  applying, then applied behind assertions (448 and 188 restored, 0 skipped, counts unchanged at
+  511 customers and 192 suppliers). `import_activation_state` is now **empty**: the hold is fully
+  released and this is the last time that table has anything to say.
+- Read back as real sessions: the Owner and the Office manager each see **451** customers in the
+  job form's picker (cap 500 — worth knowing, it truncates past that) and 188 suppliers.
+
+**There is no screen for any of this.** `reactivate_tenant_records()` and its counterpart have
+lived in the database since 0024 and **nothing in `src/` calls either**, so releasing an import
+hold can only be done by hand against the database. Worth a control on Settings › Your records
+beside the archive/restore pair, which is the same shape of operation.
+
 ### 2026-08-27 · A login can be created with a password, not only invited
 The owner's instruction, the day after two staff logins had to be written in by hand SQL because
 the screen could not do it: *"allow in settings to create user with Password as well like ysm-hub
