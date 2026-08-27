@@ -1624,6 +1624,25 @@ the chase says *"reply if you need the invoice sent again"*, which is only true 
 sent it to.
 
 ## 11. Hosted project
+**Checked object-for-object on 2026-08-27, and there is nothing outstanding to apply.** A fresh
+Postgres 16 was built from `supabase/migrations/` alone and its whole `public` schema compared with
+the live one by hashing a sorted inventory of each object kind: **891 columns, 414 constraints, 242
+indexes, 120 policies and 72 triggers — every hash identical**, so no table, column, index, policy
+or trigger in the repo is missing from live or vice versa. This is the check to run rather than
+diffing migration *names*: six ledger entries sit under their pre-renumbering names, so a name diff
+reports six false gaps.
+- **Functions need the extension filter or the comparison is nonsense**: locally `pgcrypto` installs
+  into `public` and on Supabase it lives in `extensions`, which is a 36-function difference that
+  means nothing. Excluding extension-owned functions, both sides hold **60**, with identical
+  signatures and `prosecdef` (`2c33352b31e3`).
+- **Eleven function *bodies* differ, and all eleven are cosmetic** — identical once `--` comments
+  and whitespace runs are stripped (`apply_archive_policy`, `apply_run_sequence`,
+  `compact_run_sequence`, `deactivate_tenant_records`, `guard_job_charge_account`,
+  `guard_job_sequence`, `guard_laundry_order_assignment`, `save_laundry_order_items`,
+  `set_records_archived`, `sync_invoice_line_account`, `tenant_members`). That is the 0042 trap
+  leaving its usual trace: text typed into `apply_migration` reformatted a little against the file.
+  Worth knowing before anybody reads a raw `md5(prosrc)` mismatch as drift.
+
 **`0045_supplier_contact_details` was applied on 2026-08-27** and is the ledger's last entry. The
 MYOB contact card went on with it: **397 customer ABNs, 443 billing addresses, 471 contact people
 and 446 delivery locations where there had been 0, 0, 0 and 3**; suppliers gained 184 ABNs, 117
