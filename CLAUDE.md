@@ -3036,8 +3036,23 @@ the previous `Prod` is empty.
   was telling the truth.** Verify served `in_progress` while the other two jobs had finished, which
   is the shape the 2026-08-26 entries record as stale. It was not: the step timestamps show
   `verify.sh` genuinely running 05:05:09 → 05:06:16, and the job log 404s *while a job is still
-  running* as well as when the status is stale. So the 404 is not itself evidence either way —
-  what settled it was the step-level `completed_at`, which is the thing to read.
+  running* as well as when the status is stale. So the 404 is not itself evidence either way.
+
+  > **A correction to this entry was written and was itself wrong; both are recorded, because the
+  > mistake is the useful part.** On run 239 Verify was reported as stuck at `in_progress` "for
+  > about 25 minutes" and this note was amended to say the step timestamps freeze along with the
+  > status. **They do not.** The 25 minutes never happened: the container clock read 07:48 when
+  > the job had completed at 07:44:12, so the whole polling sequence spanned about five and a half
+  > minutes and Verify — which ran its usual 65 seconds — was genuinely working for nearly all of
+  > it. The elapsed time had been inferred from *how many tool calls had been made*, which counts
+  > interactions rather than seconds, and a run of background `sleep`s that were started and then
+  > polled immediately rather than waited on.
+  >
+  > So the original sentence stands, and the real lesson is one layer up and applies to any agent
+  > working here: **read a clock before calling anything slow.** `date -u` against the runner's
+  > own `started_at` costs one command and is the difference between waiting another minute and
+  > re-running a job that has already passed. A second session hit the identical illusion on the
+  > same afternoon and diagnosed it the same way, which is why it is written down twice.
 - **`Prod` and `Dev` have diverged and `Dev` is the stale one**, which the last several entries
   each noted and none fixed. `Dev` is **20 ahead, 9 behind**; every one of those 20 is a
   *"Bring Dev up to Prod"* merge commit carrying no source change of its own, while the 9 it is
