@@ -24,6 +24,7 @@ import { DaySummary, JobCard, JobGroup } from "@/app/(app)/my-runs/run-view";
 import { BillingQueue, type QueueRow } from "@/app/(app)/invoices/awaiting/billing-queue";
 import { JobChargesEditor, type EditableCharge } from "@/app/(app)/orders/[id]/job-charges-editor";
 import { ItemPickerPreview } from "./item-picker-preview";
+import { JobForm, type JobCustomer } from "@/app/(app)/orders/job-form";
 import {
   InvoiceLineForm, type LineFormAccount, type LineFormItem,
 } from "@/app/(app)/invoices/[id]/line-form";
@@ -1582,11 +1583,70 @@ export default function DesignPreviewPage() {
               ]}
             />
           </section>
+
+          <section id="job-customer-picker-preview" className="space-y-4 border-t pt-8">
+            <PageHeader
+              title="Taking laundry in — finding the customer"
+              description="The search box offers the customer database, and says which of them are not plainly trading."
+            />
+            {/* The real form. `/orders/new` is an async server component reading
+                Supabase, so until this fixture existed the counter's own screen
+                — and the picker that hid 508 of one laundry's 511 customers —
+                could not be looked at here at all. Type into the box to bring
+                the results up; the badges and the overflow line are what this
+                section exists to show. */}
+            <JobForm
+              action={previewApply}
+              customerAction={previewApply}
+              customers={PREVIEW_JOB_CUSTOMERS}
+              drivers={[{ id: "d1", full_name: "Sam Okoye" }]}
+              staff={[{ id: "s1", label: "Christian Mignone", role: "operations_manager" }]}
+              canBackdate={false}
+              returnPath="/design-preview"
+            />
+          </section>
         </main>
       </div>
     </div>
   );
 }
+
+/**
+ * A counter's customer list, as a real one looks.
+ *
+ * Deliberately more than `RESULT_LIMIT` businesses sharing the word "Hair", so
+ * the overflow line has something to count, and deliberately a mix of statuses:
+ * this laundry's own imported base is 511 customers of which 60 are `inactive`,
+ * and the picker used to hide every one of them. `active` is the majority and
+ * carries no badge; the other three do.
+ */
+const PREVIEW_JOB_CUSTOMERS: JobCustomer[] = ([
+  ["Aspect Hair Studio", "CUST00101", "active"],
+  ["Bella Hair & Beauty", "CUST00102", "active"],
+  ["City Hair Collective", "CUST00103", "on_hold"],
+  ["Curl Hair Bar", "CUST00104", "active"],
+  ["Edge Hair Norwood", "CUST00105", "inactive"],
+  ["Flourish Hair Co.", "CUST00106", "active"],
+  ["Gloss Hair Lounge", "CUST00107", "active"],
+  ["Halo Hair Unley", "CUST00108", "prospect"],
+  ["Ivy Hair Rooms", "CUST00109", "active"],
+  ["Juniper Hair Salon", "CUST00110", "active"],
+  ["Kindred Hair", "CUST00111", "active"],
+  ["Lustre Hair Glenelg", "CUST00112", "inactive"],
+  ["Mane Hair Parlour", "CUST00113", "active"],
+  ["Nova Hair Prospect", "CUST00114", "active"],
+  ["Quay Street Bistro", "CUST00115", "active"],
+] as const).map(([business_name, customer_number, status], index) => ({
+  id: `jc${index}`,
+  customer_number,
+  business_name,
+  trading_name: null,
+  phone: `08 8${index}00 1${index}00`,
+  billing_email: null,
+  status,
+  billing_address: "12 Frazer Avenue, Gulfview Heights SA 5096",
+  delivery_address: null,
+}));
 
 /**
  * A month of one customer's jobs, rolled up.

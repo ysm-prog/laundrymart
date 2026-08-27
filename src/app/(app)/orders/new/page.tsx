@@ -3,7 +3,7 @@ import { can } from "@/lib/roles";
 import { Notice, PageContainer, PageHeader } from "@/components/ui";
 import { createCustomer } from "@/app/(app)/customers/actions";
 import { createOrder } from "../actions";
-import { loadJobFormData } from "../form-data";
+import { CUSTOMER_LIMIT, loadJobFormData } from "../form-data";
 import { JobForm } from "../job-form";
 
 export const metadata = { title: "New job" };
@@ -50,7 +50,7 @@ export default async function NewJobPage({
 
       {truncated ? (
         <div className="mb-5">
-          <Notice tone="info" title="Showing your first 500 customers">
+          <Notice tone="info" title={`Showing your first ${CUSTOMER_LIMIT} customers`}>
             The search box below covers those. If someone is missing, open their
             record from Customers and start the job from there.
           </Notice>

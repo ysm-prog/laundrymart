@@ -12,12 +12,28 @@ import type { JobCustomer, JobDriver, JobStaff } from "./job-form";
  * lookup and a fifteen-second one. The cap is the honest limit of the approach —
  * past it the picker would need a server-side search, which is what `/search`
  * already does for the rest of the app.
+ *
+ * **1000, not 500, and the difference is not theoretical.** This laundry's own
+ * customer base is 511 businesses, so the old cap sat *inside* a real list: the
+ * eleven at the end of the alphabet — five Zink Hair salons among them — would
+ * have been unfindable here while sitting on the Customers screen, which is the
+ * exact complaint this file was opened to fix, arriving a second time by another
+ * route. 511 rows measure 157 kB of JSON before compression, so the doubling
+ * costs a counter tablet one more page of a payload it already carries.
  */
-const CUSTOMER_LIMIT = 500;
+export const CUSTOMER_LIMIT = 1000;
 
 const CUSTOMER_COLUMNS =
-  "id, customer_number, business_name, trading_name, phone, billing_email, " +
+  "id, customer_number, business_name, trading_name, phone, billing_email, status, " +
   "billing_address_line1, billing_suburb, billing_state, billing_postcode";
+
+/** The columns above, as they come back. Stated once — it is read three times. */
+type CustomerRow = {
+  id: string; customer_number: string; business_name: string;
+  trading_name: string | null; phone: string | null; billing_email: string | null;
+  status: string; billing_address_line1: string | null; billing_suburb: string | null;
+  billing_state: string | null; billing_postcode: string | null;
+};
 
 export type JobFormData = {
   customers: JobCustomer[];
@@ -27,6 +43,14 @@ export type JobFormData = {
   staff: JobStaff[];
   /** True when more customers exist than the picker loaded. */
   truncated: boolean;
+};
+
+export type JobCatalogueItem = {
+  id: string;
+  item_code: string | null;
+  name: string;
+  description: string | null;
+  laundry_category: string | null;
 };
 
 /**
@@ -40,14 +64,6 @@ export type JobFormData = {
  *   administrators — so without this, editing a job one of them holds would
  *   open showing "Nobody yet" and clear the assignment on save.
  */
-export type JobCatalogueItem = {
-  id: string;
-  item_code: string | null;
-  name: string;
-  description: string | null;
-  laundry_category: string | null;
-};
-
 export async function loadJobFormData(
   ensureCustomerId?: string, ensureStaffId?: string,
 ): Promise<JobFormData> {
@@ -64,15 +80,19 @@ export async function loadJobFormData(
       // business against a customer of another.
       .eq("tenant_id", session.tenantId)
       .is("deleted_at", null)
-      .in("status", ["active", "prospect", "on_hold"])
+      // Everyone but an archived customer, which is the same line the invoice
+      // and contract pickers draw (`lib/domain/customers.ts` holds the rule).
+      // This used to be an allow-list of three, which hid every `inactive`
+      // customer from the counter while the Customers screen went on listing
+      // them — 508 of this laundry's 511 the day its MYOB import landed, and
+      // sixty of them still. Nothing was refusing the *work*: `createOrder`
+      // takes any of them, and a job started from the customer's own record
+      // saved perfectly well. Only the search box disagreed, and it said
+      // nothing, so a missing customer read as a missing customer.
+      .neq("status", "archived")
       .order("business_name")
       .limit(CUSTOMER_LIMIT)
-      .returns<{
-        id: string; customer_number: string; business_name: string;
-        trading_name: string | null; phone: string | null; billing_email: string | null;
-        billing_address_line1: string | null; billing_suburb: string | null;
-        billing_state: string | null; billing_postcode: string | null;
-      }[]>(),
+      .returns<CustomerRow[]>(),
     supabase
       .from("customer_locations")
       .select("customer_id, address_line1, suburb, state, postcode, is_primary")
@@ -121,18 +141,16 @@ export async function loadJobFormData(
     if (address) deliveryAddress.set(location.customer_id, address);
   }
 
-  const toJobCustomer = (customer: {
-    id: string; customer_number: string; business_name: string;
-    trading_name: string | null; phone: string | null; billing_email: string | null;
-    billing_address_line1: string | null; billing_suburb: string | null;
-    billing_state: string | null; billing_postcode: string | null;
-  }): JobCustomer => ({
+  const toJobCustomer = (customer: CustomerRow): JobCustomer => ({
     id: customer.id,
     customer_number: customer.customer_number,
     business_name: customer.business_name,
     trading_name: customer.trading_name,
     phone: customer.phone,
     billing_email: customer.billing_email,
+    // Carried so the picker can say "On hold" or "Inactive" beside the name
+    // rather than leaving the counter to find out from somebody in the office.
+    status: customer.status,
     billing_address: [
       customer.billing_address_line1, customer.billing_suburb,
       customer.billing_state, customer.billing_postcode,
@@ -143,9 +161,12 @@ export async function loadJobFormData(
   const customers: JobCustomer[] = (customersResult.data ?? []).map(toJobCustomer);
   const total = customersResult.count ?? 0;
 
-  // The one the form is about to show as chosen, when the capped, status-filtered
-  // list above did not carry them — a customer past the 500th by name, or one
-  // since put on hold under a job that already exists. One row, only when needed.
+  // The one the form is about to show as chosen, when the capped list above did
+  // not carry them — a customer past the thousandth by name, or one archived
+  // under a job that already exists. One row, only when needed, and deliberately
+  // unfiltered by status: this is a customer the form is *already* pointed at,
+  // and dropping them here is what turns a picker into one that looks untouched
+  // while the hidden field still posts that id.
   if (ensureCustomerId && !customers.some((customer) => customer.id === ensureCustomerId)) {
     const { data: missing } = await supabase
       .from("customers")
@@ -153,7 +174,7 @@ export async function loadJobFormData(
       .eq("tenant_id", session.tenantId)
       .eq("id", ensureCustomerId)
       .is("deleted_at", null)
-      .maybeSingle<Parameters<typeof toJobCustomer>[0]>();
+      .maybeSingle<CustomerRow>();
     if (missing) customers.push(toJobCustomer(missing));
   }
 

@@ -75,7 +75,8 @@ The master spec names a .NET 9 Web API; this build follows the supplied skeleton
   (`laundry-billing.ts` — a customer's effective price list, and one invoice line per item of
   laundry), ABN validation, date
   helpers, the laundry-job workflow (`laundry-orders.ts`), the run-assignment rules
-  (`run-assignment.ts`) and the timezone conversion (`timezone.ts`). Unit-tested; shared by
+  (`run-assignment.ts`), who may be picked for new work (`customers.ts`) and the timezone
+  conversion (`timezone.ts`). Unit-tested; shared by
   preview, route generation, invoicing, the jobs module and My Runs so they cannot diverge.
 - **The whole application runs on `Australia/Adelaide`** (2026-08-26). `BUSINESS_TIMEZONE`
   composes a stored instant (`received_at`), an invoice period and a notification's
@@ -564,6 +565,18 @@ posts `return_to`, so a manager who adjusts a run from the round's day lands bac
 `/run` survives as the second tab ("At the depot") because it owns the offline outbox, the
 service worker and the unload inventory sweep, and is the one screen that must work with no
 signal.
+
+**A customer picker offers the customer database** (2026-08-27). Every screen that puts a
+customer in front of somebody narrows the list, and until then they did not agree: the
+Customers screen listed all five statuses, the invoice and contract pickers four
+(`neq archived`), and the job form's **three** — silently. `lib/domain/customers.ts` is the
+one rule now: `isPickableCustomer` leaves out only `archived` (already soft-deleted, so
+outside every read in the app), and `customerStatusNeedsSaying` is what puts *On Hold*,
+*Inactive* or *Prospect* beside the name — the fix that makes those customers findable must
+not also make them look like everybody else. The job form's cap went 500 → 1000 in the same
+change, because this laundry's own base is **511** and the old cap sat inside it. Nothing about
+who may be *billed* moved: `createOrder` never checked the status, which is why a job started
+from a customer's own record page always worked.
 
 **A job's stage is a track, not a row of buttons** (2026-08-26). `/orders/:id` opens on
 *Where this job is up to* — the six stages as a dot-and-rail stepper, adopted from
@@ -1581,6 +1594,20 @@ not been taken, and would need the test logins rehoused first.
 The multi-tenancy *architecture* is unchanged and stays: `tenant_id` on every table, RLS keyed on
 `is_member()`, the admin client filtering by hand. One operating tenancy is a fact about today's
 data, not a licence to drop the boundary — §3 and §23 are untouched by this.
+
+**The import hold on its customers was released on 2026-08-27**, by hand against the database
+rather than from any screen. `reactivate_tenant_records()` replayed what 0024 had written down:
+**448** customers went back to `active`, the **60** that were already inactive in MYOB were left
+alone, and the customer half of `import_activation_state` is now empty (the 188 supplier rows
+remain). The tenant reads **511 customers — 451 active, 60 inactive**. Two things follow that are
+worth not re-deriving:
+- **`inactive` is a real answer here, not leftover import state.** Those 60 are businesses the
+  laundry had already stopped serving, which is why the job picker marks them rather than hiding
+  them (§6) and why "just activate everything" would have been the wrong repair.
+- **Nothing in `src/` can release an import.** Both 0024 functions are service-role only and no
+  screen calls either, deliberately — 0024's own header says so. The next deployment to import a
+  customer base needs somebody at the database again, or a capability that means "release the
+  import" and a screen behind it. Neither exists.
 
 **`0044_item_master_detail` was applied on 2026-08-26** (`20260826132916`) and is the ledger's
 last entry, **48** in all. Additive throughout, and applied before the code merged for the reason
@@ -2616,7 +2643,90 @@ so §3a's "one login per role" no longer works on this deployment — a sensible
 credential §3a warns about, and worth recording because nothing else does. And `T22`/`T38`/`T40`
 are still three items: with the price list working they can be collapsed to one code with three
 customer prices, but merging them touches frozen charges and is a decision, not a repair.
+### 2026-08-27 · The customer picker offers the customer database
+Reported from the deployed app: *"Customer doesn't pick up when we create new laundry from
+customer database."* **No migration; no schema, RLS, capability, policy or role change** —
+`git diff` over `supabase/` is empty, and nobody gained or lost anything. §6 holds the rule.
 
+**One clause, and it was refusing work the database was happy to take.** The job form's picker
+narrowed to `.in("status", ["active", "prospect", "on_hold"])` while the Customers screen listed
+all five statuses and `createOrder` checked none of them. The laundry's MYOB import had left
+**508 of its 511 customers `inactive`** (0024's deliberate hold, "mark it inactive for now, turn
+it on later"), so the counter's search box could find **three** businesses out of five hundred —
+and said nothing about it, so a customer who was on file read exactly like one who was not.
+
+- **The picker was the only thing refusing.** `createOrder` filters on tenant and `deleted_at`
+  and has never looked at the status; `loadJobFormData`'s top-up read fetches a customer it is
+  *handed* regardless of status. So pressing **New job** on one of those very records worked
+  perfectly, and only the search box disagreed — which is precisely why this went unnoticed and
+  why it reads as the app losing customers rather than as a filter.
+- **The rule is `lib/domain/customers.ts`, pure and tested**, not a clause inside a query: a
+  rule stated in a `.from(...)` chain is one no unit test can reach, and `form-data.ts` reaches
+  `requireSession` → `next/headers`, so it cannot be imported into vitest at all.
+- **The status is now shown, which is the other half.** Making 60 `inactive` businesses findable
+  must not also make them look like everybody else, so *On Hold*, *Inactive* and *Prospect* ride
+  beside the name in the results and on the chosen card. `active` carries nothing — it is the
+  ordinary case, and 451 of 511 badges would be noise.
+- **The cap went 500 → 1000, and that is not housekeeping.** With the status filter widened the
+  list is 511, so the old cap sat *inside* a real customer base: the eleven at the end of the
+  alphabet — five Zink Hair salons among them — would have been unfindable here while sitting on
+  the Customers screen. That is the same complaint arriving by a second route. 511 rows measure
+  **157 kB** of JSON before compression, measured rather than guessed.
+- **A search that matches more than it draws now says so.** `matches` was capped at twelve and
+  the total was thrown away, which was harmless against three customers and is not against 511 —
+  searching "hair" here matches fourteen and drew twelve, silently. It reads *Showing 12 of 14*.
+
+**A pre-existing defect on the same form, found by measuring rather than reading.** The "use a
+different delivery address" checkbox was hand-rolled at the call site — a **16px** box in a 36px
+row, bordered `border-strong`, which the 2026-08-24 pass measured at 1.42:1 where 1.4.11 asks
+3:1 of anything identifying a control. It missed both halves of that sweep because this form has
+never been in `/design-preview`. It now carries `Checkbox`'s skin and its 44px padded label — the
+skin and not the component, since that one is uncontrolled and this box drives React state, the
+same call the 2026-08-17 billing components made.
+
+- 1060 unit tests (was 1050) and 504 pgTAP assertions, unchanged — this adds no policy and no
+  migration. `verify` green: typecheck, lint, tests and the production build.
+- **Every new assertion was confirmed to fail without its fix** rather than assumed to be doing
+  something: restoring the allow-list fails two, filtering the top-up read by status fails one,
+  dropping `status` from the select string fails one, dropping the mapping fails one, and making
+  the rule hide `inactive` again fails three. **One of them was vacuous on the first attempt and
+  is the lesson worth keeping** — `/CUSTOMER_COLUMNS[\s\S]*?\bstatus\b/` matches the word
+  `status` *anywhere later in the file*, which `.neq("status", …)` satisfies two lines down, so
+  it passed with the column removed. It is asserted against the extracted declaration now.
+- The seam is guarded by **reading the source**, the `one-door.test.ts` pattern, for the reason
+  above; it proves the two sibling pickers really carry the clause before asserting the job form
+  now agrees, so it cannot pass over a pattern nobody uses.
+- **Driven in a real browser** at 390 and 1440: **30 assertions, 0 failures, 0 console errors, 0
+  document overflow, nothing tappable under 36px.** `JobForm` went into `/design-preview` to make
+  that possible — the counter's main screen had never been in the gallery, which is how the 16px
+  checkbox survived. The harness asserts the section is in the page *being served* before
+  measuring, and was proved non-vacuous by pointing it at a section that does not exist.
+  `FormActions` hangs 16px past its container on a phone **by design** (`-mx-4 … sm:mx-0`), so
+  the sticky bar is excluded from the section measure and the document is measured instead.
+
+**The data half was released by somebody else while this was being investigated, and saying so
+matters more than the fix.** At 05:31 UTC (15:01 Adelaide) `reactivate_tenant_records()` was run
+against Adelaide Towel Service: the customer half of `import_activation_state` went from 448 rows
+to 0, and the tenant went from **508 inactive / 3 active** to **451 active / 60 inactive** — the
+448 restored to what MYOB said, the 60 left alone because they were inactive in the real business
+too, which is exactly what 0024 was written to make possible. Two consequences:
+- **the immediate symptom was resolved by that, not by this commit.** What this commit fixes is
+  the code defect underneath, which still hid the 60 and, once the list passed 500, eleven more;
+- **there is still no screen that releases the import.** `reactivate_tenant_records()` is
+  service-role only and nothing in `src/` calls it (0024 says so deliberately: "until there is a
+  capability that means *release the import*"). So this was run by hand against the database, and
+  the next deployment to import a customer base will need somebody to do the same.
+
+**Verified against `laundrymart-syd` as a real session** rather than by reading. As
+`cmignone219@gmail.com` (`operations_manager`, one of the two real staff added the day before),
+inside the office manager's own RLS: the old clause returns **451** customers, the new one
+returns **511**, of which **60** carry a badge — and the table holds 511, so nothing is left out.
+
+**Not verified behind the auth gate.** This container has no Supabase credentials, so `/orders/new`
+itself was never opened with real rows in it — the picker was proved through the gallery, the
+source-level seam tests, the database read-back above and the build. **Before trusting it: on
+`ats.coreit.com.au`, press Take in laundry, search for a customer you know is inactive, and check
+they come up with an *Inactive* badge and that the job saves.**
 ### 2026-08-27 · A login can be created with a password, not only invited
 The owner's instruction, the day after two staff logins had to be written in by hand SQL because
 the screen could not do it: *"allow in settings to create user with Password as well like ysm-hub
