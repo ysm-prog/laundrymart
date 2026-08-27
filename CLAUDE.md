@@ -2598,9 +2598,28 @@ login that wrote rows must stay pointing at them.
   the only difference being that `current_driver_id()` stops returning null. A one-person round is
   the case where board and driver are the same human, and this is what that looks like without the
   two narrowings interfering.
-- **Every round now has a member and every board member has a round** — asserted, not eyeballed.
-  The one exception is `TESTBOARD`, still linked to `board@roles.example.com` and deliberately left
-  membershipless; it should be deleted or unlinked rather than left half-connected.
+- **Every round now has a member and every board member has a round** — asserted, not eyeballed,
+  and with `TESTBOARD` gone there is no exception left.
+
+**`TESTBOARD` and `board@roles.example.com` are deleted outright**, at the owner's instruction —
+the only rows this cleanup destroyed rather than unlinked, and the reference sweep is why that was
+safe. **Nothing referenced either**: no `daily_routes.board_id`, no `laundry_orders.
+assigned_board_id`, no foreign key anywhere in `public` to that login, **0** audit rows, **0**
+sessions, **0** memberships. That is the opposite of the two test profiles above, which named
+`audit_logs.actor_id` on 10 rows and so kept their logins; the rule is the same in both cases —
+a login that wrote something stays, a login that wrote nothing need not.
+
+- **Hard delete rather than `deleted_at`**, deliberately. `boards` carries the column and every
+  read filters it, but **nothing in `src/` ever sets it** — the app offers a *status* change and no
+  delete at all — so a soft delete would have left a row named "Test Board" in the table for ever,
+  which is the clutter being removed. With zero references there is nothing for a hard delete to
+  strand.
+- **The reference sweep was re-run inside the deleting transaction**, not trusted from the earlier
+  call: the app is in use, and a run assigned to that board between the two would have made the
+  first answer stale. It refuses rather than cascades.
+- `scripts/role-profiles.mjs` still lists a `board` profile, so `npm run seed:roles` would recreate
+  the login — and §3a's `role-profiles.test.ts` pins that list against `ROLES`, so removing it from
+  the script is a code change with a test behind it rather than a line to quietly drop.
 
 ### 2026-08-27 · The import hold is released: 448 customers and 188 suppliers
 Reported from the deployed app: *"Customer doesn't pick up when we create new laundry from
