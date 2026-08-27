@@ -2533,7 +2533,7 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
-### 2026-08-27 · The test profiles lose their access, and the rounds get theirs back
+### 2026-08-27 · The rounds get their memberships back, and Board 1 becomes a person
 Found while verifying the import release, and acted on at the owner's instruction. **No migration,
 no schema/RLS/capability/code change** — a live data change and nothing else.
 
@@ -2574,9 +2574,33 @@ invoices and **0** accounts, so the billing and purchases gates survived the cha
 - **`marsy.forte69@gmail.com` holds a `board` membership and is linked to no board**, which is the
   same inconsistency from the other side: that login signs in to an empty My Runs until it is
   paired with a round.
-- Memberships went 7 → 9. Both halves rehearsed in a transaction that ended by raising and applied
-  behind assertions, including that the laundry keeps at least two `super_admin`s (three remain)
-  and that the audit trail still names its actors.
+- Memberships went 7 → 9 and then to 8, as Board 1's placeholder gave way to a real person.
+  Every step was rehearsed in a transaction that ended by raising and applied behind assertions,
+  including that the laundry keeps at least two `super_admin`s (three remain) and that the audit
+  trail still names its actors.
+
+**Board 1 signs in as Mario Forte now, and the placeholder is retired.** `board1@ats.example.com`
+existed only because the round had no real login when §24's cutover ran; `marsy.forte69@gmail.com`
+was created through the new People screen on 2026-08-27 and is that login. `boards.user_id` is one
+login per round, so linking Mario **necessarily unlinked** the placeholder — which would have left
+it holding a `board` membership and no round, the empty-My-Runs state §24 exists to prevent. So its
+membership went the same way the test profiles' did: **membership deleted, login kept**, since a
+login that wrote rows must stay pointing at them.
+
+- **The driver record was linked too, and it is a different link.** A board is the round and a
+  driver is the person (§24): `daily_routes.operated_by_driver_id` is how the business answers
+  "who was holding that parcel?". The `Mario Forte` driver row had existed unlinked since
+  2026-08-17, so it now names his login.
+- **That link widens nothing, and it was measured rather than argued.** `is_driver_only(t)`
+  requires the *membership role* to be `driver`, and Mario's is `board` — so the driver-scoped
+  clauses on `daily_routes` and `jobs` never engage for him. Counted as his own session either
+  side of the change: **runs=3, stops=6, orders=8, invoices=0 before and after, identical**, with
+  the only difference being that `current_driver_id()` stops returning null. A one-person round is
+  the case where board and driver are the same human, and this is what that looks like without the
+  two narrowings interfering.
+- **Every round now has a member and every board member has a round** — asserted, not eyeballed.
+  The one exception is `TESTBOARD`, still linked to `board@roles.example.com` and deliberately left
+  membershipless; it should be deleted or unlinked rather than left half-connected.
 
 ### 2026-08-27 · The import hold is released: 448 customers and 188 suppliers
 Reported from the deployed app: *"Customer doesn't pick up when we create new laundry from
