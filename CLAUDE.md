@@ -2923,6 +2923,12 @@ previous `Prod` is empty, so the suite is the same **504** assertions it was.
   `date -u` said 07:40:28 when I believed ten minutes had passed. **Check elapsed time against the
   runner's timestamps before concluding a job is stuck**, and note that the log 404s *while a job
   is genuinely running* as well as when the status is stale, so the 404 is evidence of neither.
+- **`Prod` moved under this release and was merged in rather than force-pushed.** Six commits
+  from another session landed on it between the fast-forward and this record — the import-hold
+  release, the board memberships, the bcrypt-cost note — all **documentation only** (`CLAUDE.md`
+  and `MEMORY.md`, 183 insertions, 0 deletions, no source file touched), so they auto-merged with
+  no conflict and the source tree is byte-identical to the one CI had already passed. `Prod` is
+  `2409090` and **CI is green on all three jobs there too** (07:44:48 → 07:46:23Z).
 - **`Dev` is 20 ahead and 11 behind, and the twenty are catch-up merges carrying no source change
   of their own.** The same standing drift the last several entries record and none fixes. Left
   alone deliberately: the instruction was `Prod`.
