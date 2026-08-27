@@ -1372,6 +1372,55 @@ into itself with no configuration at all. What the deployment does need is `RESE
 `INVOICE_FROM_EMAIL`; without them every one of these actions says so by name rather than
 reporting a success that did not happen.
 
+**A password can be set instead of emailing a link** (2026-08-27), adopted from
+`ysm-prog/ysm-hub`'s `api/create-staff.js`. An invitation hands over a *link*, and there are real
+cases where the owner has to hand over a *credential*: a counter hand with no work email, somebody
+being set up in the room, a round's shared tablet. This laundry's first two real staff had to be
+written in by hand SQL for exactly that reason, which is the argument for the screen doing it.
+
+- **One card, one set of questions, two submit buttons.** The two ways differ only in how the
+  person gets in, so two cards would ask for a name and an email twice. `SubmitButton`'s
+  `formAction` is the mechanism and the billing queue's Price / Approve pair is the precedent.
+  The invitation keeps the primary button — it is the safer path, since the person chooses their
+  own password and nothing has to be handed over — and the password sits one disclosure away.
+- **Nothing inside that disclosure is `required`.** A `required` control inside a closed
+  `<details>` fails native validation with nothing to focus, so the form silently refuses to
+  submit; the constraint the 2026-08-24 pass recorded when the job form's optional sections became
+  disclosures. The password is validated on the server instead.
+- **The invitation refuses a typed password rather than ignoring one.** The single hazard of two
+  verbs over one form: fill the box, press the wrong button, and the invitation goes while the
+  administrator believes they set a password and hands over a credential this app never stored.
+  It fails with the name of the button that does use it.
+- **`lib/auth/passwords.ts` states the rules once**, because ysm-hub states them twice and the two
+  disagree: its `AddStaffForm` refuses under **6** characters and its API refuses under **10**, so
+  a 7-character password passes the browser and is rejected by the server. Ten here, matching the
+  half that binds, and the form's hint is **interpolated from the same constant** so it cannot
+  promise a rule the action then refuses. Also the bcrypt limit — **72 bytes, not characters**,
+  since bcrypt hashes no more than that and older implementations silently ignore the rest, which
+  would make two different passwords open one login.
+- **Surrounding whitespace is refused out loud, never trimmed.** Trimming would store a different
+  credential from the one the administrator typed; allowing it means somebody pastes a trailing
+  newline, types it back without, and cannot sign in with nothing on screen explaining why. So the
+  ambiguity is surfaced rather than resolved silently in either direction.
+- **A failed membership insert deletes the login it just made.** An `auth.users` row with no
+  membership is a login that signs in and dead-ends on "not linked to a laundry yet", and whose
+  retry answers *"that address already has a login"* — the one message that stops an administrator
+  finishing the job. ysm-hub returns `User created but profile update failed` and leaves the
+  orphan; §10c had already settled the same question for the invitation, which deletes the login a
+  refused send had minted. The membership itself still goes in on the caller's **RLS-bound**
+  client, so which laundry somebody joins stays the database's decision.
+- **`email_confirm: true`**, because an administrator is standing there setting them up — which is
+  also what makes this path work on a deployment with no mail provider at all.
+- **The authority is the invitation's, unchanged**: same `admin.write` gate, same role picker.
+  ysm-hub additionally stops a manager creating anything but `shop_staff`, so a lesser role cannot
+  mint an admin and climb; **that guard has no analogue here and is deliberately not ported**,
+  because `membershipRolesWith("admin.write")` is `["super_admin"]` alone and no lesser membership
+  role can add anybody at all. A guard against an unreachable state reads as protection and is
+  really a branch nobody can test. `roles.test.ts` pins that set, so a second role gaining
+  `admin.write` fails a test.
+- **The password never reaches the flash message or the audit trail.** `done()`/`fail()` ride a
+  cookie that is not httpOnly (§2) and survive a redirect; the audit trail is read by four roles.
+
 Removing access deletes the membership and nothing else: the login survives (it may be their
 access to another tenant), and every row they wrote still points at them. Both removal and a
 role change refuse the last `admin.write` holder — with two administrators each could otherwise
@@ -2473,6 +2522,94 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-08-27 · A login can be created with a password, not only invited
+The owner's instruction, the day after two staff logins had to be written in by hand SQL because
+the screen could not do it: *"allow in settings to create user with Password as well like ysm-hub
+has."* Adopted from `ysm-prog/ysm-hub`'s `api/create-staff.js`. **No migration; no schema, RLS,
+policy or capability change** — `git diff` over `supabase/` is empty and no role gained or lost
+anything. §10c holds the design.
+
+**An invitation hands over a link, and sometimes what is needed is a credential.** A counter hand
+with no work email, somebody being set up in the room, a round's shared tablet. The People screen
+could only ever email a link, which is why Angelo and Christian went in by SQL on 2026-08-27 — the
+clearest possible argument for the screen being able to do it.
+
+- **One card, one set of questions, two submit buttons.** The two ways differ only in how the
+  person gets in, so two cards would ask for a name and an email twice. `SubmitButton`'s
+  `formAction` is the mechanism and the billing queue's Price / Approve pair is the precedent: one
+  set of answers, two verbs over it. The invitation keeps the primary button and the password sits
+  behind a disclosure, because it is the safer of the two — the person chooses their own password
+  and nothing has to be handed over.
+- **The invitation now refuses a typed password rather than ignoring one.** The single hazard of
+  two verbs over one form, and the worst outcome available: the invitation goes, the administrator
+  believes they set a password, and they hand over a credential this app never stored. It fails
+  with the name of the button that does use it.
+
+**Three things ysm-hub does that were deliberately *not* copied**, each written down because the
+reasoning is the reusable part:
+
+- **Its password rule is stated twice and the two disagree.** `AddStaffForm` refuses under **6**
+  characters, `api/create-staff.js` refuses under **10** — so a 7-character password passes the
+  browser and is rejected by the server with a message the form never predicted. Here the rule
+  lives once in `lib/auth/passwords.ts`, and the form's hint is **interpolated from the same
+  constant**, so it cannot promise something the action then refuses. A test asserts the
+  interpolation rather than the number, which is the half that actually prevents the drift.
+- **Its manager-cannot-create-an-admin guard has no analogue here.** That stops a lesser role
+  minting an admin and climbing; `membershipRolesWith("admin.write")` on this app is
+  `["super_admin"]` **alone**, so no lesser membership role can add anybody at all and the
+  escalation is unreachable. A guard against an impossible state reads as protection and is really
+  a branch nobody can test. `roles.test.ts` pins that set, so a second role gaining `admin.write`
+  fails a test and this note is what to come back to.
+- **It leaves an orphan login behind.** On a failed profile write it returns *"User created but
+  profile update failed"* and the `auth.users` row stays — a login that signs in and dead-ends,
+  whose retry answers *"that address already has a login"*, which is the one message that stops an
+  administrator finishing the job. Here the login just minted is deleted, exactly as §10c already
+  had the invitation delete one after a refused send.
+
+**Two decisions of this app's own:**
+
+- **Surrounding whitespace on a password is refused out loud, never trimmed.** Trimming stores a
+  different credential from the one that was typed; allowing it means an administrator pastes a
+  trailing newline from a document, types it back without, and cannot sign in with nothing
+  explaining why. The ambiguity is surfaced rather than resolved silently in either direction.
+- **The length cap is 72 *bytes*, not characters.** bcrypt hashes no more than that, and older
+  implementations silently ignore the rest — so two different passwords would open one login. A
+  character check would let 30 emoji (60 UTF-16 units, **120 bytes**) straight through. The test
+  for that caught its own arithmetic first: 40 emoji is already 80 `.length`, not 40.
+
+**A real, pre-existing defect was found by measuring and is fixed with it.** `Input` and `Select`
+default their id to the **field name**, and the members list renders a name box, a role picker and
+a site picker **on every row** — so this laundry's People screen was emitting twenty elements each
+called `full_name`, `role` and `depot_id`. Invalid HTML, and every `<label for>` in the document
+resolves to whichever one comes first. Ids are per row now; `Select` gained the `id` override
+`Input` already had for exactly this reason, plus an `aria-label`, since those two row pickers had
+no accessible name at all. Not introduced by this change and not noticed by review either — the
+browser check flagged it, and the first instinct (that it was a gallery fixture rendering the card
+twice) was **wrong and was checked rather than assumed**.
+
+- 1050 unit tests (was 1042) and 504 pgTAP assertions, unchanged — this adds no policy and no
+  migration. `verify` green: typecheck, lint, tests and the production build.
+- **Every one of the six new assertions was confirmed to fail without its fix** rather than assumed
+  to be doing something: dropping the invitation's guard, removing the orphan cleanup, marking the
+  password `required` inside the disclosure, hard-coding the length in the hint, reverting the
+  per-row ids, and dropping the whitespace rule. All six failed, and the baseline came back green.
+- The seam is guarded by **reading the source**, the `one-door.test.ts` pattern: `actions.ts` is a
+  `"use server"` module and `page.tsx` reaches Supabase at module scope, so neither can be imported
+  into vitest. The property is structural, and this exact seam — a field name a form posts and an
+  action reads — has shipped broken here three times behind a green `verify`.
+- **Driven in a real browser** at 390 and 1440: **48 assertions, 0 failures, 0 console errors, 0
+  overflow inside the section, nothing under 36px.** The disclosure starts shut, the password is
+  `type="password"` with `autoComplete="new-password"` (`off` is widely ignored, and a manager
+  would offer the administrator's *own* credential into a box that creates somebody else's login),
+  both buttons are in one form, and the hint states the ten-character rule. `AddPersonCard` was
+  split out of its async wrapper so the gallery can render it at all — §10b's rule, since every
+  real screen here reads Supabase and none of them render without a live project.
+
+**Not verified behind the auth gate.** This container has no Supabase credentials, so the People
+screen itself was never opened with real rows in it — the card was proved through the gallery, the
+seam tests and the build. **Before trusting it: on `ats.coreit.com.au`, add somebody with a
+password, sign in as them, then delete them again.** Worth doing next: both of 2026-08-27's real
+staff still hold passwords that were sent over chat, and this screen is now how they get replaced.
 ### 2026-08-27 · The first two real people, and the roles their titles mean
 The owner's instruction: create a login for each of the two people named, by the role given,
 with a simple password for now. **No migration; no schema, RLS, capability, policy or code

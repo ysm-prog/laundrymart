@@ -67,6 +67,7 @@ import { ListControls } from "@/components/list-controls";
 import { ACTIVITY_PERIOD_PRESETS, BILLING_PERIOD_PRESETS, resolvePeriod } from "@/lib/domain/dates";
 import { money } from "@/lib/format";
 import { QuickActions } from "@/components/quick-actions";
+import { AddPersonCard } from "@/app/(app)/admin/users/page";
 import { DraftCard } from "@/app/(app)/invoices/drafts/draft-card";
 import type { DraftSummary } from "@/lib/invoices/open-draft";
 
@@ -1537,6 +1538,23 @@ export default function DesignPreviewPage() {
             />
             <QuickActions role="super_admin" />
             <QuickActions role="board" />
+          </section>
+
+          <section id="add-person-preview" className="space-y-4 border-t pt-8">
+            <PageHeader
+              title="People — adding someone"
+              description="One set of questions, two ways in: email them a link, or set a password now."
+            />
+            {/* The real card, against fixture sites. It is normally an async
+                server component reading Supabase, so without this split nobody
+                could look at the disclosure, the password field or the two
+                buttons at all. */}
+            <AddPersonCard
+              depots={[
+                { id: "depot-adl", name: "Adelaide" },
+                { id: "depot-nth", name: "Northern" },
+              ]}
+            />
           </section>
         </main>
       </div>

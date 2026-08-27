@@ -17,8 +17,10 @@ import { FilterChips, FilterSummary } from "@/components/filters";
 import { isFiltered } from "@/lib/filters";
 import { Field, Input, Select, SubmitButton } from "@/components/form";
 import {
-  inviteMember, removeMember, sendMemberSignInLink, updateMembership,
+  createMemberWithPassword, inviteMember, removeMember, sendMemberSignInLink, updateMembership,
 } from "../actions";
+import { FormDisclosure } from "@/app/(app)/customers/customer-form";
+import { MIN_PASSWORD_LENGTH } from "@/lib/auth/passwords";
 
 export const metadata = { title: "People" };
 export const dynamic = "force-dynamic";
@@ -48,8 +50,8 @@ export default async function UsersPage({
         </Suspense>
       ) : (
         <Notice tone="info" title="Adding someone new">
-          Administrators can invite people here by email. Ask one of them to add anyone
-          who needs a login.
+          Administrators can add people here — by emailing them a link, or by setting a
+          password and handing it over. Ask one of them for anyone who needs a login.
         </Notice>
       )}
 
@@ -138,13 +140,46 @@ const activeDepots = cache(async (): Promise<Pick<Depot, "id" | "name">[]> => {
  * custom SMTP nobody had configured — so every invitation this screen has ever
  * reported as sent was a form saying so and sending nothing.
  */
+/**
+ * The two ways somebody gets onto this list, in one card.
+ *
+ * They ask the **same four questions** and differ only in how the person gets
+ * in, so they are one form with two submit buttons rather than two cards asking
+ * for a name and an email twice. `SubmitButton`'s `formAction` is the mechanism
+ * and the billing queue's Price / Approve pair is the precedent: one set of
+ * answers, two verbs over it.
+ *
+ * **The invitation stays the default and the visible path.** It is the safer of
+ * the two — the person chooses their own password and nothing has to be handed
+ * over — so it keeps the primary button, and setting a password is one
+ * disclosure away for the cases where a link is no use: a counter hand with no
+ * work email, somebody being set up in the room, a round's shared tablet.
+ *
+ * Nothing inside the disclosure is `required`. That is not incidental: a
+ * `required` control inside a closed `<details>` fails native validation with
+ * nothing to focus and no way for the operator to find out why the form will
+ * not submit — the constraint the 2026-08-24 pass recorded when the job form's
+ * optional sections became disclosures. The password is validated on the
+ * server, by `passwordProblem`, which is also where its rules are stated.
+ */
 async function InviteCard() {
-  const depots = await activeDepots();
+  return <AddPersonCard depots={await activeDepots()} />;
+}
 
+/**
+ * The card itself, with no data read in it, so `/design-preview` can render it.
+ *
+ * §10b's rule: every real screen here is an async server component reading
+ * Supabase, so none of them render without a live project — which is how a
+ * doubled hairline and an invisible dark-mode edge both survived a green
+ * `verify`. Splitting the one query out is what lets the gallery show this form
+ * (and its disclosure, and both buttons) against fixtures.
+ */
+export function AddPersonCard({ depots }: { depots: Pick<Depot, "id" | "name">[] }) {
   return (
     <Card
-      title="Invite someone"
-      description="They get an email with a link to set a password. Their access starts as soon as they follow it."
+      title="Add someone"
+      description="Email them a link to set their own password, or set one now and hand it over."
     >
       <form action={inviteMember} className="space-y-4">
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,2fr)_minmax(0,1.5fr)_minmax(0,1.5fr)]">
@@ -170,6 +205,42 @@ async function InviteCard() {
                     options={depots.map((depot) => ({ value: depot.id, label: depot.name }))} />
           </Field>
         </div>
+
+        <FormDisclosure
+          summary="Set a password instead"
+          hint="For somebody with no email, or who is standing next to you"
+        >
+          <div className="space-y-4">
+            <Field
+              label="Password"
+              name="password"
+              /* Generated from the constant the server enforces, so the form
+                 cannot promise a rule the action then refuses. That is exactly
+                 the defect this was adopted from: ysm-hub's form accepts six
+                 characters and its API demands ten. */
+              hint={`At least ${MIN_PASSWORD_LENGTH} characters. They can change it once they are in.`}
+            >
+              {/* `new-password`, not `off`: password managers ignore `off` and
+                  would happily fill the administrator's own credential into a
+                  box that creates somebody else's login. */}
+              <Input name="password" type="password" autoComplete="new-password" />
+            </Field>
+            <p className="text-xs text-muted-foreground">
+              No email is sent. Give them the password yourself, and ask them to change
+              it — anyone on the list below can be sent a sign-in link to do that.
+            </p>
+            <div className="flex justify-end">
+              <SubmitButton
+                variant="secondary"
+                formAction={createMemberWithPassword}
+                pendingLabel="Creating…"
+              >
+                Create login
+              </SubmitButton>
+            </div>
+          </div>
+        </FormDisclosure>
+
         <div className="flex justify-end">
           <SubmitButton pendingLabel="Sending…">Send invitation</SubmitButton>
         </div>
@@ -177,7 +248,6 @@ async function InviteCard() {
     </Card>
   );
 }
-
 
 async function MembershipList({
   params, canWrite, currentUserId,
@@ -287,10 +357,20 @@ async function MembershipList({
                       of the app able to show one: eleven of the logins on this
                       deployment predate ever being asked for a name, and a
                       picker showing an address is not a list of people. */}
-                  <Input name="full_name" defaultValue={row.fullName ?? ""}
+                  {/* Ids are per row, not per field name. `Input`/`Select`
+                      default their id to the field name, and this form is
+                      rendered once *per member* — so on a laundry with twenty
+                      people the page carried twenty elements each called
+                      `full_name`, `role` and `depot_id`. Invalid HTML, and
+                      every `<label for>` in the document resolves to whichever
+                      one happens to come first. The same fix the charges editor
+                      needed when the gallery put two of them on one page. */}
+                  <Input name="full_name" id={`full_name-${row.id}`} defaultValue={row.fullName ?? ""}
                          aria-label={`Name for ${row.label}`} placeholder="Their name" />
-                  <Select name="role" defaultValue={row.roleValue} groups={ROLE_GROUPS} />
-                  <Select name="depot_id" placeholder="Every site" defaultValue={row.depotId}
+                  <Select name="role" id={`role-${row.id}`} defaultValue={row.roleValue}
+                          aria-label={`Role for ${row.label}`} groups={ROLE_GROUPS} />
+                  <Select name="depot_id" id={`depot_id-${row.id}`} placeholder="Every site"
+                          aria-label={`Site for ${row.label}`} defaultValue={row.depotId}
                           options={depots.map((depot) => ({ value: depot.id, label: depot.name }))} />
                   <SubmitButton variant="secondary" pendingLabel="Saving…">Save</SubmitButton>
                 </form>

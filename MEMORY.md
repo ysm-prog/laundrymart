@@ -16,7 +16,46 @@ logins — which live there precisely so they cannot read the real business's re
 **The multi-tenancy architecture stays.** One operating tenancy is a fact about today's data, not
 a reason to drop `tenant_id`, RLS, or §23's rule that a read feeding a write names its tenant.
 
-## Latest: the first two real people, and the roles their titles mean
+## Latest: a login can be created with a password, not only invited
+2026-08-27, branch `claude/user-creation-by-role-bre21j`. Owner: *"allow in settings to
+create user with Password as well like ysm-hub has."* Adopted from `ysm-prog/ysm-hub`'s
+`api/create-staff.js` (cloned to `/home/user/ysm-hub`). **No migration; `git diff` over
+`supabase/` is empty**, no role gained or lost anything. §10c holds the design.
+
+- **One card, one set of questions, two submit buttons** (`SubmitButton`'s `formAction`;
+  the billing queue's Price/Approve pair is the precedent). Invitation keeps the primary
+  button; the password sits behind a `FormDisclosure`. **Nothing inside it is `required`** —
+  a required control in a closed `<details>` blocks submit unfocusably.
+- **The invitation refuses a typed password** rather than ignoring it — otherwise the mail
+  goes and the admin hands over a credential the app never stored.
+- **Three things ysm-hub does that were NOT copied**, each for a stated reason:
+  its password rule is stated twice and disagrees (form 6, API 10 — here it is one constant
+  and the hint is interpolated from it); its manager-cannot-create-admin guard is
+  unreachable here (`membershipRolesWith("admin.write")` is `["super_admin"]` alone); and
+  it leaves an **orphan login** on a failed profile write (here the login is deleted, as
+  §10c already had the invitation do after a refused send).
+- **Ours:** whitespace around a password is refused out loud, never trimmed (trimming stores
+  a different credential than was typed); the cap is **72 bytes not characters**, because
+  bcrypt ignores the rest and 30 emoji is 120 bytes at `.length` 60.
+- **Pre-existing defect found by measuring and fixed:** `Input`/`Select` default their id to
+  the *field name* and the members list renders three of them **per row**, so the People
+  screen emitted 20 elements each called `full_name`/`role`/`depot_id` — invalid HTML, every
+  `<label for>` resolving to the first. Per-row ids now; `Select` gained the `id` override
+  `Input` already had, plus `aria-label` (those pickers had no accessible name). The first
+  guess — "just a gallery fixture rendering the card twice" — was **wrong and was checked**.
+- 1050 tests (was 1042), 504 pgTAP unchanged, `verify` green. **All six new assertions were
+  confirmed to fail without their fix.** Seam guarded by reading source (`one-door.test.ts`
+  pattern) — `actions.ts` is `"use server"` and `page.tsx` reads Supabase at module scope.
+- **Browser-driven at 390/1440: 48 assertions, 0 failures, 0 console errors, 0 overflow,
+  nothing under 36px.** `AddPersonCard` split out of its async wrapper so the gallery can
+  render it (§10b). Local render needs a placeholder `.env.local` (gitignored).
+- **Not verified behind the auth gate** — no Supabase creds here. **Next: on
+  `ats.coreit.com.au` add somebody with a password, sign in as them, delete them.** Also:
+  Angelo's and Christian's passwords were sent over chat and this screen is how they get
+  replaced.
+
+
+## Previously: the first two real people, and the roles their titles mean
 2026-08-27, branch `claude/user-creation-by-role-bre21j`. Owner's instruction: create a login
 for each of two named people, by the role given, with a simple password for now.
 **No migration, no schema/RLS/capability/code change** — `git diff` over `src/` and
