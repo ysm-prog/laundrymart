@@ -2648,6 +2648,36 @@ being opened with real rows in them. **Before trusting it: on `ats.coreit.com.au
 Laundry prices, price `T22`, then take a job in for that item and press Price this job — the charge
 should carry the rate you just set.**
 
+**Merged to `Prod` (`9c3abab`) on 2026-08-27**, a clean fast-forward — `Prod` was never
+force-pushed. **CI green on all three jobs**: Verify (typecheck, lint, **1090** tests across 64
+files, production build), Security (gitleaks strict + dependency audit), and the DB job applying
+every migration to a fresh Postgres 16 with the whole pgTAP suite (**504 assertions** across 27
+files) and the seed on top. **Nothing to apply** — this release adds no migration, and `git diff`
+over `supabase/` is empty against both parents.
+
+- **`Prod` moved twice while this was in flight and was merged in each time** rather than rebased
+  over. First the job form's customer picker no longer narrowing on status; then five documentation
+  records from another session (the import hold released, two test-profile memberships deleted,
+  Board 1 becoming a person, the bcrypt-cost note). **Only `CLAUDE.md` and `MEMORY.md` ever
+  conflicted**; `design-preview/page.tsx`, which two of the three branches touched, merged clean and
+  carries every section. Every changelog entry is kept exactly once.
+- **One incoming entry corrected a finding this branch had recorded, and the note was kept rather
+  than overwritten.** This entry reported, as an open question, that no `@roles.example.com` profile
+  holds a membership. That was a deliberate deletion by the session whose entry sits below, for a
+  sharper reason than the one guessed at here — `owner@roles.example.com` held `super_admin` on the
+  real laundry under a password committed to a public repository. The note now points at it, because
+  *which session probed as what* is the provenance of the gate proof above.
+- **Read the log, not the status — the seventh time this file records it, and it mattered again.**
+  The Verify job served `in_progress` for minutes after the other two had finished, and its log
+  404s *while a job is still running* as well as when the status is stale, so the 404 settles
+  nothing either way. What settled it was the step-level `completed_at` (07:49:33 → 07:50:41) and
+  then `== PASSED ==` in the log itself.
+- **`api.github.com` is unreachable from this session** — every direct poll returned nothing, so
+  the GitHub MCP tools are the only way to read a run here. Worth knowing before writing a `curl`
+  loop that silently reports nothing thirty times.
+- **The Vercel deploy is not confirmable from this session**, the standing gap §5 records. Read it
+  in the GitHub UI or the Vercel dashboard.
+
 **Two things the read-back turned up, and the first was answered by another session the same
 day.** No `@roles.example.com` profile holds a membership any more, and neither does
 `board1@ats.example.com` — read off the live database while looking for a session to probe with,

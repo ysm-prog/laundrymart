@@ -39,6 +39,12 @@ propagation rules.
   **1** of the new item (0040's open SELECT holding). Nothing survived.
 - **Measuring found three defects reading did not**: a priced row saying "No price set"; duplicate
   DOM ids across two tables on one page; an 18px-wide GST hit area from `sm` up.
+### Shipped
+**Merged to `Prod` (`9c3abab`) on 2026-08-27**, clean fast-forward, never force-pushed. CI green on
+all three jobs — Verify (1090 tests / 64 files), Security, and the DB job (504 pgTAP assertions
+across 27 files, + seed). No migration, so nothing to apply. `Prod` moved twice mid-flight and was
+merged in both times; only the two docs ever conflicted.
+
 ### Not done — needs a browser and the owner
 1. **Open Money › Laundry prices on `ats.coreit.com.au`, price `T22`, take a job in for it and press
    Price this job.** The charge should carry the rate just set. Nothing here proves that end to end.
