@@ -16,7 +16,39 @@ logins — which live there precisely so they cannot read the real business's re
 **The multi-tenancy architecture stays.** One operating tenancy is a fact about today's data, not
 a reason to drop `tenant_id`, RLS, or §23's rule that a read feeding a write names its tenant.
 
-## Latest: the import hold released, and the People list is real
+## Latest: the customer picker offers the customer database
+2026-08-27, branch `claude/laundry-creation-customer-db-3tp9d1`. Reported from the deployed
+app: *"Customer doesn't pick up when we create new laundry from customer database."*
+**No migration; `git diff` over `supabase/` is empty**, no role gained or lost anything.
+§6 holds the rule, §11 the live state.
+
+- **One clause.** The job form's picker narrowed to
+  `.in("status", ["active","prospect","on_hold"])` while the Customers screen listed all five
+  statuses and `createOrder` checked none. The MYOB import had left **508 of 511** customers
+  `inactive`, so the search box found **three** of five hundred — and said nothing.
+- **The picker was the only refusal.** `createOrder` filters tenant + `deleted_at` only, and
+  the top-up read fetches a customer it is *handed* whatever its status — which is why
+  **New job** from a customer's own record always worked. That is why nobody spotted a filter.
+- **The rule is now `lib/domain/customers.ts`**, pure and tested: `isPickableCustomer` (all but
+  `archived`) and `customerStatusNeedsSaying` (badge anything not `active`). A rule inside a
+  `.from()` chain is one no unit test can reach — `form-data.ts` imports `next/headers`.
+- **Cap 500 → 1000.** Widened, the list is 511, so the old cap sat *inside* a real customer
+  base — eleven at the end of the alphabet would have been unfindable. 157 kB, measured.
+- **`Showing 12 of 14`** — the results list drew twelve and threw the total away. Harmless at
+  three customers, not at 511.
+- **Pre-existing defect found by measuring:** the "different delivery address" checkbox was
+  hand-rolled — 16px box, 36px row, `border-strong` (1.42:1). Now `Checkbox`'s skin in a 44px
+  label. It survived because **`JobForm` had never been in `/design-preview`**; it is now.
+- **The data half was released by somebody else mid-investigation.**
+  `reactivate_tenant_records()` ran at 05:31 UTC → **451 active / 60 inactive**. So the symptom
+  went away by that, not by this commit; the code defect still hid the 60 and, past 500, eleven
+  more. **Nothing in `src/` can release an import** — 0024's functions are service-role only.
+- Proved as a real session (`cmignone219@gmail.com`, `operations_manager`): old clause **451**,
+  new clause **511**, **60** badged. 1060 tests, 30 browser assertions, `verify` green.
+- **Not opened behind the auth gate** (no Supabase creds here). Next: on `ats.coreit.com.au`,
+  Take in laundry → search an inactive customer → expect an *Inactive* badge and a saved job.
+
+## Also today: the import hold released, and the People list is real
 2026-08-27, branch `claude/user-creation-by-role-bre21j`. All **live data**, no migration and
 no code change — `git diff` over `src/` and `supabase/` against `Prod` is empty. The §18
 entries hold the detail; this is the state to start from.
