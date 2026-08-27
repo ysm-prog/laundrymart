@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  buildItemPriceRows, laundryPriceItemType, liveItemRate, priceRowHint,
+  buildItemPriceRows, laundryPriceItemType, liveItemRate, priceRowHint, seedPriceFromItem,
   type ItemPriceRow, type PricedItem,
 } from "../laundry-prices";
 import type { LaundryPriceRow } from "../laundry-billing";
@@ -250,5 +250,67 @@ describe("priceRowHint", () => {
 
   it("says only that, where the item has no selling price either", () => {
     expect(hint({ item: FEE })).toBe("No price set");
+  });
+});
+
+describe("seedPriceFromItem", () => {
+  /*
+   * The conversion the "Fill from my item prices" button performs, and the one
+   * number in this file checked against a real frozen charge rather than
+   * reasoned about: `T40` is $0.40 GST-exclusive on the live item master, and
+   * the charge frozen on `LJ00012` is $0.44.
+   */
+  it("grosses up a GST-exclusive item price, because a list rate is what the customer pays", () => {
+    expect(seedPriceFromItem(
+      { sell_price: 0.4, sell_price_basis: "exclusive", tax_code: "GST" }, 0.1,
+    )).toEqual({ unitPrice: 0.44, taxable: true });
+  });
+
+  it("leaves a GST-inclusive price exactly as it is", () => {
+    expect(seedPriceFromItem(
+      { sell_price: 0.38, sell_price_basis: "inclusive", tax_code: "GST" }, 0.1,
+    )).toEqual({ unitPrice: 0.38, taxable: true });
+  });
+
+  it("does not gross up a line that carries no GST", () => {
+    // `Dis` on the live master: $13.00, stated exclusive, tax code N-T. There is
+    // no GST to add, and adding it would over-charge by 10%.
+    expect(seedPriceFromItem(
+      { sell_price: 13, sell_price_basis: "exclusive", tax_code: "N-T" }, 0.1,
+    )).toEqual({ unitPrice: 13, taxable: false });
+  });
+
+  it("never guesses at a basis nobody stated", () => {
+    expect(seedPriceFromItem(
+      { sell_price: 5, sell_price_basis: null, tax_code: "GST" }, 0.1,
+    )).toEqual({ unitPrice: 5, taxable: true });
+  });
+
+  it("treats an item with no tax code as taxable, like every other charge here", () => {
+    expect(seedPriceFromItem({ sell_price: 1, sell_price_basis: "exclusive" }, 0.1))
+      .toEqual({ unitPrice: 1.1, taxable: true });
+  });
+
+  it("refuses an unpriced item rather than seeding a zero", () => {
+    // 23 of the laundry's sellable items carry no MYOB price. A zero row would
+    // bill them silently at nothing; no row at all is reported as unpriced.
+    expect(seedPriceFromItem({ sell_price: 0, sell_price_basis: "exclusive" })).toBeNull();
+    expect(seedPriceFromItem({ sell_price: null, sell_price_basis: null })).toBeNull();
+  });
+
+  it("reads the laundry's own GST rate rather than assuming 10%", () => {
+    expect(seedPriceFromItem(
+      { sell_price: 100, sell_price_basis: "exclusive", tax_code: "GST" }, 0.15,
+    )).toEqual({ unitPrice: 115, taxable: true });
+  });
+
+  it("agrees with what the pricer would charge for the same item", () => {
+    // The seeded rate is taken verbatim by `liveItemRate`, and an unseeded item
+    // falls through to the same gross-up — so filling the list must not change
+    // what anything costs. Asserted together, because that is the property.
+    const item = { sell_price: 0.4, sell_price_basis: "exclusive" };
+    const seeded = seedPriceFromItem({ ...item, tax_code: "GST" }, 0.1)!;
+    expect(liveItemRate(item, null, { taxable: true, gstRate: 0.1 }).rate)
+      .toBe(liveItemRate(item, { ...seeded, bagPrice: null }, { taxable: true, gstRate: 0.1 }).rate);
   });
 });

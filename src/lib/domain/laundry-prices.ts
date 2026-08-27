@@ -29,6 +29,7 @@
 import { ITEM_TYPES, type ItemType } from "./laundry-orders";
 import type { LaundryPrice, LaundryPriceRow } from "./laundry-billing";
 import { GST_RATE_FALLBACK, lineRateFromItem, sellPriceLabel } from "./items";
+import { taxableFromTaxCode } from "./accounts";
 import { money } from "@/lib/format";
 import { round2 } from "./pricing";
 
@@ -228,4 +229,44 @@ export function priceRowHint(row: ItemPriceRow): string | null {
   if (!Number.isFinite(own) || own <= 0) return "No price set";
   return `No price set \u2014 currently bills at the item\u2019s `
     + sellPriceLabel(money(own), row.item.selling_unit);
+}
+
+/* -------------------------------------------- filling the list from MYOB --- */
+
+/**
+ * The list price an item's own selling price becomes.
+ *
+ * **This is a conversion, not a copy, and getting it wrong moves money.**
+ * `items.sell_price` is MYOB's list price and carries a *basis*: 111 of this
+ * laundry's 119 priced items state theirs GST-**exclusive**. A
+ * `laundry_prices.unit_price` is what the customer pays, GST included — the same
+ * convention `priceFromList` writes a charge under and `recalculate_invoice`
+ * totals a line under (0043). So an exclusive price has to be grossed up on the
+ * way in, or every rate on the list lands short by exactly the GST.
+ *
+ * Checked against the one piece of real evidence rather than reasoned about:
+ * `T40` is $0.40 exclusive and the charge frozen on `LJ00012` is **$0.44**. The
+ * same number this returns.
+ *
+ * Three pass straight through, each a decision `lineRateFromItem` already makes:
+ * a price already stated GST-inclusive, a line carrying no GST (`FRE`/`N-T`), and
+ * a basis nobody has stated — never guessed at, because inventing an answer here
+ * silently re-rates the laundry.
+ *
+ * Returns null for an item with no selling price. **Not zero**: 23 of the
+ * laundry's sellable items have no price in MYOB either, and a zero would bill
+ * them silently at nothing where a missing row is reported as unpriced.
+ */
+export function seedPriceFromItem(
+  item: Pick<PricedItem, "sell_price" | "sell_price_basis"> & { tax_code?: string | null },
+  gstRate: number = GST_RATE_FALLBACK,
+): { unitPrice: number; taxable: boolean } | null {
+  const listed = Number(item.sell_price ?? 0);
+  if (!Number.isFinite(listed) || listed <= 0) return null;
+  // The app treats a charge as taxable unless something says otherwise, so an
+  // item with no tax code takes that default — the same direction
+  // `chargePatchForItem` takes.
+  const taxable = taxableFromTaxCode(item.tax_code) ?? true;
+  const unitPrice = lineRateFromItem(listed, item.sell_price_basis, taxable, gstRate);
+  return unitPrice > 0 ? { unitPrice, taxable } : null;
 }

@@ -2569,6 +2569,58 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-08-27 · The prices are actually in the list
+Reported in three words — *"YOU HAVENT ADDED PRICE"* — with `MYOB_Items_Register.xlsx`
+attached, the file §25 had been waiting on since the item master landed. Fair: the previous
+entry built the screen and left the list **empty**, so every one of the 140 rows read *"No
+price set"*. **No migration; no schema, RLS, capability or policy change.**
+
+**The prices were never missing from the app — they were missing from the list, and the two
+look identical on screen.** `liveItemRate` already falls back to `items.sell_price`, so a job
+for `T40` has been billing at $0.44 the whole time. What an owner opening Money › Laundry
+prices saw was 140 empty fields.
+
+**The register is the file, and it carries what was needed.** 257 rows, 27 columns — `Item ID`,
+`Selling price`, **`Selling price basis`**, `Selling tax code`, `Income category`. 142 items are
+`Sell item = Y` and **119 carry a selling price**, of which **111 are Tax exclusive** and 8 Tax
+inclusive. Every column in it is already on `items` (0043 + 0044), which is why this needed no
+schema change: the item master had the data and nothing had turned it into a price list.
+
+- **A price is converted, not copied, and that is the whole of the risk.** A
+  `laundry_prices.unit_price` is what the customer pays, GST included (0043); an exclusive item
+  price is not. Copying `T40`'s $0.40 verbatim would have **cut the rate by the whole GST** —
+  the under-billing the 2026-08-26 entry records, reintroduced through the back door.
+  `seedPriceFromItem` grosses up through `lineRateFromItem`, reads `tenants.gst_rate` rather
+  than assuming 10%, and passes three cases straight through: already-inclusive, a `FRE`/`N-T`
+  line, and a basis nobody stated.
+- **Checked against the one piece of real evidence rather than reasoned about.** `T40` is $0.40
+  exclusive and the charge frozen on `LJ00012` is **$0.44** — the same number the rule returns.
+- **`fillPricesFromItems` is a filler, not a reset.** It writes only where there is no row yet,
+  so pressing it twice is safe, pressing it after re-rating a code does not undo the re-rate,
+  and pressing it after adding items brings in exactly the new ones. The screen offers it in a
+  notice that counts what it would fill, so it cannot promise a number the action would not
+  deliver, and the offer disappears once there is nothing to do.
+- 1098 unit tests (was 1090); the eight new assertions were **confirmed to fail** by copying the
+  item price verbatim — four of them, including the one that pins the seeded rate against what
+  `liveItemRate` would charge for the same item either way. `verify` green.
+
+**Applied live the same day: `laundry_prices` went 0 → 117 rows** for Adelaide Towel Service —
+every active sellable item carrying a MYOB selling price. Rehearsed in a transaction that ended
+by raising, and the rehearsal is what proved the conversion: `T40` 0.40 exclusive → **0.44**,
+`T22` 0.22 → 0.24, `TW` 0.20 → 0.22, `HTW` 0.70 → 0.77, while `GTW` (0.38 inclusive) and `32682`
+(1.80 inclusive) passed through untouched and `Dis` (13.00 exclusive, **N-T**) stayed 13.00 and
+not taxable. The real apply ran behind a guard that the table started empty, so a rerun could
+not double-price it, plus assertions on the row count and on every row being item-scoped, on
+this laundry, above zero.
+
+**Then proved as real sessions**, rolled back: the **Owner** reads 117 and sees `T40` at 0.44 and
+re-rates it — **1 row**, not a silent zero; the **Office manager** reads 117; a **board** reads
+**0**. `can_read_pricing()` holding over real rows for the first time, since until today the
+table was empty and every proof of it was vacuous.
+
+**23 sellable items are still unpriced, and that is the honest state** — MYOB has no selling
+price for them either. They report as unpriced rather than billing at nothing.
+
 ### 2026-08-27 · The price list is item codes, and a price edit reaches the screens
 The owner's instruction: put the item codes on Money › Laundry prices, take the old rows off, have
 an update reflect live wherever an item code is linked, and let a new code be added there.
