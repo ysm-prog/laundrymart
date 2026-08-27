@@ -2719,11 +2719,21 @@ over `supabase/` is empty against both parents.
   sharper reason than the one guessed at here — `owner@roles.example.com` held `super_admin` on the
   real laundry under a password committed to a public repository. The note now points at it, because
   *which session probed as what* is the provenance of the gate proof above.
-- **Read the log, not the status — the seventh time this file records it, and it mattered again.**
-  The Verify job served `in_progress` for minutes after the other two had finished, and its log
-  404s *while a job is still running* as well as when the status is stale, so the 404 settles
-  nothing either way. What settled it was the step-level `completed_at` (07:49:33 → 07:50:41) and
-  then `== PASSED ==` in the log itself.
+- **This entry first claimed a stale CI status, and that claim was wrong — the same mistake the
+  entry below corrects, made independently an hour later.** What it said: *"the Verify job served
+  `in_progress` for minutes after the other two had finished."* It did not. `verify.sh` ran
+  07:49:33 → 07:50:41 — its usual ~68 seconds — so every poll that saw `in_progress` was made
+  while the job was genuinely working, and the 404 on its log is what an in-flight job returns.
+  The other two jobs finish in ~25 seconds, which is what makes Verify *look* stuck beside them.
+  - **The elapsed time was inferred from how many tool calls had been made rather than from a
+    clock**, and from background `sleep`s that were started and then polled immediately instead
+    of waited on. The illusion `ae2e19c` describes; this is the fourth session to reach it.
+  - **It was caught here by finally reading one**: `date -u` returned 08:02:59 and then 08:03:03
+    across what felt like minutes — four seconds. Thirty-two seconds into a seventy-second gate,
+    with nothing wrong at all.
+  - **Both the wrong claim and this correction stay**, because the remedy is the useful part:
+    `date -u` against the runner's own `started_at` costs one command, and it is the difference
+    between waiting another minute and re-running a job that has already passed.
 - **`api.github.com` is unreachable from this session** — every direct poll returned nothing, so
   the GitHub MCP tools are the only way to read a run here. Worth knowing before writing a `curl`
   loop that silently reports nothing thirty times.
