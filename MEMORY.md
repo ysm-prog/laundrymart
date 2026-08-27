@@ -83,8 +83,10 @@ app: *"Customer doesn't pick up when we create new laundry from customer databas
 - **Not opened behind the auth gate** (no Supabase creds here). Next: on `ats.coreit.com.au`,
   Take in laundry → search an inactive customer → expect an *Inactive* badge and a saved job.
 - **Merged to `Prod` (`bc4fa45`)**, clean fast-forward from `1cbc31b`, never force-pushed. CI
-  green on all three jobs; no migration, so nothing to apply. `Dev` is 20 ahead / 11 behind —
-  its twenty are catch-up merges, the standing drift nobody has fixed.
+  green on all three jobs; no migration, so nothing to apply. **`Dev` is level as of
+  2026-08-27** — it carried no non-merge commit Prod lacked, so bringing it up was purely making
+  its tree match, which it now does byte for byte. The standing drift the earlier note describes
+  is closed rather than merely smaller.
 - **Trap, the other way round:** Verify looked stale at `in_progress` for "thirteen minutes"; it
   actually ran 70s. This container's clock had barely moved. Check elapsed time against the
   runner's own timestamps, and remember the job log 404s while a job is genuinely running too.
