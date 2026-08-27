@@ -422,14 +422,23 @@ key remains the way to reset or re-assert them through the Auth API, but nothing
   policy would have written zero rows in silence. It lets a delete through when the parent invoice
   row is already gone, which is the `on delete cascade` path; refusing there would make an invoice
   undeletable. §30 has the reasoning.
-- **Laundry is priced per customer, and a missing price is reported rather than billed at
-  zero.** `laundry_prices` (0017) holds one row per kind of laundry either for a customer or
-  for the tenant (`customer_id is null`); the customer's own row wins, the default is the only
-  fallback, and there is no third. A kind of laundry nobody has priced comes back from
-  `buildLaundryCharges` as *unpriced*, with the reason and the job number, and the monthly run
-  says so in a toast that sticks — a silently missing line looks exactly like laundry that was
-  never taken in. A bulk lot bills by the bag when a bag rate is set and the bags were counted,
-  otherwise by the counter's estimate; a lot with neither cannot be priced and says so.
+- **Laundry is priced per customer and per item code, and a missing price is reported rather
+  than billed at zero.** `laundry_prices` (0018) holds one row per item — or, for rows written
+  before 2026-08-27, per kind of laundry — either for a customer or for the tenant
+  (`customer_id is null`); the customer's own row wins, the default is the only fallback, and
+  there is no third. Within a tier the **item** beats the category, because a price written
+  against TOW001 is a price for TOW001 and one written against "towels" is a price for every
+  kind of towel. Laundry nobody has priced comes back from `priceJob` as *unpriced*, with the
+  reason and the job number, and the run says so in a toast that sticks — a silently missing
+  line looks exactly like laundry that was never taken in. A bulk lot bills by the bag when a
+  bag rate is set and the bags were counted, otherwise by the counter's estimate; a lot with
+  neither cannot be priced and says so.
+  - **The price screens write the item tier and nothing else, since 2026-08-27.** They rendered
+    the nine `ITEM_TYPES` and never touched `item_id`, so the tier 0032 built had **no entry
+    point at all** — which is why the live table held **zero rows** and the laundry put the rate
+    inside the item code instead (`T22`, `T38`, `T40`: three master records all named "Towels -
+    Black"). The category tier is still *read* by `priceListFor`, because job rows written
+    before an item was picked resolve through it; nothing writes one any more. See §31.
 - **A laundry job is billed exactly once.** `invoice_lines.laundry_order_id` is the record of
   it: the generator skips any job already carried on an invoice that is not void, so a job
   finished near a period boundary cannot be billed by two runs. Voiding an invoice makes its
@@ -614,7 +623,7 @@ as before, plus `/bills`, `/suppliers` and `/accounts` from the MYOB import, gat
 separate `purchases.read` — a dispatcher holds `invoices.read` so they can see whether a
 customer is on stop, which is no reason to show them what the business pays its suppliers.
 It was previously **an area with two tabs** — the register and
-`/invoices/prices`, the tenant's laundry price list — because what the monthly run charges is a
+`/invoices/prices`, the tenant's laundry price list **by item code** — because what the run charges is a
 billing decision, not a setting. A customer's own prices live on their record
 (`/customers/:id/prices`), reached from the customer page rather than from a tab, since it is
 one customer's exception to the list. `/notifications` (the bell's list) is
@@ -2560,6 +2569,97 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-08-27 · The price list is item codes, and a price edit reaches the screens
+The owner's instruction: put the item codes on Money › Laundry prices, take the old rows off, have
+an update reflect live wherever an item code is linked, and let a new code be added there.
+**No migration; no schema, RLS, capability or policy change** — `git diff` over `supabase/` is
+empty, and no role gained or lost anything. §31 holds the design.
+
+**The tier this needed already existed and had no entry point.** `laundry_prices.item_id` has been
+there since `0032` and `priceJob` has read it through `itemPriceListFor` ever since — but both
+price screens rendered the nine `ITEM_TYPES` and never wrote an item row. So the item tier was a
+feature nobody could reach, and the live table held **0 rows on the whole project**.
+
+**What the laundry did instead is the argument for the change, and it is data rather than taste.**
+With no usable price list the rate went into the *code*: `T22`, `T38` and `T40` are three items all
+named "Towels - Black", differing only in price. Three master records to keep in step with the
+books where there should be one item and three prices. Read off the live database before anything
+was written, along with the fact that the only thing pricing laundry today is `items.sell_price`
+through the manual charge editor — which is where `LJ00012`'s $0.44 came from (T40's $0.40
+GST-exclusive, grossed up).
+
+**"Remove existing data" removed nothing, and that is said plainly rather than left to be
+discovered.** The nine categories were a property of the screen; the table was already empty. A
+later reader checking for a deletion should not conclude it failed.
+
+- **The form posts what it was showing.** Nine rows could always all be posted, so a blank could
+  safely mean *clear*; 254 items cannot be, so every rendered row posts a `present` field and blank
+  clears only what was present. Without it, saving from a search would delete the price of every
+  code that did not match it — asserted from both directions, because only the pair proves it.
+- **The search hides rows and never unmounts them**, which is a deliberate departure from §29: that
+  rule is about list pages, and this is a form where a URL navigation would throw away every price
+  typed before the search. Proved in the browser — the row disappears, the row still posts, and a
+  rate typed before a search is still there after it.
+- **Adding an item code is gated on `items.write`, not `invoices.write`.** Same two roles today,
+  different questions, and `0040` is the half that binds: a capability without the policy behind it
+  writes zero rows in silence.
+
+**Where a price change lands, which is the half the instruction most needed answering.**
+`liveItemRate` puts the list in front of `items.sell_price` in both places an item becomes money —
+the job's Charges card and the invoice line composer — so re-rating a code changes the next charge
+and the next line with nothing to re-key. A **list** rate is taken verbatim and never grossed up: an
+item's price carries a basis, a list rate is a number the owner typed into a box labelled "what the
+customer pays", and applying the one to the other would add 10% to a figure they already decided.
+**A charge approval has frozen does not move, draft invoice or not** — that is
+`guard_job_charge_snapshot` as `0044` left it, protecting an amount the customer may already have
+been told, and the screen carries that sentence rather than leaving it to be found.
+
+- 1080 unit tests (was 1050) and 504 pgTAP assertions, unchanged — this adds no policy and no
+  migration. `verify` green: typecheck, lint, tests and the production build.
+- **The new assertions were confirmed to fail without their fix** rather than assumed to be doing
+  something: grossing a list rate up fails 3, letting a category row price an item fails 1,
+  dropping the `present` de-duplication fails 1, and asking only "is there a fallback?" for the
+  row hint fails 2.
+- **Driven in a real browser at 390 and 1440, and measured light and dark at 320/390/768/1440:
+  78 assertions, 0 failures, 0 console errors, 0 overflow inside the section, nothing under 36px.**
+  Document overflow is 7px at 320 and 0 elsewhere — the pre-existing dispatch-planner fixture,
+  byte-identical to the recorded baseline, so this adds none. The harness reports the applied
+  background colour and was proved non-vacuous by pointing it at a section that does not exist.
+- **Measuring found three defects that reading did not.** A priced row said "No price set" under a
+  field with a price in it, because the first draft asked only whether there was a *fallback* and
+  the usual list never has one — the rule is `priceRowHint` now, pure and tested. Two tables on one
+  page emitted duplicate DOM ids, so every `<label for>` resolved to the first one; ids are per
+  table instance through `useId()` while the **names** stay `unit_<itemId>`, which is the contract
+  the parser reads. And the GST box's hit area was **18px wide** from `sm` up, because the label
+  collapses to content and its only text is `sr-only`.
+- **The gate itself was proved live, as real sessions, in a transaction that ended by raising.**
+  A `board` read **0** prices and was refused both a price insert and an item insert (42501); the
+  **Owner** priced T22 — **1 row**, which is the assertion that matters, since a policy refusing a
+  caller writes zero rows in silence — added an item code and priced it in the same breath, and had
+  a duplicate price for one item refused by `uq_laundry_prices_scope` while two items in one
+  category were both accepted; the **Office manager** read 3 and re-rated **1 row**. The board
+  still read 0 prices and **1** of the new item, which is `0040`'s decision holding: SELECT on
+  `items` stays open to every member, pricing does not. Nothing survived the rollback — 0
+  `laundry_prices`, 0 probe items, 254 items, 648 invoices.
+
+**Not verified behind the auth gate.** This container has no Supabase credentials, so the screens
+were proved through the component gallery, the tests, the build and the live probe rather than by
+being opened with real rows in them. **Before trusting it: on `ats.coreit.com.au` open Money ›
+Laundry prices, price `T22`, then take a job in for that item and press Price this job — the charge
+should carry the rate you just set.**
+
+**Two things the read-back turned up, and the first was answered by another session the same
+day.** No `@roles.example.com` profile holds a membership any more, and neither does
+`board1@ats.example.com` — read off the live database while looking for a session to probe with,
+and recorded here as an open finding. It is not one: the entry below (*"The rounds get their
+memberships back, and Board 1 becomes a person"*) is that deletion, done deliberately, and its
+reason is sharper than the guess made here — `owner@roles.example.com` held **`super_admin`** on
+the real laundry under a password committed to a public repository. Left in rather than deleted,
+because *which session probed as what* is the provenance of the gate proof above: it used
+`board2@ats.example.com`, `angelo@` and `cmignone219@`, all three of which still hold their
+memberships. The second thing stands: `T22`/`T38`/`T40` are still three items, and with the price
+list working they can be collapsed to one code with three customer prices — but merging them
+touches frozen charges and is a decision, not a repair.
 ### 2026-08-27 · The rounds get their memberships back, and Board 1 becomes a person
 Found while verifying the import release, and acted on at the owner's instruction. **No migration,
 no schema/RLS/capability/code change** — a live data change and nothing else.
@@ -2647,7 +2747,6 @@ a login that wrote something stays, a login that wrote nothing need not.
 - `scripts/role-profiles.mjs` still lists a `board` profile, so `npm run seed:roles` would recreate
   the login — and §3a's `role-profiles.test.ts` pins that list against `ROLES`, so removing it from
   the script is a code change with a test behind it rather than a line to quietly drop.
-
 ### 2026-08-27 · The customer picker offers the customer database
 
 > **Read with the import-hold entry below.** The same report produced two fixes on the same
@@ -2807,7 +2906,6 @@ previous `Prod` is empty, so the suite is the same **504** assertions it was.
   `false` on 2026-08-26 so a deploy reports itself on the commit that caused it, but no GitHub MCP
   tool here lists check runs or statuses for a ref, and `api.github.com` answers *"GitHub access is
   not enabled for this session"*. **Read it in the GitHub UI or the Vercel dashboard.**
-
 ### 2026-08-27 · A login can be created with a password, not only invited
 The owner's instruction, the day after two staff logins had to be written in by hand SQL because
 the screen could not do it: *"allow in settings to create user with Password as well like ysm-hub
@@ -7989,6 +8087,66 @@ document is what to hand somebody asking what the feature does.
 - **The audit row carries both orders in full.** "What was it before?" is the question an audit
   log gets asked about a run that went wrong, and a movement count cannot answer it. Board, run
   date, run ids, previous and new sequence, actor, role and the resulting version.
+
+## 31. The price list is keyed on the item code
+`/invoices/prices` and `/customers/:id/prices` list **item codes**, not the nine kinds of
+laundry. The owner's instruction, 2026-08-27, and there was no migration in it: `laundry_prices`
+has been able to hold `item_id` since **0032** and the unique index has accommodated it since the
+same migration — what was missing was any screen that would write one.
+
+- **The tier existed and had no entry point, which is the finding.** `priceJob` has consulted
+  `itemPriceListFor` since 0032 and both price screens rendered nine fixed rows. So the item tier
+  was a feature nobody could use, the live table held **0 rows**, and the only thing pricing
+  laundry on this deployment was `items.sell_price` read through the manual charge editor.
+- **The cost of that gap is visible in the live data.** With no usable price list, the rate went
+  into the *code*: `T22`, `T38` and `T40` are three items all named "Towels - Black", differing
+  only in price. Three master records to keep in step with the books where there should be one
+  item and three prices. That is the argument for this change, and it is data rather than taste.
+- **"Remove existing data" removed nothing, because there was nothing to remove.** The nine
+  category rows were a property of the *screen*; the table was empty on the whole project. Said
+  plainly because the instruction implies a deletion and none happened, and a later reader
+  checking for one should not conclude it failed.
+- **`item_type` is derived, never typed.** The column is NOT NULL and predates the item tier, so
+  a per-item row still names one — `laundryPriceItemType` takes it from the item's own
+  `laundry_category`, `other` where it has none. Typing it would let a price for TOW001 be filed
+  under "sheets" with nobody able to see why, the same reason `sync_laundry_item_type` exists.
+- **The form posts what it was showing.** Nine rows could always all be posted, so "not posted"
+  and "posted blank" were one thing and a blank could safely mean *clear*. 254 items cannot be,
+  so every rendered row posts a `present` field and **blank clears only what was present**.
+  Without it, saving from a search would delete the price of every code that did not match it.
+- **The search hides rows; it never unmounts them and it is not in the URL.** The one deliberate
+  departure from §29, and the reason is that §29 is a rule about *list pages* while this is a
+  form: navigating to narrow the list would throw away every price typed before the search, and
+  an unmounted input posts nothing. Asserted in the browser from both directions — the row
+  disappears, the row still posts, and a rate typed before a search is still there after it.
+- **Adding an item code is on the screen**, gated on `items.write` rather than on
+  `invoices.write`. The two resolve to the same two roles today — the Owner and the Office
+  manager — but they are different questions, and `0040` is the boundary that binds: a
+  capability without the policy behind it writes zero rows in silence.
+
+### 31a. Where a price change actually lands
+The instruction was that an update should "reflect live in draft invoice, invoice everywhere item
+codes are linked". Most of that was simply not happening, and one part of it is a database
+refusal rather than a screen choice. Both halves are stated on the screen itself.
+
+- **It reaches everything that is not yet frozen, and that is new.** `liveItemRate` puts the
+  price list in front of `items.sell_price` in both places an item becomes money —
+  `chargePatchForItem` on a job's Charges card and the invoice line composer — so re-rating `T40`
+  changes what the next charge and the next line cost, with nothing to re-key. `attachListPrices`
+  is the one read behind it, resolved through the same `buildItemPriceRows` the price screens
+  render from, so the screen and the pricer cannot come to disagree about what a customer pays.
+- **A list rate is taken verbatim and never grossed up.** `items.sell_price` carries a *basis*
+  and an exclusive one is grossed up by `lineRateFromItem` (0043); a price-list rate is a number
+  the owner typed into a box labelled "what the customer pays". Applying the item's basis to it
+  would add 10% to a figure they already decided, on a charge approval then freezes.
+- **Its GST tick travels with it**, so picking an item by hand and pressing "Price this job"
+  cannot bill the same code two ways — `priceFromList` already writes `price.taxable`, and now so
+  does the hand-picked path.
+- **A charge that approval has frozen does not move, draft invoice or not.** That is
+  `guard_job_charge_snapshot`, narrowed by `0044` to permit an account code and nothing else, and
+  it is what stops an amount the customer may already have been told from re-pricing itself. The
+  remedies are the two that already exist: re-price the job before approving it, or take it off
+  the draft. The screen carries that sentence rather than leaving it to be discovered.
 
 ## 21. Customer pricing and job billing
 **Two lifecycles on one job, and they meet at exactly one point.** The operational status says
