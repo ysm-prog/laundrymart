@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
+import { attachListPrices } from "@/lib/items/list-prices";
 import type { CodingAccount, CodingItem } from "@/components/coding-pickers";
 import { can, type Role } from "@/lib/roles";
 import { money, dateTime } from "@/lib/format";
@@ -51,7 +52,7 @@ export async function ChargesCard({
     // fetching an item list, a chart of accounts and the GST rate to render one
     // would be a few hundred rows read for nothing on every view of every
     // historical job.
-    editable ? loadCodingItems(supabase, tenantId) : Promise.resolve([]),
+    editable ? loadCodingItems(supabase, tenantId, customerId) : Promise.resolve([]),
     editable ? loadCodingAccounts(supabase, tenantId) : Promise.resolve([]),
     editable ? tenantGstRate(supabase, tenantId) : Promise.resolve(GST_RATE_FALLBACK),
   ]);
@@ -275,7 +276,7 @@ const TONES: Record<BillingStatus, "neutral" | "info" | "success" | "warning" | 
  * job page.
  */
 async function loadCodingItems(
-  supabase: Awaited<ReturnType<typeof createClient>>, tenantId: string,
+  supabase: Awaited<ReturnType<typeof createClient>>, tenantId: string, customerId: string,
 ): Promise<CodingItem[]> {
   const { data } = await supabase
     .from("items")
@@ -295,7 +296,11 @@ async function loadCodingItems(
     .order("item_code", { nullsFirst: false })
     .limit(500)
     .returns<CodingItem[]>();
-  return data ?? [];
+  // The laundry price list in front of `items.sell_price`. This is the call site
+  // where getting it wrong costs the most: approval **freezes** what a charge
+  // says, so a stale rate here is one the customer is billed at on a row nobody
+  // can edit afterwards.
+  return attachListPrices(supabase, tenantId, customerId, data ?? []);
 }
 
 async function loadCodingAccounts(

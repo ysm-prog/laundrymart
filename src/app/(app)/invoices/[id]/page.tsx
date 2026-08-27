@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { requireCapability } from "@/lib/auth/context";
 import { GST_RATE_FALLBACK, tenantGstRate } from "@/lib/gst";
 import { createClient } from "@/lib/supabase/server";
+import { attachListPrices } from "@/lib/items/list-prices";
 import { can } from "@/lib/roles";
 import { counted, date, money, today } from "@/lib/format";
 import { CHARGE_TYPE_LABELS, type ChargeType } from "@/lib/domain/pricing";
@@ -129,7 +130,8 @@ export default async function InvoiceDetailPage({
       <div className="grid gap-6 xl:grid-cols-3">
         <div className="space-y-6 xl:col-span-2">
           <Suspense fallback={<SkeletonRows rows={5} />}>
-            <Lines invoiceId={id} editable={editable} tenantId={session.tenantId} />
+            <Lines invoiceId={id} editable={editable} tenantId={session.tenantId}
+                   customerId={invoice.customer_id} />
             <ServiceBreakdown invoiceId={id} tenantId={session.tenantId} />
           </Suspense>
 
@@ -379,10 +381,16 @@ async function ServiceBreakdown({ invoiceId, tenantId }: { invoiceId: string; te
 }
 
 async function Lines({
-  invoiceId, editable, tenantId,
+  invoiceId, editable, tenantId, customerId,
 }: {
   invoiceId: string;
   editable: boolean;
+  /**
+   * Whose prices to offer. A picked item's rate is this customer's own listed
+   * price where they have one and the laundry's usual price otherwise, so the
+   * composer bills what the price screens say — see `attachListPrices`.
+   */
+  customerId: string | null;
   /**
    * §23, and it decides money twice over: the GST rate below is read for this
    * laundry, and both pickers offer ids that are posted straight back onto a
@@ -406,7 +414,7 @@ async function Lines({
               + "sequence, gl_account_id, account_code")
       .eq("invoice_id", invoiceId).order("sequence")
       .returns<InvoiceLine[]>(),
-    editable ? loadItemCatalogue(tenantId) : Promise.resolve([]),
+    editable ? loadItemCatalogue(tenantId, customerId) : Promise.resolve([]),
     editable ? loadChartOfAccounts(tenantId) : Promise.resolve([]),
     editable ? tenantGstRate(supabase, tenantId) : Promise.resolve(GST_RATE_FALLBACK),
   ]);
@@ -496,7 +504,9 @@ async function Lines({
  * over is an arbitrary slice. Inactive items are left out: an invoice is written
  * today, and offering something the laundry has retired is offering a mistake.
  */
-async function loadItemCatalogue(tenantId: string): Promise<LineFormItem[]> {
+async function loadItemCatalogue(
+  tenantId: string, customerId: string | null,
+): Promise<LineFormItem[]> {
   const supabase = await createClient();
   const { data } = await supabase
     .from("items")
@@ -520,7 +530,9 @@ async function loadItemCatalogue(tenantId: string): Promise<LineFormItem[]> {
     .order("item_code", { nullsFirst: false })
     .limit(500)
     .returns<LineFormItem[]>();
-  return data ?? [];
+  // The laundry price list in front of `items.sell_price`, so re-rating a code
+  // on Money › Laundry prices changes what the next line composed for it costs.
+  return attachListPrices(supabase, tenantId, customerId, data ?? []);
 }
 
 /**

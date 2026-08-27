@@ -6,6 +6,7 @@ import {
   accountLabel, isRevenueAccount, searchAccounts, type PickableAccount,
 } from "@/lib/domain/accounts";
 import { itemLabel, searchItems, type PickableItem } from "@/lib/domain/items";
+import type { PriceValue } from "@/lib/domain/laundry-prices";
 import { CONTROL, cx, Eyebrow, Notice } from "@/components/ui";
 import { Field } from "@/components/form";
 
@@ -41,6 +42,14 @@ export type CodingItem = PickableItem & {
    */
   selling_unit?: string | null;
   sell_price_basis?: string | null;
+  /**
+   * What the laundry price list charges for this item — this customer's own
+   * rate where they have one, the usual price otherwise, null where neither
+   * exists. Resolved server-side by `buildItemPriceRows` and read by
+   * `liveItemRate`, which is what puts an owner's edit in front of
+   * `items.sell_price` on every screen that turns an item into money.
+   */
+  list_price?: PriceValue | null;
 };
 
 export type CodingAccount = PickableAccount;
