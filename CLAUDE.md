@@ -1394,6 +1394,17 @@ into itself with no configuration at all. What the deployment does need is `RESE
 `INVOICE_FROM_EMAIL`; without them every one of these actions says so by name rather than
 reporting a success that did not happen.
 
+**A login written by SQL must use `gen_salt('bf', 10)`, not `gen_salt('bf')`** (2026-08-27).
+pgcrypto's default cost for bcrypt is **6**; GoTrue writes **10**. Both are valid bcrypt and both
+verify — Go's `bcrypt.CompareHashAndPassword` ignores cost — so this is not why a login fails, and
+it was checked rather than assumed before saying so. But it makes an SQL-written login visibly
+different from an API-written one at a glance (`$2a$06$` against `$2a$10$`), which is exactly the
+tell you want when diagnosing one, and a weaker hash is not what you want on a real credential.
+Every login this project wrote by SQL — the twelve role profiles (§3a), the four board logins
+(§24) and the two staff logins of 2026-08-27 — carries `$2a$06$`. The three real staff were moved
+to cost 10 when their password was reset; the rest have not been and are worth re-hashing the next
+time anything touches them.
+
 **A password can be set instead of emailing a link** (2026-08-27), adopted from
 `ysm-prog/ysm-hub`'s `api/create-staff.js`. An invitation hands over a *link*, and there are real
 cases where the owner has to hand over a *credential*: a counter hand with no work email, somebody
@@ -2637,13 +2648,114 @@ being opened with real rows in them. **Before trusting it: on `ats.coreit.com.au
 Laundry prices, price `T22`, then take a job in for that item and press Price this job — the charge
 should carry the rate you just set.**
 
-**Two things the read-back turned up that are the owner's, not the code's.** The eleven
-`@roles.example.com` test profiles and `board1@ats.example.com` now hold **no membership at all**,
-so §3a's "one login per role" no longer works on this deployment — a sensible answer to the live
-credential §3a warns about, and worth recording because nothing else does. And `T22`/`T38`/`T40`
-are still three items: with the price list working they can be collapsed to one code with three
-customer prices, but merging them touches frozen charges and is a decision, not a repair.
+**Two things the read-back turned up, and the first was answered by another session the same
+day.** No `@roles.example.com` profile holds a membership any more, and neither does
+`board1@ats.example.com` — read off the live database while looking for a session to probe with,
+and recorded here as an open finding. It is not one: the entry below (*"The rounds get their
+memberships back, and Board 1 becomes a person"*) is that deletion, done deliberately, and its
+reason is sharper than the guess made here — `owner@roles.example.com` held **`super_admin`** on
+the real laundry under a password committed to a public repository. Left in rather than deleted,
+because *which session probed as what* is the provenance of the gate proof above: it used
+`board2@ats.example.com`, `angelo@` and `cmignone219@`, all three of which still hold their
+memberships. The second thing stands: `T22`/`T38`/`T40` are still three items, and with the price
+list working they can be collapsed to one code with three customer prices — but merging them
+touches frozen charges and is a decision, not a repair.
+### 2026-08-27 · The rounds get their memberships back, and Board 1 becomes a person
+Found while verifying the import release, and acted on at the owner's instruction. **No migration,
+no schema/RLS/capability/code change** — a live data change and nothing else.
+
+**Two test profiles were still members of the real laundry, and one was an owner.**
+`owner@roles.example.com` held **`super_admin`** on Adelaide Towel Service and still used
+`RoleTest!2026` — the shared password §3a documents in `scripts/role-profiles.mjs`, a committed
+file in a **public** repository. Confirmed by hashing, not assumed. So the published password
+opened an owner account on a real business: 451 customers, 647 invoices and the chart of accounts.
+`branch-manager@roles.example.com` was the same with a narrower role. **Both memberships are now
+deleted, and no `@roles.example.com` profile holds one.**
+
+- **The membership goes, the login stays** — §10c's own rule for Remove access, and here it is
+  load-bearing rather than conventional: `audit_logs.actor_id` names those two on **10 rows**, and
+  `audit_logs` deliberately carries no foreign key to `auth.users` so the trail outlives the
+  person. Deleting the login would have left ten entries rendering as a bare UUID, which is the
+  defect the 2026-08-18 entry exists to fix. Checked first: **no** foreign key anywhere in
+  `public` references either login, so nothing else was at stake.
+- **Access is gone either way**, proved as a real session rather than reasoned about:
+  `owner@roles.example.com` now reads `is_member = false` and **0** customers, **0** invoices and
+  **0** accounts. The residual is a login that can still authenticate against a published password
+  and reach nothing — worth rotating or deleting, and the standing fix is §3a's: that password
+  should not be in a public repository at all.
+
+**The four delivery rounds had lost their memberships and have them back.** Thirteen memberships
+were removed from the People screen while the test profiles were being tidied, and
+`board1@`…`board4@ats.example.com` went with them — while `boards.user_id` still pointed at all
+five. So every round showed as *linked* on the Boards screen and every one of those logins
+dead-ended on "not linked to a laundry yet": the empty-screen failure §24 exists to prevent,
+reached from the opposite direction. Restored as `board` with no site, and read back as
+`board1@`: `is_member` true, `current_board_id` resolving, `is_board_only` true, and **0**
+invoices and **0** accounts, so the billing and purchases gates survived the change.
+
+- **`TESTBOARD` was deliberately left alone.** It is linked to `board@roles.example.com`, a test
+  profile, and restoring its membership in the same breath as removing the other test profiles
+  would have contradicted the instruction. It is the one board still claiming a link its login
+  cannot use — either delete the board and the profile, or unlink it, but it should not stay as it
+  is.
+- **`marsy.forte69@gmail.com` holds a `board` membership and is linked to no board**, which is the
+  same inconsistency from the other side: that login signs in to an empty My Runs until it is
+  paired with a round.
+- Memberships went 7 → 9 and then to 8, as Board 1's placeholder gave way to a real person.
+  Every step was rehearsed in a transaction that ended by raising and applied behind assertions,
+  including that the laundry keeps at least two `super_admin`s (three remain) and that the audit
+  trail still names its actors.
+
+**Board 1 signs in as Mario Forte now, and the placeholder is retired.** `board1@ats.example.com`
+existed only because the round had no real login when §24's cutover ran; `marsy.forte69@gmail.com`
+was created through the new People screen on 2026-08-27 and is that login. `boards.user_id` is one
+login per round, so linking Mario **necessarily unlinked** the placeholder — which would have left
+it holding a `board` membership and no round, the empty-My-Runs state §24 exists to prevent. So its
+membership went the same way the test profiles' did: **membership deleted, login kept**, since a
+login that wrote rows must stay pointing at them.
+
+- **The driver record was linked too, and it is a different link.** A board is the round and a
+  driver is the person (§24): `daily_routes.operated_by_driver_id` is how the business answers
+  "who was holding that parcel?". The `Mario Forte` driver row had existed unlinked since
+  2026-08-17, so it now names his login.
+- **That link widens nothing, and it was measured rather than argued.** `is_driver_only(t)`
+  requires the *membership role* to be `driver`, and Mario's is `board` — so the driver-scoped
+  clauses on `daily_routes` and `jobs` never engage for him. Counted as his own session either
+  side of the change: **runs=3, stops=6, orders=8, invoices=0 before and after, identical**, with
+  the only difference being that `current_driver_id()` stops returning null. A one-person round is
+  the case where board and driver are the same human, and this is what that looks like without the
+  two narrowings interfering.
+- **Every round now has a member and every board member has a round** — asserted, not eyeballed,
+  and with `TESTBOARD` gone there is no exception left.
+
+**`TESTBOARD` and `board@roles.example.com` are deleted outright**, at the owner's instruction —
+the only rows this cleanup destroyed rather than unlinked, and the reference sweep is why that was
+safe. **Nothing referenced either**: no `daily_routes.board_id`, no `laundry_orders.
+assigned_board_id`, no foreign key anywhere in `public` to that login, **0** audit rows, **0**
+sessions, **0** memberships. That is the opposite of the two test profiles above, which named
+`audit_logs.actor_id` on 10 rows and so kept their logins; the rule is the same in both cases —
+a login that wrote something stays, a login that wrote nothing need not.
+
+- **Hard delete rather than `deleted_at`**, deliberately. `boards` carries the column and every
+  read filters it, but **nothing in `src/` ever sets it** — the app offers a *status* change and no
+  delete at all — so a soft delete would have left a row named "Test Board" in the table for ever,
+  which is the clutter being removed. With zero references there is nothing for a hard delete to
+  strand.
+- **The reference sweep was re-run inside the deleting transaction**, not trusted from the earlier
+  call: the app is in use, and a run assigned to that board between the two would have made the
+  first answer stale. It refuses rather than cascades.
+- `scripts/role-profiles.mjs` still lists a `board` profile, so `npm run seed:roles` would recreate
+  the login — and §3a's `role-profiles.test.ts` pins that list against `ROLES`, so removing it from
+  the script is a code change with a test behind it rather than a line to quietly drop.
 ### 2026-08-27 · The customer picker offers the customer database
+
+> **Read with the import-hold entry below.** The same report produced two fixes on the same
+> day from two sessions, and both were needed: that one is the *data* half — 448 of those 508
+> were `inactive` only because the 2026-08-13 import hold had never been released, so they
+> were put back to `active` — and this is the *code* half, which is why the picker should not
+> have been narrowing that far in the first place. Neither supersedes the other: after both,
+> the picker offers all 511 with the genuinely-inactive 60 labelled.
+
 Reported from the deployed app: *"Customer doesn't pick up when we create new laundry from
 customer database."* **No migration; no schema, RLS, capability, policy or role change** —
 `git diff` over `supabase/` is empty, and nobody gained or lost anything. §6 holds the rule.
@@ -2727,6 +2839,67 @@ itself was never opened with real rows in it — the picker was proved through t
 source-level seam tests, the database read-back above and the build. **Before trusting it: on
 `ats.coreit.com.au`, press Take in laundry, search for a customer you know is inactive, and check
 they come up with an *Inactive* badge and that the job saves.**
+### 2026-08-27 · The import hold is released: 448 customers and 188 suppliers
+
+> **Read with the customer-picker entry above.** Same report, same day, two sessions, two
+> halves. This is the data half; that one widened the picker itself and shows the status
+> beside the name. The 60 that stay `inactive` here are the ones that entry labels.
+Reported from the deployed app: *"Customer doesn't pick up when we create new laundry from
+customer data base."* **No migration, no schema/RLS/capability/code change** — `git diff` over
+`src/` and `supabase/` is empty. A live data change and nothing else.
+
+**Not a bug — a switch nobody had flipped back.** The MYOB import of 2026-08-13 deliberately set
+every imported customer and supplier `inactive`, recording each row's real status in
+`import_activation_state` so it could be undone (0024). The job form's picker filters to
+`status in ('active','prospect','on_hold')` (`orders/form-data.ts`), so all 508 imported customers
+were excluded and it offered **2**. The filter is right — an inactive customer should not be
+offered for new work — and the data was the stale half.
+
+- **Replayed, not blanket-activated**, which is 0024's whole reason for existing. 448 customers
+  and 188 suppliers went back to `active`; **60 customers and 4 suppliers stayed `inactive`**
+  because they were already inactive in the source system. Those two numbers are exactly what
+  0024's own header predicted, which is the check that the state table was still telling the
+  truth after five months. Blanket-setting `active` would have silently switched on 64 records
+  the business had deliberately turned off, with nothing left recording that it should not have.
+- **Customers first, suppliers only when asked.** The report was about the job form, so the
+  customers half ran alone; the owner then asked for the suppliers. The second run used
+  `reactivate_tenant_records()` itself — with the customer state rows already cleared, its
+  customers loop is a no-op — rather than the hand-written equivalent the first run needed.
+- Both halves rehearsed in a transaction that ended by raising and read back clean before
+  applying, then applied behind assertions (448 and 188 restored, 0 skipped, counts unchanged at
+  511 customers and 192 suppliers). `import_activation_state` is now **empty**: the hold is fully
+  released and this is the last time that table has anything to say.
+- Read back as real sessions: the Owner and the Office manager each see **451** customers in the
+  job form's picker (cap 500 — worth knowing, it truncates past that) and 188 suppliers.
+
+**There is no screen for any of this.** `reactivate_tenant_records()` and its counterpart have
+lived in the database since 0024 and **nothing in `src/` calls either**, so releasing an import
+hold can only be done by hand against the database. Worth a control on Settings › Your records
+beside the archive/restore pair, which is the same shape of operation.
+
+**Merged to `Prod` (`bc4fa45`) on 2026-08-27**, a clean fast-forward from `1cbc31b` — `Prod` had
+not moved since the previous release, so there was nothing to reconcile and it was never
+force-pushed. **CI green on all three jobs**: Verify (typecheck, lint, **1060** tests, production
+build, `== PASSED ==` at 07:40:31Z), Security (gitleaks strict + dependency audit), and the DB job
+applying every migration to a fresh Postgres 16 with the whole pgTAP suite and the seed on top.
+**Nothing to apply** — this release adds no migration, and `git diff` over `supabase/` against the
+previous `Prod` is empty, so the suite is the same **504** assertions it was.
+
+- **"Read the log, not the status" caught me the other way round this time, which is worth
+  recording because the file now says it six ways.** The Verify job served `in_progress` for what
+  looked like thirteen minutes while the other two had finished in twenty-five seconds, which is
+  exactly the stale shape the last five entries describe — and it was not stale. `verify.sh` ran
+  **07:39:21 → 07:40:31**, seventy seconds. What was wrong was this container's own clock reading:
+  `date -u` said 07:40:28 when I believed ten minutes had passed. **Check elapsed time against the
+  runner's timestamps before concluding a job is stuck**, and note that the log 404s *while a job
+  is genuinely running* as well as when the status is stale, so the 404 is evidence of neither.
+- **`Dev` is 20 ahead and 11 behind, and the twenty are catch-up merges carrying no source change
+  of their own.** The same standing drift the last several entries record and none fixes. Left
+  alone deliberately: the instruction was `Prod`.
+- **The Vercel deploy is not confirmable from this session.** §5 records `github.silent` set to
+  `false` on 2026-08-26 so a deploy reports itself on the commit that caused it, but no GitHub MCP
+  tool here lists check runs or statuses for a ref, and `api.github.com` answers *"GitHub access is
+  not enabled for this session"*. **Read it in the GitHub UI or the Vercel dashboard.**
 ### 2026-08-27 · A login can be created with a password, not only invited
 The owner's instruction, the day after two staff logins had to be written in by hand SQL because
 the screen could not do it: *"allow in settings to create user with Password as well like ysm-hub

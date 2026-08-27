@@ -76,6 +76,52 @@ app: *"Customer doesn't pick up when we create new laundry from customer databas
   new clause **511**, **60** badged. 1060 tests, 30 browser assertions, `verify` green.
 - **Not opened behind the auth gate** (no Supabase creds here). Next: on `ats.coreit.com.au`,
   Take in laundry → search an inactive customer → expect an *Inactive* badge and a saved job.
+- **Merged to `Prod` (`bc4fa45`)**, clean fast-forward from `1cbc31b`, never force-pushed. CI
+  green on all three jobs; no migration, so nothing to apply. `Dev` is 20 ahead / 11 behind —
+  its twenty are catch-up merges, the standing drift nobody has fixed.
+- **Trap, the other way round:** Verify looked stale at `in_progress` for "thirteen minutes"; it
+  actually ran 70s. This container's clock had barely moved. Check elapsed time against the
+  runner's own timestamps, and remember the job log 404s while a job is genuinely running too.
+
+## Also today: the import hold released, and the People list is real
+2026-08-27, branch `claude/user-creation-by-role-bre21j`. All **live data**, no migration and
+no code change — `git diff` over `src/` and `supabase/` against `Prod` is empty. The §18
+entries hold the detail; this is the state to start from.
+
+**Adelaide Towel Service now looks like a business rather than a sandbox:**
+- **451 customers active** (was 2). The MYOB import of 2026-08-13 deliberately held every
+  imported record `inactive` (0024) and nobody had flipped it back; the job form's picker
+  correctly filters inactive customers out, so it offered 2 of 510. Replayed each row's
+  *recorded previous status* — **60 customers and 4 suppliers stayed inactive** because they
+  were already inactive in MYOB. **188 suppliers** released the same way.
+  `import_activation_state` is now **empty**; that table has nothing left to say.
+- **8 memberships, all real people.** Angelo Mignone (Owner), Christian Mignone (Manager),
+  Mario Forte (Board 1), `board2@`–`board4@ats.example.com` placeholders, and darshan@/jay@
+  (Owner + platform admins). **No `@roles.example.com` profile holds a membership.**
+- **4 rounds, every one linked to a login that holds a membership.** Board 1 signs in as Mario
+  Forte, whose `drivers` row is linked too — a board is the round, a driver is the person.
+- **`TESTBOARD` and `board@roles.example.com` are deleted**, board row and login. Safe because
+  the reference sweep was empty; the two other test profiles kept their logins because
+  `audit_logs.actor_id` named them on 10 rows.
+
+**Two things still open, both flagged to the owner:**
+- **`RoleTest!2026` is in `scripts/role-profiles.mjs`, a committed file in a public repo**, and
+  11 test logins still exist under it. None can reach anything now (no memberships), so nothing
+  is exposed — but the constant belongs in the environment. `owner@roles.example.com` held
+  `super_admin` on the real laundry under that password until today.
+- `scripts/role-profiles.mjs` still lists a `board` profile, so `npm run seed:roles` would
+  recreate the deleted login. `role-profiles.test.ts` pins that list against `ROLES`, so
+  removing it is a code change with a test behind it.
+
+**Method that kept paying off:** every live change was rehearsed in a transaction ending in
+`raise`, read back to prove the rollback, then applied behind assertions — and read back **as
+real sessions**, because a policy refusing a caller writes zero rows in silence.
+
+**Nothing today was verified in a browser.** This container's network policy refuses both
+`ats.coreit.com.au` and `*.supabase.co` (403 to CONNECT — an org rule, not retryable). Worth
+checking in the app: sign in as Mario and see Board 1's day; open a new job and see 451
+customers in the picker.
+
 
 ## Previously: a login can be created with a password, not only invited
 2026-08-27, branch `claude/user-creation-by-role-bre21j`. Owner: *"allow in settings to
@@ -83,10 +129,15 @@ create user with Password as well like ysm-hub has."* Adopted from `ysm-prog/ysm
 `api/create-staff.js` (cloned to `/home/user/ysm-hub`). **No migration; `git diff` over
 `supabase/` is empty**, no role gained or lost anything. §10c holds the design.
 
-## Two live findings that belong to the owner, not the code
-- **The eleven `@roles.example.com` test profiles and `board1@ats.example.com` hold no membership at
-  all.** So §3a's "sign in as each role" no longer works on this deployment. A sensible answer to
-  the live-credential problem §3a warns about; recorded because nothing else records it.
-- **`marsy.forte69@gmail.com` is a new `board` login**, and `angelo@` (super_admin) plus
-  `cmignone219@` (operations_manager) are the two real staff — the only non-platform-admin
-  memberships. They are what the live probes now use, which is better than a test profile.
+## Who to probe as, now the test profiles are gone
+No `@roles.example.com` profile holds a membership, and neither does `board1@ats.example.com` —
+deliberately, by the session whose entry is *"The rounds get their memberships back, and Board 1
+becomes a person"*: `owner@roles.example.com` held `super_admin` on the real laundry under a
+password committed to a public repo. So §3a's "sign in as each role" no longer works here.
+
+Probe as these instead — all three confirmed to hold their memberships after that cleanup:
+- `angelo@adelaidetowelservice.com.au` — `super_admin`, **not** a platform admin, so it tests
+  `has_role()` rather than `is_platform_admin()`.
+- `cmignone219@gmail.com` — `operations_manager`.
+- `board2@ats.example.com` (or `board3`/`board4`, or `marsy.forte69@gmail.com`) — `board`, the
+  role that should be refused.
