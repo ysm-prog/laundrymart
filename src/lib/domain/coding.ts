@@ -12,7 +12,8 @@
  */
 
 import { taxableFromTaxCode } from "./accounts";
-import { GST_RATE_FALLBACK, lineRateFromItem } from "./items";
+import { GST_RATE_FALLBACK } from "./items";
+import { liveItemRate, type PriceValue } from "./laundry-prices";
 
 /* ------------------------------------------------------------------ *
  * Choosing an item fills the rest of the charge.
@@ -37,6 +38,17 @@ export type ItemChoice = {
   sell_price_basis?: string | null;
   tax_code?: string | null;
   income_account_id?: string | null;
+  /**
+   * What the laundry price list says this item costs *this customer*, resolved
+   * server-side by `buildItemPriceRows` — their own rate where they have one,
+   * the usual price otherwise, and null where neither exists.
+   *
+   * This is the half that makes an owner’s edit reach the screens: before it,
+   * every place an item became money read `items.sell_price`, so the price list
+   * governed the pricer and nothing else, and re-rating a towel changed nothing
+   * on the charge somebody was about to type.
+   */
+  list_price?: PriceValue | null;
 };
 
 export type ChargePatch = {
@@ -97,13 +109,19 @@ export function chargePatchForItem(
     gstRate?: number;
   } = {},
 ): ChargePatch {
-  const taxable = taxableFromTaxCode(item.tax_code) ?? taxableFromTaxCode(options.accountTaxCode);
-  // `taxable` is null where neither the item nor its account has an opinion, and
+  const coded = taxableFromTaxCode(item.tax_code) ?? taxableFromTaxCode(options.accountTaxCode);
+  // `coded` is null where neither the item nor its account has an opinion, and
   // the row keeps whatever it already had. A charge is taxable by default in this
   // app, so an unstated answer grosses up — the same direction the composer takes.
-  const price = lineRateFromItem(
-    item.sell_price, item.sell_price_basis, taxable ?? true, options.gstRate ?? GST_RATE_FALLBACK,
-  );
+  //
+  // `liveItemRate` is what puts the price list in front of `items.sell_price`,
+  // and its GST answer travels with the rate: where the list priced this item,
+  // the list’s own tick is the answer, so picking the item by hand and pressing
+  // "Price this job" cannot disagree about the same code. Where it did not, the
+  // tax code resolution above is left exactly as it was.
+  const { rate: price, taxable } = liveItemRate(item, item.list_price, {
+    taxable: coded, gstRate: options.gstRate ?? GST_RATE_FALLBACK,
+  });
   const takesName = options.descriptionIsQuery || !row.description.trim();
 
   return {

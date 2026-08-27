@@ -154,7 +154,7 @@ const GLOSSARY: Array<{ term: string; also?: string; meaning: string }> = [
   },
   {
     term: "Laundry price", also: "price list, rate",
-    meaning: "What you charge for each kind of laundry when a customer has no rate card — per piece, and optionally per bag for bulk lots. Money › Laundry prices holds your usual prices; a customer who has agreed something different has their own list on their page. A rate card beats both. A kind of laundry with no price anywhere is left off and reported, rather than being billed at nothing.",
+    meaning: "What you charge for each item code when a customer has no rate card \u2014 per piece, and optionally per bag for bulk lots. Money \u203a Laundry prices holds your usual prices; a customer who has agreed something different has their own list on their page. A rate card beats both. Change a price and it is used by every job you price or approve from then on, and wherever you pick that item on a charge or an invoice line \u2014 but a job you have already approved keeps the price it was approved at, even on a draft invoice. An item code with no price anywhere falls back to the item's own selling price, and one with neither is left off and reported rather than billed at nothing.",
   },
   {
     term: "Billing method",

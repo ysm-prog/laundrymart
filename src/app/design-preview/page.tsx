@@ -32,11 +32,12 @@ import { ChargeAccountTable } from "@/app/(app)/invoices/charge-accounts/charge-
 import {
   InvoiceSelection, type SelectableInvoice,
 } from "@/app/(app)/invoices/invoice-selection";
-import { PriceTable } from "@/app/(app)/invoices/prices/price-table";
+import { ItemPriceTable } from "@/app/(app)/invoices/prices/item-price-table";
+import { AddItemCard } from "@/app/(app)/invoices/prices/add-item-card";
 import { StatusTrack } from "@/app/(app)/orders/[id]/status-track";
-import {
-  defaultPriceList, priceListFor, type LaundryPriceRow,
-} from "@/lib/domain/laundry-billing";
+import type { LaundryPriceRow } from "@/lib/domain/laundry-billing";
+import { buildItemPriceRows } from "@/lib/domain/laundry-prices";
+import type { PriceListItem } from "@/app/(app)/invoices/prices/items";
 import { AssignForm } from "@/app/(app)/my-runs/assign-form";
 import type { DayJob } from "@/lib/runs/my-runs";
 import {
@@ -301,20 +302,34 @@ const PREVIEW_RUN_BOARDS = [
  * so this gallery shows an override and an inherited price side by side, which
  * is the layout worth looking at.
  */
-const PREVIEW_PRICE_ROWS: LaundryPriceRow[] = [
-  { customer_id: null, item_type: "towels", unit_price: 2, bag_price: 15, taxable: true },
-  { customer_id: null, item_type: "sheets", unit_price: 4.5, bag_price: null, taxable: true },
-  { customer_id: null, item_type: "uniforms", unit_price: 6, bag_price: null, taxable: true },
-  { customer_id: "preview", item_type: "towels", unit_price: 1.75, bag_price: 12, taxable: true },
+const PREVIEW_PRICE_ITEMS: PriceListItem[] = [
+  { id: "i-t22", item_code: "T22", name: "Towels - Black", description: null,
+    laundry_category: "towels", sell_price: 0.22, selling_unit: "ea", sell_price_basis: "exclusive" },
+  { id: "i-tw", item_code: "TW", name: "Towels - Wash & Dry Only", description: null,
+    laundry_category: "towels", sell_price: 0.2, selling_unit: null, sell_price_basis: "exclusive" },
+  { id: "i-htw", item_code: "HTW", name: "Hand Towels - White", description: null,
+    laundry_category: "hand_towels", sell_price: 0.7, selling_unit: null, sell_price_basis: null },
+  // Deliberately unpriced on both lists *and* on the item — the row whose hint
+  // has to read "No price set" with nothing after it.
+  { id: "i-sh", item_code: "SH", name: "Sheets - Flat", description: null,
+    laundry_category: "sheets", sell_price: 0, selling_unit: null, sell_price_basis: null },
 ];
-const toPriceValues = (source: ReturnType<typeof priceListFor>) =>
-  new Map([...source].map(([itemType, price]) => [itemType, {
-    unitPrice: price.unitPrice, bagPrice: price.bagPrice, taxable: price.taxable,
-  }]));
-const PREVIEW_CUSTOMER_PRICES = toPriceValues(
-  priceListFor("preview", PREVIEW_PRICE_ROWS.filter((row) => row.customer_id === "preview")),
-);
-const PREVIEW_DEFAULT_PRICES = toPriceValues(defaultPriceList(PREVIEW_PRICE_ROWS));
+const PREVIEW_PRICE_ROWS: LaundryPriceRow[] = [
+  { customer_id: null, item_type: "towels", item_id: "i-t22",
+    unit_price: 0.24, bag_price: 15, taxable: true },
+  { customer_id: null, item_type: "towels", item_id: "i-tw",
+    unit_price: 0.22, bag_price: null, taxable: true },
+  { customer_id: null, item_type: "hand_towels", item_id: "i-htw",
+    unit_price: 0.77, bag_price: null, taxable: true },
+  // The override: this customer pays less than the usual price for T22, which is
+  // the pairing worth looking at — a filled field over a "usual price" hint.
+  { customer_id: "preview", item_type: "towels", item_id: "i-t22",
+    unit_price: 0.2, bag_price: 12, taxable: true },
+];
+const PREVIEW_CUSTOMER_PRICE_ROWS =
+  buildItemPriceRows(PREVIEW_PRICE_ITEMS, PREVIEW_PRICE_ROWS, "preview");
+const PREVIEW_DEFAULT_PRICE_ROWS =
+  buildItemPriceRows(PREVIEW_PRICE_ITEMS, PREVIEW_PRICE_ROWS, null);
 
 export default function DesignPreviewPage() {
   if (process.env.VERCEL_ENV === "production") notFound();
@@ -1010,23 +1025,34 @@ export default function DesignPreviewPage() {
           </section>
 
           {/* ------------------------------------------------ laundry prices --- */}
-          {/* Nine rows of three inputs is the widest form in the app on a phone,
-              and it is a real screen behind the auth gate — which means this
-              gallery is the only place its layout can be looked at. */}
+          {/* Rows of three inputs, a search that only hides, and a form that
+              posts every row whether or not it is on screen — the widest form in
+              the app on a phone, and a real screen behind the auth gate, which
+              means this gallery is the only place its layout can be looked at.
+              Both scopes are drawn: the usual list, where a blank row falls back
+              to the item's own selling price, and a customer's, where it falls
+              back to the usual price. */}
           <section id="laundry-prices-preview" className="space-y-4 border-t pt-8">
             <PageHeader
               title="Laundry prices"
-              description="What each kind of laundry costs. Used to bill the jobs you take in at the counter."
+              description="What each item code costs. Used to bill the jobs you take in at the counter."
             />
-            <PriceTable
+            <ItemPriceTable
+              title="Your usual prices"
+              description="Price per piece for counted laundry, and an optional price per bag for bulk lots."
+              rows={PREVIEW_DEFAULT_PRICE_ROWS}
+              writable
+              submitLabel="Save usual prices"
+            />
+            <ItemPriceTable
               title="Prices for Harbourview Hotel"
-              description="Blank means the usual price, shown under each kind of laundry."
-              values={PREVIEW_CUSTOMER_PRICES}
-              defaults={PREVIEW_DEFAULT_PRICES}
+              description="Blank means the usual price, shown under each item code."
+              rows={PREVIEW_CUSTOMER_PRICE_ROWS}
               customerId="preview"
               writable
               submitLabel="Save their prices"
             />
+            <AddItemCard returnTo="/design-preview" />
           </section>
 
           {/* --------------------------------------------- billing review ----- */}
