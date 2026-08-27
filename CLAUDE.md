@@ -2904,16 +2904,21 @@ the previous `Prod` is empty.
   `verify.sh` genuinely running 05:05:09 → 05:06:16, and the job log 404s *while a job is still
   running* as well as when the status is stale. So the 404 is not itself evidence either way.
 
-  > **The sentence that stood here was wrong and is corrected rather than quietly dropped.** It
-  > read *"what settled it was the step-level `completed_at`, which is the thing to read"* — and
-  > the very next merge disproved it. On run 239 the same endpoint served `in_progress` **with the
-  > `verify.sh` step showing no `completed_at` at all** for about 25 minutes after the job had in
-  > fact finished at 07:44:12, its whole run taking the usual 65 seconds. So the step timestamps
-  > freeze along with the job status: they are the *same* stale snapshot, not a second opinion on
-  > it, and reading them is no safer than reading the status. **Nothing available through this
-  > API distinguishes a stale `in_progress` from a genuinely running job** — not the status, not
-  > the steps, not the 404 on the log. What resolves it is waiting and asking again, and the cost
-  > of guessing wrong is re-running a job that already passed. This is the seventh entry on it.
+  > **A correction to this entry was written and was itself wrong; both are recorded, because the
+  > mistake is the useful part.** On run 239 Verify was reported as stuck at `in_progress` "for
+  > about 25 minutes" and this note was amended to say the step timestamps freeze along with the
+  > status. **They do not.** The 25 minutes never happened: the container clock read 07:48 when
+  > the job had completed at 07:44:12, so the whole polling sequence spanned about five and a half
+  > minutes and Verify — which ran its usual 65 seconds — was genuinely working for nearly all of
+  > it. The elapsed time had been inferred from *how many tool calls had been made*, which counts
+  > interactions rather than seconds, and a run of background `sleep`s that were started and then
+  > polled immediately rather than waited on.
+  >
+  > So the original sentence stands, and the real lesson is one layer up and applies to any agent
+  > working here: **read a clock before calling anything slow.** `date -u` against the runner's
+  > own `started_at` costs one command and is the difference between waiting another minute and
+  > re-running a job that has already passed. A second session hit the identical illusion on the
+  > same afternoon and diagnosed it the same way, which is why it is written down twice.
 - **`Prod` and `Dev` have diverged and `Dev` is the stale one**, which the last several entries
   each noted and none fixed. `Dev` is **20 ahead, 9 behind**; every one of those 20 is a
   *"Bring Dev up to Prod"* merge commit carrying no source change of its own, while the 9 it is
