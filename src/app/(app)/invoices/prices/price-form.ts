@@ -1,36 +1,42 @@
-import { ITEM_TYPES, ITEM_TYPE_LABELS, type ItemType } from "@/lib/domain/laundry-orders";
 import { round2 } from "@/lib/domain/pricing";
 
 /**
  * The price-list form's payload, read outside the `"use server"` module that
  * saves it.
  *
- * One row per kind of laundry, all nine posted every time — so "what did the
- * operator mean by leaving this blank?" is the only real question, and it is
- * answered once, here, rather than at each of the two screens that post the
- * form.
+ * One row per **item code**, and the payload is what says which codes were on
+ * screen. That is the change from the nine-category form this replaces: nine
+ * rows could always all be posted, so "not posted" and "posted blank" were the
+ * same thing. This laundry has 254 items, the screen shows a searched and paged
+ * slice of them, and the two must not be confused — treating an item that was
+ * simply not on this page as a blank would delete its price.
+ *
+ * So the form posts a `present` field per row it is showing, and **blank clears
+ * only what was present**. Everything else is untouched, which is what makes it
+ * safe to save from page 2 of a search.
  *
  * **Blank means no price, and no price means the row is removed.** Not zero: a
- * zero-priced kind of laundry would bill silently at nothing, while a missing
- * one is reported by the monthly run as unpriced with the reason. That
- * distinction is the whole safety property of `laundry-billing.ts`, so the form
- * must not quietly break it by storing zeros.
+ * zero-priced item would bill silently at nothing, while a missing one is
+ * reported by the pricer as unpriced with the reason. That distinction is the
+ * whole safety property of the pricing tiers, so the form must not quietly break
+ * it by storing zeros.
  */
 
 export type PriceEntry = {
-  itemType: ItemType;
+  itemId: string;
   unitPrice: number;
   bagPrice: number | null;
   taxable: boolean;
 };
 
 export type ParsedPriceForm =
-  | { ok: true; entries: PriceEntry[]; cleared: ItemType[] }
+  | { ok: true; entries: PriceEntry[]; cleared: string[] }
   | { ok: false; error: string };
 
-export const unitField = (itemType: string) => `unit_${itemType}`;
-export const bagField = (itemType: string) => `bag_${itemType}`;
-export const taxableField = (itemType: string) => `taxable_${itemType}`;
+export const PRESENT_FIELD = "present";
+export const unitField = (itemId: string) => `unit_${itemId}`;
+export const bagField = (itemId: string) => `bag_${itemId}`;
+export const taxableField = (itemId: string) => `taxable_${itemId}`;
 
 /** A money field: blank is absent, anything unreadable or negative is an error. */
 function readMoney(raw: FormDataEntryValue | null): number | null | "invalid" {
@@ -49,18 +55,30 @@ function readMoney(raw: FormDataEntryValue | null): number | null | "invalid" {
 /**
  * Read the posted price list into the rows to keep and the rows to remove.
  *
- * Every kind of laundry the form did not price ends up in `cleared`, which is
- * what lets a customer's override be taken off again — deleting their row is how
- * they go back to the tenant's default price.
+ * `labels` names an item in a refusal — "T40 — Towels - Black: enter a price…"
+ * rather than a UUID, which is the difference between a message somebody can act
+ * on and one they have to decode. An id the caller does not know is reported as
+ * itself rather than being silently dropped: a row the screen posted and the
+ * server cannot name is a disagreement worth surfacing, not hiding.
  */
-export function parsePriceForm(form: FormData): ParsedPriceForm {
+export function parsePriceForm(
+  form: FormData,
+  labels: ReadonlyMap<string, string> = new Map(),
+): ParsedPriceForm {
   const entries: PriceEntry[] = [];
-  const cleared: ItemType[] = [];
+  const cleared: string[] = [];
+  const seen = new Set<string>();
 
-  for (const itemType of ITEM_TYPES) {
-    const unit = readMoney(form.get(unitField(itemType)));
-    const bag = readMoney(form.get(bagField(itemType)));
-    const label = ITEM_TYPE_LABELS[itemType];
+  for (const raw of form.getAll(PRESENT_FIELD)) {
+    const itemId = String(raw).trim();
+    // A duplicated id would otherwise be read twice and could land in both
+    // lists, so the second sighting is dropped rather than fought over.
+    if (!itemId || seen.has(itemId)) continue;
+    seen.add(itemId);
+
+    const unit = readMoney(form.get(unitField(itemId)));
+    const bag = readMoney(form.get(bagField(itemId)));
+    const label = labels.get(itemId) ?? itemId;
 
     if (unit === "invalid") {
       return { ok: false, error: `${label}: enter a price of zero or more, or leave it blank.` };
@@ -73,15 +91,15 @@ export function parsePriceForm(form: FormData): ParsedPriceForm {
     // bag. The piece rate simply stays at zero and counted items report as
     // unpriced rather than billing at nothing.
     if (unit === null && bag === null) {
-      cleared.push(itemType);
+      cleared.push(itemId);
       continue;
     }
 
     entries.push({
-      itemType,
+      itemId,
       unitPrice: unit ?? 0,
       bagPrice: bag,
-      taxable: form.get(taxableField(itemType)) !== null,
+      taxable: form.get(taxableField(itemId)) !== null,
     });
   }
 

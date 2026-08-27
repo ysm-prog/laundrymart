@@ -10,6 +10,7 @@ import { sendInvite, sendSignInLink } from "@/lib/auth/send-link";
 import { requestOrigin } from "@/lib/auth/request-origin";
 import { listMembers } from "@/lib/directory";
 import { inviteFailureMessage } from "@/lib/auth/magic-link";
+import { createLoginFailureMessage, passwordProblem } from "@/lib/auth/passwords";
 import { MEMBERSHIP_ROLES, membershipRolesWith, type MembershipRole } from "@/lib/roles";
 import {
   describeDbError, done, fail, firstIssue, optionalText, optionalUuid, requiredDate, toObject,
@@ -206,6 +207,25 @@ const inviteSchema = z.object({
 });
 
 /**
+ * The same four questions as an invitation, plus the password.
+ *
+ * `password` is a bare string on purpose. Every other string helper in this
+ * file trims — `optionalText` folds `""` to absent, `z.string().trim()` would
+ * strip the ends — and a password is the exact bytes the administrator chose,
+ * so any of them would quietly store a different credential from the one that
+ * was typed. Whether those bytes are acceptable is `passwordProblem`'s to say
+ * (`lib/auth/passwords.ts`), which is also where the surrounding-whitespace
+ * case is refused out loud rather than resolved silently either way.
+ *
+ * A missing field reads as `""` rather than failing the parse, so the operator
+ * gets that module's sentence — which names the other button — instead of Zod's
+ * account of a field they can see is empty.
+ */
+const passwordLoginSchema = inviteSchema.extend({
+  password: z.preprocess((v) => (typeof v === "string" ? v : ""), z.string()),
+});
+
+/**
  * Set what a person is called.
  *
  * The name is read out of `auth.users` by a definer function (0030) and written
@@ -245,6 +265,20 @@ export async function inviteMember(formData: FormData): Promise<void> {
   const parsed = inviteSchema.safeParse(toObject(formData));
   if (!parsed.success) return fail(PEOPLE, firstIssue(parsed.error));
   const { email, full_name, role, depot_id } = parsed.data;
+
+  // The two ways in share one form and one set of questions (see the People
+  // screen), so the password box is on screen when this action runs. Ignoring a
+  // filled-in one would be the worst outcome available: the invitation goes,
+  // the administrator believes they set a password, and they hand over a
+  // credential this app never stored. Refuse and name the button that uses it.
+  const typedPassword = formData.get("password");
+  if (typeof typedPassword === "string" && typedPassword !== "") {
+    return fail(
+      PEOPLE,
+      "You typed a password, so nothing was sent. Press Create login to use it, "
+        + "or clear the box to email them a link instead.",
+    );
+  }
 
   // Minted here and emailed by this app's own provider — Supabase's built-in
   // mailer needs custom SMTP this deployment has never had, so before this every
@@ -290,6 +324,115 @@ export async function inviteMember(formData: FormData): Promise<void> {
     invitee.emailed
       ? `Invitation emailed to ${full_name} at ${email}. They can sign in as soon as they follow the link.`
       : `${full_name} already had a login, so no email was sent — they have access now.`,
+  );
+}
+
+/**
+ * Create a login with a password an administrator sets, here and now.
+ *
+ * The second way onto this laundry's list, beside the invitation — adopted from
+ * `ysm-prog/ysm-hub`'s `api/create-staff.js`, which is the same act in that
+ * product. It exists because an invitation hands over a *link* and there are
+ * real cases where the owner needs to hand over a *credential*: a counter hand
+ * with no work email, somebody being set up in the room, or a round's shared
+ * tablet. On 2026-08-27 this laundry's first two real staff had to be written
+ * in by hand SQL for exactly that reason, which is the argument for the screen
+ * being able to do it.
+ *
+ * ## What it does not change
+ *
+ * **The authority is the invitation's, unchanged.** Same `admin.write` gate,
+ * same `MEMBERSHIP_ROLES` picker, same last-administrator rules elsewhere on
+ * the screen. This is a different *delivery*, not a wider power.
+ *
+ * ysm-hub additionally refuses to let a manager create anything but
+ * `shop_staff`, so a lesser role cannot mint an admin and climb. That guard has
+ * **no analogue here and is deliberately not ported**: `membershipRolesWith(
+ * "admin.write")` is `["super_admin"]` alone — no lesser membership role can
+ * add anybody at all — so the escalation it prevents is unreachable. A guard
+ * against an impossible state reads as protection and is really just a branch
+ * nobody can test. `roles.test.ts` pins that set, so if a second role ever gains
+ * `admin.write` a test fails and this comment is what to come back to.
+ *
+ * ## What it does that ysm-hub does not
+ *
+ * **A failed membership insert takes the login with it.** Creating the auth user
+ * is what makes the rest recoverable-or-not: an `auth.users` row with no
+ * membership is a login that signs in successfully and dead-ends on "not linked
+ * to a laundry yet", and the retry answers "that address already has a login" —
+ * which is precisely the message that stops an administrator finishing the job.
+ * ysm-hub returns `User created but profile update failed` and leaves the orphan
+ * behind. §10c already settled this for the invitation path, where a refused
+ * send deletes the login it just minted; the same reasoning applies here, so the
+ * same thing happens.
+ */
+export async function createMemberWithPassword(formData: FormData): Promise<void> {
+  const session = await assertCapability("admin.write");
+  const parsed = passwordLoginSchema.safeParse(toObject(formData));
+  if (!parsed.success) return fail(PEOPLE, firstIssue(parsed.error));
+  const { email, full_name, role, depot_id, password } = parsed.data;
+
+  // Stated once, in `lib/auth/passwords.ts`, and checked here rather than in the
+  // Zod schema so the sentence the operator reads is the module's own — the
+  // whole point being that this app does not repeat ysm-hub's split rule, where
+  // the form says six characters and the server says ten.
+  const problem = passwordProblem(password);
+  if (problem) return fail(PEOPLE, problem);
+
+  let admin: ReturnType<typeof createAdminClient>;
+  try {
+    admin = createAdminClient();
+  } catch {
+    return fail(PEOPLE, "This deployment has no service key set up, so a login cannot be created here yet.");
+  }
+
+  // `email_confirm: true` because an administrator is standing there setting
+  // them up: there is nothing to confirm and no mail to wait for. That is also
+  // what makes this path work on a deployment with no mail provider at all.
+  const { data: created, error: createError } = await admin.auth.admin.createUser({
+    email,
+    password,
+    email_confirm: true,
+    // The name is why the invitation asks for one too. Every screen that puts a
+    // person beside a job reads `user_metadata.full_name` first
+    // (`memberDisplayName`), and it never invents a name from an email local
+    // part — so a login created without one renders as an address for ever.
+    user_metadata: { full_name },
+  });
+  if (createError || !created?.user) {
+    return fail(PEOPLE, createLoginFailureMessage(createError?.message));
+  }
+
+  // Through the caller's **own RLS-bound client**, exactly as `inviteMember`
+  // does: which laundry somebody joins is the database's decision, not a server
+  // action's. The admin client above bypasses RLS and is used for the one thing
+  // only it can do — writing `auth.users`.
+  const supabase = await createClient();
+  const { error } = await supabase.from("memberships").insert({
+    user_id: created.user.id,
+    tenant_id: session.tenantId,
+    role,
+    depot_id: depot_id ?? null,
+  });
+  if (error) {
+    await admin.auth.admin.deleteUser(created.user.id);
+    return fail(PEOPLE, describeDbError(error));
+  }
+
+  // Never the password. This message rides a flash cookie that is **not**
+  // httpOnly (§2) and survives a redirect, so putting the credential in it would
+  // write it into the browser's cookie jar and into anything reading the
+  // response. The administrator typed it; they have it.
+  await recordAudit(session, {
+    entity: "membership", entityId: created.user.id, action: "create",
+    summary: `${full_name} (${email}) created with a password as ${role}`,
+  });
+
+  revalidatePath(PEOPLE);
+  return done(
+    PEOPLE,
+    `${full_name} can sign in now with the password you set. `
+      + "Ask them to change it once they are in.",
   );
 }
 

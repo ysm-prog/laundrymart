@@ -128,7 +128,7 @@ export function Textarea({
 export type SelectOption = { value: string; label: string };
 
 export function Select({
-  name, options, groups, defaultValue, required, placeholder,
+  name, options, groups, defaultValue, required, placeholder, id, "aria-label": ariaLabel,
 }: {
   name: string;
   options?: ReadonlyArray<SelectOption>;
@@ -139,10 +139,20 @@ export function Select({
    */
   groups?: ReadonlyArray<{ label: string; options: ReadonlyArray<SelectOption> }>;
   defaultValue?: string | null; required?: boolean; placeholder?: string;
+  /**
+   * Overrides the id, which otherwise mirrors `name` — the same escape hatch
+   * `Input` carries, and needed for the same reason. A screen that repeats one
+   * field name down a list (the People screen has a role and a site picker on
+   * *every* member's row) would otherwise emit one `id="role"` per row: invalid
+   * HTML, and every `<label for>` on the page resolves to whichever came first.
+   */
+  id?: string;
+  /** For a control with no visible `Field` label — a row of inline edits. */
+  "aria-label"?: string;
 }) {
   const field = useFieldControl();
   return (
-    <select id={name} name={name} required={required}
+    <select id={id ?? name} name={name} required={required} aria-label={ariaLabel}
             aria-describedby={field.describedBy} aria-invalid={field.invalid || undefined}
             defaultValue={defaultValue ?? ""} className={cx(CONTROL, SELECT_CHEVRON)}>
       {placeholder ? <option value="">{placeholder}</option> : null}

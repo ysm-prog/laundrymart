@@ -24,9 +24,10 @@ import { loadInvoiceForPdf } from "@/lib/pdf/invoice-data";
 import { pushInvoiceToXero } from "@/lib/xero/push";
 import { pushPaymentToXero } from "@/lib/xero/push-payment";
 import { pushVoidToXero } from "@/lib/xero/push-void";
-import { accountForLine, incomeAccountsForItems } from "@/lib/invoices/account-coding";
+import { accountLookupsFor, resolveChargeAccount } from "@/lib/invoices/account-coding";
 import { generateInvoicesForJobs } from "@/lib/invoices/from-jobs";
-import { findOrOpenDraft, removeJobFromDraft } from "@/lib/invoices/open-draft";
+import { findOrOpenDraft, rebuildJobLines, removeJobFromDraft } from "@/lib/invoices/open-draft";
+import { loadChargesForJobs } from "@/lib/orders/job-billing";
 import { issueOneInvoice } from "@/lib/invoices/issue";
 import {
   markInvoiceJobsPaid, releaseVoidedInvoiceJobs, sendInvoice,
@@ -331,11 +332,16 @@ export async function generateInvoices(formData: FormData): Promise<void> {
     if (!opened.ok) return fail("/invoices", opened.error);
     const invoiceId = opened.draft.id;
 
-    // Same rule as the per-job generator, from the same module: a line that names
-    // an item is coded to that item's income account, and everything else is
-    // reported as uncoded on the invoice rather than guessed at.
-    const accountByItem = await incomeAccountsForItems(
-      supabase, session.tenantId, draft.map((entry) => entry.line.itemId),
+    // Same ladder as the per-job generator, from the same module: the item's
+    // income account, then the charge type's default, and anything neither can
+    // answer is reported as uncoded on the invoice rather than guessed at. A
+    // contract line has no charge-level account of its own, so it starts at the
+    // second rung.
+    const lookups = await accountLookupsFor(
+      supabase, session.tenantId,
+      draft.map((entry) => ({
+        source_item_id: entry.line.itemId, charge_type: entry.line.chargeType,
+      })),
     );
 
     // After whatever is already on the draft, so the invoice reads laundry first
@@ -351,7 +357,10 @@ export async function generateInvoices(formData: FormData): Promise<void> {
         created_by: session.userId,
         invoice_id: invoiceId,
         item_id: entry.line.itemId ?? null,
-        gl_account_id: accountForLine(entry.line.itemId, accountByItem),
+        gl_account_id: resolveChargeAccount(
+          { source_item_id: entry.line.itemId, charge_type: entry.line.chargeType },
+          lookups,
+        ),
         agreement_id: entry.agreementId,
         location_id: entry.locationId,
         laundry_order_id: entry.orderId ?? null,
@@ -630,6 +639,174 @@ export async function removeInvoiceLine(formData: FormData): Promise<void> {
   await supabase.rpc("recalculate_invoice", { p_invoice: parsed.data.invoice_id });
   revalidatePath(backTo);
   return done(backTo, "Line removed.");
+}
+
+/**
+ * Code one invoice line to an account.
+ *
+ * The replacement for the sentence this screen used to carry — *"Remove and
+ * re-add a line to give it a code."* That advice was not merely clumsy, it was
+ * **wrong on the line most likely to need it**. A job line removed and re-added
+ * through the composer comes back as `origin = 'manual'`, and the next job that
+ * joins the draft runs `rebuildJobLines`, which deletes only the *job* lines and
+ * re-derives them from the frozen charges. The charge returns as a job line, the
+ * manual copy stays, and the customer is billed for it twice.
+ *
+ * **Where the code is written depends on where the line's code comes from, and
+ * that is the whole design.** A job line's account is *derived* — charge, then
+ * item, then charge type — and re-derived on every rebuild, so writing an
+ * override onto the line would be discarded the next time somebody approved a
+ * job. Nothing would say so. That is the class of silent failure this repo has
+ * shipped three times, so the code goes to the source instead:
+ *
+ * - `origin = 'job'` → the frozen charges the line was rolled up from. 0044
+ *   narrows `guard_job_charge_snapshot` to permit exactly this one column while
+ *   the invoice is still a draft; everything that decides what the customer pays
+ *   stays as immutable as it was. The lines are then rebuilt, so what is on
+ *   screen is what the next rebuild will produce rather than a near-miss.
+ * - anything else → the line itself. `rebuildJobLines` never touches a `manual`
+ *   or `contract` line, so there it is permanent by construction.
+ *
+ * `account_code` is deliberately never posted. `sync_invoice_line_account()`
+ * derives the text from the id inside the write, so a hand-made request cannot
+ * stamp `4-1100` on a line pointing somewhere else.
+ */
+export async function setInvoiceLineAccount(formData: FormData): Promise<void> {
+  const session = await assertCapability("invoices.write");
+  const parsed = z.object({
+    id: z.string().uuid(),
+    invoice_id: z.string().uuid(),
+    // Absent means **clear the code**, not "leave it alone": this control always
+    // posts the field, and "no account" is an answer somebody is entitled to give.
+    gl_account_id: optionalUuid,
+  }).safeParse(toObject(formData));
+  if (!parsed.success) return fail("/invoices", firstIssue(parsed.error));
+
+  const chosen = parsed.data.gl_account_id ?? null;
+  const backTo = returnTo(formData, `/invoices/${parsed.data.invoice_id}`);
+  const supabase = await createClient();
+
+  // 0040's `guard_invoice_line_draft_only` is the boundary and refuses this
+  // outright; this is the readable sentence in front of it, and it also covers a
+  // stale page whose control is still on screen after somebody else issued.
+  const { data: parent } = await supabase
+    .from("invoices").select("status")
+    .eq("id", parsed.data.invoice_id).eq("tenant_id", session.tenantId)
+    .maybeSingle<{ status: string }>();
+  if (!parent) return fail(backTo, "That invoice could not be found.");
+  if (parent.status !== "draft") {
+    return fail(backTo, parent.status === "void"
+      ? "This invoice is void. Its lines are a record of what was said and cannot change."
+      : "This invoice is no longer a draft, so its coding cannot change. "
+        + "Raise a credit note if it was wrong.");
+  }
+
+  const { data: line } = await supabase
+    .from("invoice_lines")
+    .select("id, origin, laundry_order_id, item_id, charge_type, unit_price, taxable, gl_account_id")
+    .eq("id", parsed.data.id)
+    .eq("invoice_id", parsed.data.invoice_id)
+    .eq("tenant_id", session.tenantId)
+    .maybeSingle<{
+      id: string; origin: string | null; laundry_order_id: string | null;
+      item_id: string | null; charge_type: string; unit_price: number;
+      taxable: boolean; gl_account_id: string | null;
+    }>();
+  if (!line) return fail(backTo, "That line could not be found on this invoice.");
+
+  const outcome = line.origin === "job"
+    ? await codeJobLine(supabase, session, parsed.data.invoice_id, line, chosen)
+    : await codeOwnLine(supabase, session, line.id, chosen);
+  if (!outcome.ok) return fail(backTo, outcome.error);
+
+  await recordAudit(session, {
+    entity: "invoice_line", entityId: parsed.data.invoice_id, action: "update",
+    summary: chosen ? `coded ${line.charge_type}` : `cleared the code on ${line.charge_type}`,
+  });
+  revalidatePath(backTo);
+  revalidatePath(`/invoices/${parsed.data.invoice_id}`);
+  return done(backTo, chosen ? "Line coded." : "Code removed from the line.");
+}
+
+/** A line the rebuild does not own: the code lives on the line and stays there. */
+async function codeOwnLine(
+  supabase: Awaited<ReturnType<typeof createClient>>, session: Session,
+  lineId: string, chosen: string | null,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const { error } = await supabase
+    .from("invoice_lines")
+    .update({ gl_account_id: chosen })
+    .eq("id", lineId)
+    .eq("tenant_id", session.tenantId);
+  return error ? { ok: false, error: describeDbError(error) } : { ok: true };
+}
+
+/**
+ * A job line: code the charges behind it, then rebuild.
+ *
+ * **Which charges are behind it** is the consolidation key with the account
+ * taken out — item, charge type, unit price and GST are what `consolidationKey`
+ * merges on, so every charge sharing those *and* the account currently on the
+ * line is one this line was rolled up from. The account has to be compared
+ * *effectively* (through the same ladder), because a charge whose own column is
+ * null may still be sitting on this line by way of its item.
+ *
+ * A line spanning several jobs carries no `laundry_order_id` (that is
+ * `jobInvoiceLines`' own rule), so the search widens to the invoice's whole
+ * source list rather than being skipped.
+ */
+async function codeJobLine(
+  supabase: Awaited<ReturnType<typeof createClient>>, session: Session,
+  invoiceId: string,
+  line: {
+    laundry_order_id: string | null; item_id: string | null;
+    charge_type: string; unit_price: number; taxable: boolean; gl_account_id: string | null;
+  },
+  chosen: string | null,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  let orderIds: string[];
+  if (line.laundry_order_id) {
+    orderIds = [line.laundry_order_id];
+  } else {
+    const { data: sources } = await supabase
+      .from("invoice_source_jobs").select("order_id")
+      .eq("invoice_id", invoiceId).eq("tenant_id", session.tenantId)
+      .returns<Array<{ order_id: string }>>();
+    orderIds = (sources ?? []).map((row) => row.order_id);
+  }
+  if (orderIds.length === 0) {
+    return { ok: false, error: "That line's job could not be found on this invoice." };
+  }
+
+  const chargesByJob = await loadChargesForJobs(supabase, orderIds);
+  const charges = [...chargesByJob.values()].flat();
+  const lookups = await accountLookupsFor(supabase, session.tenantId, charges);
+
+  const behind = charges.filter((charge) =>
+    charge.charge_type === line.charge_type
+    && (charge.source_item_id ?? null) === (line.item_id ?? null)
+    && Number(charge.unit_price) === Number(line.unit_price)
+    && charge.taxable === line.taxable
+    && resolveChargeAccount(charge, lookups) === (line.gl_account_id ?? null));
+
+  if (behind.length === 0) {
+    // Not a silent no-op: the charges moved under the page, and re-deriving on a
+    // guess would code a line the operator is no longer looking at.
+    return {
+      ok: false,
+      error: "That line's charges have changed since this page was loaded. Reload and try again.",
+    };
+  }
+
+  const { error } = await supabase
+    .from("job_charge_snapshots")
+    .update({ gl_account_id: chosen })
+    .in("id", behind.map((charge) => charge.id))
+    .eq("tenant_id", session.tenantId);
+  if (error) return { ok: false, error: describeDbError(error) };
+
+  const rebuilt = await rebuildJobLines(supabase, session, invoiceId);
+  return rebuilt.ok ? { ok: true } : { ok: false, error: rebuilt.error };
 }
 
 /**

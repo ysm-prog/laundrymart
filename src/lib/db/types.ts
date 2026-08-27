@@ -709,3 +709,21 @@ export type SupplierPayment = {
 
 /** `select("id, name")` on a lookup table. */
 export type Option = { id: Uuid; name: string };
+
+/**
+ * The default account for one kind of charge (0044).
+ *
+ * The third tier of the coding ladder, behind the charge's own account and its
+ * item's. A row exists only while a default is set — cleared means deleted, so
+ * `gl_account_id` is null here for one reason only: the account it named was
+ * removed from the chart, and `on delete set null` cleared the link rather than
+ * leaving a dangling id for the invoice writer to choke on.
+ */
+export type ChargeTypeAccount = {
+  id: Uuid;
+  tenant_id: Uuid;
+  charge_type: string;
+  gl_account_id: Uuid | null;
+  created_at: string;
+  updated_at: string | null;
+};

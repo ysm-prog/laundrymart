@@ -91,18 +91,23 @@ describe("navigationFor", () => {
     expect(navigationFor("dispatcher").map((item) => item.label)).not.toContain("Money");
 
     // Finance keeps the payable side and loses the receivable one, so the area
-    // survives with the three payable tabs and starts at Bills.
+    // survives with the payable tabs and starts at Bills.
+    //
+    // **Bills, not Charge accounts**, and that ordering is load-bearing rather
+    // than cosmetic: `navigationFor` resolves a row to the first child the role
+    // can open, so putting a `purchases.read` configuration screen at the top of
+    // the list would silently make it finance's landing page for the whole area.
     const finance = navigationFor("finance").find((item) => item.label === "Money");
     expect(finance?.href).toBe("/bills");
     expect(finance?.children?.map((child) => child.label)).toEqual([
-      "Bills", "Suppliers", "Accounts",
+      "Bills", "Suppliers", "Accounts", "Charge accounts",
     ]);
 
     // The Office manager keeps both sides.
     const office = navigationFor("operations_manager").find((item) => item.label === "Money");
     expect(office?.children?.map((child) => child.label)).toEqual([
       "Invoices", "Billing", "Awaiting invoice", "Open drafts", "Laundry prices", "Xero",
-      "Bills", "Suppliers", "Accounts",
+      "Bills", "Suppliers", "Accounts", "Charge accounts",
     ]);
 
     // Xero rides with the receivable side, so finance does not see it: they no

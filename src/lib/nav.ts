@@ -274,6 +274,20 @@ export const NAVIGATION: NavItem[] = [
         label: "Accounts", href: "/accounts", capability: "purchases.read",
         blurb: "The chart of accounts every invoice and bill is coded against.",
       },
+      {
+        // Beside Accounts, and deliberately **last**: it is configuration for
+        // the chart rather than a screen anybody opens Money to reach. Placing
+        // it before Bills made it finance's landing screen for the whole area,
+        // because `navigationFor` resolves a row to the first child that role
+        // can open — caught by `nav.test.ts` rather than by a person.
+        //
+        // Under Money and not Settings for the reason the laundry price list
+        // is: it decides what an invoice says. Gated on `purchases.read`, like
+        // the chart of accounts every value in it points at.
+        label: "Charge accounts", href: "/invoices/charge-accounts",
+        capability: "purchases.read",
+        blurb: "Where a fuel levy, a delivery or a minimum lands in your books.",
+      },
     ],
   },
   {

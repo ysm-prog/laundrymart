@@ -3,7 +3,8 @@
 import { useMemo, useState } from "react";
 import { CHARGE_TYPE_LABELS } from "@/lib/domain/pricing";
 import { accountLabel, taxableFromTaxCode } from "@/lib/domain/accounts";
-import { lineRateFromItem, priceBasisHint } from "@/lib/domain/items";
+import { priceBasisHint } from "@/lib/domain/items";
+import { liveItemRate } from "@/lib/domain/laundry-prices";
 import { CONTROL, cx, Eyebrow } from "@/components/ui";
 import { Field, Select, SubmitButton, useFieldControl } from "@/components/form";
 import {
@@ -127,19 +128,31 @@ export function InvoiceLineForm({
       ? taxableFromTaxCode(byAccountId.get(chosen.income_account_id)?.tax_code)
       : null;
     const answer = fromItem ?? fromAccount;
-    if (answer !== null) setTaxable(answer);
 
     /*
-     * **The rate is the item's price as a LINE rate, which is not always the
-     * same number.** A line amount is GST-inclusive (0043), so an item stating
-     * its price GST-exclusive is grossed up here — otherwise the line bills
-     * short by exactly the GST and nothing on the screen says so.
+     * **The rate is what the laundry price list says this item costs, and the
+     * item's own selling price only where the list is silent.**
+     *
+     * That order is the whole of "an owner's edit reflects live wherever an item
+     * code is linked": re-rate `T40` on Money › Laundry prices and the next line
+     * anybody composes for it carries the new rate, with nothing to re-key.
+     *
+     * Where the list did not answer, `liveItemRate` falls through to
+     * `lineRateFromItem`, which is what this did before: a line amount is
+     * GST-inclusive (0043), so an item stating its price GST-exclusive is
+     * grossed up — otherwise the line bills short by exactly the GST and nothing
+     * on the screen says so. A **list** rate is never grossed up, because it is
+     * already what the owner said the customer pays.
      *
      * Resolved after the GST answer above, because whether GST applies is half
-     * of what decides the rate: on a FRE line there is nothing to add.
+     * of what decides the rate: on a FRE line there is nothing to add. And where
+     * the list priced the item, its own GST tick is the answer — so the composer
+     * and the pricer cannot disagree about the same code.
      */
-    const willBeTaxable = answer ?? taxable;
-    const price = lineRateFromItem(chosen.sell_price, chosen.sell_price_basis, willBeTaxable, gstRate);
+    const { rate: price, taxable: listed } = liveItemRate(chosen, chosen.list_price, {
+      taxable: answer ?? taxable, gstRate,
+    });
+    if (listed !== null) setTaxable(listed);
     setUnitPrice(Number.isFinite(price) && price > 0 ? price.toFixed(2) : "0");
   }
 

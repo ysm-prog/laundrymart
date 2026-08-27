@@ -24,17 +24,21 @@ import { DaySummary, JobCard, JobGroup } from "@/app/(app)/my-runs/run-view";
 import { BillingQueue, type QueueRow } from "@/app/(app)/invoices/awaiting/billing-queue";
 import { JobChargesEditor, type EditableCharge } from "@/app/(app)/orders/[id]/job-charges-editor";
 import { ItemPickerPreview } from "./item-picker-preview";
+import { JobForm, type JobCustomer } from "@/app/(app)/orders/job-form";
 import {
   InvoiceLineForm, type LineFormAccount, type LineFormItem,
 } from "@/app/(app)/invoices/[id]/line-form";
+import { LineCode, LineCoding } from "@/app/(app)/invoices/[id]/line-coding";
+import { ChargeAccountTable } from "@/app/(app)/invoices/charge-accounts/charge-account-table";
 import {
   InvoiceSelection, type SelectableInvoice,
 } from "@/app/(app)/invoices/invoice-selection";
-import { PriceTable } from "@/app/(app)/invoices/prices/price-table";
+import { ItemPriceTable } from "@/app/(app)/invoices/prices/item-price-table";
+import { AddItemCard } from "@/app/(app)/invoices/prices/add-item-card";
 import { StatusTrack } from "@/app/(app)/orders/[id]/status-track";
-import {
-  defaultPriceList, priceListFor, type LaundryPriceRow,
-} from "@/lib/domain/laundry-billing";
+import type { LaundryPriceRow } from "@/lib/domain/laundry-billing";
+import { buildItemPriceRows } from "@/lib/domain/laundry-prices";
+import type { PriceListItem } from "@/app/(app)/invoices/prices/items";
 import { AssignForm } from "@/app/(app)/my-runs/assign-form";
 import type { DayJob } from "@/lib/runs/my-runs";
 import {
@@ -65,6 +69,7 @@ import { ListControls } from "@/components/list-controls";
 import { ACTIVITY_PERIOD_PRESETS, BILLING_PERIOD_PRESETS, resolvePeriod } from "@/lib/domain/dates";
 import { money } from "@/lib/format";
 import { QuickActions } from "@/components/quick-actions";
+import { AddPersonCard } from "@/app/(app)/admin/users/page";
 import { DraftCard } from "@/app/(app)/invoices/drafts/draft-card";
 import type { DraftSummary } from "@/lib/invoices/open-draft";
 
@@ -298,20 +303,34 @@ const PREVIEW_RUN_BOARDS = [
  * so this gallery shows an override and an inherited price side by side, which
  * is the layout worth looking at.
  */
-const PREVIEW_PRICE_ROWS: LaundryPriceRow[] = [
-  { customer_id: null, item_type: "towels", unit_price: 2, bag_price: 15, taxable: true },
-  { customer_id: null, item_type: "sheets", unit_price: 4.5, bag_price: null, taxable: true },
-  { customer_id: null, item_type: "uniforms", unit_price: 6, bag_price: null, taxable: true },
-  { customer_id: "preview", item_type: "towels", unit_price: 1.75, bag_price: 12, taxable: true },
+const PREVIEW_PRICE_ITEMS: PriceListItem[] = [
+  { id: "i-t22", item_code: "T22", name: "Towels - Black", description: null,
+    laundry_category: "towels", sell_price: 0.22, selling_unit: "ea", sell_price_basis: "exclusive" },
+  { id: "i-tw", item_code: "TW", name: "Towels - Wash & Dry Only", description: null,
+    laundry_category: "towels", sell_price: 0.2, selling_unit: null, sell_price_basis: "exclusive" },
+  { id: "i-htw", item_code: "HTW", name: "Hand Towels - White", description: null,
+    laundry_category: "hand_towels", sell_price: 0.7, selling_unit: null, sell_price_basis: null },
+  // Deliberately unpriced on both lists *and* on the item — the row whose hint
+  // has to read "No price set" with nothing after it.
+  { id: "i-sh", item_code: "SH", name: "Sheets - Flat", description: null,
+    laundry_category: "sheets", sell_price: 0, selling_unit: null, sell_price_basis: null },
 ];
-const toPriceValues = (source: ReturnType<typeof priceListFor>) =>
-  new Map([...source].map(([itemType, price]) => [itemType, {
-    unitPrice: price.unitPrice, bagPrice: price.bagPrice, taxable: price.taxable,
-  }]));
-const PREVIEW_CUSTOMER_PRICES = toPriceValues(
-  priceListFor("preview", PREVIEW_PRICE_ROWS.filter((row) => row.customer_id === "preview")),
-);
-const PREVIEW_DEFAULT_PRICES = toPriceValues(defaultPriceList(PREVIEW_PRICE_ROWS));
+const PREVIEW_PRICE_ROWS: LaundryPriceRow[] = [
+  { customer_id: null, item_type: "towels", item_id: "i-t22",
+    unit_price: 0.24, bag_price: 15, taxable: true },
+  { customer_id: null, item_type: "towels", item_id: "i-tw",
+    unit_price: 0.22, bag_price: null, taxable: true },
+  { customer_id: null, item_type: "hand_towels", item_id: "i-htw",
+    unit_price: 0.77, bag_price: null, taxable: true },
+  // The override: this customer pays less than the usual price for T22, which is
+  // the pairing worth looking at — a filled field over a "usual price" hint.
+  { customer_id: "preview", item_type: "towels", item_id: "i-t22",
+    unit_price: 0.2, bag_price: 12, taxable: true },
+];
+const PREVIEW_CUSTOMER_PRICE_ROWS =
+  buildItemPriceRows(PREVIEW_PRICE_ITEMS, PREVIEW_PRICE_ROWS, "preview");
+const PREVIEW_DEFAULT_PRICE_ROWS =
+  buildItemPriceRows(PREVIEW_PRICE_ITEMS, PREVIEW_PRICE_ROWS, null);
 
 export default function DesignPreviewPage() {
   if (process.env.VERCEL_ENV === "production") notFound();
@@ -1007,23 +1026,34 @@ export default function DesignPreviewPage() {
           </section>
 
           {/* ------------------------------------------------ laundry prices --- */}
-          {/* Nine rows of three inputs is the widest form in the app on a phone,
-              and it is a real screen behind the auth gate — which means this
-              gallery is the only place its layout can be looked at. */}
+          {/* Rows of three inputs, a search that only hides, and a form that
+              posts every row whether or not it is on screen — the widest form in
+              the app on a phone, and a real screen behind the auth gate, which
+              means this gallery is the only place its layout can be looked at.
+              Both scopes are drawn: the usual list, where a blank row falls back
+              to the item's own selling price, and a customer's, where it falls
+              back to the usual price. */}
           <section id="laundry-prices-preview" className="space-y-4 border-t pt-8">
             <PageHeader
               title="Laundry prices"
-              description="What each kind of laundry costs. Used to bill the jobs you take in at the counter."
+              description="What each item code costs. Used to bill the jobs you take in at the counter."
             />
-            <PriceTable
+            <ItemPriceTable
+              title="Your usual prices"
+              description="Price per piece for counted laundry, and an optional price per bag for bulk lots."
+              rows={PREVIEW_DEFAULT_PRICE_ROWS}
+              writable
+              submitLabel="Save usual prices"
+            />
+            <ItemPriceTable
               title="Prices for Harbourview Hotel"
-              description="Blank means the usual price, shown under each kind of laundry."
-              values={PREVIEW_CUSTOMER_PRICES}
-              defaults={PREVIEW_DEFAULT_PRICES}
+              description="Blank means the usual price, shown under each item code."
+              rows={PREVIEW_CUSTOMER_PRICE_ROWS}
               customerId="preview"
               writable
               submitLabel="Save their prices"
             />
+            <AddItemCard returnTo="/design-preview" />
           </section>
 
           {/* --------------------------------------------- billing review ----- */}
@@ -1188,6 +1218,59 @@ export default function DesignPreviewPage() {
               />
             </Card>
             </div>
+          </section>
+
+          {/* ------------------------------------------------ coding a line ---- */}
+          {/* The Code cell, and where a kind of charge posts when nothing more
+              specific says. Both are here because both are client components on
+              pages that read Supabase at module scope, so this gallery is the
+              only place either can be looked at — and looking is what found the
+              two defects §27 records on the screen next door. */}
+          <section id="line-coding-preview" className="space-y-4 border-t pt-8">
+            <PageHeader
+              eyebrow="Money"
+              title="Coding a line"
+              description="Press the code to change it. A line with no code says so, and can be given one without being removed."
+            />
+
+            <Card title="The Code cell on a draft"
+                  description="Coded, and not. Pressing either opens the search; the uncoded one is the state the report was made about.">
+              <div className="flex flex-wrap items-center gap-6">
+                <LineCoding
+                  lineId="p1" invoiceId="preview" accounts={PREVIEW_CHART}
+                  accountId="g2" code="4-1100" description="Towels - Wash & Dry Only"
+                  action={async () => { "use server"; }}
+                />
+                <LineCoding
+                  lineId="p2" invoiceId="preview" accounts={PREVIEW_CHART}
+                  accountId={null} code={null} description="LJ00007 — fuel"
+                  action={async () => { "use server"; }}
+                />
+                <LineCoding
+                  lineId="p3" invoiceId="preview" accounts={[]}
+                  accountId={null} code={null} description="A laundry with no chart yet"
+                  action={async () => { "use server"; }}
+                />
+              </div>
+            </Card>
+
+            <Card title="The same cell once the invoice has gone"
+                  description="A record, not a form. The code links through to the account; a deleted account leaves the code standing with nothing to link to.">
+              <div className="flex flex-wrap items-center gap-6">
+                <LineCode accountId="g2" code="4-1100" />
+                <LineCode accountId={null} code="4-1150" />
+                <LineCode accountId={null} code={null} />
+              </div>
+            </Card>
+
+            <Card title="Where each kind of charge posts"
+                  description="The third tier of the ladder. It answers for the lines that name no item — a fuel levy, a minimum, a delivery.">
+              <ChargeAccountTable
+                accounts={PREVIEW_CHART}
+                current={{ fuel_levy: "g5", wash_only: "g2", minimum_service_fee: "g6" }}
+                action={async () => { "use server"; }}
+              />
+            </Card>
           </section>
 
           {/* ------------------------------------------------- period billing --- */}
@@ -1483,11 +1566,87 @@ export default function DesignPreviewPage() {
             <QuickActions role="super_admin" />
             <QuickActions role="board" />
           </section>
+
+          <section id="add-person-preview" className="space-y-4 border-t pt-8">
+            <PageHeader
+              title="People — adding someone"
+              description="One set of questions, two ways in: email them a link, or set a password now."
+            />
+            {/* The real card, against fixture sites. It is normally an async
+                server component reading Supabase, so without this split nobody
+                could look at the disclosure, the password field or the two
+                buttons at all. */}
+            <AddPersonCard
+              depots={[
+                { id: "depot-adl", name: "Adelaide" },
+                { id: "depot-nth", name: "Northern" },
+              ]}
+            />
+          </section>
+
+          <section id="job-customer-picker-preview" className="space-y-4 border-t pt-8">
+            <PageHeader
+              title="Taking laundry in — finding the customer"
+              description="The search box offers the customer database, and says which of them are not plainly trading."
+            />
+            {/* The real form. `/orders/new` is an async server component reading
+                Supabase, so until this fixture existed the counter's own screen
+                — and the picker that hid 508 of one laundry's 511 customers —
+                could not be looked at here at all. Type into the box to bring
+                the results up; the badges and the overflow line are what this
+                section exists to show. */}
+            <JobForm
+              action={previewApply}
+              customerAction={previewApply}
+              customers={PREVIEW_JOB_CUSTOMERS}
+              drivers={[{ id: "d1", full_name: "Sam Okoye" }]}
+              staff={[{ id: "s1", label: "Christian Mignone", role: "operations_manager" }]}
+              canBackdate={false}
+              returnPath="/design-preview"
+            />
+          </section>
         </main>
       </div>
     </div>
   );
 }
+
+/**
+ * A counter's customer list, as a real one looks.
+ *
+ * Deliberately more than `RESULT_LIMIT` businesses sharing the word "Hair", so
+ * the overflow line has something to count, and deliberately a mix of statuses:
+ * this laundry's own imported base is 511 customers of which 60 are `inactive`,
+ * and the picker used to hide every one of them. `active` is the majority and
+ * carries no badge; the other three do.
+ */
+const PREVIEW_JOB_CUSTOMERS: JobCustomer[] = ([
+  ["Aspect Hair Studio", "CUST00101", "active"],
+  ["Bella Hair & Beauty", "CUST00102", "active"],
+  ["City Hair Collective", "CUST00103", "on_hold"],
+  ["Curl Hair Bar", "CUST00104", "active"],
+  ["Edge Hair Norwood", "CUST00105", "inactive"],
+  ["Flourish Hair Co.", "CUST00106", "active"],
+  ["Gloss Hair Lounge", "CUST00107", "active"],
+  ["Halo Hair Unley", "CUST00108", "prospect"],
+  ["Ivy Hair Rooms", "CUST00109", "active"],
+  ["Juniper Hair Salon", "CUST00110", "active"],
+  ["Kindred Hair", "CUST00111", "active"],
+  ["Lustre Hair Glenelg", "CUST00112", "inactive"],
+  ["Mane Hair Parlour", "CUST00113", "active"],
+  ["Nova Hair Prospect", "CUST00114", "active"],
+  ["Quay Street Bistro", "CUST00115", "active"],
+] as const).map(([business_name, customer_number, status], index) => ({
+  id: `jc${index}`,
+  customer_number,
+  business_name,
+  trading_name: null,
+  phone: `08 8${index}00 1${index}00`,
+  billing_email: null,
+  status,
+  billing_address: "12 Frazer Avenue, Gulfview Heights SA 5096",
+  delivery_address: null,
+}));
 
 /**
  * A month of one customer's jobs, rolled up.
