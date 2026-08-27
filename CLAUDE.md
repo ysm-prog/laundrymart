@@ -2743,6 +2743,34 @@ screen itself was never opened with real rows in it — the card was proved thro
 seam tests and the build. **Before trusting it: on `ats.coreit.com.au`, add somebody with a
 password, sign in as them, then delete them again.** Worth doing next: both of 2026-08-27's real
 staff still hold passwords that were sent over chat, and this screen is now how they get replaced.
+**Merged to `Prod` (`1821c81`) on 2026-08-27**, a clean fast-forward from `70a4292` — `Prod` had
+not moved since the previous release, so there was nothing to reconcile and it was never
+force-pushed. **CI green on all three jobs**: Verify (typecheck, lint, **1050** tests, production
+build), Security (gitleaks strict + dependency audit), and the DB job applying all **45**
+migrations to a fresh Postgres 16 with the whole pgTAP suite (**504 assertions**) and the seed on
+top. **Nothing to apply** — this release adds no migration, and `git diff` over `supabase/` against
+the previous `Prod` is empty.
+
+- **Read the log, not the status — the sixth time this file records it, and this time the status
+  was telling the truth.** Verify served `in_progress` while the other two jobs had finished, which
+  is the shape the 2026-08-26 entries record as stale. It was not: the step timestamps show
+  `verify.sh` genuinely running 05:05:09 → 05:06:16, and the job log 404s *while a job is still
+  running* as well as when the status is stale. So the 404 is not itself evidence either way —
+  what settled it was the step-level `completed_at`, which is the thing to read.
+- **`Prod` and `Dev` have diverged and `Dev` is the stale one**, which the last several entries
+  each noted and none fixed. `Dev` is **20 ahead, 9 behind**; every one of those 20 is a
+  *"Bring Dev up to Prod"* merge commit carrying no source change of its own, while the 9 it is
+  missing are real — `0044_charge_type_accounts`, the charge-account coding ladder, and this
+  release. So `Dev` is not a staging branch anybody is using; it is a branch that would need a
+  catch-up merge before it could be one. Left alone deliberately: the instruction was `Prod`.
+- **The Vercel deploy is not confirmable from this session, and that is a known gap rather than a
+  silence.** §5 records `github.silent` being set to `false` on 2026-08-26 precisely so a deploy
+  reports itself on the commit that caused it — but no GitHub MCP tool here lists check runs or
+  statuses for a ref, and `api.github.com` answers *"GitHub access is not enabled for this
+  session"*. The commit page's checks region is rendered client-side, so its emptiness in a plain
+  fetch is evidence of nothing (§5's own false-negative trap). **Read it in the GitHub UI or the
+  Vercel dashboard.**
+
 ### 2026-08-27 · The first two real people, and the roles their titles mean
 The owner's instruction: create a login for each of the two people named, by the role given,
 with a simple password for now. **No migration; no schema, RLS, capability, policy or code
