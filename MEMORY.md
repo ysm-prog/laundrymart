@@ -49,6 +49,15 @@ create user with Password as well like ysm-hub has."* Adopted from `ysm-prog/ysm
 - **Browser-driven at 390/1440: 48 assertions, 0 failures, 0 console errors, 0 overflow,
   nothing under 36px.** `AddPersonCard` split out of its async wrapper so the gallery can
   render it (§10b). Local render needs a placeholder `.env.local` (gitignored).
+- **Merged to `Prod` (`1821c81`) 2026-08-27**, clean fast-forward from `70a4292`, never
+  force-pushed. **CI green on all three jobs** (Verify / Security / DB — 45 migrations, 504
+  pgTAP assertions, seed). No migration, so nothing to apply.
+- **`Dev` has diverged and is the stale one: 20 ahead, 9 behind.** All 20 are "Bring Dev up to
+  Prod" merge commits with no source of their own; the 9 it lacks are real (`0044`, the charge
+  -account ladder, this release). It wants a catch-up merge before it is a usable staging
+  branch. Left alone — the instruction was Prod.
+- **The Vercel deploy cannot be confirmed from a session like this** (no MCP tool lists check
+  runs for a ref; `api.github.com` is not enabled). Read it in the GitHub UI or Vercel.
 - **Not verified behind the auth gate** — no Supabase creds here. **Next: on
   `ats.coreit.com.au` add somebody with a password, sign in as them, delete them.** Also:
   Angelo's and Christian's passwords were sent over chat and this screen is how they get
