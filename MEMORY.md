@@ -47,6 +47,12 @@ app: *"Customer doesn't pick up when we create new laundry from customer databas
   new clause **511**, **60** badged. 1060 tests, 30 browser assertions, `verify` green.
 - **Not opened behind the auth gate** (no Supabase creds here). Next: on `ats.coreit.com.au`,
   Take in laundry → search an inactive customer → expect an *Inactive* badge and a saved job.
+- **Merged to `Prod` (`bc4fa45`)**, clean fast-forward from `1cbc31b`, never force-pushed. CI
+  green on all three jobs; no migration, so nothing to apply. `Dev` is 20 ahead / 11 behind —
+  its twenty are catch-up merges, the standing drift nobody has fixed.
+- **Trap, the other way round:** Verify looked stale at `in_progress` for "thirteen minutes"; it
+  actually ran 70s. This container's clock had barely moved. Check elapsed time against the
+  runner's own timestamps, and remember the job log 404s while a job is genuinely running too.
 
 ## Also today: the import hold released, and the People list is real
 2026-08-27, branch `claude/user-creation-by-role-bre21j`. All **live data**, no migration and

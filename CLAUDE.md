@@ -2656,6 +2656,7 @@ a login that wrote something stays, a login that wrote nothing need not.
 > were put back to `active` — and this is the *code* half, which is why the picker should not
 > have been narrowing that far in the first place. Neither supersedes the other: after both,
 > the picker offers all 511 with the genuinely-inactive 60 labelled.
+
 Reported from the deployed app: *"Customer doesn't pick up when we create new laundry from
 customer database."* **No migration; no schema, RLS, capability, policy or role change** —
 `git diff` over `supabase/` is empty, and nobody gained or lost anything. §6 holds the rule.
@@ -2776,6 +2777,30 @@ offered for new work — and the data was the stale half.
 lived in the database since 0024 and **nothing in `src/` calls either**, so releasing an import
 hold can only be done by hand against the database. Worth a control on Settings › Your records
 beside the archive/restore pair, which is the same shape of operation.
+
+**Merged to `Prod` (`bc4fa45`) on 2026-08-27**, a clean fast-forward from `1cbc31b` — `Prod` had
+not moved since the previous release, so there was nothing to reconcile and it was never
+force-pushed. **CI green on all three jobs**: Verify (typecheck, lint, **1060** tests, production
+build, `== PASSED ==` at 07:40:31Z), Security (gitleaks strict + dependency audit), and the DB job
+applying every migration to a fresh Postgres 16 with the whole pgTAP suite and the seed on top.
+**Nothing to apply** — this release adds no migration, and `git diff` over `supabase/` against the
+previous `Prod` is empty, so the suite is the same **504** assertions it was.
+
+- **"Read the log, not the status" caught me the other way round this time, which is worth
+  recording because the file now says it six ways.** The Verify job served `in_progress` for what
+  looked like thirteen minutes while the other two had finished in twenty-five seconds, which is
+  exactly the stale shape the last five entries describe — and it was not stale. `verify.sh` ran
+  **07:39:21 → 07:40:31**, seventy seconds. What was wrong was this container's own clock reading:
+  `date -u` said 07:40:28 when I believed ten minutes had passed. **Check elapsed time against the
+  runner's timestamps before concluding a job is stuck**, and note that the log 404s *while a job
+  is genuinely running* as well as when the status is stale, so the 404 is evidence of neither.
+- **`Dev` is 20 ahead and 11 behind, and the twenty are catch-up merges carrying no source change
+  of their own.** The same standing drift the last several entries record and none fixes. Left
+  alone deliberately: the instruction was `Prod`.
+- **The Vercel deploy is not confirmable from this session.** §5 records `github.silent` set to
+  `false` on 2026-08-26 so a deploy reports itself on the commit that caused it, but no GitHub MCP
+  tool here lists check runs or statuses for a ref, and `api.github.com` answers *"GitHub access is
+  not enabled for this session"*. **Read it in the GitHub UI or the Vercel dashboard.**
 
 ### 2026-08-27 · A login can be created with a password, not only invited
 The owner's instruction, the day after two staff logins had to be written in by hand SQL because
