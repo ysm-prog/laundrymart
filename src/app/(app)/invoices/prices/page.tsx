@@ -4,8 +4,10 @@ import { can } from "@/lib/roles";
 import { Notice, PageContainer, PageHeader } from "@/components/ui";
 import type { LaundryPriceRow } from "@/lib/domain/laundry-billing";
 import { buildItemPriceRows } from "@/lib/domain/laundry-prices";
+import { SubmitButton } from "@/components/form";
 import { ItemPriceTable } from "./item-price-table";
 import { AddItemCard } from "./add-item-card";
+import { fillPricesFromItems } from "./actions";
 import { PRICE_LIST_ITEM_COLUMNS, type PriceListItem } from "./items";
 
 export const metadata = { title: "Laundry prices" };
@@ -62,6 +64,11 @@ export default async function LaundryPricesPage() {
   ]);
 
   const rows = buildItemPriceRows(items ?? [], prices ?? [], null);
+  // How many could be filled in one press — the count the offer below quotes, so
+  // it cannot promise a number the action would not deliver.
+  const unpriced = rows.filter(
+    (row) => row.price === null && Number(row.item.sell_price ?? 0) > 0,
+  ).length;
 
   return (
     <PageContainer width="form">
@@ -92,6 +99,35 @@ export default async function LaundryPricesPage() {
           {" "}keeps the price it was approved at, even on a draft invoice — re-price it before
           approving, or take it off the draft, if the new rate should apply.
         </Notice>
+
+        {writable && unpriced > 0 ? (
+          /*
+            The list starts empty on a laundry whose item master came from MYOB,
+            and every row then reads "No price set" — while the app is in fact
+            already billing those items at their MYOB rate, through
+            `liveItemRate`'s fallback. That reads as an app with no prices in it,
+            which is exactly how this screen was first reported.
+
+            One press brings those prices onto the list, converted rather than
+            copied: an item stating its price GST-exclusive is grossed up,
+            because a list rate is what the customer pays. It never touches a row
+            that already has a price, so it is safe to press twice and safe to
+            press after re-rating a code.
+          */
+          <Notice tone="info" title={`${unpriced} item ${unpriced === 1 ? "code has" : "codes have"} a selling price and no rate here`}>
+            <p className="mb-3">
+              They are billing at the item&rsquo;s own selling price today. Bring those onto this
+              list and you can see them, edit them, and set a different rate per customer. GST is
+              added where the item&rsquo;s price is stated without it. Nothing you have already
+              priced is changed.
+            </p>
+            <form action={fillPricesFromItems}>
+              <SubmitButton variant="secondary" size="md" pendingLabel="Pricing…">
+                Fill from my item prices
+              </SubmitButton>
+            </form>
+          </Notice>
+        ) : null}
 
         <ItemPriceTable
           title="Your usual prices"

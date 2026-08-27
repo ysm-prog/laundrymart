@@ -9,7 +9,24 @@ where that is genuinely what it is. The multi-tenancy architecture stays: one op
 fact about today's data, not a reason to drop `tenant_id`, RLS, or §23's rule that a read feeding a
 write names its tenant.
 
-## Latest: the laundry price list is keyed on the item code
+## Latest: the prices are actually in the list
+2026-08-27. Owner, three words: *"YOU HAVENT ADDED PRICE"*, with `MYOB_Items_Register.xlsx`
+attached. Fair — the work below built the screen and left the list empty, so all 140 rows read
+"No price set". **No migration.**
+
+- **`laundry_prices` is 0 → 117 rows live.** Every active sellable item with a MYOB selling price.
+- **Converted, not copied.** 111 of the 119 priced items state their price GST-**exclusive**; a
+  list rate is GST-**inclusive**. Copying verbatim would have cut every rate by the GST.
+  `seedPriceFromItem` grosses up through `lineRateFromItem` on `tenants.gst_rate`.
+  **`T40` 0.40 exclusive → 0.44 — the exact charge frozen on `LJ00012`.**
+- **`fillPricesFromItems` is the repeatable path**, offered on the screen in a notice that counts
+  what it would fill. It writes only where there is no row: safe to press twice, never undoes a
+  re-rate.
+- Proved as real sessions (rolled back): Owner reads 117 / re-rates 1 row, Office manager 117,
+  board **0**. First non-vacuous proof of `can_read_pricing()` — the table used to be empty.
+- 23 sellable items stay unpriced: MYOB has no price for them either.
+
+## Previously: the laundry price list is keyed on the item code
 2026-08-27, branch `claude/laundry-price-item-codes-0dh46d`. Owner: *"under Laundry price add all
 the Item Codes and remove existing data so when owner or manager update it should reflect live in
 draft invoice, invoice everywhere itemcode are linked, also provide option to add new itemcodes."*

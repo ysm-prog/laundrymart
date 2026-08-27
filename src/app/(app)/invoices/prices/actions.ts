@@ -6,8 +6,11 @@ import { createClient } from "@/lib/supabase/server";
 import { recordAudit } from "@/lib/audit";
 import { describeDbError, done, fail, returnTo } from "@/lib/actions";
 import { checkItemCode, itemLabel } from "@/lib/domain/items";
-import { laundryPriceItemType, type PricedItem } from "@/lib/domain/laundry-prices";
+import {
+  laundryPriceItemType, seedPriceFromItem, type PricedItem,
+} from "@/lib/domain/laundry-prices";
 import { ITEM_TYPES } from "@/lib/domain/laundry-orders";
+import { tenantGstRate } from "@/lib/gst";
 import { parsePriceForm, PRESENT_FIELD } from "./price-form";
 
 /**
@@ -264,4 +267,95 @@ export async function addItemCode(formData: FormData): Promise<void> {
   return done(path, `Added ${itemLabel(created)}.`, {
     href: `/items/${created.id}`, label: "Open the item",
   });
+}
+
+/**
+ * Fill the usual price list from the item master's own selling prices.
+ *
+ * **Why this exists rather than a one-off load.** The item master arrived from
+ * MYOB carrying a selling price on 117 of the laundry's 140 sellable items, and
+ * the price list started empty — so every row on this screen read *"No price
+ * set"* while the app was, in fact, already billing those items at their MYOB
+ * rate through `liveItemRate`'s fallback. That reads as an app with no prices in
+ * it. One press brings the prices the laundry already keeps onto the list, where
+ * they can be seen, edited and overridden per customer.
+ *
+ * **It never overwrites a price somebody set.** Only items with no row on this
+ * list are filled, so pressing it twice is safe, pressing it after re-rating a
+ * code does not undo the re-rate, and pressing it after adding new items brings
+ * in exactly the new ones. That is the whole safety property: this is a filler,
+ * not a reset.
+ *
+ * **A price is converted, not copied** — `seedPriceFromItem` grosses up a
+ * GST-exclusive item price, because a list rate is what the customer pays. The
+ * rule is pure and tested; the rate comes from `tenants.gst_rate` rather than a
+ * hard-coded 10%, since this number decides money.
+ */
+export async function fillPricesFromItems(formData: FormData): Promise<void> {
+  const session = await assertCapability("invoices.write");
+  const path = returnTo(formData, "/invoices/prices");
+
+  const supabase = await createClient();
+
+  // §23: both reads feed a write, so both name the tenant rather than leaning on
+  // RLS — a platform admin's session reads every laundry.
+  const [{ data: items, error }, { data: priced }, gstRate] = await Promise.all([
+    supabase
+      .from("items")
+      .select("id, item_code, name, laundry_category, sell_price, sell_price_basis, tax_code")
+      .eq("tenant_id", session.tenantId)
+      .is("deleted_at", null)
+      .eq("status", "active")
+      .eq("is_sell", true)
+      .gt("sell_price", 0)
+      .returns<Array<PricedItem & { id: string; tax_code: string | null }>>(),
+    supabase
+      .from("laundry_prices").select("item_id")
+      .eq("tenant_id", session.tenantId)
+      .is("customer_id", null)
+      .not("item_id", "is", null)
+      .returns<Array<{ item_id: string }>>(),
+    tenantGstRate(supabase, session.tenantId),
+  ]);
+  if (error) return fail(path, describeDbError(error));
+
+  const already = new Set((priced ?? []).map((row) => row.item_id));
+  const inserts = [];
+  for (const item of items ?? []) {
+    if (already.has(item.id)) continue;
+    const seeded = seedPriceFromItem(item, gstRate);
+    if (!seeded) continue;
+    inserts.push({
+      tenant_id: session.tenantId,
+      created_by: session.userId,
+      customer_id: null,
+      item_id: item.id,
+      item_type: laundryPriceItemType(item),
+      unit_price: seeded.unitPrice,
+      bag_price: null,
+      taxable: seeded.taxable,
+    });
+  }
+
+  if (inserts.length === 0) {
+    // Not a failure: every priced item already has a rate, which is the state
+    // this button exists to reach. Saying "nothing to fill" beats a success
+    // message that implies something happened.
+    return done(path, "Every item with a selling price already has a price on this list.");
+  }
+
+  const { error: insertError } = await supabase.from("laundry_prices").insert(inserts);
+  if (insertError) return fail(path, describeDbError(insertError));
+
+  await recordAudit(session, {
+    entity: "laundry_price",
+    entityId: null,
+    action: "update",
+    summary: `Filled ${inserts.length} laundry price(s) from the item selling prices`,
+    metadata: { filled: inserts.length },
+  });
+
+  revalidatePath(path);
+  return done(path, `Priced ${inserts.length} item ${inserts.length === 1 ? "code" : "codes"} `
+    + "from your item list. Nothing you had already priced was changed.");
 }
