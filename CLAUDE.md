@@ -2533,6 +2533,51 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-08-27 · The test profiles lose their access, and the rounds get theirs back
+Found while verifying the import release, and acted on at the owner's instruction. **No migration,
+no schema/RLS/capability/code change** — a live data change and nothing else.
+
+**Two test profiles were still members of the real laundry, and one was an owner.**
+`owner@roles.example.com` held **`super_admin`** on Adelaide Towel Service and still used
+`RoleTest!2026` — the shared password §3a documents in `scripts/role-profiles.mjs`, a committed
+file in a **public** repository. Confirmed by hashing, not assumed. So the published password
+opened an owner account on a real business: 451 customers, 647 invoices and the chart of accounts.
+`branch-manager@roles.example.com` was the same with a narrower role. **Both memberships are now
+deleted, and no `@roles.example.com` profile holds one.**
+
+- **The membership goes, the login stays** — §10c's own rule for Remove access, and here it is
+  load-bearing rather than conventional: `audit_logs.actor_id` names those two on **10 rows**, and
+  `audit_logs` deliberately carries no foreign key to `auth.users` so the trail outlives the
+  person. Deleting the login would have left ten entries rendering as a bare UUID, which is the
+  defect the 2026-08-18 entry exists to fix. Checked first: **no** foreign key anywhere in
+  `public` references either login, so nothing else was at stake.
+- **Access is gone either way**, proved as a real session rather than reasoned about:
+  `owner@roles.example.com` now reads `is_member = false` and **0** customers, **0** invoices and
+  **0** accounts. The residual is a login that can still authenticate against a published password
+  and reach nothing — worth rotating or deleting, and the standing fix is §3a's: that password
+  should not be in a public repository at all.
+
+**The four delivery rounds had lost their memberships and have them back.** Thirteen memberships
+were removed from the People screen while the test profiles were being tidied, and
+`board1@`…`board4@ats.example.com` went with them — while `boards.user_id` still pointed at all
+five. So every round showed as *linked* on the Boards screen and every one of those logins
+dead-ended on "not linked to a laundry yet": the empty-screen failure §24 exists to prevent,
+reached from the opposite direction. Restored as `board` with no site, and read back as
+`board1@`: `is_member` true, `current_board_id` resolving, `is_board_only` true, and **0**
+invoices and **0** accounts, so the billing and purchases gates survived the change.
+
+- **`TESTBOARD` was deliberately left alone.** It is linked to `board@roles.example.com`, a test
+  profile, and restoring its membership in the same breath as removing the other test profiles
+  would have contradicted the instruction. It is the one board still claiming a link its login
+  cannot use — either delete the board and the profile, or unlink it, but it should not stay as it
+  is.
+- **`marsy.forte69@gmail.com` holds a `board` membership and is linked to no board**, which is the
+  same inconsistency from the other side: that login signs in to an empty My Runs until it is
+  paired with a round.
+- Memberships went 7 → 9. Both halves rehearsed in a transaction that ended by raising and applied
+  behind assertions, including that the laundry keeps at least two `super_admin`s (three remain)
+  and that the audit trail still names its actors.
+
 ### 2026-08-27 · The import hold is released: 448 customers and 188 suppliers
 Reported from the deployed app: *"Customer doesn't pick up when we create new laundry from
 customer data base."* **No migration, no schema/RLS/capability/code change** — `git diff` over
