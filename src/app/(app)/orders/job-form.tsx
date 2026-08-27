@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { Field, FormActions, Input, Select, SubmitButton, Textarea } from "@/components/form";
 import {
-  Badge, ButtonLink, CONTROL, Eyebrow, FormSection, Notice, cx, humanise,
+  Badge, ButtonLink, CONTROL, Eyebrow, FormSection, Notice, StatusBadge, cx, humanise,
 } from "@/components/ui";
 import {
   Building2, CalendarClock, Check, Plus, Search, Shirt, Truck,
@@ -16,6 +16,7 @@ import {
   RECEIVED_VIA_LABELS, describeItem, initialDeliveryRequired, initialReceivedVia,
   receivedViaOptions, type ReceivedVia,
 } from "@/lib/domain/laundry-orders";
+import { customerStatusNeedsSaying } from "@/lib/domain/customers";
 import { businessToday, toZonedDate } from "@/lib/domain/timezone";
 import type { LaundryOrder, LaundryOrderItem } from "@/lib/db/types";
 
@@ -49,6 +50,13 @@ export type JobCustomer = {
   trading_name: string | null;
   phone: string | null;
   billing_email: string | null;
+  /**
+   * `active`, `prospect`, `on_hold` or `inactive`. Shown wherever it is not
+   * plainly `active`: the picker offers every one of them — which is what the
+   * database has always accepted — so the counter has to be able to see that
+   * the business they are about to take laundry in for is on hold.
+   */
+  status: string;
   billing_address: string | null;
   delivery_address: string | null;
 };
@@ -70,6 +78,9 @@ type ItemRow = {
 };
 
 const QUICK_CREATE_FORM = "job-customer-quick-create";
+
+/** How many search results are drawn at once. The rest are counted, not hidden. */
+const RESULT_LIMIT = 12;
 
 function blankItem(key: number): ItemRow {
   return {
@@ -168,14 +179,20 @@ export function JobForm({
    * over the door, the trading name, the phone number they are reading off a
    * docket, and the email. Filtered in the browser over a list already loaded —
    * no round trip, so it narrows as fast as they type.
+   *
+   * The total is kept alongside the twelve that are drawn, because those two
+   * numbers used to be the same one. A laundry with a real customer base
+   * searching "hair" matches dozens; showing twelve of them and saying nothing
+   * is the same failure as showing none — a customer who is on file, and is not
+   * on screen, with no way to tell which.
    */
-  const matches = useMemo(() => {
+  const found = useMemo(() => {
     const term = query.trim().toLowerCase();
-    if (!term) return customers.slice(0, 12);
-    return customers.filter((customer) => [
+    const all = !term ? customers : customers.filter((customer) => [
       customer.business_name, customer.trading_name, customer.customer_number,
       customer.phone, customer.billing_email,
-    ].some((field) => field?.toLowerCase().includes(term))).slice(0, 12);
+    ].some((field) => field?.toLowerCase().includes(term)));
+    return { shown: all.slice(0, RESULT_LIMIT), total: all.length };
   }, [customers, query]);
 
   /**
@@ -262,7 +279,11 @@ export function JobForm({
                       <Building2 className="size-5" />
                     </span>
                     <div className="min-w-0">
-                      <p className="font-semibold">{selected.business_name}</p>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="font-semibold">{selected.business_name}</p>
+                        {customerStatusNeedsSaying(selected.status)
+                          ? <StatusBadge status={selected.status} /> : null}
+                      </div>
                       <p className="mt-0.5 text-sm text-muted-foreground">
                         {[selected.customer_number, selected.trading_name]
                           .filter(Boolean).join(" · ")}
@@ -329,12 +350,16 @@ export function JobForm({
                     <ul id="customer-results"
                         className="absolute inset-x-0 top-full z-20 mt-1 max-h-72 overflow-y-auto
                                    rounded-xl border bg-surface py-1 shadow-lg">
-                      {matches.map((customer) => (
+                      {found.shown.map((customer) => (
                         <li key={customer.id}>
                           <button type="button" onClick={() => setCustomerId(customer.id)}
                                   className="flex min-h-12 w-full flex-col items-start justify-center
                                              px-4 py-2 text-left transition hover:bg-surface-muted">
-                            <span className="text-sm font-medium">{customer.business_name}</span>
+                            <span className="flex flex-wrap items-center gap-2 text-sm font-medium">
+                              {customer.business_name}
+                              {customerStatusNeedsSaying(customer.status)
+                                ? <StatusBadge status={customer.status} /> : null}
+                            </span>
                             <span className="text-xs text-muted-foreground">
                               {[customer.customer_number, customer.phone, customer.billing_email]
                                 .filter(Boolean).join(" · ")}
@@ -342,9 +367,17 @@ export function JobForm({
                           </button>
                         </li>
                       ))}
-                      {matches.length === 0 ? (
+                      {found.total === 0 ? (
                         <li className="px-4 py-3 text-sm text-muted-foreground">
                           No customer found. Try another search, or add a new customer below.
+                        </li>
+                      ) : null}
+                      {found.total > found.shown.length ? (
+                        <li className="border-t px-4 py-2 text-xs text-muted-foreground">
+                          {/* "Showing 12 of 47" rather than "35 more", which needs a
+                              plural rule to read right at one. */}
+                          Showing {found.shown.length} of {found.total} — keep typing
+                          to narrow it down.
                         </li>
                       ) : null}
                     </ul>
@@ -656,10 +689,22 @@ export function JobForm({
                         ?? selected?.billing_address
                         ?? "Select a customer to see their address."}
                   </p>
-                  <label className="mt-1 flex min-h-9 items-center gap-2 text-sm">
+                  {/*
+                    `Checkbox`'s skin and its padded hit area, not the component:
+                    that one is uncontrolled and this box drives React state.
+                    Hand-rolled it missed both halves of the 2026-08-24
+                    accessibility pass — a 16px box in a 36px row, and
+                    `border-strong`, which measures 1.42:1 against the surface
+                    where 1.4.11 asks 3:1 of anything identifying a control.
+                    Found by measuring this form in the gallery, which is the
+                    first time it has been in there.
+                  */}
+                  <label className="mt-1 flex min-h-11 cursor-pointer items-center gap-3
+                                    rounded-lg py-1.5 text-sm transition hover:bg-surface-muted/60">
                     <input type="checkbox" checked={customAddress}
                            onChange={(event) => setCustomAddress(event.target.checked)}
-                           className="h-4 w-4 border border-strong accent-primary" />
+                           className="size-[1.15rem] shrink-0 rounded border-control-border
+                                      accent-primary" />
                     Use a different delivery address for this job
                   </label>
                   <p className="text-xs text-muted-foreground">
