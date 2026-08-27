@@ -3088,8 +3088,23 @@ the previous `Prod` is empty.
   was telling the truth.** Verify served `in_progress` while the other two jobs had finished, which
   is the shape the 2026-08-26 entries record as stale. It was not: the step timestamps show
   `verify.sh` genuinely running 05:05:09 → 05:06:16, and the job log 404s *while a job is still
-  running* as well as when the status is stale. So the 404 is not itself evidence either way —
-  what settled it was the step-level `completed_at`, which is the thing to read.
+  running* as well as when the status is stale. So the 404 is not itself evidence either way.
+
+  > **A correction to this entry was written and was itself wrong; both are recorded, because the
+  > mistake is the useful part.** On run 239 Verify was reported as stuck at `in_progress` "for
+  > about 25 minutes" and this note was amended to say the step timestamps freeze along with the
+  > status. **They do not.** The 25 minutes never happened: the container clock read 07:48 when
+  > the job had completed at 07:44:12, so the whole polling sequence spanned about five and a half
+  > minutes and Verify — which ran its usual 65 seconds — was genuinely working for nearly all of
+  > it. The elapsed time had been inferred from *how many tool calls had been made*, which counts
+  > interactions rather than seconds, and a run of background `sleep`s that were started and then
+  > polled immediately rather than waited on.
+  >
+  > So the original sentence stands, and the real lesson is one layer up and applies to any agent
+  > working here: **read a clock before calling anything slow.** `date -u` against the runner's
+  > own `started_at` costs one command and is the difference between waiting another minute and
+  > re-running a job that has already passed. A second session hit the identical illusion on the
+  > same afternoon and diagnosed it the same way, which is why it is written down twice.
 - **`Prod` and `Dev` have diverged and `Dev` is the stale one**, which the last several entries
   each noted and none fixed. `Dev` is **20 ahead, 9 behind**; every one of those 20 is a
   *"Bring Dev up to Prod"* merge commit carrying no source change of its own, while the 9 it is
@@ -3330,13 +3345,26 @@ migrations to a fresh Postgres 16 with the whole pgTAP suite (**504 assertions**
   `tenantId` into `Lines` — `Prod` to read the laundry's GST rate, this branch for §23's rule
   that a read feeding a write names its tenant. The resolution is the union: their fourth read
   and their two extra item columns, with the tenant filter on both loaders.
-- **Read the log, not the status — the fifth time this file records it.** The Verify job
-  reported `in_progress` from both the runs and the jobs endpoint long after finishing, and its
-  log was 404 while that lasted; it carries `== PASSED ==` at 23:36:51 followed by cleanup. The
-  other two jobs had completed at 23:35:52 and 23:35:55 while the *run* still showed an
-  `updated_at` of 23:35:39.
-- **`Dev` is 6 commits behind and has not been touched**, because the instruction was Prod. It
-  wants a catch-up merge — the staleness the 2026-08-16 entry records as a standing problem.
+- **This entry claimed a stale CI status and it was wrong — the clock was never read.** What
+  it said: *"Read the log, not the status — the fifth time this file records it. The Verify job
+  reported `in_progress` from both the runs and the jobs endpoint long after finishing."* It did
+  not. `verify.sh` started at 23:35:48 and the log carries `== PASSED ==` at **23:36:51** — its
+  usual ~64 seconds — so every poll that saw `in_progress` was made while the job was genuinely
+  working, and the 404 on its log is what an in-flight job returns. The other two jobs finish in
+  ~25 seconds, which is what made Verify *look* stuck beside them.
+  - **The elapsed time was inferred from the number of tool calls rather than from a clock**,
+    helped by background sleeps that were started and then polled immediately instead of waited
+    on. Exactly the illusion `ae2e19c` describes; that note records two sessions reaching it
+    independently the same afternoon, and this is the third.
+  - **The one real observation is much smaller and is kept**: the *run*-level `updated_at` read
+    23:35:39 while the jobs endpoint already had two jobs completed at 23:35:52 and 23:35:55.
+    That is a ~16-second run-level lag, not a stale status worth a rule.
+  - **Both the wrong claim and this correction stay**, because the remedy is the useful part:
+    `date -u` against the runner's own `started_at` costs one command and is the difference
+    between waiting a minute and re-running a job that has already passed.
+- **`Dev` was 6 commits behind when this was written and is level now** (2026-08-27). It carried
+  **no** non-merge commit Prod lacked, so bringing it up was purely making its tree match — which
+  is what it is, byte for byte.
 ### 2026-08-26 · An item says what MYOB says about it, and the line says what the price means
 The owner opened all 257 of Adelaide's active items in MYOB one at a time and captured
 every field on the item page. Nine had nowhere to live in this schema, and two of those
