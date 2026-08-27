@@ -16,7 +16,52 @@ logins — which live there precisely so they cannot read the real business's re
 **The multi-tenancy architecture stays.** One operating tenancy is a fact about today's data, not
 a reason to drop `tenant_id`, RLS, or §23's rule that a read feeding a write names its tenant.
 
-## Latest: a line's code is a real account, and a levy gets one unasked
+## Latest: the first two real people, and the roles their titles mean
+2026-08-27, branch `claude/user-creation-by-role-bre21j`. Owner's instruction: create a login
+for each of two named people, by the role given, with a simple password for now.
+**No migration, no schema/RLS/capability/code change** — `git diff` over `src/` and
+`supabase/` is empty. A live data change and nothing else.
+
+| person | title given | role written | address |
+|---|---|---|---|
+| Angelo Mignone | Owner | `super_admin` | `angelo@adelaidetowelservice.com.au` |
+| Christian Mignone | Manager | `operations_manager` | `cmignone219@gmail.com` |
+
+- **"Manager" is `operations_manager`, not `branch_manager`/`regional_manager`.** Those two
+  are named in `JOB_TO_INVOICE` and therefore **subtracted** from it — no jobs, no invoices,
+  no prices — which would leave a laundry's manager unable to take laundry in or bill it.
+  `operations_manager` is `TENANT_ALL` minus `admin.write`: everything the Owner has except
+  adding, re-roling and removing people. It is the role `ROLE_PRESETS` labels **Office**.
+- **These are the first members who are neither a test profile nor a platform admin.** §2
+  filters platform admins out of every people-picker, so Adelaide's job assignment and
+  completion pickers previously offered only `@roles.example.com` names. §24's cutover list
+  is down to one item: **Adelaide still holds no laundry prices**.
+- **Written by SQL in GoTrue's shape** (the §24 board-login pattern), not by an invitation —
+  the ask was a password to hand over, and an invite hands over a link. The rows are
+  **identical to `jay@ctnorwood.com.au` on all 23 compared `auth.users` columns**, diffed
+  rather than eyeballed; eight token columns `''` not NULL (the 2026-08-18 trap).
+- **`full_name` set on both** — `memberDisplayName()` reads it first and never invents a name
+  from an email local part, so without it they would render as addresses. Proved through
+  `tenant_members()`, not by reading the column.
+- **Rehearsed, rolled back, re-proved, then applied behind a does-not-already-exist guard.**
+  Read back as **real sessions**: each reads Adelaide's 510 customers / 647 invoices / 254
+  items / 268 accounts / 69 audit rows, and each write touched **1 row** — the count is the
+  assertion, since a refusal writes zero rows in silence. Rolled back; 0 probe rows left.
+- Logins and memberships **18 → 20**, all Adelaide. Advisors **23**, unchanged (no function
+  added). 0 `anon` table grants, 0 tables without RLS. Nothing else moved.
+- **Passwords are a bootstrap and were sent over chat — replace them.** People › *Email
+  sign-in link* mints a `recovery` link through Resend, needs no SMTP, and both signs the
+  person in and lets them set their own.
+- **Not proved: the HTTP sign-in.** The password grant was refused by this container's
+  network policy (`connect_rejected`, 403 to CONNECT — the §16 wall; the proxy README says
+  report, don't retry). What *is* proved: each bcrypt hash verifies against its own password
+  and refuses the other's, plus the 23-column identity above. **One step left: open
+  `ats.coreit.com.au` and sign in as each.**
+- **Stale doc corrected on the way:** §24 warned every site picker offers nothing because the
+  only depot was `inactive`. Re-read — `ADL` is **active**. Warning kept, marked spent.
+
+
+## Previously: a line's code is a real account, and a levy gets one unasked
 2026-08-26, branch `claude/account-chat-linking-bknjn3`. Reported against `LJ00007`: an
 invoice line `LJ00007 — fuel` coded `—`, under *"Remove and re-add a line to give it a
 code."* One migration (`0044`); **nothing dropped, no row changed, no capability moved.**
@@ -154,7 +199,7 @@ differences**. As real sessions: **board reads 254, writes 0** (on a row it read
 Advisors 23, unchanged. All 254 rows still at their defaults. **Not opened behind the auth
 gate** — the browser half is still unproved.
 
-## Latest: 0043 is in the repo, and the Xero basis disagrees with it
+## Before that: 0043 is in the repo, and the Xero basis disagrees with it
 2026-08-26, branch `claude/invoice-creation-job-workflow-11mobw`. The owner asked for the live
 migration this repo lacked. **No `src/` change; one migration file, reconstructed not authored.**
 

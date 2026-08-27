@@ -2223,8 +2223,12 @@ current state.
 same 1,154 rows, back through `set_records_archived('20000000-…-000000000001', false)` called as
 a real owner session. Nothing was deleted in either direction.
 
-**Eighteen logins, and twelve of them are test profiles in the real laundry.** The two real ones
-are `darshan@` and `jay@ctnorwood.com.au` (both `super_admin` **and** platform admins); four are
+**Twenty logins, and twelve of them are test profiles in the real laundry.** Four are real
+people: `angelo@adelaidetowelservice.com.au` (`super_admin`) and `cmignone219@gmail.com`
+(`operations_manager`), added 2026-08-27 and the **first two members who are neither a test
+profile nor a platform administrator**; and `darshan@` and `jay@ctnorwood.com.au`, both
+`super_admin` **and** platform admins — which is why they do not count as staff for the purpose
+above, since §2 filters a platform admin out of every list a person is picked from. Four are
 `board1@`…`board4@ats.example.com` (§24); the rest are `<role>@roles.example.com` (§3a), one per
 membership role. **They were members of the demo laundry only until 2026-08-26 and are members of
 `Adelaide Towel Service` now** — the owner's decision when the demo laundry was deleted, so that
@@ -2469,6 +2473,74 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-08-27 · The first two real people, and the roles their titles mean
+The owner's instruction: create a login for each of the two people named, by the role given,
+with a simple password for now. **No migration; no schema, RLS, capability, policy or code
+change** — `git diff` over `src/` and `supabase/` is empty. This is a live data change and
+nothing else. §11 has the read-backs; §24's cutover list shrinks by one.
+
+| person | title given | role written | address |
+|---|---|---|---|
+| Angelo Mignone | Owner | `super_admin` | `angelo@adelaidetowelservice.com.au` |
+| Christian Mignone | Manager | `operations_manager` | `cmignone219@gmail.com` |
+
+**"Manager" is `operations_manager`, and the two other manager roles would have been wrong.**
+`branch_manager` and `regional_manager` are *named in* `JOB_TO_INVOICE` and therefore
+**subtracted** from it — no jobs, no invoices, no prices — so either would have left the
+manager of a laundry unable to take laundry in or bill it, which is the whole of the job.
+`operations_manager` is `TENANT_ALL.filter(c => c !== "admin.write")`: everything Angelo holds
+except the ability to add, re-role or remove people. It is also the role `ROLE_PRESETS` labels
+**Office**, which is the word the People picker puts in front of an owner.
+
+**These are the first members of this laundry who are neither a test profile nor a platform
+administrator**, which is the line §24 has had open since the cutover. It matters beyond
+bookkeeping: a platform admin is **filtered out of every list a person is picked from** (§2), so
+until today Adelaide's job assignment and completion pickers offered nothing but
+`@roles.example.com` profiles. Angelo and Christian are the first real names in them.
+
+- **Written by SQL in GoTrue's own shape**, the §24 board-login pattern — not by an invitation,
+  because the ask was a password to hand over now and an invite deliberately hands over a link
+  instead. The rows are **identical to `jay@ctnorwood.com.au` on all 23 compared `auth.users`
+  columns** — diffed column by column against a login Supabase's own Auth API created and which
+  has signed in successfully, rather than eyeballed. That includes the eight token columns as
+  `''` and not NULL: the 2026-08-18 trap that made eleven logins unresolvable to `getUserById`.
+- **`full_name` is set on both, and that is not cosmetic.** `memberDisplayName()` reads
+  `user_metadata.full_name` first and **never invents a name from an email local part**, so a
+  login without one renders as an address or a short UUID — the defect the 2026-08-18 entry
+  exists to fix. Proved through `tenant_members()` rather than by reading the column: the
+  directory returns `Angelo Mignone/super_admin` and `Christian Mignone/operations_manager`.
+- **Rehearsed first, and the rehearsal mechanism was re-proved before it was trusted.** The whole
+  change plus ten assertions ran in a transaction that ended by raising; the read-back after that
+  rollback found **0** probe logins, **0** probe identities and 18/18 unchanged. The real apply
+  then ran behind the same assertions **plus a guard that the two addresses did not already
+  exist**, so a rollback that had not rolled back could not have made two pairs of logins.
+- **Then proved as real sessions**, writes inside a transaction that was then aborted. Each read
+  Adelaide's own 510 customers, 647 invoices, 254 items, 268 accounts and 69 audit rows, and each
+  wrote **1 row** to `items`. The row count is the assertion that matters: a policy refusing a
+  caller writes **zero rows with no error**, the silence this project has shipped twice. Neither
+  is a platform admin; neither holds a membership anywhere else. Nothing survived the rollback —
+  **0** items carry a probe timestamp.
+- **Advisors are 23**, unchanged: 22 documented SECURITY DEFINER helpers plus the auth
+  leaked-password toggle. This adds no function, so none was expected and none appeared. **0**
+  `anon` table grants and **0** tables in `public` without RLS.
+- Counts moved exactly as intended and nothing else did: logins and memberships **18 → 20**, all
+  20 in Adelaide; 1 tenant, 510 customers, 647 invoices, 254 items untouched.
+
+**The passwords are a bootstrap, and the honest word for them is temporary.** They were generated
+with `crypto.randomInt` rather than made up, they are distinct, and neither is derivable from the
+other — but they were transmitted in a chat message, which is the whole reason they should not
+stay. Both people can replace theirs from **People › Email sign-in link** (§10c), which mints a
+`recovery` link through Resend and both signs them in *and* lets them set a password. That path
+needs no SMTP and has existed since 2026-08-24.
+
+**Not proved: the HTTP sign-in itself.** The password grant against
+`/auth/v1/token?grant_type=password` was attempted for both, and for a deliberately wrong
+password as a control, and all three were refused by this container's **network policy** —
+`connect_rejected`, *"gateway answered 403 to CONNECT"*, the same wall §16 recorded in August and
+one the proxy README says to report rather than retry. What *is* proved is that each stored
+bcrypt hash verifies against its own password and refuses the other's (`extensions.crypt`, in
+both the rehearsal and the apply), and the 23-column identity with a login that signs in. **The
+one step left is somebody opening `ats.coreit.com.au` and signing in as each of them.**
 ### 2026-08-26 · The code on a line is a real account, and a levy has one without being asked
 Reported from the deployed app against `LJ00007`: an invoice line reading
 `LJ00007 — fuel` with a code of `—`, under a notice whose only advice was *"Remove and
@@ -7044,16 +7116,24 @@ business and is labelled as one; leaving that profile without a `boards` row wou
 login that works and shows nothing, which §24 exists to prevent. Harbour's Board 1 went with the
 laundry.
 
-**What is left of the cutover is the real laundry's, not the code's.** *Invite one person who is
-not a platform admin* is **done** in the sense that matters — Adelaide now holds twelve
-role-profile memberships, none of them platform admins, so its People screen and its job pickers
-are no longer empty. What genuinely remains: **a real member of staff**, rather than a test
-profile, and **Adelaide's own laundry prices**, which it still holds none of. And with only one
-depot — set `inactive` by the owner on 2026-08-26 — every "site" picker in the app (customer,
-contract, driver, board, vehicle, inventory, route template, invitation) currently offers nothing,
-because all eight filter `status = 'active'`. That is one press on Settings › Sites to undo and is
-deliberately left to the owner, but it is the first thing that will stop somebody adding a
-customer.
+**What is left of the cutover is the real laundry's, not the code's — and it is down to one
+thing.** *Invite one person who is not a platform admin* is **done properly** as of 2026-08-27:
+`Angelo Mignone` (`super_admin`) and `Christian Mignone` (`operations_manager`) are the laundry's
+first two members who are neither a test profile nor a platform administrator. That matters beyond
+the People screen: a platform admin is filtered out of every list a person is picked from (§2), so
+until then Adelaide's job assignment and completion pickers offered nothing but
+`@roles.example.com` names. It had been recorded as "done in the sense that matters" on the
+strength of the twelve role profiles, which was true of the *screen* and not of the business.
+
+**The depot is active again.** It was set `inactive` by the owner on 2026-08-26, and this section
+warned that every "site" picker in the app (customer, contract, driver, board, vehicle, inventory,
+route template, invitation) therefore offered nothing, since all eight filter `status = 'active'`.
+Re-read on 2026-08-27: `ADL` / Adelaide is **active**, so that warning is spent and the pickers
+work. Left here rather than deleted, because the trap is real and one press away from returning.
+
+**What genuinely remains: Adelaide's own laundry prices, of which it still holds none.** Until a
+price list is entered, "Price this job" can only ever answer *nothing came back priced* — correct,
+and inert. Inventing rates for a real business is not a repair, so this is the owner's to do.
 
 ## 25. The item master, and MYOB
 `items` is the one item vocabulary: what the laundry rents out *and* what arrives in a customer's
