@@ -1372,6 +1372,17 @@ into itself with no configuration at all. What the deployment does need is `RESE
 `INVOICE_FROM_EMAIL`; without them every one of these actions says so by name rather than
 reporting a success that did not happen.
 
+**A login written by SQL must use `gen_salt('bf', 10)`, not `gen_salt('bf')`** (2026-08-27).
+pgcrypto's default cost for bcrypt is **6**; GoTrue writes **10**. Both are valid bcrypt and both
+verify — Go's `bcrypt.CompareHashAndPassword` ignores cost — so this is not why a login fails, and
+it was checked rather than assumed before saying so. But it makes an SQL-written login visibly
+different from an API-written one at a glance (`$2a$06$` against `$2a$10$`), which is exactly the
+tell you want when diagnosing one, and a weaker hash is not what you want on a real credential.
+Every login this project wrote by SQL — the twelve role profiles (§3a), the four board logins
+(§24) and the two staff logins of 2026-08-27 — carries `$2a$06$`. The three real staff were moved
+to cost 10 when their password was reset; the rest have not been and are worth re-hashing the next
+time anything touches them.
+
 **A password can be set instead of emailing a link** (2026-08-27), adopted from
 `ysm-prog/ysm-hub`'s `api/create-staff.js`. An invitation hands over a *link*, and there are real
 cases where the owner has to hand over a *credential*: a counter hand with no work email, somebody
