@@ -1,4 +1,5 @@
 import { Suspense } from "react";
+import Link from "next/link";
 import { requireCapability } from "@/lib/auth/context";
 import { createClient } from "@/lib/supabase/server";
 import { money } from "@/lib/format";
@@ -8,11 +9,15 @@ import {
 } from "@/components/ui";
 import { ListControls, Pagination, pageFrom, rangeFor } from "@/components/list-controls";
 import { FilterChips } from "@/components/filters";
+import { SUPPLIER_COLUMNS } from "./columns";
 
 export const metadata = { title: "Suppliers" };
 export const dynamic = "force-dynamic";
 
 type Search = { q?: string; status?: string; page?: string };
+
+/** A supplier plus the code of the account its bills post to. */
+type SupplierRow = Supplier & { gl_accounts: { code: string } | null };
 
 export default async function SuppliersPage({ searchParams }: { searchParams: Promise<Search> }) {
   const params = await searchParams;
@@ -56,8 +61,9 @@ async function SupplierList({ params }: { params: Search }) {
 
   let query = supabase
     .from("suppliers")
-    .select("id, supplier_number, name, phone, email, opening_balance, notes, status",
-            { count: "exact" })
+    // The default account is embedded rather than joined by hand: one FK to
+    // `gl_accounts` (0045 asserts exactly one), so the embed is unambiguous.
+    .select(`${SUPPLIER_COLUMNS}, gl_accounts(code)`, { count: "exact" })
     .is("deleted_at", null)
     .order("name")
     .range(from, to);
@@ -65,10 +71,13 @@ async function SupplierList({ params }: { params: Search }) {
   if (params.status) query = query.eq("status", params.status);
   if (params.q) {
     const term = `%${params.q}%`;
-    query = query.or(`name.ilike.${term},supplier_number.ilike.${term},email.ilike.${term}`);
+    query = query.or(
+      `name.ilike.${term},supplier_number.ilike.${term},email.ilike.${term},` +
+      `contact_name.ilike.${term},abn.ilike.${term}`,
+    );
   }
 
-  const { data, count, error } = await query.returns<Supplier[]>();
+  const { data, count, error } = await query.returns<SupplierRow[]>();
   if (error) throw new Error(error.message);
 
   const filtered = Boolean(params.q || params.status);
@@ -86,7 +95,18 @@ async function SupplierList({ params }: { params: Search }) {
           />
         }
         columns={[
-          { header: "Supplier", cell: (row) => row.name },
+          {
+            header: "Supplier",
+            cell: (row) => (
+              <Link
+                href={`/suppliers/${row.id}`}
+                className="font-medium text-primary underline underline-offset-2"
+              >
+                {row.name}
+              </Link>
+            ),
+          },
+          { header: "Contact", cell: (row) => row.contact_name ?? "—", hideBelow: "lg" },
           {
             header: "Number",
             cell: (row) => <span className="font-mono">{row.supplier_number}</span>,
@@ -102,6 +122,14 @@ async function SupplierList({ params }: { params: Search }) {
             cell: (row) => (Number(row.opening_balance) === 0 ? "—" : money(row.opening_balance)),
             align: "right",
             hideBelow: "sm",
+          },
+          {
+            // MYOB's "Category" — where this supplier's bills post by default.
+            header: "Account",
+            cell: (row) => (row.gl_accounts
+              ? <span className="font-mono">{row.gl_accounts.code}</span>
+              : <span className="text-muted-foreground">—</span>),
+            hideBelow: "lg",
           },
           { header: "Status", cell: (row) => <StatusBadge status={row.status} /> },
         ]}
