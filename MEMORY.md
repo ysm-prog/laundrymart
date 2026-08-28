@@ -9,8 +9,10 @@ where that is genuinely what it is. The multi-tenancy architecture stays: one op
 fact about today's data, not a reason to drop `tenant_id`, RLS, or §23's rule that a read feeding a
 write names its tenant.
 
-## Latest: the MYOB contact card is in
-2026-08-27, branch `claude/contacts-sync-code-links-b4f5os`. Owner sent
+## Latest: the MYOB contact card is in — merged and live
+2026-08-27, **merged to `Prod` (`15a4188`) and `Dev` (`9fb7968`) on 2026-08-28**, identical trees,
+CI green on all three jobs for both. Nothing left to apply: `0045` went on the hosted project
+before the merge and is still the ledger's last entry. Owner sent
 `MYOB_Contacts_Full_Details.xlsx` — 640 active contacts, 37 columns — to go "into contacts", linked
 to codes. One migration (**`0045`**), nine nullable columns on `suppliers` + one guard. §32 has the
 field mapping.

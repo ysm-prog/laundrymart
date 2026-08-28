@@ -2715,7 +2715,7 @@ once, the `items/columns.ts` precedent, because two hand-maintained strings drif
 
 - 1098 unit tests and **557 pgTAP assertions across 27 files, unchanged** — this adds no policy
   and no capability, so it adds no proof, and 0045's own eight self-assertions are the proof.
-  `verify` green; all 46 migrations applied to a fresh Postgres 16 with the whole suite on top,
+  `verify` green; all 49 migration files applied to a fresh Postgres 16 with the whole suite on top,
   and the assertion count is **identical with and without 0045**.
 - **Every one of the eight self-assertions was confirmed to fire** by breaking what it guards
   against a real database — a permissive `for all` policy re-added, the FK made `restrict`, the
@@ -2763,6 +2763,30 @@ live database read-back rather than by being opened. **Before trusting it: open 
 on `ats.coreit.com.au`, press `Simba Global`, and check the card shows the Bayswater North address,
 Jill La Pira, and account `5-1000 Towel Purchases` — then open a customer and confirm the contact
 person and delivery address are on their record.**
+
+**Merged to `Prod` (`15a4188`) and `Dev` (`9fb7968`) on 2026-08-28**, both holding identical trees
+— `git diff Prod Dev` is empty. `Prod` was a clean fast-forward and was never force-pushed:
+`origin/Prod` was an ancestor of the branch, so there was nothing to reconcile and no conflict to
+resolve. `Dev` had been 24 ahead and 0 behind `Prod` with an **empty** diff against it — those 24
+are the catch-up merge commits the last several entries record — so bringing it up was a merge that
+changed nothing but its history.
+
+- **CI green on all three jobs for both runs**, read off the logs rather than the statuses: Verify
+  (typecheck, lint, **1098** tests across 64 files, production build, `== PASSED ==` at 10:20:31Z on
+  `Prod` and 10:20:57Z on `Dev`), Security (gitleaks strict + dependency audit), and the DB job
+  applying all 49 migration files to a fresh Postgres 16 with the whole pgTAP suite (`pgTAP suite passed`)
+  and `supabase/seed.sql` on top.
+- **The elapsed time was checked against a clock before anything was called slow.** `date -u` read
+  10:21:25Z against run-start 10:19:08Z, so the whole sequence spanned two minutes and Verify's
+  ~59 seconds is its ordinary duration. Four earlier entries in this file record a session wrongly
+  reporting a stale `in_progress` after inferring elapsed time from how many tool calls it had made;
+  one command settles it.
+- **Nothing to apply.** `0045` went on the hosted project on 2026-08-27, **before** the merge — the
+  order every release since 2026-08-18 records, and the one that matters for an additive change with
+  screens reading the new columns at request time. The ledger's last entry is still
+  `0045_supplier_contact_details`.
+- **The Vercel deploy is not confirmable from this session**, the standing gap §5 records. Read it in
+  the GitHub UI or the Vercel dashboard.
 
 ### 2026-08-27 · The prices are actually in the list
 Reported in three words — *"YOU HAVENT ADDED PRICE"* — with `MYOB_Items_Register.xlsx`
