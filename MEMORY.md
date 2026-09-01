@@ -25,7 +25,8 @@ action calls the function, so code-first would make every credit note fail and t
 - The header now follows its own lines (it never did), `taxable` is asked rather than assumed, and
   a failed line or total deletes the credit note rather than leaving one reading $0.00.
 - **0 credit notes existed on the project**, so nothing stored was re-interpreted.
-- **532 pgTAP assertions across 28 files** (was 521/28-with-17-in-that-file); 1101 unit tests
+- **532 pgTAP assertions across 28 files** (was 521); §7's count line updated with it — I missed
+  it on the first pass, which is the drift the Stop hook exists to catch. 1101 unit tests
   unchanged. Reverting the function to the exclusive model fails **5 assertions by name**.
 - **`run-db-tests.sh` caught my `plan(27)` against 28 run** — the check earning its place.
 - Proved live as real sessions: a **board**'s call moved **nothing**; Owner and Office manager both

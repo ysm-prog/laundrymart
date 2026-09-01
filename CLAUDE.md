@@ -1155,7 +1155,7 @@ Proofs in `supabase/tests/`: `rls_isolation`, `rls_coverage`, `driver_scope`,
 `job_billing`, `purchases_scope`, `supplier_payments_scope`, `import_helpers`,
 `import_activation`, `member_directory`, `boards_scope`, `item_master`,
 `audit_log_scope`, `run_sequence`, `accounts_scope`, `open_draft_invoices`,
-`single_laundry`, `charge_accounts`, `gst_inclusive` (**521 assertions** across 28 files).
+`single_laundry`, `charge_accounts`, `gst_inclusive` (**532 assertions** across 28 files).
 
 **Count assertions, not lines starting with `ok`.** pgTAP's function is literally named `ok`, so
 psql prints a centred `ok` **column header** above each result — and `grep -c '^\s*ok '` counts
@@ -1705,7 +1705,16 @@ reports six false gaps.
   leaving its usual trace: text typed into `apply_migration` reformatted a little against the file.
   Worth knowing before anybody reads a raw `md5(prosrc)` mismatch as drift.
 
-**`0045_supplier_contact_details` was applied on 2026-08-27** and is the ledger's last entry. The
+**`0046_credit_note_gst_inclusive` was applied on 2026-09-01** (`20260901084855`) and is the
+ledger's last entry, **51** in all. One function, no table, no column, no policy, no capability;
+**0 credit notes and 0 credit note lines** existed, so nothing stored was re-interpreted. The live
+body is md5-identical to a database built from `supabase/migrations/` alone, first attempt. Proved
+as real sessions: a **board**'s call moved **nothing** while the Owner and the Office manager each
+got 72.70/6.61/72.70, all rolled back; 511 customers and 648 invoices unchanged; advisors **23**
+(it is SECURITY INVOKER, so correctly absent). The 2026-09-01 changelog entry has the full record.
+
+**`0045_supplier_contact_details` was applied on 2026-08-27** and was the ledger's last entry until
+the above. The
 MYOB contact card went on with it: **397 customer ABNs, 443 billing addresses, 471 contact people
 and 446 delivery locations where there had been 0, 0, 0 and 3**; suppliers gained 184 ABNs, 117
 addresses, 55 contact names and **176 default expense accounts**, and **1,347 of 1,515 supplier
