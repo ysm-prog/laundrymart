@@ -53,6 +53,7 @@ export async function countReturn(formData: FormData): Promise<void> {
   const { data: route } = await supabase
     .from("daily_routes")
     .select("id, code, depot_id, unloaded_at")
+    .eq("tenant_id", session.tenantId)
     .eq("id", parsed.data.route_id)
     .maybeSingle<{ id: string; code: string; depot_id: string | null; unloaded_at: string | null }>();
   if (!route) return fail(BACK, "That run could not be found.");
@@ -300,6 +301,7 @@ export async function advanceBatch(formData: FormData): Promise<void> {
   const { data: batch } = await supabase
     .from("production_batches")
     .select("id, batch_number, stage, depot_id")
+    .eq("tenant_id", session.tenantId)
     .eq("id", parsed.data.id)
     .maybeSingle<{ id: string; batch_number: string; stage: string; depot_id: string | null }>();
   if (!batch) return fail(BACK, "That batch could not be found.");
@@ -382,6 +384,7 @@ export async function rejectFromBatch(formData: FormData): Promise<void> {
 
   const { data: batch } = await supabase
     .from("production_batches").select("id, batch_number, stage, depot_id")
+    .eq("tenant_id", session.tenantId)
     .eq("id", parsed.data.batch_id)
     .maybeSingle<{ id: string; batch_number: string; stage: string; depot_id: string | null }>();
   if (!batch) return fail(BACK, "That batch could not be found.");
@@ -390,6 +393,7 @@ export async function rejectFromBatch(formData: FormData): Promise<void> {
   const { data: line } = await supabase
     .from("production_batch_lines")
     .select("id, item_id, owner_type, customer_id, quantity, rejected_quantity")
+    .eq("tenant_id", session.tenantId)
     .eq("id", parsed.data.line_id)
     .maybeSingle<BatchLine>();
   if (!line) return fail(backTo, "That batch line could not be found.");
@@ -489,6 +493,7 @@ export async function cancelBatch(formData: FormData): Promise<void> {
 
   const { data: batch } = await supabase
     .from("production_batches").select("id, batch_number, stage, depot_id")
+    .eq("tenant_id", session.tenantId)
     .eq("id", parsed.data.id)
     .maybeSingle<{ id: string; batch_number: string; stage: string; depot_id: string | null }>();
   if (!batch) return fail(BACK, "That batch could not be found.");

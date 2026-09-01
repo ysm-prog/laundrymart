@@ -420,6 +420,7 @@ export async function updateOrder(formData: FormData): Promise<void> {
       "priority, assigned_to, delivery_required, expected_delivery_date, " +
       "expected_collection_date, delivery_address, received_at",
     )
+    .eq("tenant_id", session.tenantId)
     .eq("id", id.data)
     .maybeSingle<Record<string, unknown>>();
 
@@ -686,7 +687,9 @@ export async function assignOrder(formData: FormData): Promise<void> {
   }
 
   const { data: before } = await supabase
-    .from("laundry_orders").select("assigned_to").eq("id", parsed.data.id)
+    .from("laundry_orders").select("assigned_to")
+    .eq("tenant_id", session.tenantId)
+    .eq("id", parsed.data.id)
     .maybeSingle<{ assigned_to: string | null }>();
 
   const { error } = await supabase

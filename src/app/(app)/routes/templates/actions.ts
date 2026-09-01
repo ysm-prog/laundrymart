@@ -175,7 +175,9 @@ export async function duplicateTemplate(formData: FormData): Promise<void> {
 
   const supabase = await createClient();
   const { data: source, error: readError } = await supabase
-    .from("route_templates").select("*").eq("id", id.data).single();
+    .from("route_templates").select("*")
+    .eq("tenant_id", session.tenantId)
+    .eq("id", id.data).single();
   if (readError) return fail("/routes/templates", describeDbError(readError));
 
   const { id: _id, created_at: _c, updated_at: _u, deleted_at: _d, ...rest } =
