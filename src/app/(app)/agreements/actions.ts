@@ -254,7 +254,9 @@ export async function createNewVersion(formData: FormData): Promise<void> {
 
   const supabase = await createClient();
   const { data: current, error: readError } = await supabase
-    .from("service_agreements").select("*").eq("id", id.data).single();
+    .from("service_agreements").select("*")
+    .eq("tenant_id", session.tenantId)
+    .eq("id", id.data).single();
   if (readError) return fail(`/agreements/${id.data}`, describeDbError(readError));
 
   const {

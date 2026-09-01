@@ -950,7 +950,9 @@ export async function recordPayment(formData: FormData): Promise<void> {
   await supabase.rpc("recalculate_invoice", { p_invoice: parsed.data.invoice_id });
 
   const { data: invoice } = await supabase
-    .from("invoices").select("total, amount_paid").eq("id", parsed.data.invoice_id).single();
+    .from("invoices").select("total, amount_paid")
+    .eq("tenant_id", session.tenantId)
+    .eq("id", parsed.data.invoice_id).single();
 
   if (invoice) {
     const paid = Number(invoice.amount_paid) >= Number(invoice.total);
@@ -1236,7 +1238,9 @@ export async function emailInvoice(formData: FormData): Promise<void> {
     // The fix is one click away (design B4): the toast links the customer form.
     const supabase = await createClient();
     const { data: owner } = await supabase
-      .from("invoices").select("customer_id").eq("id", parsed.data.id).maybeSingle();
+      .from("invoices").select("customer_id")
+      .eq("tenant_id", session.tenantId)
+      .eq("id", parsed.data.id).maybeSingle();
     return fail(backTo, "This customer has no billing email. Add one, or type an address to send to.",
       owner ? { href: `/customers/${owner.customer_id}/edit`, label: "Add their billing email" } : undefined);
   }

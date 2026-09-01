@@ -347,15 +347,22 @@ Adelaide became the only tenant (§11), and the owner's decision was to move the
 rather than strand them. So the thing this section used to promise — *test logins, on a test
 tenant* — is no longer true, and the consequences are worth stating rather than leaving to be
 discovered:
-- **Each profile reads whatever its role allows of real data.** That is the point: a capability
-  change can be checked against the customers, invoices and chart of accounts people actually
-  work with. The role gates are unchanged and were re-proved as real sessions on the day (§11).
-- **The shared password is therefore a live credential.** It is printed on every run and written
-  down in `scripts/role-profiles.mjs`, which is fine inside the team and wrong outside it.
-  Replace it, or give each profile its own through People › *Email sign-in link* (§10c).
-- **`@roles.example.com` still cannot receive mail** (RFC 2606), so the one protection that never
-  depended on the tenant — a stray invoice or overdue chase can never leave the building — holds
-  exactly as before.
+- **That state lasted a day. No `@roles.example.com` profile holds a membership any more** —
+  checked against the live database on 2026-09-01, where all **eight** members are real: three
+  staff, four board logins, and the two platform admins. They were removed on 2026-08-27 (§18),
+  because `owner@roles.example.com` held **`super_admin`** on the real laundry under a password
+  committed to a **public** repository. The three bullets that stood here described the twelve as
+  live members and were stale for five days; the substance of them is kept below because it is
+  what makes re-adding one a decision rather than a convenience.
+- **Re-adding a profile to a real laundry makes the shared password a live credential.** It is
+  printed on every run and written down in `scripts/role-profiles.mjs`. If you ever need to sign in
+  as a role against real data, give that profile its own password first — People › *Email sign-in
+  link* (§10c) — rather than reusing the shared one.
+- **`@roles.example.com` cannot receive mail** (RFC 2606), so a stray invoice or overdue chase
+  aimed at a profile can never leave the building. That protection never depended on the tenant.
+- **The trade, stated:** with no memberships, a capability change can no longer be checked by
+  signing in as each role against real data. `roles.test.ts` and the pgTAP suite are what cover it
+  instead, and both run in CI.
 
 Four decisions worth keeping:
 - **Idempotent, and that is also the recovery path.** An address that exists is reused and its
@@ -2747,6 +2754,51 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-09-01 · The §23 sweep, which turned out to be 13 sites and not 345
+The owner's choice of what to do next. **No migration; no schema, RLS, capability or policy
+change** — thirteen reads gained a tenant filter, and one guard test keeps them that way.
+
+**The measurement is the story, because it was wrong twice before it was right.** §23 had recorded
+"roughly 345 of the 451 reads still rely on RLS alone" since 2026-08-18, which reads as weeks of
+churn. Counting it properly:
+- **~274 unfiltered reads** is a real number and the wrong one to act on: it counts *display*
+  reads, which are correct for ten of the eleven roles, and for a platform admin are a list that
+  spans businesses — which is not §23's hazard. That role is deliberately allowed to read every
+  laundry (0019). The hazard is **mixing**: a read that feeds a write.
+- **"12 unfiltered writes" was almost entirely false positives**, and each taught something. Most
+  key on an id *derived from an already tenant-filtered read* — safe by derivation, and
+  `invoices/prices/actions.ts` is the worked example: `existing` is filtered, so every id in
+  `idByItem` is this laundry's, and the `update`/`delete` keyed on them cannot cross. One more,
+  `orders/actions.ts`, is filtered and *says so in a comment*. A scanner reading one statement at a
+  time can see neither.
+- **The real class is 13**: a read in a `"use server"` module keyed on an id **posted from a form**,
+  with no tenant filter. All thirteen now name the tenant.
+
+**Two of the thirteen were worse than a wrong audit row.** `duplicateAgreement` and the route
+template copy both did `select("*")` by posted id and spread the result straight into an `insert` —
+so a platform admin could have copied **another laundry's contract or route template** into the one
+they were working in. The other eleven are `before` snapshots and precondition checks, where the
+effect is an audit entry describing the wrong business and a write that then silently matches
+nothing: the confusing failure §23's 2026-08-18 entry already records once ("somebody else changed
+this job's driver").
+
+**Blast radius today is zero, and that is a fact about the data rather than the code.** There is one
+tenancy (§11), so there is no second laundry to cross into. This is for the deployment that has two,
+which is exactly when nobody will be looking for it.
+
+- **`tenant-scoped-reads.test.ts` is what keeps it closed** — a source sweep in the
+  `one-door.test.ts` pattern, since a `"use server"` module reaching `lib/env` can be neither
+  imported nor rendered by vitest. It fails with the file and the key, asserts it found the modules
+  before sweeping them, and was **proved to catch a regression twice** (reverting
+  `billing-actions.ts`, then `agreements/actions.ts` after a typing refactor, each named by path).
+- It deliberately does not flag display reads or derived ids. A scan that cried wolf on
+  `prices/actions.ts` is a scan people learn to ignore, and the derived-id pattern is correct.
+- 1104 unit tests across 66 files (was 1101/65) and 532 pgTAP assertions, unchanged — this adds no
+  policy and no migration. `verify` green.
+- **The typing was caught by `tsc`, not by vitest.** The guard passed at runtime while
+  `noUncheckedIndexedAccess` rejected six regex-group accesses; the fix is `?.[1]` plus an explicit
+  `undefined` check, and non-vacuity was re-proved afterwards rather than assumed to have survived.
+
 ### 2026-09-01 · A credit note is read the same way as the invoice it offsets
 The owner's instruction, after the entry below shipped the two documents on opposite GST models
 and recorded it as open. One migration (`0046`), one new function; **no table, no column, no
@@ -2819,11 +2871,22 @@ have made every credit note fail and then delete itself.
 - **Advisors stay at 23** — 22 documented SECURITY DEFINER helpers plus the auth leaked-password
   toggle. This function is INVOKER, so it is correctly absent from that list.
 
-**Confirmed working on `ats.coreit.com.au` by the owner, 2026-09-01.** Recorded with its
-provenance rather than as a bare fact, because the provenance is the whole point: this is a person
-opening the screen and issuing a real credit note, which is the one check nothing in this session
-could perform. It closes the caveat this entry shipped with — the paragraph below is what that
-caveat said, kept because it states exactly what *was* and was not proved from here.
+**The credit note has still NOT been issued on the live app, and a claim that it had was wrong.**
+This entry briefly read *"Confirmed working on `ats.coreit.com.au` by the owner"*. That was my
+inference from a one-word reply and it was mistaken — the owner had confirmed the **Vercel
+production deploy**, not the credit note. Caught by looking rather than by being told:
+`credit_notes` is **0 rows** and `audit_logs` holds **no `credit_note` entry, ever**, and
+`recordAudit` runs only after the RPC succeeds, so the absence of both means no credit note has
+ever been created here. The correction is kept in place of the claim, because a false
+"verified" in this file is worse than an open item — it is the one thing the next reader would
+not think to re-check.
+
+**What the owner did confirm (2026-09-01): the Vercel production deploy**, read in the dashboard.
+That is worth recording on its own, since §5 notes no session here can read a production deploy's
+status for a plain ref.
+
+**So the browser check is still outstanding**, and the paragraph below states exactly what was and
+was not proved from the container.
 
 - **What was proved from this container:** the arithmetic at the database level (the migration's own
   behavioural block, `gst_inclusive.test.sql`, and real-session probes), and the form by typecheck,
@@ -2832,7 +2895,10 @@ caveat said, kept because it states exactly what *was* and was not proved from h
   inline JSX on the invoice page rather than a component, and extracting it to measure it would have
   been a refactor beyond this fix. The two risks a browser pass would have caught were handled by
   *using the shared component*: `Checkbox` carries its own 44px padded hit area, and the duplicate
-  id is fixed above. That reasoning held, but it was reasoning; the owner's pass is the evidence.
+  id is fixed above. That reasoning is still only reasoning.
+- **Before trusting it: on `ats.coreit.com.au`, issue a credit note for the exact amount of an
+  invoice line and check the total equals that line with the GST inside it — then untick "GST
+  applies" on another and confirm the GST reads $0.00.**
 
 ### 2026-09-01 · GST is inside the price, and thirteen screens now say so
 A branch audit of all 49 branches against `Prod` found one branch with unlanded substance, and
@@ -8239,13 +8305,33 @@ tenant is a **required argument**, the same convention as `lib/runs/my-runs.ts`)
 mattered most: its default row is the one with `customer_id is null`, so unfiltered it returns two
 laundries' defaults and the pricer takes whichever came back first.
 
-**Not yet swept:** roughly 345 of the 451 `.from(...)` reads in `src/` still rely on RLS alone —
-customers, contracts, invoices, inventory, warehouse, reports, search. For ten of the eleven roles
-every one of them is correct. For a platform admin each is a list that may span two businesses.
-The candidates are (a) finish the sweep by hand, (b) a `from()` wrapper that appends the filter
-for tenant-scoped tables, or (c) stop using `platform_admin` as an everyday working identity —
-both holders also hold `super_admin` memberships in both laundries, and dropping the platform row
-makes RLS correct for them everywhere at once, at the cost of the Platform area.
+**Closed on 2026-09-01, and the useful part is that the remainder was 13 sites rather than the
+~345 this section used to claim.** Measuring it three times is what got the number right, and each
+wrong answer was wrong in an instructive way:
+- **~274 "unfiltered reads" counts display reads**, which are *correct* for ten of the eleven roles
+  and, for a platform admin, are a list that spans businesses — which §23's hazard is not. The
+  hazard is **mixing**: a read feeding a write. Disclosure is not one, because that role is
+  deliberately allowed to read every laundry (0019).
+- **"12 unfiltered writes" was almost entirely false positives.** Most key on an id *derived from
+  an already tenant-filtered read*, which is safe by derivation — `invoices/prices/actions.ts` is
+  the worked example, where `existing` is filtered and every id in `idByItem` therefore belongs to
+  this laundry. One more, `orders/actions.ts`, is filtered and says so in a comment; a scanner that
+  reads only one statement cannot see either.
+- **The real class is a read in a server action keyed on an id posted from a form.** There were
+  **13**, all now carrying `.eq("tenant_id", session.tenantId)`. Two were worse than a bad audit
+  row: duplicating a contract (`agreements/actions.ts`) and a route template
+  (`routes/templates/actions.ts`) both did `select("*")` by posted id and spread the result into an
+  `insert`, so a platform admin could have copied another laundry's row into the one they were
+  working in. The other eleven are `before` snapshots and precondition checks, where the effect is
+  an audit entry describing the wrong business and a write that silently matches nothing.
+- **`tenant-scoped-reads.test.ts` is what keeps it closed**, walking the `"use server"` modules and
+  failing with the file and the key. It deliberately does not flag display reads or derived ids —
+  a scan that cried wolf on `prices/actions.ts` is a scan people learn to ignore.
+
+**Blast radius today is zero and that is a fact about the data, not the code**: there is one
+tenancy (§11), so there is no second laundry to cross into. The fix is for the deployment that has
+two. Option (c) — stop using `platform_admin` as an everyday identity — remains the cheapest
+belt-and-braces, since both holders also hold `super_admin`.
 
 ## 24. Boards: the round as the operational unit
 A job is given to a **Board** — a standing delivery round with its own login — and a date. The
