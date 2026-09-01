@@ -38,6 +38,7 @@ export async function openNotification(formData: FormData): Promise<void> {
   const { data: notification } = await supabase
     .from("notifications")
     .select("id, href")
+    .eq("tenant_id", session.tenantId)
     .eq("id", parsed.data.id)
     .in("audience", audiences)
     .maybeSingle<{ id: string; href: string }>();

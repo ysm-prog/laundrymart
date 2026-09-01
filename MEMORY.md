@@ -9,7 +9,30 @@ where that is genuinely what it is. The multi-tenancy architecture stays: one op
 fact about today's data, not a reason to drop `tenant_id`, RLS, or §23's rule that a read feeding a
 write names its tenant.
 
-## Latest: the credit note is on the invoice's GST model
+## Latest: the §23 sweep — 13 sites, not 345
+2026-09-01. No migration. §23 had claimed ~345 unfiltered reads since August; the number that
+matters is **13** — a read in a `"use server"` module keyed on an id **posted from a form**, with no
+tenant filter. All now carry `.eq("tenant_id", session.tenantId)`.
+
+- **~274 "unfiltered" counts display reads** — correct for 10 of 11 roles, and a platform admin is
+  *allowed* to read across laundries. The hazard is **mixing** (a read feeding a write), not
+  disclosure.
+- **"12 unfiltered writes" was nearly all false positives**: ids derived from an already-filtered
+  read are safe (`prices/actions.ts`), and `orders/actions.ts` is filtered and says so in a comment.
+- **Two of the 13 were real data hazards**: `duplicateAgreement` and the route-template copy did
+  `select("*")` by posted id and spread it into an `insert` — another laundry's row copied in.
+- **Blast radius today is zero** because there is one tenancy. This is for the two-tenant case.
+- `tenant-scoped-reads.test.ts` guards it, proved non-vacuous twice. 1104 tests / 66 files.
+- **`tsc` caught the guard's typing where vitest did not** — `noUncheckedIndexedAccess` vs regex
+  groups. Non-vacuity re-proved after the fix.
+
+## Also: the credit note is NOT yet confirmed live — I got that wrong
+I recorded "confirmed working by the owner" from a one-word reply. Wrong: the owner had confirmed
+the **Vercel deploy**. `credit_notes` is 0 rows and `audit_logs` has no `credit_note` entry ever,
+and `recordAudit` only runs after the RPC succeeds — so no credit note has ever been created here.
+§18 carries the correction and the browser check is outstanding again.
+
+## Previously: the credit note is on the invoice's GST model
 2026-09-01, on `claude/repo-branch-prod-review-2dn2sc`. One migration (**`0046`**), one function;
 no table, no column, no policy, no capability, no row changed. **Applied live already** as
 `20260901084855` — before the code merges, which matters here rather than being convention: the

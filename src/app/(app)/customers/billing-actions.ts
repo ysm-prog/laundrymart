@@ -51,6 +51,7 @@ export async function updateCustomerBilling(formData: FormData): Promise<void> {
   const { data: before } = await supabase
     .from("customers")
     .select("business_name, billing_method, rate_card_agreement_id, payment_terms_days")
+    .eq("tenant_id", session.tenantId)
     .eq("id", parsed.data.id)
     .maybeSingle<{
       business_name: string; billing_method: string;
