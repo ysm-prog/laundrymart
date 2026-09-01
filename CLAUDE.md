@@ -1155,7 +1155,7 @@ Proofs in `supabase/tests/`: `rls_isolation`, `rls_coverage`, `driver_scope`,
 `job_billing`, `purchases_scope`, `supplier_payments_scope`, `import_helpers`,
 `import_activation`, `member_directory`, `boards_scope`, `item_master`,
 `audit_log_scope`, `run_sequence`, `accounts_scope`, `open_draft_invoices`,
-`single_laundry`, `charge_accounts`, `gst_inclusive` (**521 assertions** across 28 files).
+`single_laundry`, `charge_accounts`, `gst_inclusive` (**532 assertions** across 28 files).
 
 **Count assertions, not lines starting with `ok`.** pgTAP's function is literally named `ok`, so
 psql prints a centred `ok` **column header** above each result — and `grep -c '^\s*ok '` counts
@@ -1275,8 +1275,26 @@ run, and each fails on its own, so neither could be taken without the other and 
   rule misbehaving.
 
 **Dependabot re-offers this group as its versions move** — the same two blocked bumps arrived
-again as #44 with `vitest` added — so the errors above are the thing to re-run, not the PR number
-to remember.
+again as #44 with `vitest` added, and a third time as **#53** (TypeScript 7.0.2, ESLint 10.9.0,
+`@types/react-dom` 19.2.5) — so the errors above are the thing to re-run, not the PR number to
+remember.
+
+**Re-run on 2026-09-01 against #53's versions, and both still fail identically.** TypeScript 7.0.2
+raises `typescript-eslint does not support TS 7.0` from
+`eslint-config-next/node_modules/typescript-eslint/dist/index.js:52` — still the *nested* copy, so
+still not liftable by a root override. ESLint 10.9.0 raises
+`TypeError: scopeManager.addGlobals is not a function` at
+`eslint/lib/languages/js/source-code/source-code.js:221`, inside `addDeclaredGlobals` during
+`SourceCode.finalize`, so it dies before any rule runs rather than misbehaving on one.
+- **What is new is a date to watch rather than a fix.** TS 7's error now names
+  [typescript-eslint#10940](https://github.com/typescript-eslint/typescript-eslint/issues/10940),
+  which tracks support for **TS >= 7.1** — so the blocker is upstream and versioned, not
+  open-ended. It also points at running typescript-eslint against the TS 6 API side by side, which
+  is a way to take TS 7 *without* waiting; deliberately not done here, because it means carrying
+  two TypeScript versions to satisfy a linter, and the pin costs nothing today.
+- **`@types/react-dom` 19.2.5 was taken** and #53 closed. One package moved in the lockfile with
+  none added or removed — measured as package sets, not diff lines, for the reason above — and the
+  whole gate is green on a clean `npm ci`.
 
 **What was salvageable was taken**: `eslint-config-next` `^16.3.1` (resolving to 16.3.3) and
 `vitest` `^4.1.11`, both green on TypeScript 6 + ESLint 9. Keeping `eslint-config-next` current is
@@ -1705,7 +1723,16 @@ reports six false gaps.
   leaving its usual trace: text typed into `apply_migration` reformatted a little against the file.
   Worth knowing before anybody reads a raw `md5(prosrc)` mismatch as drift.
 
-**`0045_supplier_contact_details` was applied on 2026-08-27** and is the ledger's last entry. The
+**`0046_credit_note_gst_inclusive` was applied on 2026-09-01** (`20260901084855`) and is the
+ledger's last entry, **51** in all. One function, no table, no column, no policy, no capability;
+**0 credit notes and 0 credit note lines** existed, so nothing stored was re-interpreted. The live
+body is md5-identical to a database built from `supabase/migrations/` alone, first attempt. Proved
+as real sessions: a **board**'s call moved **nothing** while the Owner and the Office manager each
+got 72.70/6.61/72.70, all rolled back; 511 customers and 648 invoices unchanged; advisors **23**
+(it is SECURITY INVOKER, so correctly absent). The 2026-09-01 changelog entry has the full record.
+
+**`0045_supplier_contact_details` was applied on 2026-08-27** and was the ledger's last entry until
+the above. The
 MYOB contact card went on with it: **397 customer ABNs, 443 billing addresses, 471 contact people
 and 446 delivery locations where there had been 0, 0, 0 and 3**; suppliers gained 184 ABNs, 117
 addresses, 55 contact names and **176 default expense accounts**, and **1,347 of 1,515 supplier
