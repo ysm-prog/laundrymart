@@ -9,6 +9,7 @@ import {
   Button, ButtonLink, Card, DataTable, EmptyState, Notice,
   PageHeader, SkeletonRows, StatusBadge, humanise,
 } from "@/components/ui";
+import { ConfirmSubmit } from "@/components/confirm-submit";
 import { Field, FormActions, Select, SubmitButton, Textarea } from "@/components/form";
 import { assignRoute, setRouteStatus } from "../actions";
 
@@ -130,10 +131,34 @@ export default async function DailyRouteDetailPage({
                   <Button variant={index === 0 ? "primary" : "secondary"}>{step.label}</Button>
                 </form>
               ))}
-              <form action={setRouteStatus}>
+              {/* The one destructive control on this screen, and the last
+                  one-tap destructive action in the app. It now states its
+                  consequence beside the button like every other final action —
+                  Close run on `/run`, the invoice void, Cancel job.
+
+                  `contents` for the same reason the job page uses it: the panel
+                  `ConfirmSubmit` opens is `w-full`, which only fills the row if
+                  the form is not itself the flex item sizing it.
+
+                  No `reasonName`. `setRouteStatus` records the move in
+                  `audit_logs` with who and when, and has nowhere to put a
+                  sentence — its schema strips what it does not name, so a reason
+                  typed here would be collected and silently dropped. Asking for
+                  one on those terms is worse than not asking. */}
+              <form action={setRouteStatus} className="contents">
                 <input type="hidden" name="id" value={id} />
                 <input type="hidden" name="status" value="cancelled" />
-                <Button variant="danger">Cancel run</Button>
+                <ConfirmSubmit
+                  label="Cancel run"
+                  consequence={
+                    `Cancelling ends ${route.code} for ${date(route.route_date)}. Its stops are `
+                    + "not cancelled and not moved — the laundry, the customers and the history "
+                    + "all stay exactly as they are — but the run stops taking work, and the "
+                    + "next job assigned for that day starts a fresh one. Nothing on this "
+                    + "screen reopens it."
+                  }
+                  pendingLabel="Cancelling…"
+                />
               </form>
             </div>
           ) : null}
