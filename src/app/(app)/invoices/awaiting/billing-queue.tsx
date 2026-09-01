@@ -168,7 +168,7 @@ export function BillingQueue({
         <span className="text-sm text-muted-foreground">
           {selected.size === 0
             ? "Nothing selected"
-            : `${selected.size} selected · ${formatMoney(chosenValue)} before GST`}
+            : `${selected.size} selected · ${formatMoney(chosenValue)}, GST included`}
         </span>
         <div className="ml-auto flex flex-wrap items-center gap-3">
           {/* Price first, then approve — the order the work is done in, and the

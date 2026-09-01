@@ -265,7 +265,7 @@ export function JobChargesEditor({
         <div className="flex flex-wrap items-center gap-4">
           <span className="text-sm text-muted-foreground">
             Subtotal <span className="font-semibold text-foreground tabular-nums">{formatMoney(subtotal)}</span>
-            {" "}before GST
+            {" "}GST included
           </span>
           <SubmitButton size="md">Save charges</SubmitButton>
         </div>

@@ -197,18 +197,21 @@ async function Revenue({ from, to }: { from: string; to: string }) {
   const supabase = await createClient();
   const { data } = await supabase
     .from("invoices")
-    .select("issue_date, status, subtotal, tax_amount, total, customers(business_name)")
+    .select("issue_date, status, tax_amount, total, customers(business_name)")
     .gte("issue_date", from).lte("issue_date", to).neq("status", "void")
-    .returns<Array<{ issue_date: string; status: string; subtotal: number; tax_amount: number; total: number; customers: { business_name: string } | null }>>();
+    .returns<Array<{ issue_date: string; status: string; tax_amount: number; total: number; customers: { business_name: string } | null }>>();
 
   const rows = data ?? [];
+  // `invoices.subtotal` is deliberately not read here. Since 0043 a line amount is
+  // GST-inclusive, so `recalculate_invoice` stores `subtotal = total` and extracts the
+  // tax from inside it — no stored column holds an ex-GST figure, and reading `subtotal`
+  // as one printed the inclusive total under an "ex GST" label. It is derived instead.
   const totals = rows.reduce(
     (acc, row) => ({
-      subtotal: acc.subtotal + Number(row.subtotal),
       tax: acc.tax + Number(row.tax_amount),
       total: acc.total + Number(row.total),
     }),
-    { subtotal: 0, tax: 0, total: 0 },
+    { tax: 0, total: 0 },
   );
 
   const byCustomer = new Map<string, number>();
@@ -224,7 +227,7 @@ async function Revenue({ from, to }: { from: string; to: string }) {
   return (
     <div className="space-y-4">
       <div className="grid gap-3 sm:grid-cols-3">
-        <Stat label="Invoiced (ex GST)" value={money(totals.subtotal)} />
+        <Stat label="Invoiced (ex GST)" value={money(totals.total - totals.tax)} />
         <Stat label="GST" value={money(totals.tax)} />
         <Stat label="Invoiced (inc GST)" value={money(totals.total)} />
       </div>
