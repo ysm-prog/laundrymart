@@ -218,7 +218,7 @@ export function consolidateChargeLines(entries: readonly ChargeEntry[]): Consoli
   return lines;
 }
 
-/** What the rolled-up lines add up to, before GST. */
+/** What the rolled-up lines add up to, GST included (a line amount is inclusive since 0043). */
 export function consolidatedSubtotal(lines: readonly ConsolidatedLine[]): number {
   return round2(lines.reduce((sum, line) => sum + line.amount, 0));
 }

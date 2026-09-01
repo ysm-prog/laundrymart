@@ -367,7 +367,7 @@ function priceFromList(
   };
 }
 
-/** What the priced lines add up to, before GST. */
+/** What the priced lines add up to, GST included (a line amount is inclusive since 0043). */
 export function jobChargeSubtotal(lines: readonly { amount: number }[]): number {
   return round2(lines.reduce((sum, line) => sum + Number(line.amount ?? 0), 0));
 }

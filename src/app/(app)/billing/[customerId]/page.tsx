@@ -112,7 +112,7 @@ export default async function CustomerBillingPage({
               value={detail.totals.reduce((sum, t) => sum + t.quantity, 0).toLocaleString("en-AU")}
               hint="Across the period" />
         <Stat label="Invoice lines" value={String(detail.lines.length)} hint="After rolling up" />
-        <Stat label="Invoice total" value={money(detail.subtotal)} hint="Before GST" />
+        <Stat label="Invoice total" value={money(detail.subtotal)} hint="GST included" />
       </div>
 
       {detail.awaitingReview > 0 ? (
@@ -166,7 +166,7 @@ export default async function CustomerBillingPage({
             <div className="flex flex-col gap-3 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between">
               <p className="text-sm text-muted-foreground">
                 {detail.billableJobIds.length} job(s) · {detail.lines.length} line(s) ·{" "}
-                <span className="font-medium text-foreground">{money(detail.subtotal)}</span> before GST
+                <span className="font-medium text-foreground">{money(detail.subtotal)}</span>, GST included
               </p>
               {canGenerate ? (
                 <form action={generateCustomerPeriodInvoice}>

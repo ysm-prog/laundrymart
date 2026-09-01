@@ -9,7 +9,34 @@ where that is genuinely what it is. The multi-tenancy architecture stays: one op
 fact about today's data, not a reason to drop `tenant_id`, RLS, or §23's rule that a read feeding a
 write names its tenant.
 
-## Latest: the MYOB contact card is in — merged and live
+## Latest: the GST proof landed, and thirteen labels corrected
+2026-09-01, on `claude/repo-branch-prod-review-2dn2sc`. **No migration** — `git diff` over
+`supabase/migrations/` is empty. Came out of auditing all 49 branches against `Prod`.
+
+- **All 49 branches reconciled.** 45 fully in `Prod`; 3 held back by decision
+  (dependabot PR #53's blocked TS 7 / ESLint 10 pins, `feature/job-billing-workflow`,
+  `claude/phase-6-build-0yybvq`); 1 partly unlanded. All 49 repo migrations are applied live.
+- **`Prod` has six root commits.** 19 branches share **no merge base** with it, so
+  `git diff Prod...branch` fails on those — and fails *silently* if stderr is dropped, reporting
+  zero files and making a branch look absorbed when nothing was compared. Compare those file by
+  file. This is the single most useful thing to know before auditing this repo again.
+- **Landed `supabase/tests/gst_inclusive.test.sql`** from
+  `claude/code-review-requirements-ns6bav` — the only proof anywhere that calls
+  `recalculate_invoice`. 574 assertions across 28 files, from 557 across 27. Non-vacuous:
+  reverting the function to 0006's exclusive shape fails 7 of its 17.
+- **Fixed thirteen "before GST" labels**, not the two first reported. A charge amount reaches an
+  invoice line unchanged and a line amount is GST-inclusive since 0043. `/reports` was printing
+  the *same number* under "ex GST" and "inc GST" — live, that read $150,562.97 where the truth
+  is $150,552.61. It is derived as `total − tax` now and `subtotal` is out of the query.
+- **`gst-labels.test.ts`** sweeps `src/` for the claim, in the `one-door.test.ts` pattern, and
+  was proved to catch a reinstated label.
+- **Still open, and the owner's call:** invoices are GST-inclusive while credit notes still add
+  GST on top (`tax = amount × gstRate`). The `Amount (ex GST)` label on that form is *correct*;
+  the two documents are on opposite models. Offsetting a $72.70 inclusive line needs $66.09.
+- **Not opened behind the auth gate** — no Supabase credentials here. Check Reports on
+  `ats.coreit.com.au`: the ex-GST and inc-GST stats should now differ by the GST between them.
+
+## Previously: the MYOB contact card is in — merged and live
 2026-08-27, **merged to `Prod` (`15a4188`) and `Dev` (`9fb7968`) on 2026-08-28**, identical trees,
 CI green on all three jobs for both. Nothing left to apply: `0045` went on the hosted project
 before the merge and is still the ledger's last entry. Owner sent
