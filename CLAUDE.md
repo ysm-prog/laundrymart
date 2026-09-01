@@ -656,6 +656,40 @@ one customer's exception to the list. `/notifications` (the bell's list) is
 deliberately off the map — the bell is its entry point, so it needs no rail row and
 renders no tab strip. Tested in `src/lib/__tests__/nav.test.ts`.
 
+**A route that cannot be drawn is answered at two levels** (2026-09-01). There were no boundary
+files at all until then: all eighteen `notFound()` calls and every uncaught server render landed
+on Next's own unbranded page, outside the shell. Now `src/app/{error,not-found,global-error}.tsx`
+and `src/app/(app)/{error,not-found}.tsx`, all drawing `BoundaryScreen` (§10b).
+
+Two levels rather than one, because a boundary renders inside the layouts *above* it: the `(app)`
+pair keeps the rail, the header and the bell, so somebody whose customer page threw is still
+standing in the application and can click elsewhere. The root pair has no shell to render inside
+and supplies its own `<main id="main">` — it covers `/`, `/login`, `/auth/*`, `/offline`,
+`/design-preview`, every URL matching no route, **and a failure in `(app)/layout.tsx` itself**,
+which the `(app)` boundary cannot catch because that layout is above it.
+
+Three rules the copy and the markup hold:
+- **The error is never rendered — not the message, not the stack.** Only Next's `digest` hash,
+  as a support reference to quote. A server error's message can carry a connection string or a
+  row the reader may not see, and none of it is anything they can act on. No digest is issued for
+  a throw in the browser, and the screen says so rather than printing an empty box (§0's rule
+  about not inventing a value, applied to a reference).
+- **`not-found` says the record does not exist, and stops there.** It does not soften into "or
+  you may not have permission": a capability refusal is `requireCapability()`'s redirect to
+  `/dashboard?error=forbidden` — a different screen with different words. Blurring them would
+  make every 404 quietly confirm that something is behind the address, which is the reasoning
+  `my-runs/jobs/[id]` already wrote down ("a 404 tells an attacker nothing a 403 would not").
+- **`global-error.tsx` depends on nothing.** It replaces the root layout, so it brings its own
+  `<html>`/`<body>`, and every rule on it is an inline style with the light tokens' hex written
+  out: `globals.css` is imported by the layout that just failed, and a stylesheet that did not
+  load is one of the ordinary ways to arrive there. System font stack, light only — the dark
+  class comes from a pre-paint script that has not run, and an inline style carries no media
+  query.
+
+`/design-preview#route-boundaries-preview` is where they can actually be looked at; one needs an
+uncaught throw and the other a missing row, which is not something a live project can be asked to
+produce on demand.
+
 ## 7. Schema
 - `0001_init` — tenants, memberships, RLS helpers, `apply_tenant_policy`, number sequences,
   audit logs.
@@ -1463,6 +1497,12 @@ Overlays: `ConfirmSubmit` for destructive actions (**inline, not a modal** — t
 belongs beside the control, especially on a phone) and `Overlay` for a genuine detour
 (centred dialog from `sm`, bottom sheet below it; focus trap, scroll lock, Escape, focus
 returned on close). Entry is a page, not a modal — that has not changed.
+**`ConfirmSubmit` now guards every destructive action there is** (2026-09-01): "Cancel run" on
+`/routes/daily/[id]` was the last plain one-tap `variant="danger"` button in the app.
+
+Route boundaries (`boundary-screen.tsx`): `BoundaryScreen` is the screen `error.tsx` and
+`not-found.tsx` draw, and `SupportReference` is the one line either is allowed to say about the
+error — see §6.
 
 `DataTable` is the one table. Below `sm` each row becomes a labelled card, so a new screen gets
 a working phone layout for free and a hand-rolled `<table>` silently does not. `bare` drops its
@@ -2754,6 +2794,64 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-09-01 · The last unguarded destructive action, and the route boundaries that never existed
+Two findings from `docs/UX_ESSENTIALS_AUDIT.md` (items 16 and 20), which audited the twenty
+interface details against this tree and traced every verdict to a line. **No migration; no schema,
+RLS, capability or policy change**, and no server action altered — this is entirely `src/app` and
+one new shared component.
+
+**"Cancel run" was the one genuinely unguarded destructive control in the product.** A plain
+`<Button variant="danger">` inside a one-click form on `/routes/daily/[id]`, cancelling a whole
+day's route with no confirmation, no reason and no undo — while `ConfirmSubmit` already guarded
+40+ actions across 15 files, including several less consequential than this one. It now uses the
+same component, with `className="contents"` on the form for the reason the job page already uses
+it: the panel is `w-full`, which only fills the row if the form is not itself the flex item sizing
+it.
+
+- **The copy names the run and what actually happens to its stops**, because that is the fact an
+  office manager needs and the one the screen does not otherwise state: *"Cancelling ends {code}
+  for {date}. Its stops are not cancelled and not moved — the laundry, the customers and the
+  history all stay exactly as they are — but the run stops taking work, and the next job assigned
+  for that day starts a fresh one. Nothing on this screen reopens it."* Each clause was
+  checked against code rather than assumed: `resolveRun` excludes `cancelled` from its
+  find-or-create, and the page hides every workflow button once the status is `cancelled`.
+- **No reason field, deliberately.** `setRouteStatus` records the move in `audit_logs` with who
+  and when, and its Zod schema strips what it does not name — so a reason typed here would be
+  collected and silently dropped. Asking on those terms is worse than not asking; adding somewhere
+  to keep it is a separate change to a screen no rail row points at.
+
+**There were no route boundaries at all.** Zero `error.tsx`, `not-found.tsx` or `global-error.tsx`
+anywhere in `src/app`, so all eighteen `notFound()` calls and every uncaught server render landed
+on Next's bare default page — outside the shell, in a typeface and palette that are not this
+product's. §6 now records the arrangement; the three rules worth repeating here:
+
+- **The error is never rendered.** Not the message, not the stack — only `digest`, as a reference
+  to quote. A stack in the UI is an information disclosure and is not something the reader can
+  act on either way. Where Next issues no digest (a throw in the browser) the screen says so
+  instead of showing an empty box.
+- **`not-found` says the record does not exist and does not hedge**, keeping it distinct from
+  `requireCapability()`'s "You do not have access to that area." A 404 that adds "or you may not
+  have permission" confirms the row is there.
+- **`global-error.tsx` is styled inline and depends on nothing** — its own `<html>`/`<body>`, the
+  light tokens' hex written out, a system font stack. A stylesheet that failed to load is one of
+  the ways to arrive there.
+
+Two levels rather than one: the `(app)` pair renders inside the shell, so the rail and header stay
+and there is somewhere to click; the root pair covers everything outside it, unmatched URLs, and a
+failure in `(app)/layout.tsx`, which the `(app)` boundary is above and cannot catch.
+
+- `BoundaryScreen` and `SupportReference` (`components/boundary-screen.tsx`) hold the markup once,
+  shaped after `/offline` — the app's existing answer to a whole screen that is not a screen of
+  data. `/design-preview#route-boundaries-preview` renders both, because neither can be reached on
+  a real route without inducing the failure it exists for.
+- 1104 unit tests across 66 files and 532 pgTAP assertions, both unchanged — this adds no domain
+  rule to test. `verify` green (typecheck, lint, 1104 tests, build), and the build now emits a
+  static `/_not-found` whose HTML was read back to confirm the copy. Screenshotted at 390 and
+  1280, light and dark: no horizontal overflow at either width.
+- **Not verified in a browser: `global-error.tsx` rendering.** Reaching it needs the root layout
+  to throw, which no local run produces. It compiles into both the server and client bundles and
+  typechecks; that it *looks* right on a broken page is reasoning, not a check.
+
 ### 2026-09-01 · The §23 sweep, which turned out to be 13 sites and not 345
 The owner's choice of what to do next. **No migration; no schema, RLS, capability or policy
 change** — thirteen reads gained a tenant filter, and one guard test keeps them that way.

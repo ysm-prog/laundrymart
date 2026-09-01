@@ -1,11 +1,12 @@
 import { AppNav, BrandMark } from "@/components/app-nav";
-import { Moon, Search } from "lucide-react";
+import { FileQuestion, Moon, Search, TriangleAlert } from "lucide-react";
 import { Checkbox, Field, Input, Select, SubmitButton } from "@/components/form";
 import {
   Badge, Button, ButtonLink, Card, DataTable, EmptyState, Eyebrow, Notice,
   PageHeader, Stage, Stat, StatusBadge, cx,
 } from "@/components/ui";
 import { ConfirmSubmit } from "@/components/confirm-submit";
+import { BoundaryScreen, SupportReference } from "@/components/boundary-screen";
 import { OverlayDemo } from "./overlay-demo";
 import { CompleteJob } from "@/app/(app)/orders/complete-job";
 import { NotificationBell } from "@/components/notification-bell";
@@ -1604,6 +1605,61 @@ export default function DesignPreviewPage() {
               canBackdate={false}
               returnPath="/design-preview"
             />
+          </section>
+
+          <section id="route-boundaries-preview" className="space-y-4 border-t pt-8">
+            <PageHeader
+              title="When a screen cannot be drawn"
+              description="The two route boundaries, as they render inside the shell."
+            />
+            {/* The real component behind `error.tsx` and `not-found.tsx`. There
+                is no other way to look at either: one needs an uncaught throw
+                and the other a missing row, and both are exactly the states a
+                live project cannot be asked to produce on demand. Drawn here
+                without `standalone`, which is how the `(app)` pair renders —
+                inside AppShell's own <main>.
+
+                The reference line is the point of the first one. An error
+                boundary shows Next's `digest` hash and nothing else: never the
+                message, never the stack. The second card is what a browser-side
+                throw looks like, where there is no digest to quote and the
+                screen says so instead of printing an empty box. */}
+            <Card title="Something went wrong" description="error.tsx — the failure never reaches the screen.">
+              <BoundaryScreen
+                tone="danger"
+                icon={<TriangleAlert className="size-6" />}
+                title="Something went wrong"
+                description={
+                  "This screen could not be loaded. Nothing you had already saved is affected — "
+                  + "the failure was in showing the page, not in recording your work."
+                }
+                actions={
+                  <>
+                    <Button type="button" size="lg">Try again</Button>
+                    <ButtonLink href="/design-preview" size="lg">Go to today</ButtonLink>
+                  </>
+                }
+                footer={<SupportReference digest="3641827905442316" />}
+              />
+            </Card>
+
+            <Card title="No support reference" description="A throw in the browser: Next issues no digest, and this says so.">
+              <SupportReference />
+            </Card>
+
+            <Card title="That record does not exist" description="not-found.tsx — the answer to all eighteen notFound() calls.">
+              <BoundaryScreen
+                icon={<FileQuestion className="size-6" />}
+                title="That record does not exist"
+                description={
+                  "Nothing in this laundry matches that address. It may have been deleted or "
+                  + "hidden since the link was made — either way, there is nothing here to open."
+                }
+                actions={
+                  <ButtonLink href="/design-preview" size="lg" variant="primary">Go to today</ButtonLink>
+                }
+              />
+            </Card>
           </section>
         </main>
       </div>

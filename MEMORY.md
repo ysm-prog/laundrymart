@@ -9,7 +9,30 @@ where that is genuinely what it is. The multi-tenancy architecture stays: one op
 fact about today's data, not a reason to drop `tenant_id`, RLS, or §23's rule that a read feeding a
 write names its tenant.
 
-## Latest: the §23 sweep — 13 sites, not 345
+## Latest: the last unguarded destructive action, and the route boundaries
+2026-09-01, on `claude/ux-essentials-fixes-h2tq5i`. **No migration, no server action changed** —
+`src/app` and one new shared component. Two findings from `docs/UX_ESSENTIALS_AUDIT.md` (the audit
+itself is documentation-only on PR #60 and is deliberately not in this branch).
+
+- **"Cancel run" (`/routes/daily/[id]`) was the only one-tap destructive control left.** Now
+  `ConfirmSubmit`, like the other 40+. The copy names the run and says what happens to its stops —
+  checked against `resolveRun` (which excludes `cancelled` from find-or-create) and against the
+  page's own button-hiding, not assumed. **No reason field**: `setRouteStatus`'s schema strips what
+  it does not name, so one typed here would be collected and dropped.
+- **There were no route boundaries at all** — zero `error.tsx`/`not-found.tsx`/`global-error.tsx`,
+  so all 18 `notFound()` calls landed on Next's bare page. Now a root trio and an `(app)` pair, the
+  second so the rail and header survive a failure and there is somewhere to click. §6 has the
+  reasoning.
+- **Three rules to keep**: the error is never rendered (only `digest`, as a support reference);
+  `not-found` says "does not exist" and never hedges toward permission; `global-error.tsx` is
+  inline-styled and depends on no stylesheet, font or theme class.
+- `verify` green. Baseline `verify` was run **before** any edit and also passed, so nothing here is
+  standing on an already-red gate. `/_not-found`'s prerendered HTML was read back; the gallery
+  section was screenshotted at 390 and 1280, light and dark, with no horizontal overflow.
+- **`global-error.tsx` has not been seen rendering.** It needs the root layout to throw, which no
+  local run produces. Compiled and typechecked only — say that, do not upgrade it.
+
+## Previously: the §23 sweep — 13 sites, not 345
 2026-09-01. No migration. §23 had claimed ~345 unfiltered reads since August; the number that
 matters is **13** — a read in a `"use server"` module keyed on an id **posted from a form**, with no
 tenant filter. All now carry `.eq("tenant_id", session.tenantId)`.
