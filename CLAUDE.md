@@ -1106,9 +1106,15 @@ Proofs in `supabase/tests/`: `rls_isolation`, `rls_coverage`, `driver_scope`,
 `job_billing`, `purchases_scope`, `supplier_payments_scope`, `import_helpers`,
 `import_activation`, `member_directory`, `boards_scope`, `item_master`,
 `audit_log_scope`, `run_sequence`, `accounts_scope`, `open_draft_invoices`,
-`single_laundry`, `charge_accounts`, `gst_inclusive` (**574 assertions** across 28 files).
-The count read 504 here until 2026-09-01 and had been stale since 0045; the measured figure
-before `gst_inclusive` landed was 557.
+`single_laundry`, `charge_accounts`, `gst_inclusive` (**521 assertions** across 28 files).
+
+**Count assertions, not lines starting with `ok`.** pgTAP's function is literally named `ok`, so
+psql prints a centred `ok` **column header** above each result — and `grep -c '^\s*ok '` counts
+every one of those as a passing test. On this suite that inflates 521 to 574, and 504 to 557. The
+figure to trust is `ok <n> - `, which local and CI agree on exactly. This is recorded because this
+file has carried the inflated number twice: the 2026-08-27 entry's *"557 across 27 files"* is that
+mistake, and on 2026-09-01 a session read the correct 504 here, called it stale, and replaced it
+with 574. It was right the first time.
 
 **`run-db-tests.sh` parses the output rather than trusting the exit code, and that is not
 pedantry.** `psql` exits 0 for a pgTAP file that runs to completion, and a failed assertion is a
@@ -2670,8 +2676,11 @@ author's own `supabase/tests/gst_inclusive.test.sql`, and **no other file in the
 - **Confirmed non-vacuous rather than assumed to be doing something**: reverting
   `recalculate_invoice` to 0006's exclusive shape fails **7 of the 17**, including the assertion
   that names $79.97 outright.
-- 574 pgTAP assertions across 28 files, from 557 across 27 — the whole DB job run on a fresh
-  Postgres 16 with the seed on top.
+- **521 pgTAP assertions across 28 files, from 504 across 27** — the whole DB job run on a fresh
+  Postgres 16 with the seed on top, and confirmed identical in CI file by file.
+  This entry first said 574 from 557, which was wrong in a way worth keeping: those come from
+  counting lines that begin with `ok`, and psql prints an `ok` column *header* above every pgTAP
+  result. 53 headers, 53 phantom assertions. §7 has the rule.
 
 **The labels were the cost, and there were thirteen of them rather than the two first reported.**
 A charge amount becomes an invoice line amount unchanged — proved by reading live rows
@@ -2705,7 +2714,7 @@ them. It asserts it scanned the tree before sweeping it (a walk finding nothing 
 every assertion), and was **proved to catch a regression** by reinstating one label and watching
 it name the file. It deliberately does not ban "ex GST", which the credit note earns.
 
-- 1101 unit tests (was 1098) and 574 pgTAP assertions (was 557). `verify` green — typecheck,
+- 1101 unit tests (was 1098) and 521 pgTAP assertions (was 504). `verify` green — typecheck,
   lint, tests and the production build.
 
 **Not verified behind the auth gate.** This container has no Supabase credentials, so the two

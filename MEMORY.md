@@ -22,7 +22,7 @@ write names its tenant.
   file. This is the single most useful thing to know before auditing this repo again.
 - **Landed `supabase/tests/gst_inclusive.test.sql`** from
   `claude/code-review-requirements-ns6bav` — the only proof anywhere that calls
-  `recalculate_invoice`. 574 assertions across 28 files, from 557 across 27. Non-vacuous:
+  `recalculate_invoice`. **521** assertions across 28 files, from **504** across 27. Non-vacuous:
   reverting the function to 0006's exclusive shape fails 7 of its 17.
 - **Fixed thirteen "before GST" labels**, not the two first reported. A charge amount reaches an
   invoice line unchanged and a line amount is GST-inclusive since 0043. `/reports` was printing
@@ -30,6 +30,10 @@ write names its tenant.
   is $150,552.61. It is derived as `total − tax` now and `subtotal` is out of the query.
 - **`gst-labels.test.ts`** sweeps `src/` for the claim, in the `one-door.test.ts` pattern, and
   was proved to catch a reinstated label.
+- **Count pgTAP assertions with `ok <n> - `, never `grep -c '^\s*ok '`.** pgTAP's function is
+  named `ok`, so psql prints an `ok` column *header* above every result and the line count reads
+  53 too high (521→574, 504→557). I shipped the inflated figure once before catching it; §7 has
+  the rule.
 - **Still open, and the owner's call:** invoices are GST-inclusive while credit notes still add
   GST on top (`tax = amount × gstRate`). The `Amount (ex GST)` label on that form is *correct*;
   the two documents are on opposite models. Offsetting a $72.70 inclusive line needs $66.09.
