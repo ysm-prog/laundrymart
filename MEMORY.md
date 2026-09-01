@@ -31,9 +31,9 @@ action calls the function, so code-first would make every credit note fail and t
 - **`run-db-tests.sh` caught my `plan(27)` against 28 run** — the check earning its place.
 - Proved live as real sessions: a **board**'s call moved **nothing**; Owner and Office manager both
   got 72.70/6.61/72.70. Rolled back, counts unchanged, advisors 23.
-- **Not opened behind the auth gate**, and the card is not in `/design-preview` (inline JSX, not a
-  component). Check on `ats.coreit.com.au`: credit a line's exact amount and confirm the GST
-  matches, then untick "GST applies" and confirm $0.00.
+- **Confirmed working on `ats.coreit.com.au` by the owner** (2026-09-01) — a person issuing a real
+  credit note, which is the one check no session here could do. The database half was proved from
+  the container; the screen half is the owner's pass.
 
 ## Also 2026-09-01: two stale figures corrected, and the dependency group decided
 - **§7 read 521 assertions and §11 called `0045` the ledger's last entry.** Both stale from my own
@@ -45,6 +45,11 @@ action calls the function, so code-first would make every credit note fail and t
   rule runs. New and worth watching: TS 7's error now names typescript-eslint#10940, which tracks
   **TS >= 7.1**, so the blocker is upstream and versioned. `@types/react-dom` 19.2.5 taken — one
   package moved, none added or removed, gate green on a clean `npm ci`.
+- **Lockfile caveat worth carrying:** that bump also dropped `libc` from Next's four optional Linux
+  SWC binaries, because this container's **npm 10.9.7** is older than whatever wrote them. Not a
+  correctness problem (`os`/`cpu` still gate them), it oscillates with whoever runs npm, and it was
+  deliberately not hand-edited back. §10a has it. **Package sets are the right measure of a bump and
+  are blind to field-level rewrites** — the sharper half of that lesson.
 
 ## Previously: the GST proof landed, and thirteen labels corrected — merged and live
 2026-09-01, **merged to `Prod` (`6ce65e0`, PR #54) and `Dev` (`4be9be4`)**, identical trees with
