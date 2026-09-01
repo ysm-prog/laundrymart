@@ -1275,8 +1275,26 @@ run, and each fails on its own, so neither could be taken without the other and 
   rule misbehaving.
 
 **Dependabot re-offers this group as its versions move** — the same two blocked bumps arrived
-again as #44 with `vitest` added — so the errors above are the thing to re-run, not the PR number
-to remember.
+again as #44 with `vitest` added, and a third time as **#53** (TypeScript 7.0.2, ESLint 10.9.0,
+`@types/react-dom` 19.2.5) — so the errors above are the thing to re-run, not the PR number to
+remember.
+
+**Re-run on 2026-09-01 against #53's versions, and both still fail identically.** TypeScript 7.0.2
+raises `typescript-eslint does not support TS 7.0` from
+`eslint-config-next/node_modules/typescript-eslint/dist/index.js:52` — still the *nested* copy, so
+still not liftable by a root override. ESLint 10.9.0 raises
+`TypeError: scopeManager.addGlobals is not a function` at
+`eslint/lib/languages/js/source-code/source-code.js:221`, inside `addDeclaredGlobals` during
+`SourceCode.finalize`, so it dies before any rule runs rather than misbehaving on one.
+- **What is new is a date to watch rather than a fix.** TS 7's error now names
+  [typescript-eslint#10940](https://github.com/typescript-eslint/typescript-eslint/issues/10940),
+  which tracks support for **TS >= 7.1** — so the blocker is upstream and versioned, not
+  open-ended. It also points at running typescript-eslint against the TS 6 API side by side, which
+  is a way to take TS 7 *without* waiting; deliberately not done here, because it means carrying
+  two TypeScript versions to satisfy a linter, and the pin costs nothing today.
+- **`@types/react-dom` 19.2.5 was taken** and #53 closed. One package moved in the lockfile with
+  none added or removed — measured as package sets, not diff lines, for the reason above — and the
+  whole gate is green on a clean `npm ci`.
 
 **What was salvageable was taken**: `eslint-config-next` `^16.3.1` (resolving to 16.3.3) and
 `vitest` `^4.1.11`, both green on TypeScript 6 + ESLint 9. Keeping `eslint-config-next` current is

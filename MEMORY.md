@@ -35,6 +35,17 @@ action calls the function, so code-first would make every credit note fail and t
   component). Check on `ats.coreit.com.au`: credit a line's exact amount and confirm the GST
   matches, then untick "GST applies" and confirm $0.00.
 
+## Also 2026-09-01: two stale figures corrected, and the dependency group decided
+- **§7 read 521 assertions and §11 called `0045` the ledger's last entry.** Both stale from my own
+  0046 commit an hour earlier: it is **532 across 28 files**, and `0046` (`20260901084855`) is the
+  last entry. Found by checking the docs against the live project, not by the Stop hook.
+- **PR #53 (the dev group) closed, its safe third taken.** TypeScript 7 and ESLint 10 **re-tested**
+  and both still fail identically — TS 7 from the *nested* typescript-eslint in
+  `eslint-config-next` (so no root override lifts it), ESLint 10 in `addDeclaredGlobals` before any
+  rule runs. New and worth watching: TS 7's error now names typescript-eslint#10940, which tracks
+  **TS >= 7.1**, so the blocker is upstream and versioned. `@types/react-dom` 19.2.5 taken — one
+  package moved, none added or removed, gate green on a clean `npm ci`.
+
 ## Previously: the GST proof landed, and thirteen labels corrected — merged and live
 2026-09-01, **merged to `Prod` (`6ce65e0`, PR #54) and `Dev` (`4be9be4`)**, identical trees with
 `Dev` **0 behind**, CI green on all three jobs for both (runs 256 and 257, read off the log rather
