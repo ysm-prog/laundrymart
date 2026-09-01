@@ -208,7 +208,7 @@ export default async function AwaitingInvoicePage({
               hint={approved.length > 0 ? "Add them to a draft" : "All on a draft"}
               tone={approved.length > 0 ? "warning" : "default"} />
         <Stat label="Approved value" value={money(approvedValue)}
-              hint={filtered ? "Before GST, filtered" : "Before GST"} />
+              hint={filtered ? "GST included, filtered" : "GST included"} />
       </div>
 
       <ListControls

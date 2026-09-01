@@ -67,7 +67,7 @@ export type PeriodCustomerRow = {
   jobCount: number;
   /** Pieces of laundry across those jobs — counted from the job, not the price. */
   itemQuantity: number;
-  /** What the priced jobs come to, before GST. Unpriced jobs contribute nothing. */
+  /** What the priced jobs come to, GST included. Unpriced jobs contribute nothing. */
   value: number;
   /** Jobs whose charges nobody has checked yet. */
   awaitingReview: number;

@@ -92,7 +92,7 @@ export default async function BillingPage({
         <Stat label="Pieces of laundry" value={totals.items.toLocaleString("en-AU")}
               hint="Counted from the jobs" />
         <Stat label="Value" value={money(totals.value)}
-              hint={totals.review > 0 ? `${totals.review} job(s) not reviewed` : "Before GST"} />
+              hint={totals.review > 0 ? `${totals.review} job(s) not reviewed` : "GST included"} />
       </div>
 
       <Card

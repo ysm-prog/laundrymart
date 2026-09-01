@@ -131,7 +131,7 @@ export async function priceSelectedJobs(formData: FormData): Promise<void> {
   // Said as a failure when anything was refused, for the same reason the month
   // -end run does: an unpriced job is invisible on the invoices themselves, and
   // looks exactly like laundry that was never taken in.
-  const summary = `Priced ${priced.length} job(s), ${money(total)} before GST.${gapNote}${refusedNote}`;
+  const summary = `Priced ${priced.length} job(s), ${money(total)}, GST included.${gapNote}${refusedNote}`;
   return refused.length > 0 ? fail(QUEUE, summary, link) : done(QUEUE, summary);
 }
 
@@ -213,7 +213,7 @@ export async function approveSelectedJobs(formData: FormData): Promise<void> {
     ? ` ${refused.length} could not be approved — ${refused[0]}`
     : "";
 
-  const summary = `Approved ${approved.length} job(s), ${money(total)} before GST.`
+  const summary = `Approved ${approved.length} job(s), ${money(total)}, GST included.`
     + `${draftNote}${unplacedNote}${note}`;
 
   // An unplaced job is reported as a failure even though its approval stood: it

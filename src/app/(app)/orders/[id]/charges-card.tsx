@@ -213,7 +213,7 @@ export async function ChargesCard({
               <span className="text-muted-foreground">
                 Subtotal{" "}
                 <span className="ml-2 font-semibold text-foreground tabular-nums">{money(subtotal)}</span>
-                <span className="ml-1">before GST</span>
+                <span className="ml-1">GST included</span>
               </span>
             </div>
           ) : null}

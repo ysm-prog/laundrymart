@@ -997,10 +997,15 @@ renders no tab strip. Tested in `src/lib/__tests__/nav.test.ts`.
     (`63e12d194b94fd82c793947d579842a0`) rather than by eye. What is missing is
     that author's prose, not any of their SQL. If their branch lands, this path
     conflicts and theirs is the one to keep.
-  - **Nothing in the pgTAP suite calls `recalculate_invoice`**, so the suite
-    passing over this migration is a *vacuous* pass with respect to the one thing
-    it changes. Said plainly because this repo has shipped that mistake twice:
-    the totalling above was proved by direct probe instead.
+  - **This was a vacuous pass until 2026-09-01, and is not any more.** Nothing in
+    the pgTAP suite called `recalculate_invoice`, so 27 green files said nothing
+    whatever about the one thing this migration changes — said plainly at the time
+    because this repo had shipped that mistake twice, and the totalling was proved
+    by direct probe instead. `gst_inclusive.test.sql` is that author's own proof,
+    landed from their branch: 17 assertions running the function against real rows,
+    including the client's $72.70 / $6.61 / $72.70 invoice and the $79.97 the old
+    exclusive model produced. Confirmed non-vacuous by reverting the function to
+    0006's shape, which fails 7 of them.
 - `0042_free_status_moves` — **a job's stage is picked, not walked.**
   `guard_laundry_order_transition` rebuilt from 0031's body — carrying 0017's two
   billing hooks and 0031's board clearing through verbatim, which is the trap
@@ -1101,7 +1106,15 @@ Proofs in `supabase/tests/`: `rls_isolation`, `rls_coverage`, `driver_scope`,
 `job_billing`, `purchases_scope`, `supplier_payments_scope`, `import_helpers`,
 `import_activation`, `member_directory`, `boards_scope`, `item_master`,
 `audit_log_scope`, `run_sequence`, `accounts_scope`, `open_draft_invoices`,
-`single_laundry`, `charge_accounts` (**504 assertions** across 27 files).
+`single_laundry`, `charge_accounts`, `gst_inclusive` (**521 assertions** across 28 files).
+
+**Count assertions, not lines starting with `ok`.** pgTAP's function is literally named `ok`, so
+psql prints a centred `ok` **column header** above each result — and `grep -c '^\s*ok '` counts
+every one of those as a passing test. On this suite that inflates 521 to 574, and 504 to 557. The
+figure to trust is `ok <n> - `, which local and CI agree on exactly. This is recorded because this
+file has carried the inflated number twice: the 2026-08-27 entry's *"557 across 27 files"* is that
+mistake, and on 2026-09-01 a session read the correct 504 here, called it stale, and replaced it
+with 574. It was right the first time.
 
 **`run-db-tests.sh` parses the output rather than trusting the exit code, and that is not
 pedantry.** `psql` exits 0 for a pgTAP file that runs to completion, and a failed assertion is a
@@ -2640,6 +2653,75 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-09-01 · GST is inside the price, and thirteen screens now say so
+A branch audit of all 49 branches against `Prod` found one branch with unlanded substance, and
+the omission had a visible cost. **No migration; no schema, RLS, capability, policy or role
+change** — `git diff` over `supabase/migrations/` is empty. One pgTAP proof landed, thirteen
+labels corrected.
+
+**`0043` shipped without the branch that wrote it, and its proof was the missing half.**
+`claude/code-review-requirements-ns6bav` authored the migration that moved invoice totals from
+*GST added on top* to *GST extracted from inside the price*. The migration went on live and was
+later reconstructed into the repo from the ledger — I compared both copies and they differ only
+in dollar-quote tags and whitespace, so there was never a schema gap. What never arrived was the
+author's own `supabase/tests/gst_inclusive.test.sql`, and **no other file in the suite calls
+`recalculate_invoice`**: 27 green proof files said nothing about the one thing 0043 changed.
+§7 recorded that as a vacuous pass and it stayed that way for six days.
+
+- **Landed unmodified from that branch**, and it passes against *this* repo's 0043 rather than
+  the branch's: 17 assertions, plan matching, running the function against real rows — the
+  client's own invoice ($72.70 subtotal, $6.61 tax, $72.70 total), the $79.97 the old exclusive
+  model produced, a `FRE` line contributing no tax, freight carrying its own answer, and the
+  three values the database refuses.
+- **Confirmed non-vacuous rather than assumed to be doing something**: reverting
+  `recalculate_invoice` to 0006's exclusive shape fails **7 of the 17**, including the assertion
+  that names $79.97 outright.
+- **521 pgTAP assertions across 28 files, from 504 across 27** — the whole DB job run on a fresh
+  Postgres 16 with the seed on top, and confirmed identical in CI file by file.
+  This entry first said 574 from 557, which was wrong in a way worth keeping: those come from
+  counting lines that begin with `ok`, and psql prints an `ok` column *header* above every pgTAP
+  result. 53 headers, 53 phantom assertions. §7 has the rule.
+
+**The labels were the cost, and there were thirteen of them rather than the two first reported.**
+A charge amount becomes an invoice line amount unchanged — proved by reading live rows
+(`fuel` 50.00 → `LJ00007 — fuel` 50.00; `Towels - Black` 44.00 → `LJ00012 — Towels - Black`
+44.00) rather than inferred — and since 0043 a line amount is GST-inclusive. So every figure
+`jobChargeSubtotal`, `consolidatedSubtotal` and `period.ts`'s `chargeSubtotal` add up already
+carries GST, and thirteen places said otherwise: two toasts, four screens, three `Stat` hints,
+two inline subtotals and three doc comments.
+
+- **`/reports` was the worst of them**, because it printed the *same number twice under
+  contradictory labels*. `recalculate_invoice` stores `subtotal = total`, so
+  `<Stat label="Invoiced (ex GST)" value={money(totals.subtotal)} />` sat beside
+  `Invoiced (inc GST)` showing the identical figure. Measured against the live database: all
+  **648** invoices have `subtotal = total`; the card read **$150,562.97** as ex-GST where the
+  truth is **$150,552.61**. **No stored column holds an ex-GST figure any more**, so it is
+  derived as `total − tax` and `subtotal` is dropped from the query rather than left fetched and
+  unread — the shape §10a's `no-unused-vars` rule exists to catch.
+- **The overstatement is $10.36 today and that is not reassurance.** 646 of the 648 invoices are
+  imported MYOB headers carrying no lines and therefore no tax; the only two that carry GST are
+  the two raised through the app. The error scales with every real invoice from here.
+- **`Amount (ex GST)` on the credit note is left exactly as it is, and that is a decision.**
+  `createCreditNote` computes `tax = amount × gstRate` and 0043 does not touch credit notes, so
+  the label is true. What it leaves is the two documents on opposite models — offsetting a
+  $72.70 inclusive line needs $66.09 typed — which is **still open** and is the owner's call.
+
+**A source sweep guards it, because thirteen copies of one claim is what this class does.**
+`gst-labels.test.ts` walks `src/` and fails on any file claiming "before GST", in the
+`one-door.test.ts` / `email-branding.test.ts` pattern — these are strings inside async server
+components and `"use server"` modules that reach `lib/env`, so no behavioural test can reach
+them. It asserts it scanned the tree before sweeping it (a walk finding nothing would pass
+every assertion), and was **proved to catch a regression** by reinstating one label and watching
+it name the file. It deliberately does not ban "ex GST", which the credit note earns.
+
+- 1101 unit tests (was 1098) and 521 pgTAP assertions (was 504). `verify` green — typecheck,
+  lint, tests and the production build.
+
+**Not verified behind the auth gate.** This container has no Supabase credentials, so the two
+screens were proved by the live-data arithmetic above, the guard test and the build rather than
+by being opened. **Before trusting it: open Reports on `ats.coreit.com.au` and check the ex-GST
+and inc-GST stats now differ by the GST figure between them.**
+
 ### 2026-08-27 · The MYOB contact card lands, and a supplier's bills know where they post
 `MYOB_Contacts_Full_Details.xlsx` — 640 active contacts (449 customers, 191 suppliers), 37
 columns, captured the same day. One migration (`0045`), nine nullable columns on `suppliers`

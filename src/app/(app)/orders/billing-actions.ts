@@ -138,7 +138,9 @@ export async function updateJobCharges(formData: FormData): Promise<void> {
 
   revalidatePath(`/orders/${job.id}`);
   revalidatePath(LIST);
-  return done(back, `Charges saved — ${money(jobChargeSubtotal(charges.lines))} before GST.`);
+  // "before GST" until 2026-09-01, which was wrong: a charge amount becomes an
+  // invoice line amount unchanged, and since 0043 a line amount is GST-inclusive.
+  return done(back, `Charges saved — ${money(jobChargeSubtotal(charges.lines))}, GST included.`);
 }
 
 /* ----------------------------------------------------------- approve it --- */
@@ -172,7 +174,7 @@ export async function approveJobCharges(formData: FormData): Promise<void> {
   revalidatePath(DRAFTS);
   revalidatePath("/invoices");
 
-  const summary = `Job ${result.orderNumber} approved at ${money(result.subtotal)} before GST.`
+  const summary = `Job ${result.orderNumber} approved at ${money(result.subtotal)}, GST included.`
     + describePlacementOutcome(result.placement);
 
   // A placement that did not happen is reported as a failure even though the
