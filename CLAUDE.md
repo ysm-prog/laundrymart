@@ -517,6 +517,15 @@ then undone rather than never configured. The cost is the thing it was presumabl
 comments on pull requests again. **Observed working the same day** — the Vercel status appears on
 `cc7da9f`, so this is a checked fact rather than a claim about what the setting ought to do.
 
+**A deploy reporting itself on GitHub is not the same as a session being able to read it.** The
+status is posted — observed on `cc7da9f` above — and a *pull request's* statuses are readable from
+a session here (`pull_request_read` with `get_status`), but that is the **preview** build, and for
+a plain ref such as a `Prod` merge commit no tool in this environment returns statuses or check
+runs. **Two** changelog entries call that *"the standing gap §5 records"*; it was never recorded
+here, and it is a **tooling** limit rather than a configuration one. (Two others state it
+correctly — they attribute only `github.silent` to §5 and then name the missing tool.) Read a
+production deploy in the Vercel dashboard, and do not "fix" `github.silent` for it.
+
 **The Vercel build command is `bash scripts/verify.sh || next build`, so a failing gate does not
 stop a deploy** — it falls through to a plain build and ships. That is deliberate (a deployment is
 better than none while a flaky check is sorted out) and it means *deploy succeeded* and *the gate
@@ -2745,11 +2754,24 @@ parents, and the live ledger's last entry is still `0045_supplier_contact_detail
   tree rather than assumed from an identical tree** — `verify` green (1101 tests across 65 files)
   and the whole DB job on a fresh Postgres 16 with the seed, **521 assertions across 28 files, 0
   failing**, matching `Prod` exactly.
-- **The Vercel production deploy is not confirmable from this session**, the standing gap §5
-  records — `get_commit` returns no statuses and no tool here lists check runs for a ref. The
-  *preview* deployment did report Ready on the pull request, which is `github.silent: false`
-  working as intended, but that is the preview and not production. Read it in the Vercel
-  dashboard.
+- **The Vercel *production* deploy is not confirmable from this session, and the limit is this
+  session's tooling rather than the configuration.** A **pull request's** statuses *are* readable:
+  `pull_request_read` with `get_status` returned Vercel *Ready* on #54 and again on the pull
+  request carrying this very record. But a PR's head is the feature branch, so what that confirms
+  is always the **preview**. Production deploys from `Prod`, whose merge commit is nobody's PR
+  head, and for a plain ref `get_commit` carries no statuses at all and nothing here lists check
+  runs. Read production in the Vercel dashboard.
+  - **Three corrections came out of writing this one bullet, which is the argument for checking
+    a sentence before committing it.** (i) The first draft said *no tool here returns commit
+    statuses* — broader than what was checked; the limit is the **ref**, not the statuses.
+    (ii) **Two** earlier entries call this *"the standing gap §5 records"* and **mis-attribute
+    it**: §5 records the *opposite*, that `github.silent` is `false` and the status was observed
+    on `cc7da9f`. So the status is very likely sitting on `Prod`'s commit and this session simply
+    cannot read it; anyone reading those two would go and re-fix a setting that already works.
+    (iii) That count was itself first written as *four*, by grepping the phrase and counting my
+    own two quotations of it — the other two entries state the limit **correctly**, naming only
+    `github.silent` as §5's and then the missing tool as the obstacle. §5 now carries the
+    distinction.
 
 ### 2026-08-27 · The MYOB contact card lands, and a supplier's bills know where they post
 `MYOB_Contacts_Full_Details.xlsx` — 640 active contacts (449 customers, 191 suppliers), 37

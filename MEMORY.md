@@ -42,9 +42,14 @@ hosted project**. Came out of auditing all 49 branches against `Prod`.
   the two documents are on opposite models. Offsetting a $72.70 inclusive line needs $66.09.
 - **Not opened behind the auth gate** — no Supabase credentials here. Check Reports on
   `ats.coreit.com.au`: the ex-GST and inc-GST stats should now differ by the GST between them.
-- **The Vercel *production* deploy was never confirmed from a session** — the standing §5 gap; no
-  tool here returns commit statuses or check runs for a ref. The *preview* did report Ready on the
-  PR, which is not the same claim. Read production in the Vercel dashboard.
+- **The Vercel *production* deploy was never confirmed from a session — a tooling limit, not a
+  configuration one.** A **PR's** statuses are readable (`pull_request_read` → `get_status` gave
+  Vercel *Ready* on #54 and #55), but a PR head is the feature branch, so that is always the
+  **preview**. Production deploys from `Prod`, whose commit is no PR's head, and for a plain ref
+  `get_commit` carries no statuses and nothing lists check runs. **Do not "fix" `github.silent`
+  for this** — it is already `false` and the status was observed on `cc7da9f`; two changelog
+  entries mis-attribute the gap to §5, which records the opposite (two others state it right).
+  Read the dashboard.
 
 ## Previously: the MYOB contact card is in — merged and live
 2026-08-27, **merged to `Prod` (`15a4188`) and `Dev` (`9fb7968`) on 2026-08-28**, identical trees,
