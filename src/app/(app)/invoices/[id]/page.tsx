@@ -19,7 +19,7 @@ import {
   PageHeader, SkeletonRows, Stat, StatusBadge, humanise,
 } from "@/components/ui";
 import { ConfirmSubmit } from "@/components/confirm-submit";
-import { Field, Input, Select, SubmitButton } from "@/components/form";
+import { Checkbox, Field, Input, Select, SubmitButton } from "@/components/form";
 import { InvoiceLineForm, type LineFormAccount, type LineFormItem } from "./line-form";
 import { LineCode, LineCoding } from "./line-coding";
 import { PrintButton } from "@/components/print-button";
@@ -223,12 +223,33 @@ export default async function InvoiceDetailPage({
             <form action={createCreditNote} className="grid gap-3 sm:grid-cols-2">
               <input type="hidden" name="invoice_id" value={id} />
               <input type="hidden" name="customer_id" value={invoice.customer_id} />
-              <Field label="Amount (ex GST)" name="amount" required>
+              {/*
+                * GST-inclusive, like the invoice line it offsets. It said
+                * "(ex GST)" until 0046 and that was true of the old arithmetic —
+                * the action added 10% on top — which meant offsetting a $72.70
+                * line took $66.09 typed here. Now the figure entered is the
+                * figure credited, and the GST is found inside it.
+                */}
+              <Field
+                label="Amount (inc GST)"
+                name="amount"
+                hint="What the customer is credited. Enter the amount as it appears on the invoice."
+                required
+              >
                 <Input name="amount" type="number" step="0.01" min={0} required />
               </Field>
               <Field label="Reason" name="reason" required>
                 <Input name="reason" required placeholder="Short delivery on 12 March" />
               </Field>
+              {/*
+                * Ticked by default, which is what this form always did in
+                * effect — the line defaulted to taxable and the header was
+                * always taxed. Worth asking now rather than assuming: under the
+                * inclusive model this decides whether a eleventh of the amount
+                * already typed is GST, so crediting a GST-free line with it on
+                * overstates the customer's GST.
+                */}
+              <Checkbox id="credit-note-taxable" name="taxable" label="GST applies" defaultChecked />
               <div className="sm:col-span-2">
                 <SubmitButton variant="secondary">Issue credit note</SubmitButton>
               </div>
