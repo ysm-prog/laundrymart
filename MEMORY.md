@@ -9,9 +9,12 @@ where that is genuinely what it is. The multi-tenancy architecture stays: one op
 fact about today's data, not a reason to drop `tenant_id`, RLS, or §23's rule that a read feeding a
 write names its tenant.
 
-## Latest: the GST proof landed, and thirteen labels corrected
-2026-09-01, on `claude/repo-branch-prod-review-2dn2sc`. **No migration** — `git diff` over
-`supabase/migrations/` is empty. Came out of auditing all 49 branches against `Prod`.
+## Latest: the GST proof landed, and thirteen labels corrected — merged and live
+2026-09-01, **merged to `Prod` (`6ce65e0`, PR #54) and `Dev` (`4be9be4`)**, identical trees with
+`Dev` **0 behind**, CI green on all three jobs for both (runs 256 and 257, read off the log rather
+than the status). **No migration** — `git diff` over `supabase/migrations/` is empty and the live
+ledger's last entry is still `0045_supplier_contact_details`, so **nothing is outstanding for the
+hosted project**. Came out of auditing all 49 branches against `Prod`.
 
 - **All 49 branches reconciled.** 45 fully in `Prod`; 3 held back by decision
   (dependabot PR #53's blocked TS 7 / ESLint 10 pins, `feature/job-billing-workflow`,
@@ -39,6 +42,14 @@ write names its tenant.
   the two documents are on opposite models. Offsetting a $72.70 inclusive line needs $66.09.
 - **Not opened behind the auth gate** — no Supabase credentials here. Check Reports on
   `ats.coreit.com.au`: the ex-GST and inc-GST stats should now differ by the GST between them.
+- **The Vercel *production* deploy was never confirmed from a session — a tooling limit, not a
+  configuration one.** A **PR's** statuses are readable (`pull_request_read` → `get_status` gave
+  Vercel *Ready* on #54 and #55), but a PR head is the feature branch, so that is always the
+  **preview**. Production deploys from `Prod`, whose commit is no PR's head, and for a plain ref
+  `get_commit` carries no statuses and nothing lists check runs. **Do not "fix" `github.silent`
+  for this** — it is already `false` and the status was observed on `cc7da9f`; two changelog
+  entries mis-attribute the gap to §5, which records the opposite (two others state it right).
+  Read the dashboard.
 
 ## Previously: the MYOB contact card is in — merged and live
 2026-08-27, **merged to `Prod` (`15a4188`) and `Dev` (`9fb7968`) on 2026-08-28**, identical trees,
