@@ -9,7 +9,32 @@ where that is genuinely what it is. The multi-tenancy architecture stays: one op
 fact about today's data, not a reason to drop `tenant_id`, RLS, or §23's rule that a read feeding a
 write names its tenant.
 
-## Latest: the GST proof landed, and thirteen labels corrected — merged and live
+## Latest: the credit note is on the invoice's GST model
+2026-09-01, on `claude/repo-branch-prod-review-2dn2sc`. One migration (**`0046`**), one function;
+no table, no column, no policy, no capability, no row changed. **Applied live already** as
+`20260901084855` — before the code merges, which matters here rather than being convention: the
+action calls the function, so code-first would make every credit note fail and then delete itself.
+
+- **The bug:** `0043` made an invoice line GST-**inclusive**; `createCreditNote` went on computing
+  `tax = amount × gst_rate` in app code. Offsetting a $72.70 line took **$66.09** typed, and
+  crediting $72.70 produced a **$79.97** credit note.
+- **The fix is the mechanism.** `recalculate_credit_note()` is the twin of `recalculate_invoice()`,
+  so the GST model has one home for both documents. Copying the formula into the action would have
+  fixed the numbers and kept the shape that caused it — 0043 changed the invoice function and
+  *could not* reach a rule living elsewhere.
+- The header now follows its own lines (it never did), `taxable` is asked rather than assumed, and
+  a failed line or total deletes the credit note rather than leaving one reading $0.00.
+- **0 credit notes existed on the project**, so nothing stored was re-interpreted.
+- **532 pgTAP assertions across 28 files** (was 521/28-with-17-in-that-file); 1101 unit tests
+  unchanged. Reverting the function to the exclusive model fails **5 assertions by name**.
+- **`run-db-tests.sh` caught my `plan(27)` against 28 run** — the check earning its place.
+- Proved live as real sessions: a **board**'s call moved **nothing**; Owner and Office manager both
+  got 72.70/6.61/72.70. Rolled back, counts unchanged, advisors 23.
+- **Not opened behind the auth gate**, and the card is not in `/design-preview` (inline JSX, not a
+  component). Check on `ats.coreit.com.au`: credit a line's exact amount and confirm the GST
+  matches, then untick "GST applies" and confirm $0.00.
+
+## Previously: the GST proof landed, and thirteen labels corrected — merged and live
 2026-09-01, **merged to `Prod` (`6ce65e0`, PR #54) and `Dev` (`4be9be4`)**, identical trees with
 `Dev` **0 behind**, CI green on all three jobs for both (runs 256 and 257, read off the log rather
 than the status). **No migration** — `git diff` over `supabase/migrations/` is empty and the live
@@ -37,9 +62,9 @@ hosted project**. Came out of auditing all 49 branches against `Prod`.
   named `ok`, so psql prints an `ok` column *header* above every result and the line count reads
   53 too high (521→574, 504→557). I shipped the inflated figure once before catching it; §7 has
   the rule.
-- **Still open, and the owner's call:** invoices are GST-inclusive while credit notes still add
-  GST on top (`tax = amount × gstRate`). The `Amount (ex GST)` label on that form is *correct*;
-  the two documents are on opposite models. Offsetting a $72.70 inclusive line needs $66.09.
+- ~~Still open: invoices GST-inclusive, credit notes adding GST on top.~~ **Closed by `0046`** —
+  see the section above. The `Amount (ex GST)` label really was correct; the model under it was
+  the thing to change.
 - **Not opened behind the auth gate** — no Supabase credentials here. Check Reports on
   `ats.coreit.com.au`: the ex-GST and inc-GST stats should now differ by the GST between them.
 - **The Vercel *production* deploy was never confirmed from a session — a tooling limit, not a
