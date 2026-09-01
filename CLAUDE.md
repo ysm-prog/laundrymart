@@ -517,6 +517,15 @@ then undone rather than never configured. The cost is the thing it was presumabl
 comments on pull requests again. **Observed working the same day** — the Vercel status appears on
 `cc7da9f`, so this is a checked fact rather than a claim about what the setting ought to do.
 
+**A deploy reporting itself on GitHub is not the same as a session being able to read it.** The
+status is posted — observed on `cc7da9f` above — and a *pull request's* statuses are readable from
+a session here (`pull_request_read` with `get_status`), but that is the **preview** build, and for
+a plain ref such as a `Prod` merge commit no tool in this environment returns statuses or check
+runs. **Two** changelog entries call that *"the standing gap §5 records"*; it was never recorded
+here, and it is a **tooling** limit rather than a configuration one. (Two others state it
+correctly — they attribute only `github.silent` to §5 and then name the missing tool.) Read a
+production deploy in the Vercel dashboard, and do not "fix" `github.silent` for it.
+
 **The Vercel build command is `bash scripts/verify.sh || next build`, so a failing gate does not
 stop a deploy** — it falls through to a plain build and ships. That is deliberate (a deployment is
 better than none while a flaky check is sorted out) and it means *deploy succeeded* and *the gate
@@ -2721,6 +2730,48 @@ it name the file. It deliberately does not ban "ex GST", which the credit note e
 screens were proved by the live-data arithmetic above, the guard test and the build rather than
 by being opened. **Before trusting it: open Reports on `ats.coreit.com.au` and check the ex-GST
 and inc-GST stats now differ by the GST figure between them.**
+
+**Merged to `Prod` (`6ce65e0`, PR #54) and `Dev` (`4be9be4`) on 2026-09-01**, both holding
+identical trees — `git diff Prod Dev` is empty — with `Dev` **0 behind**. **Nothing to apply**:
+this release adds no migration, `git diff` over `supabase/migrations/` is empty against both
+parents, and the live ledger's last entry is still `0045_supplier_contact_details`.
+
+- **CI green on all three jobs for both runs** — `Prod` run 256, `Dev` run 257 — Verify, Security
+  (gitleaks strict + audit), and the DB job applying all 49 migrations to a fresh Postgres 16 with
+  the whole pgTAP suite and the seed. **Read off the log, not the status**, which is the lesson
+  this file records five times over: **0** `not ok`, no plan mismatch, `pgTAP suite passed`, and
+  `gst_inclusive`'s 17 assertions passing **by name**. Stated exactly: the fetched log is a *tail*
+  covering 24 of the 28 test blocks, so the suite verdict and the zero failures are the evidence
+  for the whole, and the local run is what covered all 28 at 521.
+- **A merge commit rather than the fast-forward the last several entries record, and deliberately
+  so.** `Prod` was an ancestor of the branch, so either was available; a squash would have
+  collapsed the second commit — which corrects this branch's own assertion count — into the first.
+  This file's practice is to keep a correction legible rather than tidy it away, and that is worth
+  more than a linear history. `Prod` was not force-pushed.
+- **`Dev` was a catch-up merge carrying no source change of its own**, the shape every entry since
+  2026-08-26 records: its 26 commits `Prod` lacked were *all* previous catch-up merges, and the
+  only tree difference was exactly this branch's 16 files. **The gate was re-run on the merged
+  tree rather than assumed from an identical tree** — `verify` green (1101 tests across 65 files)
+  and the whole DB job on a fresh Postgres 16 with the seed, **521 assertions across 28 files, 0
+  failing**, matching `Prod` exactly.
+- **The Vercel *production* deploy is not confirmable from this session, and the limit is this
+  session's tooling rather than the configuration.** A **pull request's** statuses *are* readable:
+  `pull_request_read` with `get_status` returned Vercel *Ready* on #54 and again on the pull
+  request carrying this very record. But a PR's head is the feature branch, so what that confirms
+  is always the **preview**. Production deploys from `Prod`, whose merge commit is nobody's PR
+  head, and for a plain ref `get_commit` carries no statuses at all and nothing here lists check
+  runs. Read production in the Vercel dashboard.
+  - **Three corrections came out of writing this one bullet, which is the argument for checking
+    a sentence before committing it.** (i) The first draft said *no tool here returns commit
+    statuses* — broader than what was checked; the limit is the **ref**, not the statuses.
+    (ii) **Two** earlier entries call this *"the standing gap §5 records"* and **mis-attribute
+    it**: §5 records the *opposite*, that `github.silent` is `false` and the status was observed
+    on `cc7da9f`. So the status is very likely sitting on `Prod`'s commit and this session simply
+    cannot read it; anyone reading those two would go and re-fix a setting that already works.
+    (iii) That count was itself first written as *four*, by grepping the phrase and counting my
+    own two quotations of it — the other two entries state the limit **correctly**, naming only
+    `github.silent` as §5's and then the missing tool as the obstacle. §5 now carries the
+    distinction.
 
 ### 2026-08-27 · The MYOB contact card lands, and a supplier's bills know where they post
 `MYOB_Contacts_Full_Details.xlsx` — 640 active contacts (449 customers, 191 suppliers), 37
