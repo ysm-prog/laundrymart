@@ -2722,6 +2722,35 @@ screens were proved by the live-data arithmetic above, the guard test and the bu
 by being opened. **Before trusting it: open Reports on `ats.coreit.com.au` and check the ex-GST
 and inc-GST stats now differ by the GST figure between them.**
 
+**Merged to `Prod` (`6ce65e0`, PR #54) and `Dev` (`4be9be4`) on 2026-09-01**, both holding
+identical trees — `git diff Prod Dev` is empty — with `Dev` **0 behind**. **Nothing to apply**:
+this release adds no migration, `git diff` over `supabase/migrations/` is empty against both
+parents, and the live ledger's last entry is still `0045_supplier_contact_details`.
+
+- **CI green on all three jobs for both runs** — `Prod` run 256, `Dev` run 257 — Verify, Security
+  (gitleaks strict + audit), and the DB job applying all 49 migrations to a fresh Postgres 16 with
+  the whole pgTAP suite and the seed. **Read off the log, not the status**, which is the lesson
+  this file records five times over: **0** `not ok`, no plan mismatch, `pgTAP suite passed`, and
+  `gst_inclusive`'s 17 assertions passing **by name**. Stated exactly: the fetched log is a *tail*
+  covering 24 of the 28 test blocks, so the suite verdict and the zero failures are the evidence
+  for the whole, and the local run is what covered all 28 at 521.
+- **A merge commit rather than the fast-forward the last several entries record, and deliberately
+  so.** `Prod` was an ancestor of the branch, so either was available; a squash would have
+  collapsed the second commit — which corrects this branch's own assertion count — into the first.
+  This file's practice is to keep a correction legible rather than tidy it away, and that is worth
+  more than a linear history. `Prod` was not force-pushed.
+- **`Dev` was a catch-up merge carrying no source change of its own**, the shape every entry since
+  2026-08-26 records: its 26 commits `Prod` lacked were *all* previous catch-up merges, and the
+  only tree difference was exactly this branch's 16 files. **The gate was re-run on the merged
+  tree rather than assumed from an identical tree** — `verify` green (1101 tests across 65 files)
+  and the whole DB job on a fresh Postgres 16 with the seed, **521 assertions across 28 files, 0
+  failing**, matching `Prod` exactly.
+- **The Vercel production deploy is not confirmable from this session**, the standing gap §5
+  records — `get_commit` returns no statuses and no tool here lists check runs for a ref. The
+  *preview* deployment did report Ready on the pull request, which is `github.silent: false`
+  working as intended, but that is the preview and not production. Read it in the Vercel
+  dashboard.
+
 ### 2026-08-27 · The MYOB contact card lands, and a supplier's bills know where they post
 `MYOB_Contacts_Full_Details.xlsx` — 640 active contacts (449 customers, 191 suppliers), 37
 columns, captured the same day. One migration (`0045`), nine nullable columns on `suppliers`
