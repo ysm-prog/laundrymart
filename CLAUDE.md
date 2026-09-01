@@ -1308,6 +1308,24 @@ an optional Android ARM binding no runner installs. Checked as package sets rath
 the diff's line count — the lockfile churns re-emitted `resolved` fields, so the line count says
 nothing.
 
+**A lockfile diff can also change without any package changing, and npm's own version is why.**
+Taking `@types/react-dom` 19.2.5 on 2026-09-01 moved **one** package — none added, none removed,
+measured as package sets per the note above — and produced **14 more deleted lines than that
+accounts for**: this container's **npm 10.9.7** silently dropped the `libc` field from Next's four
+optional Linux SWC binaries (`@next/swc-linux-{arm64,x64}-{gnu,musl}`), which a newer npm had
+written. Worth knowing for three reasons, and none of them is "fix the lockfile":
+- **It is not a correctness problem.** `os`/`cpu` still gate those optional dependencies, so the
+  right binary is still selected; `libc` only lets npm skip the incompatible one *earlier*. At worst
+  an extra optional binary is fetched. `npm ci` was green locally and on all three CI jobs.
+- **It oscillates with whoever runs npm.** A contributor on npm 11 puts the fields back; a run from
+  a container on 10.9.x drops them again. So a `libc` block appearing or vanishing in a lockfile
+  diff here is an npm-version artefact, not a dependency change, and not something a pin fixes.
+- **It was deliberately not hand-edited back.** A lockfile edited by hand to disagree with the tool
+  that maintains it is worse than the drop. If byte-faithfulness matters, regenerate the lockfile on
+  npm 11 and commit that on its own.
+The general lesson is the sharper half of the note above: **package sets are the right measure of
+what a bump changed, and they are blind to field-level rewrites.** Read both.
+
 `eslint.config.mjs` adds one rule on top of `eslint-config-next`:
 **`@typescript-eslint/no-unused-vars` as an error**, because a value fetched and then dropped
 is how `createOrder` drew a job number, never wrote it, and broke every job creation past a
@@ -2801,16 +2819,20 @@ have made every credit note fail and then delete itself.
 - **Advisors stay at 23** — 22 documented SECURITY DEFINER helpers plus the auth leaked-password
   toggle. This function is INVOKER, so it is correctly absent from that list.
 
-**Not verified behind the auth gate.** This container has no Supabase credentials, so the credit
-note card was never rendered with real rows in it — the arithmetic is proved at the database level
-as above, and the form by typecheck, lint, 1101 tests and the production build. It is also not in
-`/design-preview`: the card is inline JSX on the invoice page rather than a component, and
-extracting it to measure it would be a refactor beyond this fix. The two risks a browser pass
-would have caught are handled by *using the shared component* — `Checkbox` carries its own 44px
-padded hit area, and the duplicate id is fixed above. **Before trusting it: on
-`ats.coreit.com.au`, open an invoice, issue a credit note for the exact amount of one of its
-lines, and check the credit note's total equals that line and its GST matches — then untick "GST
-applies" on another and confirm the GST reads $0.00.**
+**Confirmed working on `ats.coreit.com.au` by the owner, 2026-09-01.** Recorded with its
+provenance rather than as a bare fact, because the provenance is the whole point: this is a person
+opening the screen and issuing a real credit note, which is the one check nothing in this session
+could perform. It closes the caveat this entry shipped with — the paragraph below is what that
+caveat said, kept because it states exactly what *was* and was not proved from here.
+
+- **What was proved from this container:** the arithmetic at the database level (the migration's own
+  behavioural block, `gst_inclusive.test.sql`, and real-session probes), and the form by typecheck,
+  lint, 1101 tests and the production build.
+- **What was not:** the card rendered with real rows. It is not in `/design-preview` either — it is
+  inline JSX on the invoice page rather than a component, and extracting it to measure it would have
+  been a refactor beyond this fix. The two risks a browser pass would have caught were handled by
+  *using the shared component*: `Checkbox` carries its own 44px padded hit area, and the duplicate
+  id is fixed above. That reasoning held, but it was reasoning; the owner's pass is the evidence.
 
 ### 2026-09-01 · GST is inside the price, and thirteen screens now say so
 A branch audit of all 49 branches against `Prod` found one branch with unlanded substance, and
