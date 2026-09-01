@@ -402,6 +402,16 @@ key remains the way to reset or re-assert them through the Auth API, but nothing
 - `move_inventory()` is the single entry point for stock changes: it upserts both pools and
   writes the ledger row in one transaction.
 - `recalculate_invoice()` keeps invoice totals consistent with lines and payments.
+- **A credit note is totalled by the database too, and on the same GST-inclusive basis**
+  (`recalculate_credit_note()`, 0046). It is the twin of the above — same shape, same rate
+  source, same rounding — and it exists because a credit note's totals used to be worked out in
+  *application* code as `tax = amount × gst_rate`, GST added on top, while 0043 had made an
+  invoice line amount GST-**inclusive**. So the two documents sat on opposite models: offsetting
+  a $72.70 invoice line took $66.09 typed, and crediting the full $72.70 produced a **$79.97**
+  credit note. Copying 0043's formula into the action would have fixed the arithmetic and left
+  two implementations of one rule — which is how the defect arose, since 0043 could not change a
+  rule living somewhere else. The lines are written first and the function totals them, so the
+  next change to the GST model has one place to go.
 - **Recurring invoicing is one invoice per customer per period**, carrying every contract
   they hold **and every laundry job they had completed in it**. Not a preference: the weighed
   collections and the damaged/missing linen are recorded against the *customer*, so one
@@ -946,6 +956,36 @@ renders no tab strip. Tested in `src/lib/__tests__/nav.test.ts`.
     re-added `for all`, a dropped `tax_code`, a dropped `reorder_level`, an
     `anon` grant, a dropped policy and a mistyped new column.
 
+- `0046_credit_note_gst_inclusive` — **a credit note is read on the same basis as the
+  invoice it offsets.** `recalculate_credit_note()`, the twin of `recalculate_invoice()`:
+  `subtotal = total = sum(line amounts)` and the GST **extracted from within** the taxable
+  part rather than added on top. **Adds one function. No table, no column, no policy, no
+  capability, no trigger; drops nothing and changes no row** — there were **0 credit notes
+  and 0 credit note lines** on the deployment, checked before it was written, so nothing
+  stored is re-interpreted and there is nothing to backfill.
+  - **Why a function and not four lines in the action.** `createCreditNote` computed all
+    three columns itself as `tax = amount × gst_rate`, so `0043` changed the *invoice*
+    function and could not reach the credit note — the header also never followed its own
+    lines, and nothing recomputed one from the other. Copying 0043's formula into the action
+    would have fixed today's arithmetic and preserved the shape that caused the bug. This is
+    the same argument §4 makes for `move_inventory()` and `save_laundry_order_items()`.
+  - **SECURITY INVOKER**, so RLS and 0025's restrictive write layer still decide who may move
+    a credit note's totals — proved as real sessions, where a **board**'s call moved
+    **nothing** (0 rows, silently, which is what a restrictive policy does) while the Owner
+    and the Office manager both got 72.70/6.61/72.70.
+  - **`authenticated` is granted EXECUTE explicitly**, which is the one place it diverges
+    from its twin. `recalculate_invoice` leans on Supabase's default privileges for that
+    grant; `create or replace function` does **not** restore a revoked one, so a database
+    where somebody had revoked it would apply cleanly and leave the action silently unable to
+    total anything. Costs one line and removes the dependency — and the assertion below then
+    guards the grant rather than the platform.
+  - Five self-assertions, three of them structural and two **behavioural against real rows in
+    the migration's own transaction**, then undone. Every one was confirmed to fire by
+    breaking what it guards: the exclusive formula, a header that ignores its lines, `taxable`
+    ignored, DEFINER instead of INVOKER, and the grant removed.
+  - Reuses a laundry at 10% rather than creating one (0041 refuses a second `tenants` insert)
+    and **reads the rate, never sets it** — writing 0.10 onto the live laundry to make its own
+    arithmetic predictable would be this file touching a row it claims not to.
 - `0045_supplier_contact_details` — **the rest of a supplier's contact card, and the
   account its purchases post to.** Nine nullable columns on `suppliers` (`abn`,
   `address_line1`, `address_line2`, `suburb`, `state`, `postcode`, `contact_name`,
@@ -2662,6 +2702,89 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-09-01 · A credit note is read the same way as the invoice it offsets
+The owner's instruction, after the entry below shipped the two documents on opposite GST models
+and recorded it as open. One migration (`0046`), one new function; **no table, no column, no
+policy, no capability, no role change, and no row altered.** §4 has the rule, §7 the migration.
+
+**The defect was a money error in the direction that costs the laundry.** `0043` made an invoice
+line amount GST-**inclusive** — `recalculate_invoice` stores `subtotal = total` and finds the tax
+within — and `createCreditNote` went on computing `tax = amount × gst_rate`, GST added on top, in
+application code. So offsetting a $72.70 invoice line needed **$66.09** typed into the credit note
+form, and a customer credited the full $72.70 was handed a **$79.97** credit note.
+
+- **The fix is the mechanism, not the arithmetic**, and that distinction is the whole entry.
+  Copying 0043's formula into the action would have corrected today's numbers and kept the shape
+  that caused the bug: 0043 changed the *invoice* function and **could not** change a rule that
+  lived somewhere else. `recalculate_credit_note()` is that rule's new home — the twin of
+  `recalculate_invoice()`, same shape, same rate source, same rounding — so the next change to
+  the GST model has one place to go and cannot miss one of the two.
+- **The header now follows its own lines.** It never did: the action wrote all three columns from
+  the posted amount and separately inserted a line, and nothing recomputed one from the other. So
+  the two could disagree with nothing to catch it.
+- **`taxable` is asked rather than assumed.** It matters more under the inclusive model than it
+  did before: the answer no longer adds or withholds 10% on top, it decides whether an eleventh
+  of the figure already typed *is* GST. Crediting a GST-free line with it ticked overstates the
+  customer's GST. Defaults on, which is what the form always did in effect.
+- **A failed line or a failed total now deletes the credit note it was for.** Previously a line
+  failure left a note carrying the right figure and no lines; under the new order it would have
+  left one reading **$0.00** against a customer who has been told they were credited — worse than
+  what it replaced, so it is undone rather than left to be found. §10c's call about an invitation
+  whose send failed.
+- **The toast reads the stored figures back** instead of restating the input, so it cannot claim a
+  number the database did not store — which is the property this change exists to establish. It
+  now says *"issued for $72.70, including $6.61 GST"*.
+- **A real defect avoided on the way in.** `Checkbox` defaults its DOM id to the field name, and a
+  draft invoice renders the line composer's `taxable` **and** the credit note's on one page — two
+  elements sharing an id. Association survives (both inputs sit *inside* their labels) but the id
+  is invalid and `getElementById` becomes ambiguous. `Checkbox` gained the `id` override `Input`
+  and `Select` already carry, for the same reason (§10c, the People screen).
+- **`round2` came out of the action's imports with the arithmetic**, and `@typescript-eslint/
+  no-unused-vars` is an error here (§10a) — so the rule that caught `createOrder`'s dropped job
+  number caught this too rather than leaving a dead import.
+
+- 1101 unit tests (unchanged — this adds no pure rule; the rule is the database's) and **532
+  pgTAP assertions across 28 files, from 521**. `verify` green; all **50** migrations applied to a
+  fresh Postgres 16 with the whole suite and the seed on top.
+- **The eleven new proof assertions were confirmed to fail without the fix**, not assumed to be
+  doing something: reverting the function to the exclusive model fails **5 by name**, including
+  *"not the $79.97 the old exclusive credit note produced"* and *"an invoice and a credit note for
+  the same amount agree on the GST"* — that second one being the property the change is for. A
+  function that ignores its lines fails 7.
+- **The plan mismatch was caught by the runner rather than by me.** I declared `plan(27)` and the
+  file runs 28; `run-db-tests.sh` failed the suite on it, which is exactly what §7 says that check
+  exists for. Worth recording as the check earning its place.
+
+**Applied to `laundrymart-syd` on 2026-09-01** as `20260901084855`, the ledger's 51st entry, and
+**before the code merged** — the order every release since 2026-08-18 records, and load-bearing
+here rather than conventional: the action calls this function, so merging the code first would
+have made every credit note fail and then delete itself.
+
+- **Pre-flight:** the function absent, **0 credit notes and 0 credit note lines** (so nothing to
+  re-interpret), `recalculate_invoice` confirmed on the inclusive model, **0** `anon` table grants
+  and **0** tables without RLS.
+- **The live function body is byte-identical to a database built from `supabase/migrations/`
+  alone** — `md5(prosrc)` compared, matching first time, unlike 0042 where two characters in a
+  comment had to be bisected out.
+- **Proved as real sessions afterwards**, in a transaction that ended by raising: a **board** read
+  the note and its call moved **nothing** (0.00/0.00 — 0 rows, silently, which is what a
+  restrictive policy does and why the assertion is by outcome), while the **Owner** and the
+  **Office manager** each got **72.70/6.61/72.70**. Nothing survived the rollback: 0 credit notes,
+  0 probe rows, 511 customers and 648 invoices unchanged.
+- **Advisors stay at 23** — 22 documented SECURITY DEFINER helpers plus the auth leaked-password
+  toggle. This function is INVOKER, so it is correctly absent from that list.
+
+**Not verified behind the auth gate.** This container has no Supabase credentials, so the credit
+note card was never rendered with real rows in it — the arithmetic is proved at the database level
+as above, and the form by typecheck, lint, 1101 tests and the production build. It is also not in
+`/design-preview`: the card is inline JSX on the invoice page rather than a component, and
+extracting it to measure it would be a refactor beyond this fix. The two risks a browser pass
+would have caught are handled by *using the shared component* — `Checkbox` carries its own 44px
+padded hit area, and the duplicate id is fixed above. **Before trusting it: on
+`ats.coreit.com.au`, open an invoice, issue a credit note for the exact amount of one of its
+lines, and check the credit note's total equals that line and its GST matches — then untick "GST
+applies" on another and confirm the GST reads $0.00.**
+
 ### 2026-09-01 · GST is inside the price, and thirteen screens now say so
 A branch audit of all 49 branches against `Prod` found one branch with unlanded substance, and
 the omission had a visible cost. **No migration; no schema, RLS, capability, policy or role
@@ -2713,7 +2836,10 @@ two inline subtotals and three doc comments.
 - **`Amount (ex GST)` on the credit note is left exactly as it is, and that is a decision.**
   `createCreditNote` computes `tax = amount × gstRate` and 0043 does not touch credit notes, so
   the label is true. What it leaves is the two documents on opposite models — offsetting a
-  $72.70 inclusive line needs $66.09 typed — which is **still open** and is the owner's call.
+  $72.70 inclusive line needs $66.09 typed — which was **still open** when this shipped.
+  **Closed the same day by `0046`**, at the owner's instruction: see the entry above. The label
+  was right and the model underneath it was the thing to change, which is why this entry left it
+  alone rather than editing the sentence.
 
 **A source sweep guards it, because thirteen copies of one claim is what this class does.**
 `gst-labels.test.ts` walks `src/` and fails on any file claiming "before GST", in the

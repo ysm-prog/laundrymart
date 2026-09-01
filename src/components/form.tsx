@@ -171,14 +171,26 @@ export function Select({
 }
 
 export function Checkbox({
-  name, label, defaultChecked, value,
-}: { name: string; label: string; defaultChecked?: boolean; value?: string }) {
+  name, label, defaultChecked, value, id,
+}: {
+  name: string; label: string; defaultChecked?: boolean; value?: string;
+  /*
+   * Defaults to `name`, which is right for the ordinary case and wrong the
+   * moment two forms on one page post the same field — the invoice page renders
+   * a credit-note "GST applies" beside the line composer's, both named
+   * `taxable`. The label association survives either way because the input is
+   * *inside* the label, but two elements sharing a DOM id is invalid and makes
+   * `getElementById` ambiguous. The same override `Input` and `Select` already
+   * carry, added for the same reason (the People screen, 2026-08-27).
+   */
+  id?: string;
+}) {
   // The padded label is the hit area, not just the 18px box — the whole row is
   // tappable, which is what makes a checklist usable one-handed in a truck.
   return (
     <label className="flex min-h-11 cursor-pointer items-center gap-3 rounded-lg py-1.5 text-sm
                       transition hover:bg-surface-muted/60">
-      <input id={name} name={name} type="checkbox" value={value} defaultChecked={defaultChecked}
+      <input id={id ?? name} name={name} type="checkbox" value={value} defaultChecked={defaultChecked}
              className="size-[1.15rem] shrink-0 rounded border-control-border accent-primary" />
       {label}
     </label>

@@ -7,7 +7,7 @@ import { createClient } from "@/lib/supabase/server";
 import { recordAudit } from "@/lib/audit";
 import { addDays } from "@/lib/domain/dates";
 import {
-  allocateWeightCharges, buildReplacementCharges, lineAmount, round2,
+  allocateWeightCharges, buildReplacementCharges, lineAmount,
   type DraftLine,
 } from "@/lib/domain/pricing";
 import {
@@ -19,7 +19,7 @@ import {
   count, describeDbError, done, fail, firstIssue, money, optionalText,
   optionalUuid, requiredDate, returnTo, toObject,
 } from "@/lib/actions";
-import { counted } from "@/lib/format";
+import { counted, money as formatMoney } from "@/lib/format";
 import { loadInvoiceForPdf } from "@/lib/pdf/invoice-data";
 import { pushInvoiceToXero } from "@/lib/xero/push";
 import { pushPaymentToXero } from "@/lib/xero/push-payment";
@@ -1076,13 +1076,45 @@ export async function voidInvoice(formData: FormData): Promise<void> {
 }
 
 /** Credit notes always reference the original invoice (acceptance criteria §10). */
+/**
+ * Raise a credit note against an invoice.
+ *
+ * **The totals are the database's, not this function's**, and that is the point
+ * of the shape rather than an implementation detail. Until 0046 this action
+ * computed all three columns itself as `tax = amount * gst_rate` — GST added on
+ * top — while `recalculate_invoice` had been extracting GST from *inside* a line
+ * amount since 0043. So the two documents sat on opposite models: offsetting a
+ * $72.70 invoice line needed $66.09 typed here, and crediting the full $72.70
+ * produced a $79.97 credit note.
+ *
+ * Copying 0043's formula into this file would have fixed today's arithmetic and
+ * left two implementations of one rule — which is exactly how the defect arose,
+ * since 0043 could not change a rule that lived somewhere else. So the lines are
+ * written first and `recalculate_credit_note` totals them, the same way every
+ * invoice writer calls `recalculate_invoice`. A future change to the GST model
+ * has one place to go.
+ */
 export async function createCreditNote(formData: FormData): Promise<void> {
   const session = await assertCapability("invoices.write");
   const parsed = z.object({
     invoice_id: z.string().uuid(),
     customer_id: z.string().uuid(),
     reason: z.string().trim().min(3, "Give a reason for the credit"),
+    /*
+     * What the customer is credited, GST included — the same basis as the
+     * invoice line it offsets. The form says so, and `recalculate_credit_note`
+     * finds the GST within it rather than adding any.
+     */
     amount: money.pipe(z.number().positive("Credit must be greater than zero")),
+    /*
+     * Whether that amount carries GST at all. Asked rather than assumed, and it
+     * matters more under the inclusive model than it did before: the answer no
+     * longer adds or withholds 10% on top, it decides whether a tenth of the
+     * figure already typed is GST. Crediting a GST-free line with this ticked
+     * would overstate the customer's GST by a eleventh of the credit. Defaults
+     * on, which is the ordinary case and what this action always did.
+     */
+    taxable: z.preprocess((v) => v === "on", z.boolean()),
   }).safeParse(toObject(formData));
   if (!parsed.success) return fail("/invoices", firstIssue(parsed.error));
 
@@ -1093,11 +1125,11 @@ export async function createCreditNote(formData: FormData): Promise<void> {
     .rpc("next_number", { t: session.tenantId, k: "credit_note", p: "CN" });
   if (numberError) return fail(backTo, describeDbError(numberError));
 
-  const { data: tenant } = await supabase
-    .from("tenants").select("gst_rate").eq("id", session.tenantId).maybeSingle();
-  const gstRate = Number(tenant?.gst_rate ?? 0.1);
-  const tax = round2(parsed.data.amount * gstRate);
-
+  /*
+   * Opened at zero and totalled from its lines a moment later. The alternative —
+   * insert the header already carrying figures — is what let the header and the
+   * line disagree, since nothing recomputed one from the other.
+   */
   const { data: note, error } = await supabase
     .from("credit_notes")
     .insert({
@@ -1108,13 +1140,26 @@ export async function createCreditNote(formData: FormData): Promise<void> {
       credit_note_number: creditNumber as string,
       status: "issued",
       reason: parsed.data.reason,
-      subtotal: parsed.data.amount,
-      tax_amount: tax,
-      total: round2(parsed.data.amount + tax),
+      subtotal: 0,
+      tax_amount: 0,
+      total: 0,
     })
     .select("id, credit_note_number")
     .single();
   if (error) return fail(backTo, describeDbError(error));
+
+  /*
+   * From here the credit note exists, so every failure path deletes it. A note
+   * left behind would read $0.00 on the invoice against a customer who has been
+   * told they were credited — worse than the old code's orphan, which at least
+   * carried the right figure. The same call §10c makes about an invitation whose
+   * send failed: undo the half-made record rather than leave it to be found.
+   */
+  const abandon = async (message: string): Promise<void> => {
+    await supabase.from("credit_notes").delete()
+      .eq("id", note.id).eq("tenant_id", session.tenantId);
+    return fail(backTo, message);
+  };
 
   const { error: lineError } = await supabase.from("credit_note_lines").insert({
     tenant_id: session.tenantId,
@@ -1124,15 +1169,34 @@ export async function createCreditNote(formData: FormData): Promise<void> {
     quantity: 1,
     unit_price: parsed.data.amount,
     amount: parsed.data.amount,
+    taxable: parsed.data.taxable,
   });
-  if (lineError) return fail(backTo, describeDbError(lineError));
+  if (lineError) return abandon(describeDbError(lineError));
+
+  const { error: totalError } = await supabase
+    .rpc("recalculate_credit_note", { p_note: note.id });
+  if (totalError) return abandon(describeDbError(totalError));
+
+  /*
+   * Read back rather than restated from the input, so the message cannot claim a
+   * figure the database did not store — which is the whole property this change
+   * exists to establish. A failed read is not a failed credit note, so it falls
+   * back to naming the document instead of undoing it.
+   */
+  const { data: totals } = await supabase
+    .from("credit_notes").select("total, tax_amount")
+    .eq("id", note.id).eq("tenant_id", session.tenantId)
+    .maybeSingle<{ total: number; tax_amount: number }>();
 
   await recordAudit(session, {
     entity: "credit_note", entityId: note.id, action: "create",
     summary: `${note.credit_note_number} against invoice`,
   });
   revalidatePath(backTo);
-  return done(backTo, `Credit note ${note.credit_note_number} issued.`);
+  return done(backTo, totals
+    ? `Credit note ${note.credit_note_number} issued for ${formatMoney(totals.total)}`
+      + `, including ${formatMoney(totals.tax_amount)} GST.`
+    : `Credit note ${note.credit_note_number} issued.`);
 }
 
 /**

@@ -23,10 +23,15 @@ import { describe, expect, it } from "vitest";
  * modules that reach `lib/env`, so vitest cannot render or import them. What is
  * reachable is their source.
  *
- * This deliberately does **not** ban "ex GST". A credit note really is entered
- * exclusive of GST — `createCreditNote` computes `tax = amount × gstRate` and
- * 0043 does not touch credit notes — so `Amount (ex GST)` on that form is true,
- * and `/reports` now derives its ex-GST stat as `total − tax`.
+ * This deliberately does **not** ban "ex GST", because an ex-GST figure is a
+ * legitimate thing to show: `/reports` derives one as `total − tax` and labels
+ * it honestly.
+ *
+ * It used to say the credit note earned that label too — *"a credit note really
+ * is entered exclusive of GST"* — which was true of the old arithmetic and is
+ * not true any more. `0046` put credit notes on the same GST-inclusive model as
+ * invoices, so that form now says "(inc GST)" and there is no longer a form in
+ * this app asking for a figure exclusive of GST.
  */
 
 const SRC = join(__dirname, "..", "..", "..");
@@ -67,8 +72,8 @@ describe("GST wording matches what the amount actually is", () => {
   it("catches the claim it exists to catch", () => {
     expect(EXCLUSIVE_CLAIM.test("Charges saved — $105.00 before GST.")).toBe(true);
     expect(EXCLUSIVE_CLAIM.test('hint="Before GST"')).toBe(true);
-    // and leaves the credit note's honest label alone
-    expect(EXCLUSIVE_CLAIM.test('<Field label="Amount (ex GST)" name="amount" required>')).toBe(false);
+    // and leaves a legitimately ex-GST label alone — /reports derives one
+    expect(EXCLUSIVE_CLAIM.test('<Stat label="Invoiced (ex GST)" value={money(total - tax)} />')).toBe(false);
   });
 
   it("has no screen calling a GST-inclusive amount exclusive of GST", () => {
