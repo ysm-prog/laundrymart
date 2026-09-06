@@ -2903,6 +2903,15 @@ logic, no migration**; an elevation and motion layer in the token system, §10b 
   "port free" check had passed vacuously. The 2026-08-25 trap, again, and the reason the harness
   asserts the section exists before it measures.
 
+**Third pass, the same day: the deferred sizes, and the screen the sweeps never reached.** The
+first pass deferred nine files carrying `text-[12.5px]`/`text-[13px]`/`text-[17px]`; all 23 sites
+are on the scale now (`text-sm`, `text-lg`). The count was hiding a real finding: the MYOB import
+screen (`admin/import/import-uploader.tsx`) still carried two **hand-rolled square buttons** at
+36px with `hover:opacity-90`, a Plantline-era `border-l-[5px]` callout and 12.5px throughout —
+the one screen neither the 2026-08-13 redesign nor the 2026-08-16 re-skin touched, because it
+was written on a branch that merged after both. It uses `Button` and `Notice` now, and its radio
+rows are 44px. No logic changed; `verify` green, 1104 tests unchanged.
+
 ### 2026-09-01 · The §23 sweep, which turned out to be 13 sites and not 345
 The owner's choice of what to do next. **No migration; no schema, RLS, capability or policy
 change** — thirteen reads gained a tenant filter, and one guard test keeps them that way.

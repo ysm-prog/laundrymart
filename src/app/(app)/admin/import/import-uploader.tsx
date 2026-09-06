@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { Badge, CONTROL, Card, Eyebrow, Notice, Stage, cx } from "@/components/ui";
+import { Badge, Button, CONTROL, Card, Eyebrow, Notice, Stage, cx } from "@/components/ui";
 
 /**
  * The two-step upload: read the files, show what they add up to, then write.
@@ -122,7 +122,7 @@ export function ImportUploader({ tenantName }: { tenantName: string }) {
               type="file"
               multiple
               accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-              className={cx(CONTROL, "file:mr-3 file:border-0 file:bg-transparent file:text-[12.5px] file:font-medium")}
+              className={cx(CONTROL, "file:mr-3 file:border-0 file:bg-transparent file:text-sm file:font-medium")}
               onChange={(event) => choose(event.target.files)}
             />
             {files.length > 0 ? (
@@ -153,10 +153,10 @@ export function ImportUploader({ tenantName }: { tenantName: string }) {
                 ["outstanding", "Only invoices that still owe money", "The open items. This is what a set of books needs to chase and to reconcile."],
                 ["all", "Every invoice ever raised", "The full sales history, including everything already paid. Much larger, and only worth it if you want the history in the app."],
               ] as const).map(([value, label, hint]) => (
-                <label key={value} className="flex min-h-9 items-start gap-2 text-[12.5px]">
+                <label key={value} className="flex min-h-11 items-start gap-2.5 py-1 text-sm">
                   <input
                     type="radio" name="scope" value={value} checked={scope === value}
-                    className="mt-1"
+                    className="mt-1 size-4 shrink-0 accent-primary"
                     onChange={() => { setScope(value); setPreview(null); setDone(null); }}
                   />
                   <span>
@@ -166,14 +166,13 @@ export function ImportUploader({ tenantName }: { tenantName: string }) {
                 </label>
               ))}
             </fieldset>
-            <button
-              type="button"
+            <Button
+              type="button" variant="secondary"
               disabled={files.length === 0 || tooBig || busy !== null}
               onClick={() => send("analyse")}
-              className="inline-flex min-h-9 items-center border border-strong bg-surface px-3 text-[12.5px] font-medium hover:bg-surface-muted disabled:opacity-60"
             >
               {busy === "analyse" ? "Reading…" : "Read the files"}
-            </button>
+            </Button>
           </div>
         </Stage>
 
@@ -192,20 +191,19 @@ export function ImportUploader({ tenantName }: { tenantName: string }) {
                     : "There is nothing in these files to write."}
                 </Notice>
               ) : (
-                <div className="border-l-[5px] border border-l-strong bg-surface-muted px-3 py-2 text-[12.5px]">
-                  This writes to <strong>{tenantName}</strong>: {preview.tables.reduce((sum, t) => sum + t.rows, 0).toLocaleString()}
-                  {" "}rows across {new Set(preview.tables.map((t) => t.table)).size} tables. Existing rows with the
-                  same number are updated in place; nothing is deleted.
-                </div>
+                <Notice tone="info" title={`This writes to ${tenantName}`}>
+                  {preview.tables.reduce((sum, t) => sum + t.rows, 0).toLocaleString()} rows across{" "}
+                  {new Set(preview.tables.map((t) => t.table)).size} tables. Existing rows with the same
+                  number are updated in place; nothing is deleted.
+                </Notice>
               )}
-              <button
+              <Button
                 type="button"
                 disabled={!preview.canCommit || busy !== null || done !== null}
                 onClick={() => send("commit")}
-                className="inline-flex min-h-9 items-center bg-action px-3 text-[12.5px] font-medium text-action-foreground hover:opacity-90 disabled:opacity-60"
               >
                 {busy === "commit" ? "Loading…" : done ? "Loaded" : "Load into the database"}
-              </button>
+              </Button>
             </div>
           ) : (
             <p className="text-xs text-muted-foreground">Read the files first.</p>
@@ -229,7 +227,7 @@ function PreviewPanels({ preview }: { preview: Preview }) {
       <Card title="What each file is" description="Recognised by name, and by the columns it carries if the name has been changed.">
         <ul className="space-y-2">
           {preview.summaries.map((file) => (
-            <li key={file.name} className="border-b pb-2 text-[12.5px] last:border-0 last:pb-0">
+            <li key={file.name} className="border-b pb-2 text-sm last:border-0 last:pb-0">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="font-mono text-2xs break-all">{file.name}</span>
                 <Badge tone={tone[file.status]}>{file.label}</Badge>
@@ -247,7 +245,7 @@ function PreviewPanels({ preview }: { preview: Preview }) {
 
       {fatal.length > 0 ? (
         <Card title="Problems that stop the import">
-          <ul className="space-y-1.5 text-[12.5px]">
+          <ul className="space-y-1.5 text-sm">
             {fatal.map((problem, at) => (
               <li key={at} className="flex gap-2">
                 <span className="font-mono text-2xs text-muted-foreground">
@@ -275,7 +273,7 @@ function PreviewPanels({ preview }: { preview: Preview }) {
               </li>
             ))}
           </ul>
-          <dl className="mt-3 grid grid-cols-2 gap-3 border-t pt-3 text-[12.5px] sm:grid-cols-4">
+          <dl className="mt-3 grid grid-cols-2 gap-3 border-t pt-3 text-sm sm:grid-cols-4">
             <div>
               <dt><Eyebrow>Customers</Eyebrow></dt>
               <dd className="font-mono">{preview.parties.customersNew} new · {preview.parties.customersExisting} known</dd>
@@ -302,7 +300,7 @@ function PreviewPanels({ preview }: { preview: Preview }) {
 
       {preview.notes.length > 0 ? (
         <Card title="Worth knowing" description="What the importer found in the export, and what it did about it.">
-          <ul className="space-y-1.5 text-[12.5px]">
+          <ul className="space-y-1.5 text-sm">
             {preview.notes.map((note, at) => <li key={at}>{note}</li>)}
           </ul>
         </Card>

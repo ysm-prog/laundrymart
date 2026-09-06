@@ -595,7 +595,7 @@ function PaneFigure({
     <div className="rounded-lg border bg-surface px-3 py-2">
       <Eyebrow>{label}</Eyebrow>
       <div className={cx(
-        "mt-0.5 text-[17px] font-semibold tabular-nums",
+        "mt-0.5 text-lg font-semibold tabular-nums",
         tone === "warning" && "text-warning",
       )}>
         {value}

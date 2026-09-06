@@ -102,7 +102,7 @@ async function Results({ term, role }: { term: string; role: Role }) {
                       className="flex min-h-11 items-center justify-between gap-3 px-4 py-2.5
  transition hover:bg-surface-muted">
                   <span className="min-w-0">
-                    <span className="block truncate text-[13px] font-medium">{row.title}</span>
+                    <span className="block truncate text-sm font-medium">{row.title}</span>
                     <span className="block truncate text-xs text-muted-foreground">{row.detail}</span>
                   </span>
                   {row.trailing ? <span className="shrink-0">{row.trailing}</span> : null}

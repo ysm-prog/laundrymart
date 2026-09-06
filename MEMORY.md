@@ -36,6 +36,9 @@ entry.
   actions, `page-enter` stagger on `<main>`, `animate-float` on the sign-in panel. Measured with
   `depth.mjs` — all clean; first run was vacuous because the **old `next start` still held port
   3000** (`ss` is not installed here, so "port free" lied). Kill with `pkill -f 'next-serve[r]'`.
+- **Third pass: the deferred off-scale sizes are done** (23 sites → `text-sm`/`text-lg`), and the
+  MYOB import screen — hand-rolled square buttons, a Plantline callout — is on `Button`/`Notice`.
+  Owner's call on the rest of the deferred list: parallax/tilt/shimmer stay out ("leave it").
 
 ## Previously: the §23 sweep — 13 sites, not 345
 2026-09-01. No migration. §23 had claimed ~345 unfiltered reads since August; the number that

@@ -467,7 +467,7 @@ export default function DesignPreviewPage() {
                     return (
                       <div key={label} className={cx("rounded-lg border px-2.5 py-2", peak && "border-warning/40 bg-warning/5")}>
                         <Eyebrow className={peak ? "text-warning" : undefined}>{label}</Eyebrow>
-                        <div className={cx("mt-0.5 text-[17px] font-semibold tabular-nums", peak && "text-warning")}>{qty}</div>
+                        <div className={cx("mt-0.5 text-lg font-semibold tabular-nums", peak && "text-warning")}>{qty}</div>
                       </div>
                     );
                   })}
@@ -684,11 +684,11 @@ export default function DesignPreviewPage() {
                   <div className="grid grid-cols-2 gap-3">
                     <div className="rounded-lg border bg-surface px-3 py-2">
                       <Eyebrow>Total</Eyebrow>
-                      <div className="mt-0.5 text-[17px] font-semibold tabular-nums">$1,284.50</div>
+                      <div className="mt-0.5 text-lg font-semibold tabular-nums">$1,284.50</div>
                     </div>
                     <div className="rounded-lg border bg-surface px-3 py-2">
                       <Eyebrow>Balance</Eyebrow>
-                      <div className="mt-0.5 text-[17px] font-semibold tabular-nums text-warning">$1,284.50</div>
+                      <div className="mt-0.5 text-lg font-semibold tabular-nums text-warning">$1,284.50</div>
                     </div>
                   </div>
                   <dl className="grid grid-cols-2 gap-x-3 gap-y-2">
