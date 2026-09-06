@@ -62,9 +62,12 @@ export function QuickActions({ role }: { role: Role }) {
                    text simply drops below the icon once it cannot have 9rem,
                    and takes the full width. No breakpoint to get wrong, and it
                    adjusts itself to a size we have not thought of. */
-                className="flex h-full min-h-[5.5rem] flex-col gap-1.5 rounded-xl
-                           border border-strong bg-surface p-4 shadow-xs transition
-                           hover:border-primary hover:bg-primary/5 focus-visible:border-primary"
+                /* `lift` + `group`: the card rises under the pointer and its
+                   icon tile fills with the brand colour, so the whole thing
+                   answers before it is pressed. */
+                className="group surface-card lift flex h-full min-h-[5.5rem] flex-col gap-1.5
+                           rounded-xl border border-strong bg-surface p-4 transition
+                           hover:border-primary focus-visible:border-primary"
               >
                 {/* The icon shares a line with the label only. Putting the
                     sentence beside it too means the icon's width is subtracted
@@ -75,7 +78,10 @@ export function QuickActions({ role }: { role: Role }) {
                 <span className="flex flex-wrap items-center gap-3">
                   <span aria-hidden
                         className="flex size-11 shrink-0 items-center justify-center rounded-lg
-                                   bg-primary/10 text-primary [&_svg]:size-6">
+                                   bg-gradient-to-br from-primary/15 to-primary/5 text-primary
+                                   shadow-xs transition [&_svg]:size-6
+                                   group-hover:from-primary group-hover:to-accent
+                                   group-hover:text-primary-foreground group-hover:shadow-md">
                     <Icon />
                   </span>
                   {/*

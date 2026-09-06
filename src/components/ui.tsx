@@ -101,7 +101,7 @@ export function Card({
        instead of poking square corners through it. Safe here because the one
        popover in the app (the customer picker) lives in a `FormSection`, which
        deliberately does not clip. */
-    <section className={cx("overflow-hidden rounded-xl border bg-surface shadow-sm", className)}>
+    <section className={cx("surface-card overflow-hidden rounded-xl border bg-surface", className)}>
       {title || actions ? (
         <header className="flex flex-col gap-3 border-b px-5 py-4 sm:flex-row sm:items-start sm:justify-between">
           <div className="flex min-w-0 items-start gap-2.5">
@@ -137,7 +137,7 @@ export function FormSection({
   actions?: ReactNode; icon?: ReactNode;
 }) {
   return (
-    <section className="rounded-xl border bg-surface shadow-sm">
+    <section className="surface-card rounded-xl border bg-surface">
       <header className="flex flex-col gap-3 border-b px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex min-w-0 items-start gap-2.5">
           {icon ? <span className="mt-0.5 text-primary" aria-hidden>{icon}</span> : null}
@@ -191,8 +191,10 @@ export function Stat({
   );
 
   const className = cx(
-    "block rounded-xl border bg-surface px-4 py-4 shadow-sm transition",
-    href && "hover:border-strong hover:shadow-md",
+    "surface-card block rounded-xl border bg-surface px-4 py-4 transition",
+    /* A stat that goes somewhere lifts under the pointer; one that is only a
+       number rests flat, so the two are told apart before anything is pressed. */
+    href && "lift hover:border-strong",
   );
   return href
     ? <Link href={href} className={className}>{body}</Link>
@@ -330,9 +332,11 @@ export function StatusBadge({ status }: { status: string | null | undefined }) {
  * toolbars and table rows.
  */
 const BUTTON_VARIANTS = {
-  primary: "bg-action text-action-foreground shadow-xs hover:brightness-110 active:brightness-95",
-  secondary: "border border-strong bg-surface text-foreground shadow-xs hover:bg-surface-muted active:bg-surface-sunken",
-  danger: "bg-danger text-on-status shadow-xs hover:brightness-110 active:brightness-95",
+  /* The two solid variants are `raised` (globals.css): a sheen, a lifting
+     shadow, and a press that pushes into the page. */
+  primary: "raised bg-action text-action-foreground hover:brightness-105 active:brightness-95",
+  secondary: "border border-strong bg-surface text-foreground shadow-xs hover:bg-surface-muted hover:shadow-md hover:-translate-y-px active:translate-y-0 active:shadow-xs active:bg-surface-sunken",
+  danger: "raised bg-danger text-on-status hover:brightness-105 active:brightness-95",
   ghost: "text-primary hover:bg-primary/8 active:bg-primary/15",
   /* A destructive action that sits in a list row, where a solid red block would
      shout down the row it belongs to. `ghost` is teal — the colour this app
@@ -394,7 +398,9 @@ export type ButtonSize = keyof typeof BUTTON_SIZES;
 export const CONTROL =
   "min-h-11 w-full rounded-lg border border-control-border bg-surface px-3 py-2 text-base sm:text-sm text-foreground " +
   "shadow-xs transition placeholder:text-muted-foreground " +
-  "focus:border-primary focus:ring-2 focus:ring-primary/25 " +
+  /* The ring is the hard edge a keyboard user needs; the glow is the soft halo
+     that makes the focused box read as the one lit up on the page. */
+  "focus:border-primary focus:ring-2 focus:ring-primary/25 focus:shadow-glow " +
   "disabled:cursor-not-allowed disabled:bg-surface-muted disabled:opacity-70";
 
 /**

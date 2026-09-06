@@ -30,6 +30,12 @@ entry.
 - **Deferred**: nine files with arbitrary `text-[…px]` sizes, an error-summary pattern,
   `viewport-fit=cover`. Toast auto-dismiss deliberately not adopted.
 - **Not opened behind the auth gate** — no Supabase credentials here.
+- **Second pass the same day — depth and motion**, after the owner said the pages looked flat.
+  Same palette and fonts; shadows now read `--shadow-ink`/`--shadow-k` per theme (black at 2.5×
+  in dark), `surface-card` on cards, `raised` on solid buttons, `lift` on linked stats and quick
+  actions, `page-enter` stagger on `<main>`, `animate-float` on the sign-in panel. Measured with
+  `depth.mjs` — all clean; first run was vacuous because the **old `next start` still held port
+  3000** (`ss` is not installed here, so "port free" lied). Kill with `pkill -f 'next-serve[r]'`.
 
 ## Previously: the §23 sweep — 13 sites, not 345
 2026-09-01. No migration. §23 had claimed ~345 unfiltered reads since August; the number that

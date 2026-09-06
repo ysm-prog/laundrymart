@@ -170,8 +170,14 @@ export function AppShell({
 
       {/* ------------------------------------------------------ content --- */}
       <div className="flex min-w-0 flex-col">
+        {/* The hairline of brand colour along the top is the one place the teal
+            runs the full width of the screen — it is what makes a page read as
+            *this* application rather than any page on paper. */}
         <header className="sticky top-0 z-30 flex h-16 flex-none items-center gap-2 border-b
-                           bg-surface/90 px-3 backdrop-blur sm:px-5 print:hidden">
+                           bg-surface/90 px-3 shadow-xs backdrop-blur sm:px-5 print:hidden
+                           before:pointer-events-none before:absolute before:inset-x-0 before:top-0
+                           before:h-0.5 before:bg-gradient-to-r before:from-primary before:via-accent
+                           before:to-primary/30">
           <button type="button" onClick={() => setDrawerOpen(true)}
                   aria-expanded={drawerOpen} aria-controls="mobile-nav"
                   className="flex size-11 shrink-0 items-center justify-center rounded-lg
@@ -193,8 +199,10 @@ export function AppShell({
             anchor jump as a focus move. The landmark itself draws no ring — a
             3px outline round the whole page is noise — while everything inside
             it keeps the global one. */}
+        {/* `page-enter` (globals.css): the header and the cards of every screen
+            rise into place in sequence on each navigation. */}
         <main id="main" tabIndex={-1}
-              className="min-w-0 flex-1 px-4 py-6 outline-none sm:px-6 sm:py-8">
+              className="page-enter min-w-0 flex-1 px-4 py-6 outline-none sm:px-6 sm:py-8">
           {children}
         </main>
       </div>

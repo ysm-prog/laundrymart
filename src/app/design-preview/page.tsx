@@ -485,6 +485,27 @@ export default function DesignPreviewPage() {
                 </div>
               </Card>
 
+              <Card
+                title="Depth and motion"
+                description="Solid buttons are raised keys, a card that goes somewhere lifts under the pointer, and content rises into place in sequence."
+              >
+                <div id="depth-preview" className="stagger-in space-y-4">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button variant="primary">Raised primary</Button>
+                    <Button variant="danger">Raised danger</Button>
+                    <Button variant="secondary">Secondary lifts</Button>
+                    <Button variant="primary" disabled>Disabled stays flat</Button>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    <Stat label="Lifts on hover" value="12" hint="a stat that is a link"
+                          href="/design-preview" />
+                    <Stat label="Rests flat" value="4" hint="a stat that is only a number" />
+                    <Stat label="Overdue" value="3" tone="danger" hint="past their due date"
+                          href="/design-preview" />
+                  </div>
+                </div>
+              </Card>
+
               <Card title="Component vocabulary">
                 <div className="space-y-4">
                   <div className="flex flex-wrap items-center gap-2">

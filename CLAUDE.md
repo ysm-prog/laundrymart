@@ -1496,6 +1496,26 @@ navy-plus-Inter recommendation and kept**: the shared language with YSM Hub is w
 generic match, and the Instrument Sans latin subset carries `tnum`, so a money column can be
 aligned with `tabular-nums` without a typeface change.
 
+**Quiet is not flat: depth and motion are a layer of the token system** (2026-09-06, the
+owner's response to the first pass — *"very flat … add animation and 3D"*). Every `--shadow-*`
+token reads its colour from `--shadow-ink` and its density from `--shadow-k`, set per theme:
+ink at 1× on paper, **black at 2.5× in dark**, because an ink shadow that reads on paper
+vanishes on `#141412` and a card with no shadow on dark paper is a slightly different rectangle,
+not an object. Five utilities in `globals.css` carry the language: **`surface-card`** (a top-edge
+highlight, a whisper of gradient and the layered `--shadow-card` — on `Card`, `FormSection` and
+`Stat`), **`raised`** (a sheen and a lifting shadow on the primary and danger buttons, and a press
+that removes the sheen and turns the shadow inward), **`lift`** (a linked `Stat` and a quick-action
+card rise 2px under the pointer, gated on `(hover: hover)` so a phone never leaves one stuck
+lifted), **`page-enter`** (on `<main>`: a screen's header and cards rise into place 50ms apart on
+every navigation, `backwards` fill so no transform lingers to capture a fixed descendant) and
+**`stagger-in`** / `animate-rise` / `animate-float` (the same for any list, one thing, and the two
+soft shapes on the sign-in panel). **Motion is opacity and transform only** and everything
+collapses under `prefers-reduced-motion`; ambient motion exists on exactly one screen, the sign-in
+panel. The header carries a two-pixel gradient hairline of brand colour, the brand mark is a lit
+teal tile, and a focused input gains `--shadow-glow` round its ring. **Not done, and named**:
+parallax, 3D transforms, shimmer on every load, per-row entrance on tables — each is motion a
+person on a loading dock has to wait through.
+
 `/design-preview` is a static component gallery: no data, 404s in production, outside the auth
 gate so it can be rendered from a build box. It exists because every real screen is an async
 server component reading Supabase, so none render without a live project — which is how a
@@ -2857,6 +2877,31 @@ authenticated screen was opened with real rows in it; everything past `/login` i
 shared components the gallery renders. **Before trusting it: sign in on `ats.coreit.com.au`,
 press the eye on the password box, hover and press a few buttons on a desktop and check the
 cursor and the press state, and open any status column and confirm each badge carries its dot.**
+
+**Second pass, the same day: depth and motion.** The owner's response to the above — *"all pages
+look very flat … add some animation and 3D so it should look elegant"* — and a fair reading: the
+first pass fixed what was wrong and left what was dull. Same palette, same fonts, **no `src/`
+logic, no migration**; an elevation and motion layer in the token system, §10b has the rules and
+`docs/UI-REVIEW-2026-09-06.md` §6 the table.
+- **Shadows read their colour and density from the theme** (`--shadow-ink`, `--shadow-k`): ink on
+  paper, black at 2.5× in dark. Five new tokens: `card`, `card-hover`, `raised`, `raised-hover`,
+  `glow`.
+- **`surface-card`** on `Card`, `FormSection`, `Stat`; **`raised`** on primary and danger buttons;
+  **`lift`** on a linked `Stat`, the quick-action cards, and 1px on secondary buttons;
+  **`page-enter`** on `<main>`; **`stagger-in`** / `animate-rise` / `animate-float` on the sign-in
+  page, whose panel is now a teal-to-accent gradient with two blurred shapes drifting on a
+  ten-second cycle. The header gains a brand-colour hairline, the brand mark a lit gradient tile,
+  the active rail row a shadow, a focused input a glow, and the dialog's rise a touch of scale.
+- **Measured with a second harness** (`depth.mjs`) at the same five widths and both themes: card
+  shadow and gradient present, the primary's sheen present at rest and gone on `mousedown`, the
+  lifting stat at `translateY(-2px)` under the pointer and identity at rest, stagger delays
+  0 / 0.05 / 0.1s, both floating shapes on `es-float`, the form's rise ending at opacity 1 — **0
+  console errors, 0 targets under 36px, no new overflow**, and the first-pass harness re-run clean
+  on the same build. 1104 tests unchanged; typecheck, lint and the production build green.
+- **The first run of that harness reported every section absent**: the first pass's `next start`
+  was still holding port 3000 and serving the old build — `ss` is not installed here, so the
+  "port free" check had passed vacuously. The 2026-08-25 trap, again, and the reason the harness
+  asserts the section exists before it measures.
 
 ### 2026-09-01 · The §23 sweep, which turned out to be 13 sites and not 345
 The owner's choice of what to do next. **No migration; no schema, RLS, capability or policy

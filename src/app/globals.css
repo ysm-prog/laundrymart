@@ -113,6 +113,11 @@
     --sidebar-active: 42 31.3% 93.7%;       /* paper text …                       */
     --sidebar-active-bg: 172.5 18.2% 8.6%;    /* … on an ink pill                   */
     --sidebar-hover: 40 27.3% 91.4%;
+
+    /* The colour and the density of every shadow — see the `--shadow-*`
+       tokens in the theme block for what these two drive. */
+    --shadow-ink: 18 26 25;
+    --shadow-k: 1;
   }
 
   .dark {
@@ -168,6 +173,12 @@
     --sidebar-active: 60 5.3% 7.5%;         /* ink text …                         */
     --sidebar-active-bg: 37.5 21.1% 92.5%;    /* … on a paper pill                  */
     --sidebar-hover: 60 4.5% 13.1%;
+
+    /* Black, not ink, and two and a half times as dense: an ink shadow at the
+       light-theme alphas is invisible on a near-black page, and a card with no
+       shadow on dark paper is a slightly different rectangle, not an object. */
+    --shadow-ink: 0 0 0;
+    --shadow-k: 2.5;
   }
 
   /* v4 defaults the border colour to currentColor; pin it to our token. */
@@ -421,22 +432,72 @@
   --radius-3xl: 1.125rem; /* 18px */
   --radius-4xl: 1.375rem; /* 22px */
 
-  /* Light and layered, and used sparingly — the language is mostly flat and a
-     hairline usually does the work. Retinted from a cool blue-grey to YSM's
-     ink (18 26 25), so a shadow on warm paper no longer goes faintly violet. */
-  --shadow-2xs: 0 1px 2px rgb(18 26 25 / 0.03);
-  --shadow-xs: 0 1px 2px rgb(18 26 25 / 0.04);
-  --shadow-sm: 0 1px 2px rgb(18 26 25 / 0.04), 0 1px 1px rgb(18 26 25 / 0.03);
-  --shadow-md: 0 4px 12px rgb(18 26 25 / 0.06), 0 2px 6px rgb(18 26 25 / 0.03);
-  --shadow-lg: 0 12px 32px rgb(18 26 25 / 0.10), 0 4px 12px rgb(18 26 25 / 0.05);
-  --shadow-xl: 0 20px 40px -8px rgb(18 26 25 / 0.12), 0 8px 16px -6px rgb(18 26 25 / 0.06);
-  --shadow-2xl: 0 24px 56px -12px rgb(18 26 25 / 0.20);
+  /*
+   * Shadows are layered — a tight contact shadow under a soft ambient one — and
+   * tinted with the ink rather than a cool blue-grey, so a shadow on warm paper
+   * does not go faintly violet. Every one reads its colour and its strength
+   * from two variables the theme sets in `@layer base`: `--shadow-ink` is the
+   * ink in light and pure black in dark, and `--shadow-k` scales every alpha,
+   * because an ink shadow at 6% that reads on paper vanishes entirely on
+   * #141412 — the dark theme needs the same shadow about two and a half times
+   * as dense before it says "this card is above the page".
+   *
+   * `--shadow-card` / `--shadow-card-hover` are the resting and lifted states
+   * of a card; `--shadow-raised` / `--shadow-raised-hover` are a solid button's;
+   * `--shadow-glow` is the soft halo round a focused input. The 2026-09-06
+   * review's second pass (§10b) is where these came from: the language had
+   * been *flat* rather than merely quiet, and depth is what separates an
+   * elegant paper surface from a bland one.
+   */
+  --shadow-2xs: 0 1px 2px rgb(var(--shadow-ink) / calc(0.03 * var(--shadow-k)));
+  --shadow-xs: 0 1px 2px rgb(var(--shadow-ink) / calc(0.05 * var(--shadow-k)));
+  --shadow-sm: 0 1px 2px rgb(var(--shadow-ink) / calc(0.05 * var(--shadow-k))),
+               0 1px 1px rgb(var(--shadow-ink) / calc(0.03 * var(--shadow-k)));
+  --shadow-md: 0 4px 12px rgb(var(--shadow-ink) / calc(0.07 * var(--shadow-k))),
+               0 2px 6px rgb(var(--shadow-ink) / calc(0.04 * var(--shadow-k)));
+  --shadow-lg: 0 12px 32px rgb(var(--shadow-ink) / calc(0.10 * var(--shadow-k))),
+               0 4px 12px rgb(var(--shadow-ink) / calc(0.05 * var(--shadow-k)));
+  --shadow-xl: 0 20px 40px -8px rgb(var(--shadow-ink) / calc(0.12 * var(--shadow-k))),
+               0 8px 16px -6px rgb(var(--shadow-ink) / calc(0.06 * var(--shadow-k)));
+  --shadow-2xl: 0 24px 56px -12px rgb(var(--shadow-ink) / calc(0.20 * var(--shadow-k)));
+  --shadow-card: 0 1px 2px rgb(var(--shadow-ink) / calc(0.05 * var(--shadow-k))),
+                 0 8px 20px -8px rgb(var(--shadow-ink) / calc(0.10 * var(--shadow-k))),
+                 0 0 0 1px rgb(var(--shadow-ink) / calc(0.025 * var(--shadow-k)));
+  --shadow-card-hover: 0 2px 4px rgb(var(--shadow-ink) / calc(0.06 * var(--shadow-k))),
+                       0 16px 36px -10px rgb(var(--shadow-ink) / calc(0.18 * var(--shadow-k))),
+                       0 0 0 1px rgb(var(--shadow-ink) / calc(0.03 * var(--shadow-k)));
+  --shadow-raised: 0 1px 2px rgb(var(--shadow-ink) / calc(0.14 * var(--shadow-k))),
+                   0 3px 8px -2px rgb(var(--shadow-ink) / calc(0.14 * var(--shadow-k)));
+  --shadow-raised-hover: 0 2px 4px rgb(var(--shadow-ink) / calc(0.14 * var(--shadow-k))),
+                         0 8px 16px -4px rgb(var(--shadow-ink) / calc(0.22 * var(--shadow-k)));
+  --shadow-glow: 0 0 0 4px hsl(var(--ring) / 0.16);
 }
 
 /*
- * Motion, used sparingly. The drawer and the toast are the only things that
- * move, and both respect a reduced-motion preference.
+ * Motion. Everything here is opacity and transform — the two properties a phone
+ * composites for free — and everything collapses under a reduced-motion
+ * preference (the media query at the foot of this file). Three families:
+ *
+ *   - arrival: `es-rise` — content that has just appeared drifts up 8px into
+ *     place. `page-enter` staggers a screen's cards through it on every
+ *     navigation, `stagger-in` does the same for any list, `animate-rise` for
+ *     one thing. Short and once; it says "this is new", not "look at me".
+ *   - detour: the drawer, the sheet, the toast and the dialog slide in from
+ *     the edge they belong to.
+ *   - ambient: `es-float` — the sign-in panel's two shapes breathe on a
+ *     ten-second cycle. The one decorative motion in the app, on the one
+ *     screen where nobody is trying to get work done.
  */
+@keyframes es-rise {
+  from { transform: translateY(8px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+@keyframes es-float {
+  from { transform: translate3d(0, 0, 0) scale(1); }
+  to { transform: translate3d(-18px, 24px, 0) scale(1.06); }
+}
+
 @keyframes es-fade-in {
   from { opacity: 0; }
   to { opacity: 1; }
@@ -447,9 +508,11 @@
   to { transform: translateX(0); }
 }
 
+/* The dialog and the account menu: a rise with a touch of scale, so the panel
+   settles into place rather than sliding up like a list row. */
 @keyframes es-slide-up {
-  from { transform: translateY(8px); opacity: 0; }
-  to { transform: translateY(0); opacity: 1; }
+  from { transform: translateY(10px) scale(0.98); opacity: 0; }
+  to { transform: translateY(0) scale(1); opacity: 1; }
 }
 
 @keyframes es-sheet-up {
@@ -471,6 +534,108 @@
 
 @utility animate-sheet-up {
   animation: es-sheet-up 240ms var(--ease-enter);
+}
+
+@utility animate-rise {
+  animation: es-rise 420ms var(--ease-enter) backwards;
+}
+
+@utility animate-float {
+  animation: es-float 10s ease-in-out infinite alternate;
+}
+
+/*
+ * Children arrive one after another, 50ms apart, up to a cap — the eye reads
+ * the sequence as one gesture and the page as assembled rather than dumped.
+ * `backwards` fill, deliberately: the transform is applied only for the
+ * animation's own life and leaves nothing behind, so a `position: fixed`
+ * descendant is not captured by a lingering identity transform once it ends.
+ */
+@utility stagger-in {
+  & > * { animation: es-rise 420ms var(--ease-enter) backwards; }
+  & > :nth-child(2) { animation-delay: 50ms; }
+  & > :nth-child(3) { animation-delay: 100ms; }
+  & > :nth-child(4) { animation-delay: 150ms; }
+  & > :nth-child(5) { animation-delay: 200ms; }
+  & > :nth-child(6) { animation-delay: 250ms; }
+  & > :nth-child(n + 7) { animation-delay: 300ms; }
+}
+
+/*
+ * The same sequence for a whole screen, applied to `<main>` in the shell. A
+ * page here is either one wrapping `div` holding the header and the cards, or
+ * a fragment whose cards land in `<main>` directly — so both shapes are named,
+ * and a `fixed` wrapper (the flash toast) is left out because a rising toast
+ * is a toast that is already animated.
+ */
+@utility page-enter {
+  & > :where(div:not([class*="fixed"])) > *,
+  & > :where(section, header, form, ol, ul, article) {
+    animation: es-rise 420ms var(--ease-enter) backwards;
+  }
+  & > :where(div:not([class*="fixed"])) > :nth-child(2),
+  & > :where(section, header, form, ol, ul, article):nth-child(2) { animation-delay: 50ms; }
+  & > :where(div:not([class*="fixed"])) > :nth-child(3),
+  & > :where(section, header, form, ol, ul, article):nth-child(3) { animation-delay: 100ms; }
+  & > :where(div:not([class*="fixed"])) > :nth-child(4),
+  & > :where(section, header, form, ol, ul, article):nth-child(4) { animation-delay: 150ms; }
+  & > :where(div:not([class*="fixed"])) > :nth-child(5),
+  & > :where(section, header, form, ol, ul, article):nth-child(5) { animation-delay: 200ms; }
+  & > :where(div:not([class*="fixed"])) > :nth-child(n + 6),
+  & > :where(section, header, form, ol, ul, article):nth-child(n + 6) { animation-delay: 250ms; }
+}
+
+/*
+ * Depth.
+ *
+ * A card is a sheet of paper resting on the page: a faint highlight along its
+ * top edge where the light catches it, a whisper of gradient so it is not one
+ * flat colour, and the layered `--shadow-card` under it. In dark the highlight
+ * is what does most of the work — a lighter top edge is how the eye reads a
+ * raised surface when there is no paper for a shadow to fall on.
+ */
+@utility surface-card {
+  background-image: linear-gradient(180deg, hsl(0 0% 100% / 0.4), transparent 45%);
+  box-shadow: var(--shadow-card), inset 0 1px 0 hsl(0 0% 100% / 0.65);
+  &:where(.dark, .dark *) {
+    background-image: linear-gradient(180deg, hsl(0 0% 100% / 0.035), transparent 45%);
+    box-shadow: var(--shadow-card), inset 0 1px 0 hsl(0 0% 100% / 0.07);
+  }
+}
+
+/*
+ * A surface you can press lifts toward the pointer and settles back under the
+ * finger. Hover is gated on a device that has one — a phone would otherwise
+ * leave a card stuck in its lifted state after a tap. Pair with `transition`.
+ */
+@utility lift {
+  @media (hover: hover) {
+    &:hover { transform: translateY(-2px); box-shadow: var(--shadow-card-hover); }
+  }
+  &:active { transform: translateY(0); box-shadow: var(--shadow-xs); transition-duration: 60ms; }
+}
+
+/*
+ * A solid button is a raised key: a sheen across its top half, a light edge,
+ * and a shadow that grows as it lifts on hover. Pressing it pushes it *into*
+ * the page — the sheen goes, the shadow turns inward — which is the one piece
+ * of feedback a thumb on a tablet can feel without looking.
+ */
+@utility raised {
+  background-image: linear-gradient(180deg, hsl(0 0% 100% / 0.18), hsl(0 0% 100% / 0) 60%);
+  box-shadow: inset 0 1px 0 hsl(0 0% 100% / 0.22), var(--shadow-raised);
+  @media (hover: hover) {
+    &:hover:not(:disabled) {
+      transform: translateY(-1px);
+      box-shadow: inset 0 1px 0 hsl(0 0% 100% / 0.26), var(--shadow-raised-hover);
+    }
+  }
+  &:active:not(:disabled) {
+    transform: translateY(0);
+    background-image: none;
+    box-shadow: inset 0 2px 4px rgb(var(--shadow-ink) / calc(0.22 * var(--shadow-k)));
+    transition-duration: 60ms;
+  }
 }
 
 /*
