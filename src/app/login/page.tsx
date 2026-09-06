@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { CircleCheck, Route, Shirt, Truck } from "lucide-react";
-import { Field, Input, SubmitButton } from "@/components/form";
+import { Field, Input, PasswordInput, SubmitButton } from "@/components/form";
 import { Notice } from "@/components/ui";
 import { sendMagicLink, signInWithPassword } from "./actions";
 import { ReadingComfort } from "@/components/reading-comfort";
@@ -27,7 +27,7 @@ export default async function LoginPage({
   const error = params.error ? (ERRORS[params.error] ?? params.error) : undefined;
 
   return (
-    <main id="main" className="grid min-h-screen lg:grid-cols-[1.1fr_1fr]">
+    <main id="main" className="grid min-h-dvh lg:grid-cols-[1.1fr_1fr]">
       {/*
         The brand panel. Desktop and large tablets only — on a phone it would
         push the actual sign-in form below the fold, which is the one thing a
@@ -70,7 +70,7 @@ export default async function LoginPage({
         </div>
 
         <p className="relative text-sm text-white/70">
-          Commercial laundry operations · Sydney
+          Commercial laundry operations · Adelaide
         </p>
       </section>
 
@@ -101,7 +101,7 @@ export default async function LoginPage({
                      placeholder="you@electroservices.com.au" />
             </Field>
             <Field label="Password" name="password" required>
-              <Input name="password" type="password" required autoComplete="current-password" />
+              <PasswordInput name="password" required autoComplete="current-password" />
             </Field>
             <SubmitButton pendingLabel="Signing in…" className="w-full">Sign in</SubmitButton>
           </form>

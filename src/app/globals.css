@@ -176,6 +176,51 @@
   }
 
   /*
+   * A control you can press looks pressable.
+   *
+   * Tailwind v4's preflight no longer sets `cursor: pointer` on buttons — it
+   * follows the browser default, which is the arrow. That left every one of
+   * this app's ~300 `<button>`s, every `<summary>` and every label wrapping a
+   * checkbox reading as inert text on a desk, with 17 call sites patching it by
+   * hand and the other several hundred not. Stated once here (the 2026-09-06
+   * review, §10b): a pointer on anything that acts, and the arrow on a control
+   * that is disabled, because the cursor is the one affordance a mouse user
+   * gets before they commit.
+   */
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  summary,
+  label:has(> input[type="checkbox"]),
+  label:has(> input[type="radio"]) {
+    cursor: pointer;
+  }
+  button:disabled,
+  [aria-disabled="true"] {
+    cursor: not-allowed;
+  }
+
+  /* No 300ms tap delay and no accidental double-tap zoom on a control — a
+     driver pressing "Delivered" twice on a loading dock should not zoom the
+     page. Scrolling and pinch-zoom on the page itself are untouched. */
+  a, button, input, select, textarea, label, summary, [role="button"] {
+    touch-action: manipulation;
+  }
+
+  /*
+   * Keyboard focus is never hidden under the sticky bars (WCAG 2.2, 2.4.11).
+   *
+   * The header is 64px and sticks to the top; on a phone `FormActions` sticks
+   * to the bottom. Tabbing into a field that has scrolled under either would
+   * otherwise land it exactly where the reader cannot see it. Scroll padding
+   * keeps the focused control clear of both — and it also fixes "#main" from
+   * the skip link and any in-page anchor landing under the header.
+   */
+  html {
+    scroll-padding-top: 5rem;
+    scroll-padding-bottom: 6rem;
+  }
+
+  /*
    * Reading comfort — one rule that makes the whole application bigger.
    *
    * Every size in this app is expressed in `rem`: Tailwind v4's spacing scale is
@@ -219,6 +264,13 @@
   /* Headings carry a slight optical tightening; body text does not. */
   h1, h2, h3, h4 {
     letter-spacing: -0.011em;
+  }
+
+  /* A page title that wraps, wraps evenly — a two-line heading with one word
+     orphaned on the second line reads as a mistake. Progressive: a browser
+     that does not know `balance` wraps as it always did. */
+  h1 {
+    text-wrap: balance;
   }
 
   /*
@@ -323,6 +375,19 @@
   --font-serif: var(--font-instrument-serif), Georgia, "Times New Roman", serif;
   --font-mono: var(--font-jetbrains-mono), ui-monospace, monospace;
 
+  /*
+   * One motion voice. Every `transition` utility in the app resolves to these
+   * two values, so a hover, a press and a focus ring all move at the same
+   * tempo — 160ms is quick enough to feel like feedback rather than animation,
+   * and the ease-out curve arrives softly instead of stopping dead. The four
+   * keyframe utilities at the foot of this file share the same curve. Set here
+   * rather than per call site, because a duration copied into 200 class
+   * strings is 200 places for it to drift.
+   */
+  --default-transition-duration: 160ms;
+  --default-transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
+  --ease-enter: cubic-bezier(0.2, 0, 0, 1);
+
   /* These two used to be 9px and 10px, and were sprinkled over labels
      throughout the app. They are kept so those call sites keep working, but
      raised to sizes a person can actually read at arm's length on a tablet.
@@ -393,19 +458,40 @@
 }
 
 @utility animate-fade-in {
-  animation: es-fade-in 150ms ease-out;
+  animation: es-fade-in 150ms var(--ease-enter);
 }
 
 @utility animate-slide-in-left {
-  animation: es-slide-in-left 200ms cubic-bezier(0.32, 0.72, 0, 1);
+  animation: es-slide-in-left 200ms var(--ease-enter);
 }
 
 @utility animate-slide-up {
-  animation: es-slide-up 180ms ease-out;
+  animation: es-slide-up 180ms var(--ease-enter);
 }
 
 @utility animate-sheet-up {
-  animation: es-sheet-up 240ms cubic-bezier(0.32, 0.72, 0, 1);
+  animation: es-sheet-up 240ms var(--ease-enter);
+}
+
+/*
+ * The chevron on a native <select>, drawn as a background so the control keeps
+ * its native picker — the right control on a phone and a tablet.
+ *
+ * It used to be a hard-coded `#6b7280` inside a data URI in `ui.tsx`: a cool
+ * Tailwind grey from before the YSM palette, the one raw hex left in a
+ * component, and the same grey in dark mode where it sat on a near-black fill.
+ * A data URI cannot read a CSS variable, so the two values are written out —
+ * they are `--muted-foreground` in each theme, byte for byte, and the
+ * comment beside that token is where they are derived.
+ */
+@utility select-chevron {
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23454945' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-size: 1.15rem;
+  background-position: right 0.65rem center;
+  background-repeat: no-repeat;
+  &:where(.dark, .dark *) {
+    background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23afada7' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -75,7 +75,7 @@ export function PageHeader({
           {eyebrow ? <div className="mb-1"><Eyebrow>{eyebrow}</Eyebrow></div> : null}
           <h1 className="text-2xl font-semibold sm:text-[1.75rem] sm:leading-tight">{title}</h1>
           {description ? (
-            <p className="mt-1.5 max-w-2xl text-sm text-muted-foreground">{description}</p>
+            <p className="mt-1.5 max-w-2xl text-pretty text-sm text-muted-foreground">{description}</p>
           ) : null}
         </div>
         {actions ? (
@@ -266,13 +266,26 @@ const BADGE_TONES = {
 
 export type BadgeTone = keyof typeof BADGE_TONES;
 
-export function Badge({ children, tone = "neutral" }: { children: ReactNode; tone?: BadgeTone }) {
+export function Badge({
+  children, tone = "neutral", dot = false,
+}: {
+  children: ReactNode; tone?: BadgeTone;
+  /**
+   * A small filled disc before the label, in the badge's own colour. A second
+   * signal beside the words: on paper the tints are deliberately quiet, and in a
+   * column of twenty badges the disc is what lets the eye pick out the one red
+   * row without reading every label. Shape and text still carry the meaning on
+   * their own — the colour is reinforcement, as it is everywhere else here.
+   */
+  dot?: boolean;
+}) {
   return (
     <span className={cx(
-      "inline-flex items-center gap-1 whitespace-nowrap rounded-full border px-2.5 py-0.5",
+      "inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-0.5",
       "text-xs font-medium",
       BADGE_TONES[tone],
     )}>
+      {dot ? <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-current" /> : null}
       {children}
     </span>
   );
@@ -303,7 +316,7 @@ export function humanise(value: string | null | undefined): string {
 
 export function StatusBadge({ status }: { status: string | null | undefined }) {
   if (!status) return <Badge>—</Badge>;
-  return <Badge tone={STATUS_TONES[status] ?? "neutral"}>{humanise(status)}</Badge>;
+  return <Badge dot tone={STATUS_TONES[status] ?? "neutral"}>{humanise(status)}</Badge>;
 }
 
 /* ------------------------------------------------------------------ actions */
@@ -318,16 +331,24 @@ export function StatusBadge({ status }: { status: string | null | undefined }) {
  */
 const BUTTON_VARIANTS = {
   primary: "bg-action text-action-foreground shadow-xs hover:brightness-110 active:brightness-95",
-  secondary: "border border-strong bg-surface text-foreground shadow-xs hover:bg-surface-muted",
+  secondary: "border border-strong bg-surface text-foreground shadow-xs hover:bg-surface-muted active:bg-surface-sunken",
   danger: "bg-danger text-on-status shadow-xs hover:brightness-110 active:brightness-95",
-  ghost: "text-primary hover:bg-primary/8",
+  ghost: "text-primary hover:bg-primary/8 active:bg-primary/15",
   /* A destructive action that sits in a list row, where a solid red block would
      shout down the row it belongs to. `ghost` is teal — the colour this app
      uses for "this is the action to take" — so a Remove button wearing it read
      as the safe thing to press. */
-  dangerGhost: "text-danger hover:bg-danger/8",
-  subtle: "bg-surface-muted text-foreground hover:bg-surface-sunken",
+  dangerGhost: "text-danger hover:bg-danger/8 active:bg-danger/15",
+  subtle: "bg-surface-muted text-foreground hover:bg-surface-sunken active:brightness-95",
 } as const;
+
+/*
+ * Every variant answers a press, not only a hover. A button that changes on
+ * hover and then does nothing at the moment it is pressed reads as a missed tap
+ * on a touch screen — there is no hover there, so the press was the only
+ * feedback available and it was absent on four of the six variants. Colour
+ * and brightness only: nothing moves, so the row it sits in does not jitter.
+ */
 
 /* 40px standard, 44px for the touch-first `lg`. Nothing tappable goes below
    36px — a control a thumb misses on a loading dock is a defect, not density. */
@@ -405,11 +426,10 @@ export const CONTROL =
  */
 export const CONTROL_AUTO = CONTROL.replace("w-full ", "w-auto ");
 
-export const SELECT_CHEVRON =
-  "appearance-none bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22" +
-  "%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%236b7280%22%20stroke-width%3D%222%22" +
-  "%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22m6%209%206%206%206-6%22/%3E%3C/svg%3E')] " +
-  "bg-[length:1.15rem] bg-[right_0.65rem_center] bg-no-repeat pr-10";
+/* The glyph itself lives in `globals.css` as the `select-chevron` utility, in
+   both themes' `--muted-foreground`. It was a `#6b7280` data URI here — the
+   last raw hex in a component, and one grey for both themes. */
+export const SELECT_CHEVRON = "appearance-none select-chevron pr-10";
 
 export function ButtonLink({
   href, children, variant = "secondary", size = "md", className,
@@ -567,7 +587,7 @@ export function DataTable<T>({
       <div className={cx(
              "hidden overflow-x-auto bg-surface sm:block",
              bare ? "" : "rounded-xl border shadow-sm",
-             stickyHeader && "max-h-[70vh] overflow-y-auto",
+             stickyHeader && "max-h-[70dvh] overflow-y-auto",
            )}
            tabIndex={0} role="region" aria-label={label}>
         <table className="w-full border-collapse text-sm">

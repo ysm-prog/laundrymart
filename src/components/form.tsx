@@ -1,7 +1,8 @@
 "use client";
 
 import { useFormStatus } from "react-dom";
-import { createContext, useContext, type ReactNode } from "react";
+import { createContext, useContext, useState, type ReactNode } from "react";
+import { Eye, EyeOff, LoaderCircle } from "lucide-react";
 import { CONTROL, SELECT_CHEVRON, cx } from "./ui";
 
 /**
@@ -110,6 +111,58 @@ export function Input({
       aria-describedby={field.describedBy} aria-invalid={field.invalid || undefined}
       defaultValue={defaultValue ?? undefined} className={CONTROL}
     />
+  );
+}
+
+/**
+ * A password box with a show/hide control.
+ *
+ * Somebody typing a password on a counter tablet cannot see what they typed,
+ * and the only feedback the box gives is "not recognised" a second later.
+ * Letting them look is the single largest reduction in failed sign-ins a
+ * login form can make (WCAG 3.3.8, Material's own guidance), and it costs
+ * nothing: the toggle is a `<button>` inside the box, never a submit.
+ *
+ * The accessible name stays "Show password" in both states and `aria-pressed`
+ * carries which one it is — a toggle whose *name* flips as well as its state
+ * reads to a screen reader as two different controls. The label is inside the
+ * box's own 44px row, and the button is the app's 36px floor.
+ *
+ * Joins `Field`'s hint and error wiring the same way `Input` does, so a
+ * password field with a rule under it announces the rule.
+ */
+export function PasswordInput({
+  name, required, autoComplete = "current-password", id, placeholder,
+}: {
+  name: string; required?: boolean;
+  /** `current-password` on sign-in, `new-password` where one is being chosen. */
+  autoComplete?: "current-password" | "new-password";
+  id?: string; placeholder?: string;
+}) {
+  const field = useFieldControl();
+  const [shown, setShown] = useState(false);
+  const inputId = id ?? name;
+  return (
+    <div className="relative">
+      <input
+        id={inputId} name={name} type={shown ? "text" : "password"} required={required}
+        autoComplete={autoComplete} placeholder={placeholder}
+        aria-describedby={field.describedBy} aria-invalid={field.invalid || undefined}
+        className={cx(CONTROL, "pr-12")}
+      />
+      <button
+        type="button" onClick={() => setShown((value) => !value)}
+        aria-pressed={shown} aria-controls={inputId}
+        className="absolute right-1 top-1/2 flex size-9 -translate-y-1/2 items-center justify-center
+                   rounded-md text-muted-foreground transition hover:bg-surface-muted
+                   hover:text-foreground active:bg-surface-sunken"
+      >
+        {shown
+          ? <EyeOff className="size-[1.15rem]" aria-hidden />
+          : <Eye className="size-[1.15rem]" aria-hidden />}
+        <span className="sr-only">Show password</span>
+      </button>
+    </div>
   );
 }
 
@@ -255,26 +308,33 @@ export function SubmitButton({
   const { pending } = useFormStatus();
   // Mirrors BUTTON_VARIANTS in ui.tsx.
   const variants = {
-    primary: "bg-action text-action-foreground shadow-xs hover:brightness-110",
-    danger: "bg-danger text-on-status shadow-xs hover:brightness-110",
-    secondary: "border border-strong bg-surface shadow-xs hover:bg-surface-muted",
+    primary: "bg-action text-action-foreground shadow-xs hover:brightness-110 active:brightness-95",
+    danger: "bg-danger text-on-status shadow-xs hover:brightness-110 active:brightness-95",
+    secondary: "border border-strong bg-surface shadow-xs hover:bg-surface-muted active:bg-surface-sunken",
     // For a third verb in a row that already has two: present, and not
     // competing with them. Mirrors `ghost` in BUTTON_VARIANTS.
-    ghost: "text-primary hover:bg-primary/8",
+    ghost: "text-primary hover:bg-primary/8 active:bg-primary/15",
     // A destructive control inside a list row — Remove beside a line, not the
     // action the reader came for. §10b: teal means "this is the action", so a
     // Remove drawn in it competes with the one that is. Mirrors
     // `dangerGhost` in BUTTON_VARIANTS.
-    dangerGhost: "text-danger hover:bg-danger/8",
+    dangerGhost: "text-danger hover:bg-danger/8 active:bg-danger/15",
   } as const;
   const sizes = { md: "min-h-10 px-4", lg: "min-h-11 px-5" } as const;
   return (
     <button type="submit" disabled={pending} form={formId} formAction={formAction}
+            aria-busy={pending || undefined}
             className={cx(
               "inline-flex items-center justify-center gap-2 rounded-lg text-sm font-medium transition",
               "disabled:pointer-events-none disabled:opacity-60 [&_svg]:size-4 [&_svg]:shrink-0",
               sizes[size], variants[variant], className,
             )}>
+      {/* The label already changes to "Saving…"; the spinner is the part that
+          says it is *still* going, which matters on a slow van connection
+          where a request can take several seconds and a dimmed button reads
+          as broken rather than busy. Under reduced motion the global rule
+          freezes it to a static glyph, which is what that preference asks. */}
+      {pending ? <LoaderCircle className="animate-spin" aria-hidden /> : null}
       {pending ? pendingLabel : children}
     </button>
   );
@@ -291,7 +351,13 @@ export function FormActions({ children, sticky = true }: { children: ReactNode; 
   return (
     <div className={cx(
       "flex flex-wrap items-center gap-3 border-t bg-surface px-4 py-4 sm:rounded-xl sm:border sm:px-5 sm:shadow-sm",
-      sticky && "sticky bottom-0 z-20 -mx-4 shadow-[0_-2px_8px_rgb(16_24_40/0.06)] sm:static sm:mx-0 sm:shadow-sm",
+      /* On a phone the bar sits on the bottom edge, which on a handset with a
+         home indicator is exactly where the gesture bar is. The inset is 0 in a
+         browser tab today and only reads non-zero once the viewport opts into
+         `viewport-fit=cover`; it is written now so the bar is already right the
+         day that flag is set, rather than the day somebody notices. */
+      sticky && "sticky bottom-0 z-20 -mx-4 pb-[max(1rem,env(safe-area-inset-bottom))] " +
+        "shadow-[0_-2px_8px_rgb(16_24_40/0.06)] sm:static sm:mx-0 sm:pb-4 sm:shadow-sm",
     )}>
       {children}
     </div>

@@ -58,7 +58,7 @@ export function UserMenu({
       <button type="button" onClick={() => setOpen((value) => !value)}
               aria-expanded={open} aria-haspopup="menu"
               className={cx(
-                "flex min-h-10 items-center gap-2 rounded-lg py-1 pl-1 pr-1.5 transition",
+                "flex min-h-11 items-center gap-2 rounded-lg py-1 pl-1.5 pr-2 transition",
                 "hover:bg-surface-muted",
                 open && "bg-surface-muted",
               )}>

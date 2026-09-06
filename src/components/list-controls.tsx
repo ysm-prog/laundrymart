@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import Link from "next/link";
 import { Search, X } from "lucide-react";
 import { isFiltered as anyFilterSet, filterHref, type FilterParams } from "@/lib/filters";
-import { CONTROL, SELECT_CHEVRON, cx } from "./ui";
+import { Button, CONTROL, SELECT_CHEVRON, cx } from "./ui";
 
 /**
  * The filter bar over a list. A GET form, so the filtered list lives in the URL
@@ -101,12 +101,9 @@ export function ListControls({
             </select>
           </div>
         ))}
-        <button type="submit"
-                className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg bg-action
-                           px-5 text-sm font-medium text-action-foreground shadow-xs transition
-                           hover:brightness-110">
-          Search
-        </button>
+        {/* The shared button, not a copy of its classes: the copy had a hover
+            and no press state, which is the drift this bar exists to prevent. */}
+        <Button size="lg">Search</Button>
         {/* Only when there is no summary beneath. A `FilterSummary` carries its
             own Clear, and two of them a few pixels apart is one control drawn
             twice — the reader has to work out whether they do the same thing. */}

@@ -1,6 +1,6 @@
 import { AppNav, BrandMark } from "@/components/app-nav";
 import { Moon, Search } from "lucide-react";
-import { Checkbox, Field, Input, Select, SubmitButton } from "@/components/form";
+import { Checkbox, Field, Input, PasswordInput, Select, SubmitButton } from "@/components/form";
 import {
   Badge, Button, ButtonLink, Card, DataTable, EmptyState, Eyebrow, Notice,
   PageHeader, Stage, Stat, StatusBadge, cx,
@@ -336,7 +336,7 @@ export default function DesignPreviewPage() {
   if (process.env.VERCEL_ENV === "production") notFound();
 
   return (
-    <div className="min-h-screen lg:grid lg:grid-cols-[16rem_1fr]">
+    <div className="min-h-dvh lg:grid lg:grid-cols-[16rem_1fr]">
       {/* The shell, mirrored from `AppShell`. Static here — the live one reads
           the pathname and a cookie, neither of which this gallery has. */}
       <aside className="hidden flex-col border-r bg-sidebar lg:flex">
@@ -371,7 +371,7 @@ export default function DesignPreviewPage() {
           <div className="ml-auto flex items-center gap-1">
             <span className="mr-1 hidden text-sm text-muted-foreground lg:inline">13/08/2026</span>
             <NotificationBell count={3} />
-            <span className="flex size-10 items-center justify-center rounded-lg text-muted-foreground">
+            <span className="flex size-11 items-center justify-center rounded-lg text-muted-foreground">
               <Moon className="size-[1.15rem]" aria-hidden />
             </span>
             <span className="flex size-8 items-center justify-center rounded-full bg-primary/12
@@ -512,6 +512,13 @@ export default function DesignPreviewPage() {
                     <Field label="Terms" name="p_terms" hint="Days from issue."><Input name="p_terms" defaultValue="14" /></Field>
                   </div>
                   <Checkbox name="p_check" label="Emergency service" defaultChecked />
+                  {/* The password box with its show/hide control — the one
+                      input in the app whose contents the typist cannot see. */}
+                  <div id="password-field-preview" className="max-w-sm">
+                    <Field label="Password" name="p_password" hint="At least 10 characters.">
+                      <PasswordInput name="p_password" autoComplete="new-password" />
+                    </Field>
+                  </div>
                   <div className="space-y-2">
                     <Notice tone="info" title="Information">A neutral message.</Notice>
                     <Notice tone="warning" title="Warning">Something needs attention.</Notice>

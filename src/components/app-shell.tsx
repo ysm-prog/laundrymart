@@ -88,11 +88,11 @@ export function AppShell({
 
   return (
     <div className={cx(
-      "min-h-screen lg:grid",
+      "min-h-dvh lg:grid",
       collapsed ? "lg:grid-cols-[4.5rem_1fr]" : "lg:grid-cols-[16rem_1fr]",
     )}>
       {/* ------------------------------------------------ desktop rail --- */}
-      <aside className="sticky top-0 hidden h-screen flex-col border-r bg-sidebar lg:flex">
+      <aside className="sticky top-0 hidden h-dvh flex-col border-r bg-sidebar lg:flex">
         <div className={cx(
           "flex h-16 flex-none items-center border-b border-sidebar-border",
           collapsed ? "justify-center px-2" : "px-4",
@@ -174,7 +174,7 @@ export function AppShell({
                            bg-surface/90 px-3 backdrop-blur sm:px-5 print:hidden">
           <button type="button" onClick={() => setDrawerOpen(true)}
                   aria-expanded={drawerOpen} aria-controls="mobile-nav"
-                  className="flex size-10 shrink-0 items-center justify-center rounded-lg
+                  className="flex size-11 shrink-0 items-center justify-center rounded-lg
                              text-muted-foreground transition hover:bg-surface-muted lg:hidden">
             <Menu className="size-5" aria-hidden />
             <span className="sr-only">Open menu</span>
@@ -188,7 +188,15 @@ export function AppShell({
 
         {sectionSlot}
 
-        <main id="main" className="min-w-0 flex-1 px-4 py-6 sm:px-6 sm:py-8">{children}</main>
+        {/* `tabIndex={-1}` so the skip link and an in-page anchor really move
+            focus here in every browser, not only the ones that treat a plain
+            anchor jump as a focus move. The landmark itself draws no ring — a
+            3px outline round the whole page is noise — while everything inside
+            it keeps the global one. */}
+        <main id="main" tabIndex={-1}
+              className="min-w-0 flex-1 px-4 py-6 outline-none sm:px-6 sm:py-8">
+          {children}
+        </main>
       </div>
     </div>
   );

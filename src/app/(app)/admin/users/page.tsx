@@ -15,7 +15,7 @@ import { ConfirmSubmit } from "@/components/confirm-submit";
 import { ListControls } from "@/components/list-controls";
 import { FilterChips, FilterSummary } from "@/components/filters";
 import { isFiltered } from "@/lib/filters";
-import { Field, Input, Select, SubmitButton } from "@/components/form";
+import { Field, Input, PasswordInput, Select, SubmitButton } from "@/components/form";
 import {
   createMemberWithPassword, inviteMember, removeMember, sendMemberSignInLink, updateMembership,
 } from "../actions";
@@ -223,7 +223,7 @@ export function AddPersonCard({ depots }: { depots: Pick<Depot, "id" | "name">[]
               {/* `new-password`, not `off`: password managers ignore `off` and
                   would happily fill the administrator's own credential into a
                   box that creates somebody else's login. */}
-              <Input name="password" type="password" autoComplete="new-password" />
+              <PasswordInput name="password" autoComplete="new-password" />
             </Field>
             <p className="text-xs text-muted-foreground">
               No email is sent. Give them the password yourself, and ask them to change

@@ -59,10 +59,14 @@ describe("the add-someone form and its two actions", () => {
     // disclosure fails native validation with nothing to focus — the form
     // simply refuses to submit and says nothing. The 2026-08-24 pass recorded
     // this when the job form's optional sections became disclosures.
-    const passwordInput = page.match(/<Input\s+name="password"[^/]*\/>/)?.[0] ?? "";
+    // `PasswordInput` (2026-09-06) owns the `type` itself — `password` until
+    // its show/hide control is pressed — so the box is asserted by component
+    // rather than by attribute. It is still the shared control, and still not
+    // `required`.
+    const passwordInput = page.match(/<PasswordInput\s+name="password"[^/]*\/>/)?.[0] ?? "";
     expect(passwordInput).not.toBe("");
     expect(passwordInput).not.toMatch(/\brequired\b/);
-    expect(passwordInput).toMatch(/type="password"/);
+    expect(passwordInput).not.toMatch(/type=/);
     // `off` is widely ignored by password managers, which would then offer to
     // fill the administrator's *own* credential into a box that makes somebody
     // else's login.

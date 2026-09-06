@@ -9,7 +9,29 @@ where that is genuinely what it is. The multi-tenancy architecture stays: one op
 fact about today's data, not a reason to drop `tenant_id`, RLS, or §23's rule that a read feeding a
 write names its tenant.
 
-## Latest: the §23 sweep — 13 sites, not 345
+## Latest: the UI/UX review against `ui-ux-pro-max`, answered in the token layer
+2026-09-06, on `claude/app-ui-ux-redesign-145aay`. No migration; no schema, RLS, capability,
+policy or route change. `docs/UI-REVIEW-2026-09-06.md` is the record; §10b has the rules; §18 the
+entry.
+
+- **Palette and fonts kept**, against the skill's navy + Inter recommendation: the YSM Hub
+  language is the point (§10b), and the Instrument Sans *latin* subset carries `tnum`, so
+  `tabular-nums` aligns money columns. (First font check read the wrong subset — re-fetched.)
+- **Tailwind v4 preflight sets no `cursor: pointer`** — every button/summary/checkbox label was
+  inert to a mouse. One base rule in `globals.css`, plus `touch-action: manipulation`,
+  `scroll-padding` on `html` (focus never under the sticky header/`FormActions`), shared motion
+  tokens (`--default-transition-*`, `--ease-enter`), and the `select-chevron` utility replacing a
+  `#6b7280` data URI (the last raw hex in a component).
+- **Components**: `active:` on every `Button` variant, spinner + `aria-busy` on `SubmitButton`,
+  new `PasswordInput` with a show/hide eye on all four password fields, `StatusBadge` dot,
+  header controls 44px, `dvh` everywhere `vh` was.
+- **Measured**: gallery at 320/375/768/1024/1440 and login at 375/1440, both themes — all clean;
+  harness proved non-vacuous by removing rules. 1104 tests unchanged; `verify` green.
+- **Deferred**: nine files with arbitrary `text-[…px]` sizes, an error-summary pattern,
+  `viewport-fit=cover`. Toast auto-dismiss deliberately not adopted.
+- **Not opened behind the auth gate** — no Supabase credentials here.
+
+## Previously: the §23 sweep — 13 sites, not 345
 2026-09-01. No migration. §23 had claimed ~345 unfiltered reads since August; the number that
 matters is **13** — a read in a `"use server"` module keyed on an id **posted from a form**, with no
 tenant filter. All now carry `.eq("tenant_id", session.tenantId)`.

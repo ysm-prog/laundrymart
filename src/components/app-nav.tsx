@@ -286,8 +286,8 @@ export function ThemeToggle() {
       type="button"
       onClick={toggle}
       aria-pressed={dark}
-      className="flex size-10 shrink-0 items-center justify-center rounded-lg text-muted-foreground
-                 transition hover:bg-surface-muted hover:text-foreground"
+      className="flex size-11 shrink-0 items-center justify-center rounded-lg text-muted-foreground
+                 transition hover:bg-surface-muted hover:text-foreground active:bg-surface-sunken"
       title={dark ? "Switch to light mode" : "Switch to dark mode"}
     >
       {dark ? <Sun className="size-[1.15rem]" aria-hidden /> : <Moon className="size-[1.15rem]" aria-hidden />}
@@ -373,7 +373,7 @@ export function TextSizeControl() {
       type="button"
       onClick={() => applyTextSize(nextTextSize(size))}
       className="flex size-11 shrink-0 items-center justify-center rounded-lg text-muted-foreground
-                 transition hover:bg-surface-muted hover:text-foreground"
+                 transition hover:bg-surface-muted hover:text-foreground active:bg-surface-sunken"
       title={label}
     >
       <span aria-hidden className="font-semibold leading-none">
