@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { CircleCheck, Route, Shirt, Truck } from "lucide-react";
-import { Field, Input, SubmitButton } from "@/components/form";
+import { Field, Input, PasswordInput, SubmitButton } from "@/components/form";
 import { Notice } from "@/components/ui";
 import { sendMagicLink, signInWithPassword } from "./actions";
 import { ReadingComfort } from "@/components/reading-comfort";
@@ -27,20 +27,24 @@ export default async function LoginPage({
   const error = params.error ? (ERRORS[params.error] ?? params.error) : undefined;
 
   return (
-    <main id="main" className="grid min-h-screen lg:grid-cols-[1.1fr_1fr]">
+    <main id="main" className="grid min-h-dvh lg:grid-cols-[1.1fr_1fr]">
       {/*
         The brand panel. Desktop and large tablets only — on a phone it would
         push the actual sign-in form below the fold, which is the one thing a
         login screen must never do.
       */}
-      <section className="relative hidden flex-col justify-between overflow-hidden bg-primary
+      <section className="relative hidden flex-col justify-between overflow-hidden
+                          bg-gradient-to-br from-primary via-primary to-accent
                           p-12 text-primary-foreground lg:flex">
+        {/* Two soft shapes of light, drifting on a ten-second cycle — the one
+            decorative motion in the app, on the one screen with no work on it.
+            Both stop under a reduced-motion preference. */}
         <div aria-hidden
-             className="pointer-events-none absolute -right-24 -top-24 size-96 rounded-full
-                        bg-white/8" />
+             className="animate-float pointer-events-none absolute -right-24 -top-24 size-96
+                        rounded-full bg-white/10 blur-2xl" />
         <div aria-hidden
-             className="pointer-events-none absolute -bottom-32 -left-16 size-80 rounded-full
-                        bg-white/5" />
+             className="animate-float pointer-events-none absolute -bottom-32 -left-16 size-80
+                        rounded-full bg-white/8 blur-2xl [animation-delay:-5s]" />
 
         <div className="relative flex items-center gap-3">
           <span aria-hidden
@@ -55,12 +59,13 @@ export default async function LoginPage({
           <h2 className="text-3xl font-semibold leading-tight">
             Everything the laundry is doing today, in one place.
           </h2>
-          <ul className="mt-8 space-y-4">
+          <ul className="stagger-in mt-8 space-y-4">
             {HIGHLIGHTS.map(({ icon: Icon, text }) => (
               <li key={text} className="flex items-start gap-3">
                 <span aria-hidden
                       className="mt-0.5 flex size-8 shrink-0 items-center justify-center
-                                 rounded-lg bg-white/15">
+                                 rounded-lg bg-white/15 shadow-md
+                                 [box-shadow:inset_0_1px_0_hsl(0_0%_100%/0.3),var(--shadow-md)]">
                   <Icon className="size-4" />
                 </span>
                 <span className="text-[0.9375rem] leading-relaxed text-white/90">{text}</span>
@@ -70,13 +75,13 @@ export default async function LoginPage({
         </div>
 
         <p className="relative text-sm text-white/70">
-          Commercial laundry operations · Sydney
+          Commercial laundry operations · Adelaide
         </p>
       </section>
 
       {/* The form. Centred, capped, and the only thing on screen on a phone. */}
       <section className="flex flex-col justify-center px-6 py-12 sm:px-12">
-        <div className="mx-auto w-full max-w-[26rem]">
+        <div className="animate-rise mx-auto w-full max-w-[26rem]">
           <div className="mb-8">
             <Link href="/" className="mb-6 inline-flex items-center gap-2.5 lg:hidden">
               <span aria-hidden
@@ -101,7 +106,7 @@ export default async function LoginPage({
                      placeholder="you@electroservices.com.au" />
             </Field>
             <Field label="Password" name="password" required>
-              <Input name="password" type="password" required autoComplete="current-password" />
+              <PasswordInput name="password" required autoComplete="current-password" />
             </Field>
             <SubmitButton pendingLabel="Signing in…" className="w-full">Sign in</SubmitButton>
           </form>

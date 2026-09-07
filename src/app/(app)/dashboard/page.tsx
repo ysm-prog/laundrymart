@@ -493,7 +493,7 @@ async function PlantStages() {
                  className={cx("rounded-lg border px-2.5 py-2", bottleneck && "border-warning/40 bg-warning/5")}>
               <Eyebrow className={bottleneck ? "text-warning" : undefined}>{stage.label}</Eyebrow>
               <div className={cx(
-                "mt-0.5 text-[17px] font-semibold tabular-nums",
+                "mt-0.5 text-lg font-semibold tabular-nums",
                 bottleneck && "text-warning",
               )}>
                 {number(quantity)}

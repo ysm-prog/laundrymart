@@ -21,8 +21,9 @@ export function NotificationBell({ count }: { count?: number }) {
       href="/notifications"
       title={label}
       aria-label={label}
-      className="relative flex size-10 shrink-0 items-center justify-center rounded-lg
-                 text-muted-foreground transition hover:bg-surface-muted hover:text-foreground"
+      className="relative flex size-11 shrink-0 items-center justify-center rounded-lg
+                 text-muted-foreground transition hover:bg-surface-muted hover:text-foreground
+                 active:bg-surface-sunken"
     >
       <Bell className="size-[1.15rem]" aria-hidden />
       {count ? (

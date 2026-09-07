@@ -48,7 +48,7 @@ export function GlobalSearch() {
 
       {/* Phone: an icon that expands over the header. */}
       <button type="button" onClick={() => setExpanded(true)}
-              className="ml-auto flex size-10 shrink-0 items-center justify-center rounded-lg
+              className="ml-auto flex size-11 shrink-0 items-center justify-center rounded-lg
                          text-muted-foreground transition hover:bg-surface-muted sm:hidden">
         <Search className="size-[1.15rem]" aria-hidden />
         <span className="sr-only">Search</span>
@@ -66,7 +66,7 @@ export function GlobalSearch() {
             {field}
           </form>
           <button type="button" onClick={() => setExpanded(false)}
-                  className="flex size-10 shrink-0 items-center justify-center rounded-lg
+                  className="flex size-11 shrink-0 items-center justify-center rounded-lg
                              text-muted-foreground transition hover:bg-surface-muted">
             <X className="size-5" aria-hidden />
             <span className="sr-only">Close search</span>
