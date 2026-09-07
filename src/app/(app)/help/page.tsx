@@ -254,7 +254,7 @@ export default async function HelpPage() {
           {areas.map((area) => (
             <div key={area.href}>
               <dt>
-                <Link href={area.href} className="text-[13px] font-medium text-primary hover:underline">
+                <Link href={area.href} className="text-sm font-medium text-primary hover:underline">
                   {area.label}
                 </Link>
               </dt>
@@ -283,7 +283,7 @@ export default async function HelpPage() {
           {GLOSSARY.map((entry) => (
             <div key={entry.term} className="grid gap-1 py-2.5 sm:grid-cols-[180px_minmax(0,1fr)] sm:gap-4">
               <dt>
-                <span className="text-[13px] font-medium">{entry.term}</span>
+                <span className="text-sm font-medium">{entry.term}</span>
                 {entry.also ? (
                   <span className="mt-0.5 block"><Eyebrow>also called {entry.also}</Eyebrow></span>
                 ) : null}

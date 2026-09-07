@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { CircleCheck, TriangleAlert } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
-import { Field, Input } from "@/components/form";
+import { Field, PasswordInput } from "@/components/form";
 import { Notice } from "@/components/ui";
 
 /**
@@ -163,10 +163,10 @@ export function AcceptInvite() {
     <form action={setPassword} className="space-y-4">
       <Field label="Choose a password" name="password" required
              hint="At least 8 characters. You will use this with your email address to sign in.">
-        <Input name="password" type="password" required autoComplete="new-password" />
+        <PasswordInput name="password" required autoComplete="new-password" />
       </Field>
       <Field label="Type it again" name="confirm" required>
-        <Input name="confirm" type="password" required autoComplete="new-password" />
+        <PasswordInput name="confirm" required autoComplete="new-password" />
       </Field>
 
       {error ? (

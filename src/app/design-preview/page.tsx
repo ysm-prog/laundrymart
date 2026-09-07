@@ -1,6 +1,6 @@
 import { AppNav, BrandMark } from "@/components/app-nav";
 import { FileQuestion, Moon, Search, TriangleAlert } from "lucide-react";
-import { Checkbox, Field, Input, Select, SubmitButton } from "@/components/form";
+import { Checkbox, Field, Input, PasswordInput, Select, SubmitButton } from "@/components/form";
 import {
   Badge, Button, ButtonLink, Card, DataTable, EmptyState, Eyebrow, Notice,
   PageHeader, Stage, Stat, StatusBadge, cx,
@@ -337,7 +337,7 @@ export default function DesignPreviewPage() {
   if (process.env.VERCEL_ENV === "production") notFound();
 
   return (
-    <div className="min-h-screen lg:grid lg:grid-cols-[16rem_1fr]">
+    <div className="min-h-dvh lg:grid lg:grid-cols-[16rem_1fr]">
       {/* The shell, mirrored from `AppShell`. Static here — the live one reads
           the pathname and a cookie, neither of which this gallery has. */}
       <aside className="hidden flex-col border-r bg-sidebar lg:flex">
@@ -372,7 +372,7 @@ export default function DesignPreviewPage() {
           <div className="ml-auto flex items-center gap-1">
             <span className="mr-1 hidden text-sm text-muted-foreground lg:inline">13/08/2026</span>
             <NotificationBell count={3} />
-            <span className="flex size-10 items-center justify-center rounded-lg text-muted-foreground">
+            <span className="flex size-11 items-center justify-center rounded-lg text-muted-foreground">
               <Moon className="size-[1.15rem]" aria-hidden />
             </span>
             <span className="flex size-8 items-center justify-center rounded-full bg-primary/12
@@ -468,7 +468,7 @@ export default function DesignPreviewPage() {
                     return (
                       <div key={label} className={cx("rounded-lg border px-2.5 py-2", peak && "border-warning/40 bg-warning/5")}>
                         <Eyebrow className={peak ? "text-warning" : undefined}>{label}</Eyebrow>
-                        <div className={cx("mt-0.5 text-[17px] font-semibold tabular-nums", peak && "text-warning")}>{qty}</div>
+                        <div className={cx("mt-0.5 text-lg font-semibold tabular-nums", peak && "text-warning")}>{qty}</div>
                       </div>
                     );
                   })}
@@ -483,6 +483,27 @@ export default function DesignPreviewPage() {
                   <CountRow itemId="p1" name="Bath Towel" sku="TOW-01" driverQuantity={40} />
                   <CountRow itemId="p2" name="Flat Sheet Queen" sku="SHT-02" driverQuantity={25} />
                   <CountRow itemId="p3" name="Chef Jacket" sku="UNI-07" driverQuantity={12} />
+                </div>
+              </Card>
+
+              <Card
+                title="Depth and motion"
+                description="Solid buttons are raised keys, a card that goes somewhere lifts under the pointer, and content rises into place in sequence."
+              >
+                <div id="depth-preview" className="stagger-in space-y-4">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button variant="primary">Raised primary</Button>
+                    <Button variant="danger">Raised danger</Button>
+                    <Button variant="secondary">Secondary lifts</Button>
+                    <Button variant="primary" disabled>Disabled stays flat</Button>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    <Stat label="Lifts on hover" value="12" hint="a stat that is a link"
+                          href="/design-preview" />
+                    <Stat label="Rests flat" value="4" hint="a stat that is only a number" />
+                    <Stat label="Overdue" value="3" tone="danger" hint="past their due date"
+                          href="/design-preview" />
+                  </div>
                 </div>
               </Card>
 
@@ -513,6 +534,13 @@ export default function DesignPreviewPage() {
                     <Field label="Terms" name="p_terms" hint="Days from issue."><Input name="p_terms" defaultValue="14" /></Field>
                   </div>
                   <Checkbox name="p_check" label="Emergency service" defaultChecked />
+                  {/* The password box with its show/hide control — the one
+                      input in the app whose contents the typist cannot see. */}
+                  <div id="password-field-preview" className="max-w-sm">
+                    <Field label="Password" name="p_password" hint="At least 10 characters.">
+                      <PasswordInput name="p_password" autoComplete="new-password" />
+                    </Field>
+                  </div>
                   <div className="space-y-2">
                     <Notice tone="info" title="Information">A neutral message.</Notice>
                     <Notice tone="warning" title="Warning">Something needs attention.</Notice>
@@ -657,11 +685,11 @@ export default function DesignPreviewPage() {
                   <div className="grid grid-cols-2 gap-3">
                     <div className="rounded-lg border bg-surface px-3 py-2">
                       <Eyebrow>Total</Eyebrow>
-                      <div className="mt-0.5 text-[17px] font-semibold tabular-nums">$1,284.50</div>
+                      <div className="mt-0.5 text-lg font-semibold tabular-nums">$1,284.50</div>
                     </div>
                     <div className="rounded-lg border bg-surface px-3 py-2">
                       <Eyebrow>Balance</Eyebrow>
-                      <div className="mt-0.5 text-[17px] font-semibold tabular-nums text-warning">$1,284.50</div>
+                      <div className="mt-0.5 text-lg font-semibold tabular-nums text-warning">$1,284.50</div>
                     </div>
                   </div>
                   <dl className="grid grid-cols-2 gap-x-3 gap-y-2">

@@ -33,7 +33,7 @@ export default async function InvitePage(
     : "Set a password and you are in. You can change it later from the sign-in page.";
 
   return (
-    <main id="main" className="flex min-h-screen items-center justify-center bg-surface-muted p-4">
+    <main id="main" className="flex min-h-dvh items-center justify-center bg-surface-muted p-4">
       <div className="w-full max-w-md rounded-2xl border bg-surface p-6 shadow-sm sm:p-8">
         <div className="mb-6 flex items-center gap-3">
           <span aria-hidden

@@ -89,7 +89,7 @@ export function Overlay({
       <div ref={panelRef}
            role="dialog" aria-modal="true" aria-labelledby={titleId}
            className={cx(
-             "relative flex max-h-[92vh] w-full flex-col overflow-hidden rounded-t-2xl bg-surface",
+             "relative flex max-h-[92dvh] w-full flex-col overflow-hidden rounded-t-2xl bg-surface",
              "shadow-2xl animate-sheet-up sm:rounded-2xl sm:animate-slide-up",
              sizes[size],
            )}>

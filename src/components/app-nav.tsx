@@ -46,7 +46,11 @@ export function BrandMark({ className }: { className?: string }) {
   return (
     <span aria-hidden
           className={cx(
-            "flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary",
+            /* A tile with light on it: teal into the deeper accent, a light
+               top edge, and the brand's own colour in its shadow. */
+            "flex size-8 shrink-0 items-center justify-center rounded-lg",
+            "bg-gradient-to-br from-primary to-accent",
+            "[box-shadow:inset_0_1px_0_hsl(0_0%_100%/0.25),0_4px_12px_hsl(var(--primary)/0.35)]",
             /* The monogram is the one place the shell spends mono, and it is
                where YSM Hub spends it too (`.side-shop .av`). A single letter
                in a teal tile is a mark, not prose — the objection that retired
@@ -123,8 +127,8 @@ export function AppNav({
               "group relative flex min-h-11 items-center rounded-lg text-sm transition",
               collapsed ? "justify-center px-2" : "gap-3 px-3",
               active
-                ? "bg-sidebar-active-bg font-semibold text-sidebar-active"
-                : "font-medium text-sidebar-foreground hover:bg-sidebar-hover",
+                ? "bg-sidebar-active-bg font-semibold text-sidebar-active shadow-md"
+                : "font-medium text-sidebar-foreground hover:bg-sidebar-hover hover:translate-x-0.5",
             )}
           >
             {Icon ? (
@@ -286,8 +290,8 @@ export function ThemeToggle() {
       type="button"
       onClick={toggle}
       aria-pressed={dark}
-      className="flex size-10 shrink-0 items-center justify-center rounded-lg text-muted-foreground
-                 transition hover:bg-surface-muted hover:text-foreground"
+      className="flex size-11 shrink-0 items-center justify-center rounded-lg text-muted-foreground
+                 transition hover:bg-surface-muted hover:text-foreground active:bg-surface-sunken"
       title={dark ? "Switch to light mode" : "Switch to dark mode"}
     >
       {dark ? <Sun className="size-[1.15rem]" aria-hidden /> : <Moon className="size-[1.15rem]" aria-hidden />}
@@ -373,7 +377,7 @@ export function TextSizeControl() {
       type="button"
       onClick={() => applyTextSize(nextTextSize(size))}
       className="flex size-11 shrink-0 items-center justify-center rounded-lg text-muted-foreground
-                 transition hover:bg-surface-muted hover:text-foreground"
+                 transition hover:bg-surface-muted hover:text-foreground active:bg-surface-sunken"
       title={label}
     >
       <span aria-hidden className="font-semibold leading-none">

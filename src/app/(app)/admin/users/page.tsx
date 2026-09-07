@@ -15,7 +15,7 @@ import { ConfirmSubmit } from "@/components/confirm-submit";
 import { ListControls } from "@/components/list-controls";
 import { FilterChips, FilterSummary } from "@/components/filters";
 import { isFiltered } from "@/lib/filters";
-import { Field, Input, Select, SubmitButton } from "@/components/form";
+import { Field, Input, PasswordInput, Select, SubmitButton } from "@/components/form";
 import {
   createMemberWithPassword, inviteMember, removeMember, sendMemberSignInLink, updateMembership,
 } from "../actions";
@@ -67,7 +67,7 @@ export default async function UsersPage({
           {ROLE_ORDER.map((role) => (
             <div key={role}
                  className="grid gap-0.5 py-2 sm:grid-cols-[200px_minmax(0,1fr)] sm:gap-4">
-              <dt className="text-[13px] font-medium">{roleName(role)}</dt>
+              <dt className="text-sm font-medium">{roleName(role)}</dt>
               <dd className="text-xs text-muted-foreground">{ROLE_SUMMARY[role]}</dd>
             </div>
           ))}
@@ -223,7 +223,7 @@ export function AddPersonCard({ depots }: { depots: Pick<Depot, "id" | "name">[]
               {/* `new-password`, not `off`: password managers ignore `off` and
                   would happily fill the administrator's own credential into a
                   box that creates somebody else's login. */}
-              <Input name="password" type="password" autoComplete="new-password" />
+              <PasswordInput name="password" autoComplete="new-password" />
             </Field>
             <p className="text-xs text-muted-foreground">
               No email is sent. Give them the password yourself, and ask them to change
@@ -322,7 +322,7 @@ async function MembershipList({
             cell: (row) => (
               <span className="flex items-center gap-2">
                 <span className="min-w-0">
-                  <span className="block truncate text-[13px] font-medium">{row.label}</span>
+                  <span className="block truncate text-sm font-medium">{row.label}</span>
                   {/* The address underneath, because this is the one screen
                       that is about logins rather than about people. When it is
                       all we have, the label above is already showing it, so

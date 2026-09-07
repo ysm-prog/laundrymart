@@ -5,7 +5,7 @@ export const metadata = { title: "Offline" };
 /** Served by the service worker when a navigation fails with no cached copy. */
 export default function OfflinePage() {
   return (
-    <main id="main" className="mx-auto flex min-h-screen max-w-md flex-col justify-center px-6 py-16
+    <main id="main" className="mx-auto flex min-h-dvh max-w-md flex-col justify-center px-6 py-16
                                text-center">
       <span aria-hidden
             className="mx-auto flex size-14 items-center justify-center rounded-full

@@ -41,7 +41,7 @@ export default async function ImportPage() {
             title="Files it reads"
             description="Export these from MYOB and upload them together, or a few at a time."
           >
-            <ul className="space-y-2 text-[12.5px]">
+            <ul className="space-y-2 text-sm">
               {MYOB_KINDS.map((kind) => (
                 <li key={kind}>
                   <p className="font-mono text-2xs break-all">{MYOB_FILES[kind].suffix}</p>
@@ -52,7 +52,7 @@ export default async function ImportPage() {
           </Card>
 
           <Card title="Files it will skip" description="Everything in these is already in one of the above.">
-            <ul className="space-y-2 text-[12.5px]">
+            <ul className="space-y-2 text-sm">
               {REDUNDANT_FILES.map((file) => (
                 <li key={file.suffix}>
                   <p className="font-mono text-2xs break-all">{file.suffix}</p>
@@ -63,7 +63,7 @@ export default async function ImportPage() {
           </Card>
 
           <Card title="What it will not do">
-            <ul className="space-y-1.5 text-[12.5px] text-muted-foreground">
+            <ul className="space-y-1.5 text-sm text-muted-foreground">
               <li>Nothing is ever deleted. A row that is no longer in the export is left alone.</li>
               <li>
                 A party already here who is only named by a document keeps their details and their

@@ -1512,6 +1512,50 @@ stick to. Icons are **Lucide**, one set, one weight; the rail's icon is a *name*
 `nav.ts` (`NavIcon`) and mapped to a component in `app-nav.tsx`, keeping `nav.ts` pure data for
 the unit tests.
 
+**A control you can press looks and answers like one, and that is stated once in the token
+layer** (2026-09-06, the `ui-ux-pro-max` review — `docs/UI-REVIEW-2026-09-06.md`). Tailwind v4's
+preflight does **not** set `cursor: pointer` on a button, so every `<button>`, `<summary>` and
+checkbox label in the app read as inert text to a mouse; a base rule in `globals.css` gives a
+pointer to anything that acts and `not-allowed` to a disabled control, and the same block sets
+`touch-action: manipulation` on every control (no double-tap zoom on a loading dock) and
+`scroll-padding-top/bottom` on `html`, so a field tabbed into under the sticky header or the sticky
+`FormActions` is never hidden (WCAG 2.2, 2.4.11). Motion has one voice:
+`--default-transition-duration` (160ms) and `--default-transition-timing-function` in the
+`@theme` block drive every `transition` utility, and the four keyframe utilities share
+`--ease-enter`. **Every `Button` variant carries an `active:` state**, because on a touch screen
+the press is the only feedback there is and four of six variants had none; `SubmitButton` shows a
+spinner and `aria-busy` while pending. **`PasswordInput` (`form.tsx`) is the one password control**
+— a 36px show/hide toggle with `aria-pressed`, on sign-in, both invitation fields and the People
+screen — and `StatusBadge` carries a small disc in its own colour beside the label, a second signal
+and never the only one. **`SELECT_CHEVRON` is the `select-chevron` utility** in `globals.css`,
+drawn in each theme's `--muted-foreground`: it was a `#6b7280` data URI in `ui.tsx`, the last raw
+hex in a component and one grey for both themes. Full-height layouts use `dvh`, not `vh`, so a
+phone's address bar does not leave the shell short. Header controls (theme, text size, bell, search,
+menu, account) are 44px. **The palette and the three fonts were re-examined against that skill's
+navy-plus-Inter recommendation and kept**: the shared language with YSM Hub is worth more than a
+generic match, and the Instrument Sans latin subset carries `tnum`, so a money column can be
+aligned with `tabular-nums` without a typeface change.
+
+**Quiet is not flat: depth and motion are a layer of the token system** (2026-09-06, the
+owner's response to the first pass — *"very flat … add animation and 3D"*). Every `--shadow-*`
+token reads its colour from `--shadow-ink` and its density from `--shadow-k`, set per theme:
+ink at 1× on paper, **black at 2.5× in dark**, because an ink shadow that reads on paper
+vanishes on `#141412` and a card with no shadow on dark paper is a slightly different rectangle,
+not an object. Five utilities in `globals.css` carry the language: **`surface-card`** (a top-edge
+highlight, a whisper of gradient and the layered `--shadow-card` — on `Card`, `FormSection` and
+`Stat`), **`raised`** (a sheen and a lifting shadow on the primary and danger buttons, and a press
+that removes the sheen and turns the shadow inward), **`lift`** (a linked `Stat` and a quick-action
+card rise 2px under the pointer, gated on `(hover: hover)` so a phone never leaves one stuck
+lifted), **`page-enter`** (on `<main>`: a screen's header and cards rise into place 50ms apart on
+every navigation, `backwards` fill so no transform lingers to capture a fixed descendant) and
+**`stagger-in`** / `animate-rise` / `animate-float` (the same for any list, one thing, and the two
+soft shapes on the sign-in panel). **Motion is opacity and transform only** and everything
+collapses under `prefers-reduced-motion`; ambient motion exists on exactly one screen, the sign-in
+panel. The header carries a two-pixel gradient hairline of brand colour, the brand mark is a lit
+teal tile, and a focused input gains `--shadow-glow` round its ring. **Not done, and named**:
+parallax, 3D transforms, shimmer on every load, per-row entrance on tables — each is motion a
+person on a loading dock has to wait through.
+
 `/design-preview` is a static component gallery: no data, 404s in production, outside the auth
 gate so it can be rendered from a build box. It exists because every real screen is an async
 server component reading Supabase, so none render without a live project — which is how a
@@ -2794,6 +2838,120 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-09-06 · Every component reviewed against a UX checklist, and the token layer answers
+The owner's instruction: act as a UI/UX team, review every component against the
+`ui-ux-pro-max` skill and redesign where it earns it, fonts and design included. **No migration;
+no schema, RLS, capability, policy, route or business rule change** — `git diff` over `supabase/`
+is empty and no role gained or lost anything. `docs/UI-REVIEW-2026-09-06.md` is the review
+itself: method, the twenty checklist findings with their outcome, and what was deferred and why.
+§10b carries the rules.
+
+**The two things the skill argued for and this app refused are the durable part.** It recommends
+a navy palette with Inter and Calistoga for an operations app. **Both kept as they are**: §10b's
+whole point is that this app and YSM Hub read as one company's software, the palette already
+clears AA in both themes, and the one functional question a font could answer — do digits line
+up in a money column? — was checked rather than assumed. The Instrument Sans latin subset
+`next/font` ships carries `tnum` and `pnum`, so `tabular-nums` aligns a column without a
+typeface change. (The first check read a non-latin subset and found no `tnum`; the latin one
+was fetched by parsing the Google Fonts CSS, and the answer changed. Recorded because the wrong
+subset would have argued for swapping fonts for nothing.)
+
+**What was actually wrong was structural, and it lived in the token layer.**
+- **Tailwind v4's preflight sets no `cursor: pointer`** — checked in
+  `node_modules/tailwindcss/preflight.css`. So ~300 buttons, every `<summary>` and every checkbox
+  label read as inert text to a mouse, with 17 call sites patching it by hand and the rest not.
+  One base rule now: a pointer on anything that acts, `not-allowed` on a disabled control.
+- **Four of six `Button` variants changed on hover and did nothing on press.** On a touch screen
+  there is no hover, so on a counter tablet the press was the only feedback and it was absent.
+  Every variant carries an `active:` state — colour and brightness only, nothing moves.
+- **`SubmitButton` disabled itself while pending and said nothing.** It shows a spinner before
+  the label and carries `aria-busy` now.
+- **None of the four password fields could be revealed.** `PasswordInput` is the one control —
+  a 36px eye with `aria-pressed`, wired through `Field`'s describedby — on sign-in, both
+  invitation fields and the People screen's set-a-password form.
+- **A field tabbed into under the sticky header or the sticky `FormActions` was hidden**
+  (WCAG 2.2, 2.4.11). `scroll-padding-top: 5rem` / `-bottom: 6rem` on `html`, which also lands
+  the skip link's `#main` clear of the header.
+- **`touch-action: manipulation` was set nowhere**, so a driver double-tapping "Delivered" could
+  zoom the page. One rule on every control; page scroll and pinch untouched.
+- **Motion had no shared tempo.** Tailwind's default 150ms and four hand-named curves.
+  `--default-transition-duration`/`-timing-function` in the theme block now drive every
+  `transition` utility, and the four keyframes share `--ease-enter`.
+- **`SELECT_CHEVRON` was a `#6b7280` data URI** — the last raw hex in a component, a cool grey
+  from before the YSM palette, and the same grey on the dark fill. It is the `select-chevron`
+  utility in `globals.css` now, drawn in each theme's `--muted-foreground`.
+- **Every full-height surface used `vh`**, which on a phone leaves the shell the address bar's
+  height wrong. `AppShell`, the rail, `Overlay`, `DataTable`'s sticky body, login, invite,
+  offline and the gallery are `dvh`.
+- **Six header controls were 40px** and the account trigger under it; all 44px now.
+- **`StatusBadge` gains a small disc** in its own colour beside the label — a second signal, never
+  the only one, so a red row in a column of twenty is found without reading every label.
+- `h1` balances its wrap and `PageHeader`'s description is `text-pretty`; `ListControls`' Search
+  is the shared `Button` rather than a hand-rolled one; the sign-in panel says Adelaide, not
+  Sydney.
+
+**Deferred, and named rather than dropped**: nine page files still carry arbitrary
+`text-[12.5px]`/`text-[13px]`/`text-[17px]` sizes (one step off the scale each, outside this
+scope); an above-the-fold error summary is not built because this app rejects a post with one
+flash message naming one box; and `viewport-fit=cover` is not flipped, though `FormActions` now
+pads by `env(safe-area-inset-bottom)` so it is ready for it. **The toast auto-dismiss the skill
+defaults to was deliberately not adopted** — 2026-08-24's reasoning stands.
+
+- **1104 unit tests, unchanged in count**, 532 pgTAP assertions unchanged (no migration).
+  `verify` green on the final tree: typecheck, lint, tests, production build.
+- **One test rewritten to the decision**: `people-form.test.ts` pinned
+  `<Input name="password" … type="password">` and now asserts `PasswordInput` with no `required`
+  and no `type` of its own, since the control owns the type.
+- **Measured in a real browser, not eyeballed.** `/design-preview` at 320/375/768/1024/1440 and
+  `/login` at 375/1440, light and dark: **0 console errors, 0 targets under 36px, 0 enabled
+  buttons without a pointer, 0 disabled without `not-allowed`, 27 selects all carrying the
+  theme's chevron colour, scroll padding resolving to 80px, 32 badge dots, the password toggle
+  36×36 and switching the type both ways, transition duration 0.16s.** Document overflow is 7px
+  at 320 and 1024 — byte-identical to the recorded baseline, the unlinked dispatch-planner
+  fixture — so this adds none.
+- **The harness was proved non-vacuous** by removing three of the rules and watching it report
+  135 buttons without a pointer, 27 wrong chevrons and 0px scroll padding.
+
+**Not verified behind the auth gate.** This container has no Supabase credentials, so no
+authenticated screen was opened with real rows in it; everything past `/login` inherits the
+shared components the gallery renders. **Before trusting it: sign in on `ats.coreit.com.au`,
+press the eye on the password box, hover and press a few buttons on a desktop and check the
+cursor and the press state, and open any status column and confirm each badge carries its dot.**
+
+**Second pass, the same day: depth and motion.** The owner's response to the above — *"all pages
+look very flat … add some animation and 3D so it should look elegant"* — and a fair reading: the
+first pass fixed what was wrong and left what was dull. Same palette, same fonts, **no `src/`
+logic, no migration**; an elevation and motion layer in the token system, §10b has the rules and
+`docs/UI-REVIEW-2026-09-06.md` §6 the table.
+- **Shadows read their colour and density from the theme** (`--shadow-ink`, `--shadow-k`): ink on
+  paper, black at 2.5× in dark. Five new tokens: `card`, `card-hover`, `raised`, `raised-hover`,
+  `glow`.
+- **`surface-card`** on `Card`, `FormSection`, `Stat`; **`raised`** on primary and danger buttons;
+  **`lift`** on a linked `Stat`, the quick-action cards, and 1px on secondary buttons;
+  **`page-enter`** on `<main>`; **`stagger-in`** / `animate-rise` / `animate-float` on the sign-in
+  page, whose panel is now a teal-to-accent gradient with two blurred shapes drifting on a
+  ten-second cycle. The header gains a brand-colour hairline, the brand mark a lit gradient tile,
+  the active rail row a shadow, a focused input a glow, and the dialog's rise a touch of scale.
+- **Measured with a second harness** (`depth.mjs`) at the same five widths and both themes: card
+  shadow and gradient present, the primary's sheen present at rest and gone on `mousedown`, the
+  lifting stat at `translateY(-2px)` under the pointer and identity at rest, stagger delays
+  0 / 0.05 / 0.1s, both floating shapes on `es-float`, the form's rise ending at opacity 1 — **0
+  console errors, 0 targets under 36px, no new overflow**, and the first-pass harness re-run clean
+  on the same build. 1104 tests unchanged; typecheck, lint and the production build green.
+- **The first run of that harness reported every section absent**: the first pass's `next start`
+  was still holding port 3000 and serving the old build — `ss` is not installed here, so the
+  "port free" check had passed vacuously. The 2026-08-25 trap, again, and the reason the harness
+  asserts the section exists before it measures.
+
+**Third pass, the same day: the deferred sizes, and the screen the sweeps never reached.** The
+first pass deferred nine files carrying `text-[12.5px]`/`text-[13px]`/`text-[17px]`; all 23 sites
+are on the scale now (`text-sm`, `text-lg`). The count was hiding a real finding: the MYOB import
+screen (`admin/import/import-uploader.tsx`) still carried two **hand-rolled square buttons** at
+36px with `hover:opacity-90`, a Plantline-era `border-l-[5px]` callout and 12.5px throughout —
+the one screen neither the 2026-08-13 redesign nor the 2026-08-16 re-skin touched, because it
+was written on a branch that merged after both. It uses `Button` and `Notice` now, and its radio
+rows are 44px. No logic changed; `verify` green, 1104 tests unchanged.
+
 ### 2026-09-01 · The last unguarded destructive action, and the route boundaries that never existed
 Two findings from `docs/UX_ESSENTIALS_AUDIT.md` (items 16 and 20), which audited the twenty
 interface details against this tree and traced every verdict to a line. **No migration; no schema,
