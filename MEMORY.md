@@ -42,8 +42,8 @@ entry.
 - **Merged to `Prod` (`e373929`, PR #64) on 2026-09-07**, CI green on all three jobs (run 281).
   **`Dev` brought up to it (`7c749e4`) — but `Dev` is Prod *plus* PR #60/#61**, the route
   boundaries and the guarded Cancel run, which were merged into Dev on 2026-09-01 and have never
-  reached Prod. So the trees differ by exactly that work and the boundaries are not live yet.
-  Dev's own CI (run 282) is green on all three jobs.
+  reached Prod. Closed the same day by PR #66 (`b206ccf`): the boundaries are live and the trees
+  are level again. Dev's own CI (run 282) is green on all three jobs.
 
 ## Previously: the last unguarded destructive action, and the route boundaries
 2026-09-01, on `claude/ux-essentials-fixes-h2tq5i`. **No migration, no server action changed** —
@@ -67,6 +67,8 @@ itself is documentation-only on PR #60 and is deliberately not in this branch).
   section was screenshotted at 390 and 1280, light and dark, with no horizontal overflow.
 - **`global-error.tsx` has not been seen rendering.** It needs the root layout to throw, which no
   local run produces. Compiled and typechecked only — say that, do not upgrade it.
+- **Live on `Prod` since 2026-09-07** (`b206ccf`, PR #66, CI run 288 green). The first `Dev` → `Prod`
+  merge since 2026-08-26; `Dev` and `Prod` hold identical trees again.
 
 ## Previously: the §23 sweep — 13 sites, not 345
 2026-09-01. No migration. §23 had claimed ~345 unfiltered reads since August; the number that
