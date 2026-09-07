@@ -39,6 +39,10 @@ entry.
 - **Third pass: the deferred off-scale sizes are done** (23 sites → `text-sm`/`text-lg`), and the
   MYOB import screen — hand-rolled square buttons, a Plantline callout — is on `Button`/`Notice`.
   Owner's call on the rest of the deferred list: parallax/tilt/shimmer stay out ("leave it").
+- **Merged to `Prod` (`e373929`, PR #64) on 2026-09-07**, CI green on all three jobs (run 281).
+  **`Dev` brought up to it (`7c749e4`) — but `Dev` is Prod *plus* PR #60/#61**, the route
+  boundaries and the guarded Cancel run, which were merged into Dev on 2026-09-01 and have never
+  reached Prod. So the trees differ by exactly that work and the boundaries are not live yet.
 
 ## Previously: the §23 sweep — 13 sites, not 345
 2026-09-01. No migration. §23 had claimed ~345 unfiltered reads since August; the number that
