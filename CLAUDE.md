@@ -2942,7 +2942,9 @@ live ledger's last entry is still `0046_credit_note_gst_inclusive`.
 - **The gate was re-run on the merged tree rather than assumed from either parent**: `verify`
   green, 1104 tests across 66 files, typecheck, lint and the production build — because this is
   the first tree to hold the depth utilities and the boundary screens together, and
-  `BoundaryScreen` is built on the `Button` and `Card` the first pass changed.
+  `BoundaryScreen` is built on the `Button` and `Card` the first pass changed. **CI then agreed
+  on `Dev`**: run 282, all three jobs green, `verify.sh` running 00:55:34 → 00:56:42Z — its
+  ordinary 68 seconds, read off the step timestamps.
 - **The Vercel production deploy is not confirmable from this session**, which is a tooling limit
   rather than a configuration one — §5 has the distinction. Read it in the Vercel dashboard.
 

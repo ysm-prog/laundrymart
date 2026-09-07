@@ -43,6 +43,7 @@ entry.
   **`Dev` brought up to it (`7c749e4`) — but `Dev` is Prod *plus* PR #60/#61**, the route
   boundaries and the guarded Cancel run, which were merged into Dev on 2026-09-01 and have never
   reached Prod. So the trees differ by exactly that work and the boundaries are not live yet.
+  Dev's own CI (run 282) is green on all three jobs.
 
 ## Previously: the §23 sweep — 13 sites, not 345
 2026-09-01. No migration. §23 had claimed ~345 unfiltered reads since August; the number that
