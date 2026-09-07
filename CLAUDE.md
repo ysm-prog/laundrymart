@@ -2971,8 +2971,9 @@ live ledger's last entry is still `0046_credit_note_gst_inclusive`.
   behind `ConfirmSubmit`) were merged into **`Dev`** on 2026-09-01 and never went on to `Prod`. So
   `Dev` is now **`Prod` plus those two**, the trees are not identical, and `git diff Prod Dev` is
   the boundaries work exactly: 11 files, 1,127 insertions, 3 deletions, all of them #60's and #61's.
-  **The route boundaries are therefore not on `ats.coreit.com.au` yet** — that needs #61's work to
-  go `Dev` → `Prod`, which is a separate merge and a separate decision.
+  **The route boundaries were therefore not on `ats.coreit.com.au` yet** — that needed #61's work
+  to go `Dev` → `Prod`, a separate merge and a separate decision. **Taken the same day**: PR #66,
+  `b206ccf`, recorded under the 2026-09-01 boundaries entry below.
 - **Three files conflicted, all on lines both sides appended to, and each was resolved as the
   union.** The gallery's two import lines (Dev's `FileQuestion`/`TriangleAlert` beside Prod's
   `PasswordInput`); the changelog, with the 2026-09-06 entry placed above Dev's 2026-09-01 one; and
@@ -3045,6 +3046,28 @@ failure in `(app)/layout.tsx`, which the `(app)` boundary is above and cannot ca
 - **Not verified in a browser: `global-error.tsx` rendering.** Reaching it needs the root layout
   to throw, which no local run produces. It compiles into both the server and client bundles and
   typechecks; that it *looks* right on a broken page is reasoning, not a check.
+
+**Merged to `Prod` (`b206ccf`, PR #66) on 2026-09-07**, six days after it reached `Dev` — the
+first time since 2026-08-26 that a change went `Dev` → `Prod` rather than the other way. `Prod`
+was an ancestor of `Dev` (0 behind, 38 ahead), so the pull request carried exactly the boundaries
+work: 11 files, 1,127 insertions, 3 deletions, all of them #60's and #61's. Nothing to reconcile,
+and `Prod` was never force-pushed. **Nothing to apply**: no migration, `git diff` over `supabase/`
+is empty, and the live ledger's last entry is still `0046_credit_note_gst_inclusive`.
+
+- **CI green on all three jobs on `Prod`** — run 288, Verify (typecheck, lint, 1104 tests across 66
+  files, production build), Security (gitleaks strict + dependency audit), and the DB job applying
+  all 51 migrations to a fresh Postgres 16 with the whole pgTAP suite and the seed. `verify.sh` ran
+  03:36:23 → 03:37:35Z — 72 seconds, its ordinary duration, read off the step timestamps. The same
+  tree had already passed as `Dev`'s head on the pull request's own run (34080059297).
+- **What went live is the merged tree, not #61 alone.** The 2026-09-06 UI/UX release had reached
+  `Prod` first (`e373929`) and was merged into `Dev` (`7c749e4`) before this went the other way, so
+  `ats.coreit.com.au` now carries the depth utilities and the boundary screens together — the
+  combination the catch-up merge gated rather than assumed, since `BoundaryScreen` is built on the
+  `Button` and `Card` that release changed.
+- **The Vercel production deploy is not confirmable from this session**, which is a tooling limit
+  rather than a configuration one — §5 has the distinction. Read it in the Vercel dashboard.
+- **Still unseen: `global-error.tsx` rendering**, for the reason the entry above gives. Going live
+  does not change that; only the root layout throwing on the deployed app would.
 
 ### 2026-09-01 · The §23 sweep, which turned out to be 13 sites and not 345
 The owner's choice of what to do next. **No migration; no schema, RLS, capability or policy
