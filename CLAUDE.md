@@ -2952,6 +2952,42 @@ the one screen neither the 2026-08-13 redesign nor the 2026-08-16 re-skin touche
 was written on a branch that merged after both. It uses `Button` and `Notice` now, and its radio
 rows are 44px. No logic changed; `verify` green, 1104 tests unchanged.
 
+**Merged to `Prod` (`e373929`, PR #64) on 2026-09-07 and `Dev` brought up to it (`7c749e4`) the
+same hour.** A merge commit rather than a squash, so the three passes stay three commits —
+`d720c37`, `86e3b34`, `b66fdb1` — each with its own verification record. `Prod` was an ancestor of
+the branch, so there was nothing to reconcile and it was never force-pushed. **Nothing to apply**:
+this release adds no migration, `git diff` over `supabase/` is empty against both parents, and the
+live ledger's last entry is still `0046_credit_note_gst_inclusive`.
+
+- **CI green on all three jobs on `Prod`** — run 281, Verify (typecheck, lint, 1104 tests across 66
+  files, production build), Security (gitleaks strict + dependency audit), and the DB job applying
+  all 51 migrations to a fresh Postgres 16 with the whole pgTAP suite and the seed. The whole run
+  took 97 seconds (00:26:08 → 00:27:45Z), which is its ordinary duration — read off the runner's
+  own timestamps, per the clock rule the last five merge records each had to learn.
+- **`Dev` was not a catch-up merge this time, and the record has to say so.** Every previous entry
+  since 2026-08-26 describes `Dev` as carrying nothing `Prod` lacks. It did here: PR #60 (the UX
+  essentials audit, documentation only) and PR #61 (the route boundaries — `error.tsx`,
+  `not-found.tsx`, `global-error.tsx`, the in-shell pair, `BoundaryScreen`, and *Cancel run*
+  behind `ConfirmSubmit`) were merged into **`Dev`** on 2026-09-01 and never went on to `Prod`. So
+  `Dev` is now **`Prod` plus those two**, the trees are not identical, and `git diff Prod Dev` is
+  the boundaries work exactly: 11 files, 1,127 insertions, 3 deletions, all of them #60's and #61's.
+  **The route boundaries are therefore not on `ats.coreit.com.au` yet** — that needs #61's work to
+  go `Dev` → `Prod`, which is a separate merge and a separate decision.
+- **Three files conflicted, all on lines both sides appended to, and each was resolved as the
+  union.** The gallery's two import lines (Dev's `FileQuestion`/`TriangleAlert` beside Prod's
+  `PasswordInput`); the changelog, with the 2026-09-06 entry placed above Dev's 2026-09-01 one; and
+  `MEMORY.md`, with this review as *Latest* and the boundaries demoted to *Previously*. Every
+  source file merged clean, including the gallery's body, so both the depth section and the
+  boundaries section render on one page.
+- **The gate was re-run on the merged tree rather than assumed from either parent**: `verify`
+  green, 1104 tests across 66 files, typecheck, lint and the production build — because this is
+  the first tree to hold the depth utilities and the boundary screens together, and
+  `BoundaryScreen` is built on the `Button` and `Card` the first pass changed. **CI then agreed
+  on `Dev`**: run 282, all three jobs green, `verify.sh` running 00:55:34 → 00:56:42Z — its
+  ordinary 68 seconds, read off the step timestamps.
+- **The Vercel production deploy is not confirmable from this session**, which is a tooling limit
+  rather than a configuration one — §5 has the distinction. Read it in the Vercel dashboard.
+
 ### 2026-09-01 · The last unguarded destructive action, and the route boundaries that never existed
 Two findings from `docs/UX_ESSENTIALS_AUDIT.md` (items 16 and 20), which audited the twenty
 interface details against this tree and traced every verdict to a line. **No migration; no schema,
