@@ -9,7 +9,42 @@ where that is genuinely what it is. The multi-tenancy architecture stays: one op
 fact about today's data, not a reason to drop `tenant_id`, RLS, or §23's rule that a read feeding a
 write names its tenant.
 
-## Latest: the UI/UX review against `ui-ux-pro-max`, answered in the token layer
+## Latest: four reports from the deployed app, fixed
+2026-09-08, on `claude/driver-instructions-invoice-fixes-1q42fb`. **No migration; no schema, RLS,
+capability, policy or route change** — `git diff` over `supabase/` is empty. §18 has the entry.
+
+**Two of the four were named in words this codebase does not use, and were put to the owner:**
+*Template Invoice* = the **"Create last month's invoices"** run; *Charge By Customer* = a
+customer's own **laundry prices**. Do not re-guess these.
+
+- **Driver instructions.** Three columns, two of which reached no round-facing screen:
+  `special_instructions` on the job was selected and dropped, and `customers.special_instructions`
+  (the standing "gate code 1234") was not in `DAY_JOB_COLUMNS` at all. `driverInstructions` +
+  `DriverInstructions` is now one rule and one labelled block on My Runs, the driver job page and
+  `/run` — which also renders `customer_locations.access_notes` for the first time ever.
+- **Month-end run.** Reported *"no approved job was waiting"* when four jobs sat in
+  `awaiting_review`; `describeWorkAwaitingApproval` names them and the next action. **Seven reads
+  in it named no tenant and all seven feed writes**, including the jobs it bills — zero blast
+  radius on one tenancy, total on two. `month-end-run.test.ts` guards it (different *shape* from
+  `tenant-scoped-reads.test.ts`: keyed on a period, not a posted id).
+- **Charging.** `LJ00022` is 4 bags of `T22` at $0.24 **a piece** → the pricer billed **$0.96 for
+  four bags of towels**. `billableMeasure` carries `pieces` and `bags` separately; a bag measure
+  is priceable only by a bag rate. Every unpriced row now carries a reason
+  (`no_rate` / `no_bag_rate` / `not_measured` / `no_item_code`).
+- **Customer view.** `/orders` picker capped at 200 of 511 → six of the nine customers with jobs
+  unpickable, and a `<select>` with no matching option silently posted `customer=""`, dropping
+  the filter. Raised to `CUSTOMER_LIMIT`, filtered customer always an option, `/jobs` gained a
+  customer filter, both history cards now count.
+- 1131 tests / 68 files (was 1104/66); `verify` green. **Eight reverts proved each guard catches
+  its defect.** Browser: 72 assertions at 320/390/768/1440 × both themes, 0 failures, harness
+  proved non-vacuous.
+- **Not verified behind the auth gate** — no Supabase credentials here and `*.supabase.co` is
+  refused by the network policy. Live facts came from the Supabase MCP. The §18 entry ends with
+  the five things to press on `ats.coreit.com.au`.
+- **Trap re-learned:** `git checkout -- <file>` to undo a one-line revert took the whole file
+  with it, and does nothing at all on an untracked one.
+
+## Previously: the UI/UX review against `ui-ux-pro-max`, answered in the token layer
 2026-09-06, on `claude/app-ui-ux-redesign-145aay`. No migration; no schema, RLS, capability,
 policy or route change. `docs/UI-REVIEW-2026-09-06.md` is the record; §10b has the rules; §18 the
 entry.

@@ -4,7 +4,7 @@ import { notFound } from "next/navigation";
 import { requireCapability } from "@/lib/auth/context";
 import { createClient } from "@/lib/supabase/server";
 import { can } from "@/lib/roles";
-import { date, money } from "@/lib/format";
+import { counted, date, money } from "@/lib/format";
 import { describePattern, parsePattern } from "@/lib/domain/service-calendar";
 import { isOverdue, summariseItems } from "@/lib/domain/laundry-orders";
 import { businessToday } from "@/lib/domain/timezone";
@@ -20,6 +20,14 @@ import { addContact, addLocation } from "../actions";
 import { BillingAndPricing } from "./billing-section";
 
 export const dynamic = "force-dynamic";
+
+/**
+ * How many rows each history card on this page shows before pointing at the
+ * rest. Stated once because the two cards must agree: a customer whose Jobs card
+ * shows ten and whose visits card shows five reads as one of them having lost
+ * something.
+ */
+const JOBS_ON_RECORD = 10;
 
 type Params = { id: string };
 
@@ -293,16 +301,25 @@ async function LaundryJobs({
 }: { customerId: string; canCreate: boolean }) {
   const supabase = await createClient();
   const today = businessToday();
-  const { data } = await supabase
+  /*
+   * **`count: "exact"`, because a capped list that does not say it is capped
+   * reads as the whole of it.** This card shows a page of the customer's jobs
+   * and always did; what it never did was admit there were more, so a customer
+   * with thirty jobs looked like a customer with ten and "All jobs" read as a
+   * convenience rather than as the rest of them. The head count is one extra
+   * round trip against an indexed column and it is what makes the card honest.
+   */
+  const { data, count } = await supabase
     .from("laundry_orders")
     .select(
       "id, order_number, status, priority, received_at, due_date, delivery_required, " +
       "laundry_order_items(item_type, custom_description, quantity_type, exact_quantity, " +
       "bag_count, estimated_quantity)",
+      { count: "exact" },
     )
     .eq("customer_id", customerId)
     .order("received_at", { ascending: false })
-    .limit(10)
+    .limit(JOBS_ON_RECORD)
     .returns<Array<{
       id: string; order_number: string; status: string; priority: string;
       received_at: string; due_date: string | null; delivery_required: boolean;
@@ -312,15 +329,30 @@ async function LaundryJobs({
       }>;
     }>>();
 
+  const shown = data?.length ?? 0;
+  const total = count ?? shown;
+  const more = Math.max(0, total - shown);
+
   return (
     <Card
       title="Jobs"
-      description="Laundry taken in for this customer, newest first."
+      description={total === 0
+        ? "Laundry taken in for this customer, newest first."
+        : more > 0
+          // Says the number rather than "showing some of them": the question a
+          // person has in front of a truncated list is *how many am I missing*.
+          ? `Showing the ${shown} most recent of ${total}. Open all jobs for the other ${more}.`
+          : `All ${counted(total, "job")} taken in for this customer, newest first.`}
       actions={
         <>
-          <Link href={`/orders?customer=${customerId}`} className="text-sm text-primary hover:underline">
-            All jobs
-          </Link>
+          {/* A button rather than a text link once there are more to see: it is
+              the way to the rest of them, not a footnote. */}
+          <ButtonLink
+            href={`/orders?customer=${customerId}`}
+            variant={more > 0 ? "secondary" : "ghost"}
+          >
+            All jobs{more > 0 ? ` (${total})` : ""}
+          </ButtonLink>
           {canCreate ? <ButtonLink href={`/orders/new?customer=${customerId}`}>New job</ButtonLink> : null}
         </>
       }
@@ -373,8 +405,10 @@ async function History({ customerId, showInvoices }: { customerId: string; showI
 
   const [jobs, invoices] = await Promise.all([
     supabase.from("jobs")
-      .select("id, job_number, scheduled_date, service_type, status, progress_status, customer_id, location_id, route_id, driver_id, agreement_id, arrived_at, completed_at, exception_reason, exception_notes, notes, sequence")
-      .eq("customer_id", customerId).order("scheduled_date", { ascending: false }).limit(10)
+      .select("id, job_number, scheduled_date, service_type, status, progress_status, customer_id, location_id, route_id, driver_id, agreement_id, arrived_at, completed_at, exception_reason, exception_notes, notes, sequence",
+              { count: "exact" })
+      .eq("customer_id", customerId).order("scheduled_date", { ascending: false })
+      .limit(JOBS_ON_RECORD)
       .returns<Job[]>(),
     showInvoices
       ? supabase.from("invoices")
@@ -383,9 +417,29 @@ async function History({ customerId, showInvoices }: { customerId: string; showI
       : Promise.resolve({ data: [] as Pick<Invoice, "id" | "invoice_number" | "status" | "issue_date" | "due_date" | "total" | "balance">[] }),
   ]);
 
+  const visitsMore = Math.max(0, (jobs.count ?? 0) - (jobs.data?.length ?? 0));
+
   return (
     <div className="grid gap-4 lg:grid-cols-2">
-      <Card title="Recent jobs">
+      {/* A way through to the rest of them, which this card has never had while
+          the invoices beside it always did. `/jobs` is the *routing* module — a
+          visit on a driver's run — so it is labelled for that and filtered the
+          same way the register beside it is. */}
+      <Card
+        title="Driver visits"
+        description={visitsMore > 0
+          ? `Showing the ${jobs.data?.length ?? 0} most recent of ${jobs.count}.`
+          : undefined}
+        /* `period=all` because `/jobs` opens on **today**: without it this link
+           lands on an empty list for all but a customer who happens to have a
+           visit this morning, which reads as "no visits recorded". */
+        actions={
+          <Link href={`/jobs?customer=${customerId}&period=all`}
+                className="text-sm text-primary hover:underline">
+            All
+          </Link>
+        }
+      >
         <DataTable
           rows={jobs.data ?? []}
           rowHref={(row) => `/jobs/${row.id}`}

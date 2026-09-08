@@ -1,4 +1,5 @@
 import { Suspense } from "react";
+import Link from "next/link";
 import { requireCapability } from "@/lib/auth/context";
 import { createClient } from "@/lib/supabase/server";
 import { date } from "@/lib/format";
@@ -8,7 +9,7 @@ import {
 } from "@/components/ui";
 import { ListControls, Pagination, pageFrom, rangeFor } from "@/components/list-controls";
 import { FilterChips, PeriodFilter } from "@/components/filters";
-import { isFiltered } from "@/lib/filters";
+import { filterHref, isFiltered } from "@/lib/filters";
 import {
   ACTIVITY_PERIOD_PRESETS, resolvePeriod, type ResolvedPeriod,
 } from "@/lib/domain/dates";
@@ -19,6 +20,13 @@ export const dynamic = "force-dynamic";
 
 type Search = {
   q?: string; status?: string; period?: string; from?: string; to?: string;
+  /**
+   * One customer's visits. There was no way to ask that here at all, so a
+   * customer record could point at their laundry jobs and not at the times a
+   * driver actually called on them — the other half of "show me everything for
+   * this customer".
+   */
+  customer?: string;
   page?: string; error?: string; ok?: string;
 };
 
@@ -45,7 +53,7 @@ const VISIT_STATUSES = [
   { value: "unassigned", label: "No route" },
 ] as const;
 
-const FILTER_KEYS = ["q", "status", "period", "from", "to"] as const;
+const FILTER_KEYS = ["q", "status", "period", "from", "to", "customer"] as const;
 
 export default async function JobsPage({ searchParams }: { searchParams: Promise<Search> }) {
   const params = await searchParams;
@@ -115,11 +123,29 @@ async function JobList({ params, period }: { params: Search; period: ResolvedPer
   if (params.status === "unassigned") query = query.is("route_id", null);
   else if (params.status) query = query.eq("status", params.status);
   if (params.q) query = query.ilike("job_number", `%${params.q}%`);
+  if (params.customer) query = query.eq("customer_id", params.customer);
 
   const { data, count } = await query.returns<Row[]>();
 
+  // A filter nobody can see is a filter that reads as missing rows. The name is
+  // taken from the rows themselves rather than fetched: every row on a
+  // customer-filtered list is that customer's, so the first one names them.
+  const filteredCustomer = params.customer
+    ? data?.[0]?.customers?.business_name ?? null
+    : null;
+
   return (
     <>
+      {params.customer ? (
+        <p className="mb-2 text-sm">
+          Showing visits to{" "}
+          <span className="font-medium">{filteredCustomer ?? "one customer"}</span>.{" "}
+          <Link href={filterHref("/jobs", params, { customer: undefined })}
+                className="text-primary hover:underline">
+            Show every customer
+          </Link>
+        </p>
+      ) : null}
       <p className="mb-2 text-sm text-muted-foreground">
         {period.range
           ? (period.range.start === period.range.end

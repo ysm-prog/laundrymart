@@ -252,9 +252,15 @@ const PREVIEW_DAY_JOBS: DayJob[] = [
     delivery_window: "morning", expected_delivery_time: null,
     delivery_address: "123 Main Street, Adelaide SA 5000",
     delivery_instructions: "Ring the bell at the roller door.",
-    special_instructions: null, customer_id: "c1",
+    special_instructions: "Wash separately \u2014 these stain the whites.",
+    customer_id: "c1",
     stop_id: "s1", jobs: { sequence: 1 },
-    customers: { id: "c1", business_name: "ABC Fitness", phone: "08 1234 5678" },
+    customers: {
+      id: "c1", business_name: "ABC Fitness", phone: "08 1234 5678",
+      // The standing note the round could not see before: it is on the
+      // *customer*, so it is true of every delivery to them.
+      special_instructions: "Gate code 1234. Trolleys live behind the front desk.",
+    },
     laundry_order_items: [
       { item_type: "towels", custom_description: null, quantity_type: "exact",
         exact_quantity: 250, bag_count: null, estimated_quantity: null, notes: null },
@@ -269,7 +275,10 @@ const PREVIEW_DAY_JOBS: DayJob[] = [
     delivery_address: "55 North Terrace, Adelaide SA 5000",
     delivery_instructions: null, special_instructions: null, customer_id: "c2",
     stop_id: "s2", jobs: { sequence: 2 },
-    customers: { id: "c2", business_name: "XYZ Medical", phone: "08 8888 1010" },
+    customers: {
+      id: "c2", business_name: "XYZ Medical", phone: "08 8888 1010",
+      special_instructions: "Loading dock only. Reception will not take linen.",
+    },
     laundry_order_items: [
       { item_type: "sheets", custom_description: null, quantity_type: "bulk_lot",
         exact_quantity: null, bag_count: 5, estimated_quantity: 60, notes: null },
@@ -284,7 +293,9 @@ const PREVIEW_DAY_JOBS: DayJob[] = [
     delivery_address: "19 King William Street, Adelaide SA 5000",
     delivery_instructions: null, special_instructions: null, customer_id: "c3",
     stop_id: "s3", jobs: { sequence: 3 },
-    customers: { id: "c3", business_name: "City Gym", phone: null },
+    customers: {
+      id: "c3", business_name: "City Gym", phone: null, special_instructions: null,
+    },
     laundry_order_items: [
       { item_type: "bath_towels", custom_description: null, quantity_type: "exact",
         exact_quantity: 80, bag_count: null, estimated_quantity: null, notes: null },

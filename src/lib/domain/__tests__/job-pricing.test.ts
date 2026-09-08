@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  billableQuantity, jobChargeSubtotal, priceJob, pricingSourceLabel, type RateLine,
+  billableMeasure, billableQuantity, jobChargeSubtotal, priceJob, pricingSourceLabel,
+  type RateLine,
 } from "@/lib/domain/job-pricing";
 import type { OrderItemInput } from "@/lib/domain/laundry-orders";
 
@@ -52,7 +53,11 @@ describe("billableQuantity", () => {
     }))).toBe(40);
   });
 
-  it("falls back to the bag count when there is no estimate", () => {
+  it("counts a bag as one when there is no estimate", () => {
+    // `billableQuantity` is the *counting* helper — the billing screens' "pieces
+    // of laundry" totals — where a bag counted as one beats a null that would
+    // read as no laundry at all. It deliberately does not say what the number
+    // counts, which is why nothing that multiplies by a rate may use it.
     expect(billableQuantity(item({
       quantity_type: "bulk_lot", exact_quantity: null, bag_count: 3,
     }))).toBe(3);
@@ -70,6 +75,35 @@ describe("billableQuantity", () => {
   it("refuses a zero or missing count", () => {
     expect(billableQuantity(item({ exact_quantity: null }))).toBeNull();
     expect(billableQuantity(item({ exact_quantity: 0 }))).toBeNull();
+  });
+});
+
+describe("billableMeasure", () => {
+  it("counts pieces on an exact row and offers no bags", () => {
+    expect(billableMeasure(item({ exact_quantity: 24 }))).toEqual({ pieces: 24, bags: null });
+  });
+
+  it("keeps both numbers on a bulk lot, because the rate decides which is used", () => {
+    // §4: by the bag when a bag rate is set and the bags were counted, otherwise
+    // by the estimate. That is a rule about the price, so the measure cannot
+    // pick a winner — it carries both and `priceJob` chooses.
+    expect(billableMeasure(item({
+      quantity_type: "bulk_lot", exact_quantity: null, bag_count: 3, estimated_quantity: 40,
+    }))).toEqual({ pieces: 40, bags: 3 });
+  });
+
+  it("offers bags alone when the counter gave no estimate", () => {
+    // The live shape of LJ00022. `pieces: null` is what stops a per-piece rate
+    // being applied to a bag count.
+    expect(billableMeasure(item({
+      quantity_type: "bulk_lot", exact_quantity: null, bag_count: 4,
+    }))).toEqual({ pieces: null, bags: 4 });
+  });
+
+  it("refuses a bulk lot that carries only a note", () => {
+    expect(billableMeasure(item({
+      quantity_type: "bulk_lot", exact_quantity: null, notes: "two green sacks",
+    }))).toBeNull();
   });
 });
 
@@ -102,7 +136,7 @@ describe("priceJob", () => {
     });
     expect(lines).toEqual([]);
     expect(unpriced).toEqual([
-      { itemType: "uniforms", label: "Uniforms", description: "4 × Uniforms" },
+      { itemType: "uniforms", label: "Uniforms", description: "4 × Uniforms", reason: "no_rate" },
     ]);
   });
 
@@ -317,6 +351,106 @@ describe("priceJob — the price-list fallback", () => {
     });
 
     expect(result.lines[0]!.amount).toBe(40);
+  });
+
+  it("refuses a lot counted in bags when the only rate is per piece", () => {
+    // **The defect this measure exists for, in its live shape.** LJ00022 is four
+    // bags of T22 and T22's only rate is $0.24 a piece: the pricer produced
+    // 4 × $0.24 = $0.96 for four bags of towels, silently. Four is a number of
+    // bags and $0.24 is a price for a towel, and there is no number of towels in
+    // a bag that this app knows.
+    const result = priceJob({
+      items: [item({
+        item_type: "towels", quantity_type: "bulk_lot", exact_quantity: null,
+        bag_count: 4, estimated_quantity: null,
+      })],
+      rateLines: [],
+      priceList: list({ towels: { unitPrice: 0.24 } }),
+    });
+
+    expect(result.lines).toHaveLength(0);
+    expect(result.unpriced).toHaveLength(1);
+    // Named, so the owner is sent to the "Price per bag" column rather than back
+    // to a rate they have already set and can see.
+    expect(result.unpriced[0]!.reason).toBe("no_bag_rate");
+  });
+
+  it("refuses a lot counted in bags on a rate card, which prices per piece", () => {
+    // A rate card has no per-bag model at all, so a complete card is still the
+    // wrong instrument for a lot measured only in bags.
+    const result = priceJob({
+      items: [item({
+        item_type: "towels", quantity_type: "bulk_lot", exact_quantity: null,
+        bag_count: 4, estimated_quantity: null,
+      })],
+      rateLines: [rate({ laundry_item_type: "towels", unit_price: 0.24 })],
+    });
+
+    expect(result.lines).toHaveLength(0);
+    expect(result.unpriced[0]!.reason).toBe("no_bag_rate");
+  });
+
+  it("prices those same bags the moment a bag rate exists", () => {
+    // The remedy the message points at, proved rather than asserted in prose.
+    const result = priceJob({
+      items: [item({
+        item_type: "towels", quantity_type: "bulk_lot", exact_quantity: null,
+        bag_count: 4, estimated_quantity: null,
+      })],
+      rateLines: [],
+      priceList: list({ towels: { unitPrice: 0.24, bagPrice: 40 } }),
+    });
+
+    expect(result.unpriced).toHaveLength(0);
+    expect(result.lines[0]!.amount).toBe(160);
+    expect(result.lines[0]!.description).toContain("4 bags");
+  });
+
+  it("says when the laundry was taken in with no item code at all", () => {
+    // Live: 5 of the laundry's 19 recorded rows name no item, and the price list
+    // is 117 rows every one of which is keyed on an item. "No rate on the price
+    // list" is a false trail for those — the list is full, the job is what is
+    // missing a code.
+    const result = priceJob({
+      items: [item({ item_type: "towels", exact_quantity: 100 })],
+      rateLines: [],
+      itemPriceList: new Map([
+        ["item-t22", { unitPrice: 0.24, bagPrice: null, taxable: true, source: "default" as const }],
+      ]),
+    });
+
+    expect(result.lines).toHaveLength(0);
+    expect(result.unpriced[0]!.reason).toBe("no_item_code");
+  });
+
+  it("still says no_rate when the row does name an item nobody has priced", () => {
+    const result = priceJob({
+      items: [item({ item_type: "towels", exact_quantity: 100, item_id: "item-tl" })],
+      rateLines: [],
+      itemPriceList: new Map([
+        ["item-t22", { unitPrice: 0.24, bagPrice: null, taxable: true, source: "default" as const }],
+      ]),
+    });
+
+    expect(result.unpriced[0]!.reason).toBe("no_rate");
+  });
+
+  it("tells the unpriced reasons apart", () => {
+    const result = priceJob({
+      items: [
+        // Nothing measured at all.
+        item({ item_type: "linen", quantity_type: "bulk_lot", exact_quantity: null }),
+        // Measured, names an item, and nothing anywhere prices it.
+        item({ item_type: "uniforms", exact_quantity: 6, item_id: "item-uni" }),
+        // Measured in bags, priced per piece.
+        item({ item_type: "towels", quantity_type: "bulk_lot", exact_quantity: null, bag_count: 2 }),
+      ],
+      rateLines: [],
+      priceList: list({ towels: { unitPrice: 0.24 } }),
+    });
+
+    expect(result.unpriced.map((entry) => entry.reason))
+      .toEqual(["not_measured", "no_rate", "no_bag_rate"]);
   });
 
   it("still reports laundry no tier can price", () => {

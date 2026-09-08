@@ -14,6 +14,7 @@ import {
   formatAdelaideDate, formatAdelaideDateTime, getAdelaideToday, isCalendarDate,
 } from "@/lib/domain/timezone";
 import { boardById, loadBoardJob } from "@/lib/runs/my-runs";
+import { DriverInstructions } from "@/components/driver-instructions";
 import { markJobDelivered } from "../../actions";
 
 export const metadata = { title: "Job" };
@@ -94,6 +95,12 @@ export default async function BoardJobPage({
       />
 
       <div className="space-y-5">
+        {/* **First on the page, above the address.** These used to sit at the
+            foot of the Delivery card, under six dates, in muted grey — which is
+            where a driver looks last. What is unusual about this delivery is the
+            thing to read before setting off, so it leads. */}
+        <DriverInstructions job={job} />
+
         <Card title="Where it goes">
           <div className="space-y-2 text-sm">
             <p className="text-base font-semibold">
@@ -163,18 +170,6 @@ export default async function BoardJobPage({
             ) : null}
           </dl>
 
-          {job.delivery_instructions ? (
-            <div className="mt-4 rounded-lg bg-surface-sunken px-3 py-2.5">
-              <p className="text-sm font-medium">Delivery instructions</p>
-              <p className="mt-0.5 text-sm text-muted-foreground">{job.delivery_instructions}</p>
-            </div>
-          ) : null}
-          {job.special_instructions ? (
-            <div className="mt-3 rounded-lg bg-surface-sunken px-3 py-2.5">
-              <p className="text-sm font-medium">Machine instructions</p>
-              <p className="mt-0.5 text-sm text-muted-foreground">{job.special_instructions}</p>
-            </div>
-          ) : null}
         </Card>
 
         {finished ? (
