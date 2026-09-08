@@ -2879,6 +2879,31 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-09-08 · The email and Xero runbook, and two decisions recorded
+`docs/RUNBOOK-EMAIL-AND-XERO.md`, at the owner's request. **Documentation only** —
+no source file, no migration, no test.
+
+**Both integrations are configuration rather than code**, which is the finding
+worth recording as much as the runbook. Every screen, action, template and
+payload exists and is tested; what is missing on this deployment is a Resend
+domain with its DNS, four Vercel variables, a Xero app and two account choices.
+The runbook is the ordered list with a check after each step, because §10d and
+§20 describe the *designs* and neither is followable start to finish.
+
+Two decisions taken on the day, so they are not re-opened by guessing:
+
+- **The two Xero payload gaps stay open until a real connection exists** —
+  freight is not sent, and Xero recomputes `Quantity × UnitAmount` where we sum
+  frozen amounts. §20's own position, and the owner's. The argument is that
+  `LineAmount` is *validated* by Xero, so a wrong guess does not fail one
+  invoice, it fails every push — and nothing here can test it.
+- **Contracts do not fit how this laundry works.** The feature is built and
+  unit-tested (12 tests on `contractCharges`) and has **0 service agreements**,
+  which had read as "unused". It is not: the owner's answer is that the model —
+  a pattern of service days with priced lines, minimums and levies — is not how
+  they agree standing work. So the gap is a design question rather than a
+  dormant screen, and it is open.
+
 ### 2026-09-08 · An item code is required, and Driver visits gets its own customer picker
 Two follow-ups the owner chose after the four fixes above, plus the merge that took them live.
 **No migration; no schema, RLS, capability, policy or role change** — `git diff` over `supabase/`
