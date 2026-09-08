@@ -17,6 +17,7 @@ import {
   PageHeader, SkeletonRows, SkeletonStats, Stat, StatusBadge, cx,
 } from "@/components/ui";
 import { Pagination, pageFrom, rangeFor } from "@/components/list-controls";
+import { CUSTOMER_LIMIT } from "./form-data";
 import { FilterChips } from "@/components/filters";
 import { filterHref } from "@/lib/filters";
 import { listActiveBoards } from "@/lib/runs/my-runs";
@@ -210,6 +211,20 @@ const RUN_OPTIONS = [
 async function Filters({ params }: { params: Search }) {
   const session = await requireSession();
   const supabase = await createClient();
+  /*
+   * **1000, not 200, and the difference was live.** This laundry has 511
+   * customers and the cap sat well inside that list, so 311 of them were simply
+   * not in this dropdown — including six of the nine businesses that actually
+   * have jobs (`Jay`, `Test1`, `Sueno Hair`, `Underground Haircutters`,
+   * `Pure - The Essence Of Nature`, `Jurlique`). Worse than "hard to find": a
+   * `<select>` whose `defaultValue` matches no option silently shows the first
+   * one, so arriving from a customer's "All jobs" link and then pressing Search
+   * posted `customer=""` and **threw the filter away**, leaving every job in the
+   * laundry on screen under the impression it was that customer's.
+   *
+   * `CUSTOMER_LIMIT` is shared with the job form rather than restated, so the
+   * two pickers cannot come to disagree about how many customers exist.
+   */
   const [{ data: customers }, boards] = await Promise.all([
     supabase
       .from("customers")
@@ -217,10 +232,35 @@ async function Filters({ params }: { params: Search }) {
       .eq("tenant_id", session.tenantId)
       .is("deleted_at", null)
       .order("business_name")
-      .limit(200)
+      .limit(CUSTOMER_LIMIT)
       .returns<{ id: string; business_name: string }[]>(),
     listActiveBoards(supabase, session.tenantId),
   ]);
+
+  /*
+   * The filtered customer is always an option, even past the cap.
+   *
+   * The same reasoning `withCurrentHolder` applies to a job's assignee: a select
+   * handed an id it has no option for does not fail, it silently selects the
+   * placeholder — and the next submit writes that placeholder back. Here that
+   * means losing the filter; there it meant clearing an assignment. Belt and
+   * braces beside the raised cap, because the cap is a number and this is a
+   * property.
+   */
+  let options = customers ?? [];
+  if (params.customer && !options.some((row) => row.id === params.customer)) {
+    const { data: chosen } = await supabase
+      .from("customers")
+      .select("id, business_name")
+      // Named rather than left to RLS: a platform admin reads every laundry, and
+      // this id came off the query string (§23).
+      .eq("tenant_id", session.tenantId)
+      .eq("id", params.customer)
+      .maybeSingle<{ id: string; business_name: string }>();
+    if (chosen) {
+      options = [...options, chosen].sort((a, b) => a.business_name.localeCompare(b.business_name));
+    }
+  }
 
   return (
     <div className="mb-4 flex flex-col gap-3">
@@ -279,7 +319,7 @@ async function Filters({ params }: { params: Search }) {
         <select id="customer" name="customer" defaultValue={params.customer ?? ""}
                 className={cx(CONTROL_AUTO, "max-w-[14rem]")}>
           <option value="">Any customer</option>
-          {(customers ?? []).map((customer) => (
+          {options.map((customer) => (
             <option key={customer.id} value={customer.id}>{customer.business_name}</option>
           ))}
         </select>

@@ -511,6 +511,19 @@ export function JobForm({
                       <ItemPicker
                         idPrefix={`laundry-${row.key}`}
                         purpose="laundry"
+                        /*
+                         * Required wherever there is an item master to choose
+                         * from — the owner's decision of 2026-09-08. The price
+                         * list is keyed on item codes, so a row without one can
+                         * never be priced automatically, and five of this
+                         * laundry's nineteen recorded rows were in that state.
+                         *
+                         * Decorative here and enforced in `createOrder` /
+                         * `updateOrder`, which is the boundary: this control
+                         * holds a search term rather than the chosen value, so
+                         * there is nothing for native validation to check.
+                         */
+                        required
                         items={catalogue}
                         chosen={itemById.get(row.itemId) ?? null}
                         onChoose={(picked) => patch(row.key, {

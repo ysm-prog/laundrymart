@@ -343,7 +343,17 @@ export type DayJob = {
   delivery_instructions: string | null;
   special_instructions: string | null;
   customer_id: string;
-  customers: { id: string; business_name: string; phone: string | null } | null;
+  /**
+   * `special_instructions` here is the **customer's** standing note — "gate code
+   * 1234", "always leave with reception" — and is a different column from the
+   * job's own `special_instructions` above it. Both reach the round through
+   * `driverInstructions`, which labels them apart; before that this embed did
+   * not select it at all, so the one instruction that is true of *every*
+   * delivery to a customer reached no screen the round opens.
+   */
+  customers:
+    | { id: string; business_name: string; phone: string | null; special_instructions: string | null }
+    | null;
   laundry_order_items: RunJobItem[];
   /**
    * The stop this job is delivered at, and where it sits on the run.
@@ -360,7 +370,8 @@ const DAY_JOB_COLUMNS =
   "id, order_number, status, priority, delivery_required, due_date, expected_delivery_date, " +
   "assigned_delivery_date, assigned_board_id, load_confirmed_at, completed_at, " +
   "delivery_window, expected_delivery_time, delivery_address, delivery_instructions, " +
-  "special_instructions, customer_id, stop_id, customers(id, business_name, phone), " +
+  "special_instructions, customer_id, stop_id, " +
+  "customers(id, business_name, phone, special_instructions), " +
   // Named by constraint: `laundry_orders` has more than one path to `jobs` in
   // PostgREST's eyes, and a bare embed is rejected at request time — the defect
   // class this repo has already shipped once.

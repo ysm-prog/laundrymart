@@ -87,6 +87,42 @@ export type JobChargeLine = {
   gl_account_id: string | null;
 };
 
+/**
+ * Why a row could not be priced — and therefore what to do about it.
+ *
+ * "Nothing came back priced" was the whole of what the reviewer used to be
+ * told, and it names no remedy: the three causes below want three different
+ * actions, on three different screens. Reporting them apart is the difference
+ * between a message somebody acts on and one they learn to ignore.
+ */
+export type UnpricedReason =
+  /** Neither the rate card nor the price list has any rate for this laundry. */
+  | "no_rate"
+  /**
+   * The row names no item code, and the price list is keyed on item codes.
+   *
+   * Its own reason because the remedy is different and is not on a price screen
+   * at all: the laundry was taken in without a code, so the job is what needs
+   * editing. Since 2026-08-27 the price screens write **only** the item tier
+   * (§31), so the kind-of-laundry tier they used to write is empty on this
+   * deployment — 117 prices, every one against an item, and 5 of the laundry's
+   * 19 recorded rows naming no item at all. Telling those five "no rate on the
+   * price list" sends somebody to a list that is already full.
+   */
+  | "no_item_code"
+  /** Bags were counted, and the only rate is per piece. See `billableMeasure`. */
+  | "no_bag_rate"
+  /** A bulk lot with no bag count and no estimate: nothing to multiply. */
+  | "not_measured";
+
+/** The sentence a reviewer reads, per reason. Pure, so the screens share it. */
+export const UNPRICED_REASON_TEXT: Record<UnpricedReason, string> = {
+  no_rate: "no rate on the rate card or the price list",
+  no_item_code: "taken in without an item code, so there is no code to price it by",
+  no_bag_rate: "counted in bags, and there is no price per bag for it",
+  not_measured: "recorded as a bulk lot with no bag count and no estimate",
+};
+
 export type JobPricingResult = {
   lines: JobChargeLine[];
   /**
@@ -95,28 +131,85 @@ export type JobPricingResult = {
    * customer" is a thing somebody must decide, and a zero line looks like a
    * decision that was already taken.
    */
-  unpriced: Array<{ itemType: string; label: string; description: string }>;
+  unpriced: Array<{
+    itemType: string; label: string; description: string; reason: UnpricedReason;
+  }>;
 };
 
 /**
- * How many units of laundry a row represents, for pricing.
+ * How much laundry a row represents, **and what it is counted in**.
  *
- * A counted row bills what was counted. A bulk lot has no count by definition
- * (0014), so it bills the *estimate* when one was given and otherwise the bag
- * count — and when it carries neither it is not priced at all rather than being
- * guessed at, which is why `null` is a real answer here.
+ * The unit is the whole point, and leaving it out was a money bug. A counted row
+ * is a number of *pieces*; a bulk lot with an estimate is an estimate of
+ * *pieces*; a bulk lot with neither is a number of *bags*. Those are not
+ * interchangeable, and the old `billableQuantity` returned a bare number that
+ * could be any of the three — so a bag count reached the multiplication as
+ * though it were a piece count.
+ *
+ * Live, on 2026-09-08: `LJ00022` is four bags of `T22`, whose only rate is
+ * $0.24 a piece. The pricer produced **four** × $0.24 = **$0.96 for four bags of
+ * towels**, described as "Towels — 4", with nothing on screen to suggest
+ * anything had gone wrong. `LJ00023` is the same shape, and the owner had
+ * evidently spotted it there: its frozen charge is a hand-typed
+ * `bag_charge` of 1 × $40.00. That is what "charge by customer does not work"
+ * looks like from a desk.
+ *
+ * §4 of `CLAUDE.md` has always stated the rule this restores: *"A bulk lot bills
+ * by the bag when a bag rate is set and the bags were counted, otherwise by the
+ * counter's estimate; a lot with neither cannot be priced and says so."* A bag
+ * measure is therefore priceable **only** by a bag rate, and `priceJob` refuses
+ * it otherwise instead of quietly under-billing.
+ *
+ * `null` stays a real answer: a bulk lot recorded as a note alone can be written
+ * down and cannot be priced.
  */
-export function billableQuantity(item: OrderItemInput): number | null {
+export type BillableMeasure = {
+  /**
+   * Pieces: what was counted, or the counter's estimate of a bulk lot. This is
+   * the only thing a per-piece or per-kilo rate may be applied to.
+   */
+  pieces: number | null;
+  /** Bags, when the lot was counted in bags. Priceable **only** by a bag rate. */
+  bags: number | null;
+};
+
+export function billableMeasure(item: OrderItemInput): BillableMeasure | null {
   if (item.quantity_type === "exact") {
-    return typeof item.exact_quantity === "number" && item.exact_quantity > 0
+    const counted = typeof item.exact_quantity === "number" && item.exact_quantity > 0
       ? item.exact_quantity
       : null;
+    return counted === null ? null : { pieces: counted, bags: null };
   }
-  if (typeof item.estimated_quantity === "number" && item.estimated_quantity > 0) {
-    return item.estimated_quantity;
-  }
-  if (typeof item.bag_count === "number" && item.bag_count > 0) return item.bag_count;
-  return null;
+
+  const estimate = typeof item.estimated_quantity === "number" && item.estimated_quantity > 0
+    ? item.estimated_quantity
+    : null;
+  const bags = typeof item.bag_count === "number" && item.bag_count > 0
+    ? item.bag_count
+    : null;
+
+  // Both may be present, and both are kept: which one prices the lot depends on
+  // which rate exists, not on which the counter happened to record. §4 — "by the
+  // bag when a bag rate is set and the bags were counted, otherwise by the
+  // counter's estimate" — is a rule about the *price*, so the measure must carry
+  // both halves and let the pricer choose.
+  if (estimate === null && bags === null) return null;
+  return { pieces: estimate, bags };
+}
+
+/**
+ * How many units of laundry a row represents, without saying what a unit is.
+ *
+ * Kept for the places that are **counting laundry rather than pricing it** — the
+ * billing screens' "pieces of laundry" totals — where a bag counted as one is a
+ * defensible approximation and a null would read as no laundry at all. Nothing
+ * that multiplies by a rate may use this: use `billableMeasure` and look at
+ * which of the two numbers is there, which is the distinction that was missing.
+ */
+export function billableQuantity(item: OrderItemInput): number | null {
+  const measure = billableMeasure(item);
+  if (!measure) return null;
+  return measure.pieces ?? measure.bags;
 }
 
 /** The pricing models that mean "a rate per piece of laundry". */
@@ -209,35 +302,57 @@ export function priceJob(input: {
       : ITEM_TYPE_LABELS[item.item_type as ItemType] ?? item.item_type;
 
     const rate = rateFor(item);
-    const quantity = billableQuantity(item);
+    const measure = billableMeasure(item);
+    const gap = (reason: UnpricedReason) => {
+      unpriced.push({ itemType: item.item_type, label, description: describeItem(item), reason });
+    };
 
-    // No usable rate line — try the price list before giving up. A quantity of
-    // `null` is *not* recoverable this way: it means the counter recorded a bulk
-    // lot with neither an estimate nor a bag count, so there is nothing to
-    // multiply any rate by and the gap is in what was measured, not in pricing.
+    // Nothing to multiply by: a bulk lot recorded as a note alone. The gap is in
+    // what the counter measured, not in what anybody has priced, so no rate and
+    // no price list can rescue it — said before the tiers are consulted, or the
+    // reviewer is sent to a price screen that would not have helped.
+    if (!measure) { gap("not_measured"); continue; }
+
+    // No usable rate line — try the price list before giving up.
     if (!rate || rate.unit_price <= 0) {
       // Same specificity rule one tier down: this item's own listed price, then
       // the price for its kind of laundry.
       const listed = (item.item_id ? itemPriceList?.get(item.item_id) : undefined)
         ?? priceList?.get(item.item_type);
-      const fallback = listed && quantity !== null
-        ? priceFromList(item, listed, label, lines.length + 1)
-        : null;
+      if (!listed) {
+        // Which of the two gaps it is depends on whether there was a code to
+        // look up at all. A row naming an item that nobody has priced wants a
+        // price; a row naming no item, **in a laundry that prices by item
+        // code**, wants the job edited — and saying "no rate" to that is a false
+        // trail onto a list that is already full.
+        //
+        // The second condition is what keeps that honest: a laundry with no
+        // item-keyed prices does not price by code, so a missing code is not
+        // what is wrong and the plain "no rate" is the true answer.
+        const pricesByItemCode = (itemPriceList?.size ?? 0) > 0;
+        gap(!item.item_id && pricesByItemCode ? "no_item_code" : "no_rate");
+        continue;
+      }
+      const fallback = priceFromList(item, listed, measure, label, lines.length + 1);
       if (fallback) {
         lines.push(fallback);
         continue;
       }
-      unpriced.push({ itemType: item.item_type, label, description: describeItem(item) });
+      // The list has a rate and it still could not be applied, which for a
+      // listed item means exactly one thing: the lot was counted in bags and the
+      // only rate is per piece. Naming that sends the owner to the "Price per
+      // bag" column rather than back to a price they have already set.
+      gap(measure.pieces === null ? "no_bag_rate" : "no_rate");
       continue;
     }
 
-    // Three different reasons a row goes unpriced, and all of them are the same
-    // answer to the reviewer: this needs a human. The distinction that matters
-    // is only that it is *listed*, not that it was rounded to nothing.
-    if (quantity === null) {
-      unpriced.push({ itemType: item.item_type, label, description: describeItem(item) });
-      continue;
-    }
+    // **A rate card prices per piece and per kilo, and never per bag.** So a lot
+    // with no piece count cannot be billed from one, however complete the card
+    // is — multiplying a bag count by a per-piece rate is the defect this
+    // refuses. The price list may still have a bag rate, but a rate line is the
+    // more specific agreement and having matched one we do not fall back to it.
+    if (measure.pieces === null) { gap("no_bag_rate"); continue; }
+    const quantity = measure.pieces;
 
     const included = Math.max(0, Number(rate.included_quantity ?? 0));
     const billable = round2(Math.max(0, quantity - included));
@@ -333,13 +448,19 @@ export function priceJob(input: {
 function priceFromList(
   item: OrderItemInput,
   price: LaundryListPrice,
+  measure: BillableMeasure,
   label: string,
   sequence: number,
 ): JobChargeLine | null {
-  const bags = Math.max(0, Math.trunc(item.bag_count ?? 0));
-  const useBags = item.quantity_type !== "exact" && bags > 0 && price.bagPrice !== null;
-
-  const quantity = useBags ? bags : (billableQuantity(item) ?? 0);
+  // **§4's rule, and the reason the measure carries both numbers.** A bag rate
+  // and counted bags bill by the bag, whether or not the counter also estimated
+  // the pieces; otherwise the estimate prices it per piece. What is *not*
+  // allowed is the third combination — bags counted, no bag rate — because there
+  // is no number of pieces in a bag that this app knows, and inventing one is
+  // what produced $0.96 for four bags of towels. That returns null, and the
+  // caller reports it as `no_bag_rate`.
+  const useBags = measure.bags !== null && price.bagPrice !== null;
+  const quantity = useBags ? measure.bags! : (measure.pieces ?? 0);
   const unitPrice = useBags ? price.bagPrice! : price.unitPrice;
   if (quantity <= 0 || unitPrice <= 0) return null;
 

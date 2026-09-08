@@ -82,13 +82,48 @@ const orderSchema = z.object({
 type OrderInput = z.infer<typeof orderSchema>;
 
 /**
+ * Does this laundry keep an item master?
+ *
+ * The gate on requiring an item code, and it is a question about the *data*
+ * rather than a setting: a deployment with no sellable items would otherwise
+ * have a job form nobody could submit, and a code that cannot be chosen is not a
+ * code somebody forgot. The same condition `priceJob` applies before it blames a
+ * missing code.
+ *
+ * A head count, so no rows cross the wire. It fails **open** — a read that
+ * errors returns false and the form behaves as it did before, because refusing
+ * to take laundry in is a worse outcome than an unpriced row.
+ */
+async function hasItemMaster(
+  supabase: Awaited<ReturnType<typeof createClient>>, tenantId: string,
+): Promise<boolean> {
+  const { count, error } = await supabase
+    .from("items")
+    .select("id", { count: "exact", head: true })
+    // Named rather than left to RLS (§23): a platform admin reads every laundry,
+    // and this answer gates a write scoped to one.
+    .eq("tenant_id", tenantId)
+    .is("deleted_at", null)
+    .eq("status", "active")
+    .eq("is_sell", true);
+  if (error) return false;
+  return (count ?? 0) > 0;
+}
+
+/**
  * The rules a single field cannot state on its own, each phrased as the sentence
  * the person at the counter should read. Returns the first problem, or null.
+ *
+ * `itemCodeRequired` is passed rather than assumed, because it depends on
+ * whether this laundry has an item master at all — see `validateItem` and
+ * `hasItemMaster` below.
  */
-function crossFieldProblem(input: OrderInput, items: OrderItemInput[]): string | null {
+function crossFieldProblem(
+  input: OrderInput, items: OrderItemInput[], itemCodeRequired: boolean,
+): string | null {
   if (items.length === 0) return "Please add at least one laundry item.";
   for (const [index, item] of items.entries()) {
-    const problem = validateItem(item, index + 1);
+    const problem = validateItem(item, index + 1, { itemCodeRequired });
     if (problem) return problem;
   }
 
@@ -263,7 +298,10 @@ export async function createOrder(formData: FormData): Promise<void> {
   if (!parsedItems.ok) return fail(backToForm, parsedItems.problem);
   const items = parsedItems.items;
 
-  const problem = crossFieldProblem(parsed.data, items);
+  const supabase = await createClient();
+  const problem = crossFieldProblem(
+    parsed.data, items, await hasItemMaster(supabase, session.tenantId),
+  );
   if (problem) return fail(backToForm, problem);
 
   // Backdating a receipt changes what the day's takings and the overdue list
@@ -272,8 +310,6 @@ export async function createOrder(formData: FormData): Promise<void> {
       && !can(session.role, "orders.manage")) {
     return fail(backToForm, "Only a manager can record a job as received on an earlier day.");
   }
-
-  const supabase = await createClient();
 
   const { data: customer, error: customerError } = await supabase
     .from("customers")
@@ -366,10 +402,12 @@ export async function updateOrder(formData: FormData): Promise<void> {
   if (!parsedItems.ok) return fail(backTo, parsedItems.problem);
   const items = parsedItems.items;
 
-  const problem = crossFieldProblem(parsed.data, items);
+  const supabase = await createClient();
+  const problem = crossFieldProblem(
+    parsed.data, items, await hasItemMaster(supabase, session.tenantId),
+  );
   if (problem) return fail(backTo, problem);
 
-  const supabase = await createClient();
   const existing = await loadOrder(supabase, id.data);
   if (!existing) return fail(LIST, "That job could not be found.");
 

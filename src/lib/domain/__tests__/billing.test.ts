@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   BILLING_METHODS, BILLING_METHOD_LABELS, BILLING_STATUSES, BILLING_STATUS_LABELS,
-  checkBillingTransition, chargesAreEditable, isBillingMethod,
+  checkBillingTransition, chargesAreEditable, describeWorkAwaitingApproval, isBillingMethod,
   isBillingStatus, isConsolidated, nextBillingStatuses, OPEN_BILLING_STATUSES,
   type BillingStatus,
 } from "@/lib/domain/billing";
@@ -164,5 +164,45 @@ describe("billing methods", () => {
     for (const method of BILLING_METHODS) {
       expect(sweptByMonthEndRun(method)).toBe(method !== "manual");
     }
+  });
+});
+
+describe("describeWorkAwaitingApproval", () => {
+  it("says nothing when nothing is waiting", () => {
+    expect(describeWorkAwaitingApproval({ awaitingReview: 0, unpriced: 0 })).toBe("");
+  });
+
+  it("names the jobs and the next action", () => {
+    // The live shape on 2026-09-08: four jobs completed in the window, all of
+    // them `awaiting_review`, so the run correctly billed nothing — and used to
+    // report "no approved job was waiting", which reads as *everything is
+    // billed* rather than as *four are waiting on you*.
+    const note = describeWorkAwaitingApproval({ awaitingReview: 4, unpriced: 0 });
+    expect(note).toContain("4 jobs completed in this period are waiting to be approved");
+    expect(note).toContain("Approve them and run this again.");
+  });
+
+  it("sends the operator to price first when the charges are missing too", () => {
+    // Approving is refused for a job with no charges, so "approve them" alone
+    // would be an instruction that fails.
+    const note = describeWorkAwaitingApproval({ awaitingReview: 4, unpriced: 4 });
+    expect(note).toContain("None of them have charges yet");
+    expect(note).not.toContain("Approve them and run this again.");
+  });
+
+  it("counts the partly-priced case rather than rounding it to all or none", () => {
+    expect(describeWorkAwaitingApproval({ awaitingReview: 4, unpriced: 1 }))
+      .toContain("1 of them have no charges yet");
+  });
+
+  it("reads correctly for a single job", () => {
+    const note = describeWorkAwaitingApproval({ awaitingReview: 1, unpriced: 0 });
+    expect(note).toContain("1 job completed in this period is waiting");
+    expect(note).toContain("nothing on it was billed");
+  });
+
+  it("starts with a space, so a caller can append it unconditionally", () => {
+    expect(describeWorkAwaitingApproval({ awaitingReview: 2, unpriced: 0 }).startsWith(" "))
+      .toBe(true);
   });
 });

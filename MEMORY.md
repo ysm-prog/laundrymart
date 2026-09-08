@@ -9,7 +9,78 @@ where that is genuinely what it is. The multi-tenancy architecture stays: one op
 fact about today's data, not a reason to drop `tenant_id`, RLS, or §23's rule that a read feeding a
 write names its tenant.
 
-## Latest: the UI/UX review against `ui-ux-pro-max`, answered in the token layer
+## Latest: an item code is required, and Driver visits gets a picker
+2026-09-08, on `claude/require-item-code-and-visits-picker`. The owner's two follow-ups after the
+four fixes below. **No migration; no schema, RLS, capability or policy change.**
+
+- **A laundry row must name an item code** — `validateItem({ itemCodeRequired })`, refused by
+  **both** `createOrder` and `updateOrder`. The price list is keyed on item codes, so a row
+  without one is unpriceable; five live rows were exactly that. **Conditional on the laundry
+  having an item master** (the same test `priceJob` uses before saying `no_item_code`), and the
+  head count **fails open** — refusing to take laundry in is worse than an unpriced row.
+- The picker's empty state no longer says *"leave it blank and pick the kind of laundry"*: that
+  was the route that created the problem. The required marker is decorative — the picker holds a
+  search term, not the value — and the server is the boundary.
+- **Driver visits has a customer picker**, drawn only for `customers.read`, so a board/driver
+  (who hold the `routes.read` the screen is gated on) load no customer list.
+- 1154 tests / 70 files. Three reverts proved each guard. Browser: 40 assertions at 390/1440 ×
+  both themes, 0 failures. **The 16px section overflow at 390 is `FormActions`' own `-mx-4`
+  bleed** — document overflow is 0; measure the document, as the 2026-08-27 entry did.
+
+## Owner's decisions, 2026-09-08 — what is open
+Asked and answered; do not re-guess these.
+
+- **Bag pricing: the owner sets the rates themselves.** No build. `laundry_prices.bag_price` is
+  0 rows today, so **every bagged job is currently unpriceable** — correct rather than silently
+  billed at the piece rate, but it needs their numbers (LJ00023's hand-typed charge suggests
+  $40/bag). Affected live: LJ00022 (4 bags), LJ00019 (2 bags).
+- **Wanted next, in their words:** customer email go-live, Xero connection, contracts/rate cards.
+  Two of the three are **configuration only they can do** (Resend DNS + Vercel env vars; Xero
+  credentials); contracts are **built and unused** (0 service agreements). Assess before building.
+- **Dev catch-up** was asked for and is outstanding.
+
+## Previously: four reports from the deployed app, fixed
+2026-09-08, on `claude/driver-instructions-invoice-fixes-1q42fb`. **No migration; no schema, RLS,
+capability, policy or route change** — `git diff` over `supabase/` is empty. §18 has the entry.
+
+**Two of the four were named in words this codebase does not use, and were put to the owner:**
+*Template Invoice* = the **"Create last month's invoices"** run; *Charge By Customer* = a
+customer's own **laundry prices**. Do not re-guess these.
+
+- **Driver instructions.** Three columns, two of which reached no round-facing screen:
+  `special_instructions` on the job was selected and dropped, and `customers.special_instructions`
+  (the standing "gate code 1234") was not in `DAY_JOB_COLUMNS` at all. `driverInstructions` +
+  `DriverInstructions` is now one rule and one labelled block on My Runs, the driver job page and
+  `/run` — which also renders `customer_locations.access_notes` for the first time ever.
+- **Month-end run.** Reported *"no approved job was waiting"* when four jobs sat in
+  `awaiting_review`; `describeWorkAwaitingApproval` names them and the next action. **Seven reads
+  in it named no tenant and all seven feed writes**, including the jobs it bills — zero blast
+  radius on one tenancy, total on two. `month-end-run.test.ts` guards it (different *shape* from
+  `tenant-scoped-reads.test.ts`: keyed on a period, not a posted id).
+- **Charging.** `LJ00022` is 4 bags of `T22` at $0.24 **a piece** → the pricer billed **$0.96 for
+  four bags of towels**. `billableMeasure` carries `pieces` and `bags` separately; a bag measure
+  is priceable only by a bag rate. Every unpriced row now carries a reason
+  (`no_rate` / `no_bag_rate` / `not_measured` / `no_item_code`).
+- **Customer view.** `/orders` picker capped at 200 of 511 → six of the nine customers with jobs
+  unpickable, and a `<select>` with no matching option silently posted `customer=""`, dropping
+  the filter. Raised to `CUSTOMER_LIMIT`, filtered customer always an option, `/jobs` gained a
+  customer filter, both history cards now count.
+- **1141 tests / 69 files** (was 1104/66); `verify` green. **Eight reverts proved each guard
+  catches its defect.** Browser: 72 assertions at 320/390/768/1440 × both themes, 0 failures,
+  harness proved non-vacuous.
+  - The commit message and the first draft of §18 say **1131/68**: a count taken before the last
+    two test files landed, and never re-read because the `verify` afterwards was checked only for
+    `== PASSED ==`. CI printed the true figure. Read a gate's output, not its verdict.
+- **Merged to `Prod` (`fc33624`) on 2026-09-08**, clean fast-forward, never force-pushed. CI run
+  292 green on all three jobs, read off the logs. Nothing to apply — no migration. `Dev` is now
+  one release behind and wants a catch-up merge.
+- **Not verified behind the auth gate** — no Supabase credentials here and `*.supabase.co` is
+  refused by the network policy. Live facts came from the Supabase MCP. The §18 entry ends with
+  the five things to press on `ats.coreit.com.au`.
+- **Trap re-learned:** `git checkout -- <file>` to undo a one-line revert took the whole file
+  with it, and does nothing at all on an untracked one.
+
+## Previously: the UI/UX review against `ui-ux-pro-max`, answered in the token layer
 2026-09-06, on `claude/app-ui-ux-redesign-145aay`. No migration; no schema, RLS, capability,
 policy or route change. `docs/UI-REVIEW-2026-09-06.md` is the record; §10b has the rules; §18 the
 entry.

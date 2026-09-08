@@ -10,6 +10,7 @@ import {
 } from "@/components/ui";
 import { Field, Input, SubmitButton } from "@/components/form";
 import { ConfirmSubmit } from "@/components/confirm-submit";
+import { DriverInstructions } from "@/components/driver-instructions";
 import { ExceptionCapture, OfflineCapture, ServiceWorkerRegistrar } from "@/components/offline-capture";
 import { EXCEPTION_REASONS } from "@/app/(app)/jobs/exception-reasons";
 import { closeRun, confirmLoad, markReturning, startRun, unloadRun } from "./actions";
@@ -222,9 +223,13 @@ async function Stops({
                     {stop.id === activeStopId ? "Open" : "Select"}
                   </Link>
                 </div>
-                {stop.customers?.special_instructions ? (
-                  <p className="mt-2 text-xs">Instructions: {stop.customers.special_instructions}</p>
-                ) : null}
+                {/* The same block the round reads on My Runs and on a job, so
+                    the three driver surfaces cannot say different things. What
+                    was here rendered the customer's standing note alone at 12px
+                    and dropped `access_notes` entirely — selected in the query
+                    above and never shown, which is the note that says which
+                    door to use. */}
+                <DriverInstructions job={stop} className="mt-2" compact />
               </li>
             ))}
           </ol>

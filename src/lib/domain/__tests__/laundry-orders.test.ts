@@ -457,6 +457,37 @@ describe("item validation", () => {
     expect(validateItem(exact, 1)).toBeNull();
   });
 
+  it("requires an item code where the laundry keeps an item master", () => {
+    // The owner's decision of 2026-09-08. The price list is keyed on item codes,
+    // so a row saved without one can never be priced automatically — five of
+    // this laundry's nineteen recorded rows were exactly that.
+    expect(validateItem(exact, 1, { itemCodeRequired: true })).toMatch(/item code/i);
+    expect(validateItem({ ...exact, item_id: "item-t22" }, 1, { itemCodeRequired: true }))
+      .toBeNull();
+  });
+
+  it("says why, not just that it is missing", () => {
+    // "Pick an item" alone reads as a formality; naming the consequence is the
+    // difference between a job that prices itself and one costed by hand.
+    expect(validateItem(exact, 1, { itemCodeRequired: true })).toMatch(/priced from your price list/i);
+  });
+
+  it("does not require one where there is no item master to choose from", () => {
+    // A deployment with no items would otherwise have a form nobody could
+    // submit, and a code that cannot be chosen is not a code somebody forgot.
+    // The same condition `priceJob` applies before it blames a missing code.
+    expect(validateItem(exact, 1)).toBeNull();
+    expect(validateItem(exact, 1, { itemCodeRequired: false })).toBeNull();
+  });
+
+  it("checks the kind of laundry before the code, so the message is the useful one", () => {
+    // A row with neither should be told to choose a kind of laundry first —
+    // picking an item is what fills that in, so the other order sends somebody
+    // to fix the field that was about to fix itself.
+    expect(validateItem({ ...exact, item_type: "" }, 1, { itemCodeRequired: true }))
+      .toMatch(/kind of laundry/i);
+  });
+
   it("wants a whole positive number when the laundry was counted", () => {
     expect(validateItem({ ...exact, exact_quantity: 0 }, 1)).toMatch(/valid quantity/i);
     expect(validateItem({ ...exact, exact_quantity: -3 }, 1)).toMatch(/valid quantity/i);

@@ -121,6 +121,15 @@ The master spec names a .NET 9 Web API; this build follows the supplied skeleton
   list people are picked from and are *not* filtered out of name resolution**: a job one of them
   created still has to say so. That split is `staffMembers()` versus `memberNames()`, both pure
   and both tested.
+- **What a round is told at the door is one rule and one block** (`driverInstructions` in
+  `lib/domain/driver-instructions.ts`, drawn by `DriverInstructions`). A laundry writes an
+  instruction in four places — this delivery, how the laundry is handled, how to get into the
+  site, and what is always true of the customer — and until 2026-09-08 each driver screen showed
+  a different subset: My Runs showed the first alone and unlabelled and did not even *fetch* the
+  customer's standing note, while `/run` showed the customer's alone and had selected
+  `access_notes` since it was written without ever rendering it. One rule now, ordered
+  most-specific first, de-duplicated, and labelled by where each came from — a driver cannot act
+  on "ring twice" and "always use the side door" if they cannot tell which is which.
 - Notifications (`src/lib/notifications/`) have two writers and one reader. Server actions call
   `notify()` at the moment they cause an event, on the caller's RLS-bound client; the swept,
   time-based checks live in `/api/notifications/sweep`, which has no session and therefore uses
@@ -450,6 +459,17 @@ key remains the way to reset or re-assert them through the Auth API, but nothing
   line looks exactly like laundry that was never taken in. A bulk lot bills by the bag when a
   bag rate is set and the bags were counted, otherwise by the counter's estimate; a lot with
   neither cannot be priced and says so.
+  - **That sentence was true of the design and not of the code until 2026-09-08.**
+    `billableQuantity` returned a bare number that could be pieces *or* bags, so a lot counted
+    in bags with no bag rate fell through to the **piece** rate — four bags of `T22` billed as
+    4 × $0.24 = **$0.96**, silently. `billableMeasure` carries both numbers and the pricer picks
+    by which rate exists; a rate card, which has no per-bag model at all, refuses such a lot
+    outright rather than approximating one.
+  - **Laundry that cannot be priced says which of four things is wrong**: no rate anywhere, no
+    price *per bag* for a lot counted in bags, nothing measured on the row, or no item code on
+    it at all. They want four different actions on three different screens, and one sentence for
+    all of them sent people to the wrong one. `no_item_code` is only ever said where the laundry
+    actually prices by item code, so a rate-card-only laundry still gets the plain "no rate".
   - **The price screens write the item tier and nothing else, since 2026-08-27.** They rendered
     the nine `ITEM_TYPES` and never touched `item_id`, so the tier 0032 built had **no entry
     point at all** — which is why the live table held **zero rows** and the laundry put the rate
@@ -464,7 +484,15 @@ key remains the way to reset or re-assert them through the Auth API, but nothing
   disagree — the generator reads both through the RLS-bound client.
 - **A job's laundry names an item, and the item decides what kind of laundry it is**
   (`sync_laundry_item_type`, 0032). `item_type` is what three pricing tiers, every report and
-  every pre-0032 row match on; `item_id` is the coded item. A trigger derives the first from the
+  every pre-0032 row match on; `item_id` is the coded item.
+  **Since 2026-09-08 the counter must name one** (`validateItem`'s `itemCodeRequired`, refused by
+  `createOrder` and `updateOrder`), because the price list is keyed on item codes and a row
+  without one can never be priced automatically — five of this laundry's nineteen recorded rows
+  were exactly that. **Conditional on the laundry having an item master**, the same condition
+  `priceJob` applies before it says `no_item_code`: a deployment with no items would otherwise
+  have a job form nobody could submit, and the head count that decides it fails *open*, because
+  refusing to take laundry in is worse than an unpriced row.
+  A trigger derives the first from the
   second, so a job of TOW001 filed as "sheets" — which would be priced at the sheet rate with
   nobody able to see why — is impossible however the row is written. An item with no
   `laundry_category` leaves the caller's own answer, because "this is a rented tablecloth" is not
@@ -591,6 +619,19 @@ posts `return_to`, so a manager who adjusts a run from the round's day lands bac
 `/run` survives as the second tab ("At the depot") because it owns the offline outbox, the
 service worker and the unload inventory sweep, and is the one screen that must work with no
 signal.
+
+**A customer's work is all reachable from their record** (2026-09-08). The Customer laundry list
+capped its customer picker at **200** of 511, so six of the nine businesses with jobs were not in
+it — and because a `<select>` handed an id it has no option for silently selects the placeholder,
+pressing Search after arriving from a customer's "All jobs" link posted `customer=""` and threw
+the filter away. The cap is `CUSTOMER_LIMIT` now, shared with the job form, and the filtered
+customer is added to the options regardless. **Driver visits gained a customer filter**, which it
+had never had — with a picker of its own since 2026-09-08, drawn only for a holder of
+`customers.read`, so a **board** and a **driver** (who hold the `routes.read` this screen is
+gated on) load no customer list at all — so a customer record can point at the times a driver
+called on them as well as at their laundry; that link carries `period=all`, because `/jobs` opens on today and without it
+lands on an empty list that reads as *no visits recorded*. Both history cards on the record now
+say how many rows there are, rather than showing ten and implying that is all of them.
 
 **A customer picker offers the customer database** (2026-08-27). Every screen that puts a
 customer in front of somebody narrows the list, and until then they did not agree: the
@@ -2838,6 +2879,230 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-09-08 · An item code is required, and Driver visits gets its own customer picker
+Two follow-ups the owner chose after the four fixes above, plus the merge that took them live.
+**No migration; no schema, RLS, capability, policy or role change** — `git diff` over `supabase/`
+is empty.
+
+**1 · A laundry row must name an item code, where there is an item master to choose from.**
+The price list is keyed on item codes (§31), so a row saved without one can never be priced
+automatically — and five of this laundry's nineteen recorded rows were in exactly that state
+(`LJ00024`, `LJ00021`, `LJ00011`, `LJ00010`, `LJ00009`), with nothing at the counter saying so.
+The job simply arrived at review unpriceable, which reads as the pricing being broken.
+- **The rule is `validateItem`'s new `itemCodeRequired`**, refused by `createOrder` *and*
+  `updateOrder` — both, because an edit that could drop the code would be a second door onto the
+  state this closes, and because it is what fixes the five stranded jobs the next time anybody
+  touches one.
+- **Conditional on the laundry actually keeping an item master**, which is the same condition
+  `priceJob` applies before it blames a missing code. A deployment with no items would otherwise
+  have a job form nobody could submit, and a code that cannot be chosen is not a code somebody
+  forgot. The head count that decides it **fails open**: a read that errors leaves the form
+  behaving as it did before, because refusing to take laundry in is a worse outcome than an
+  unpriced row.
+- **The wording changed as much as the marker.** The picker's empty state used to offer *"leave
+  it blank and pick the kind of laundry"* — which is precisely the route that produced those five
+  jobs. Where a code is required it now names the way out that works: add the code on Money ›
+  Laundry prices. The hint says what the code is *for*, because "pick an item" alone reads as a
+  formality rather than as the difference between a job that prices itself and one costed by hand.
+- **The marker is decorative and the server is the boundary**, stated because it looks like an
+  omission otherwise: the picker holds a *search term*, not the chosen value, so there is nothing
+  for native validation to check — and a hidden `required` input fails with nothing to focus,
+  which is the trap §10c already records for a required control inside a closed disclosure.
+
+**2 · Driver visits offers a customer picker, not just a link.** The filter landed with the four
+fixes above and was reachable only by arriving from a customer's record, which is half a feature.
+- **Drawn only for a holder of `customers.read`.** `/jobs` is gated on `routes.read`, which a
+  **board** and a **driver** hold and neither of which implies looking a customer up — so a
+  round's screen draws no picker and loads no customer list, while the office gets the same
+  filter Customer laundry has. A principled line rather than a payload optimisation, though it is
+  both.
+- `CUSTOMER_LIMIT` is shared with the other two pickers rather than restated, and the filtered
+  customer is added back when the cap left them out — the same property, for the same reason, as
+  the fix one screen over.
+
+- **1154 unit tests across 70 files (was 1141/69)**; 532 pgTAP assertions unchanged. `verify`
+  green: typecheck, lint, tests and the production build.
+- **All three new guards were confirmed to catch their defect**: dropping the `itemCodeRequired`
+  pass-through, making the rule unconditional, and removing the capability gate on the picker.
+- **Measured in a real browser** at 390 and 1440 in both themes: **40 assertions, 0 failures, 0
+  console errors, 0 document overflow** — the field marked required, the hint naming the price
+  list, the empty state no longer offering "leave it blank", and a code actually pickable. The
+  job-form fixture gained a **catalogue**, without which the gallery drew the "no items set up
+  yet" fallback and none of this could be looked at.
+  - **The section overflows 16px at 390 and the page does not**, which is `FormActions`' own
+    `-mx-4 sm:mx-0` bleed — the same measurement the 2026-08-27 entry records on this same
+    fixture, and the reason it measured the document rather than the section. The first run of
+    this harness reported it as a failure; the document is the honest measure and it reads 0.
+
+**Not verified behind the auth gate**, for the standing reason — no Supabase credentials here and
+`*.supabase.co` is refused by the network policy. **Before trusting it: take a job in on
+`ats.coreit.com.au` without picking an item code and check it is refused by name, then open Driver
+visits and pick a customer from the new dropdown.**
+
+### 2026-09-08 · Four reports: the driver's instructions, the month-end run, charging a customer, and a customer's own jobs
+Four things reported from the deployed app, each traced to a defect in live data before
+anything was written. **No migration; no schema, RLS, capability, policy or role change** —
+`git diff` over `supabase/` is empty and nobody gained or lost anything.
+
+**Two of the four were named in words this codebase does not use**, and were put to the owner
+rather than guessed at: *Template Invoice* is the **"Create last month's invoices"** run, and
+*Charge By Customer* is a customer's own **laundry prices**. Recording that here because the
+next reader will meet the same two names.
+
+**1 · The driver's instructions were spread over three columns and two of them reached no
+screen the round opens.** `delivery_instructions` was an unlabelled grey paragraph at the foot
+of a job card — the same weight as the item summary above it, and visually a note rather than
+something to act on. The job's own `special_instructions` was **selected and dropped**. And
+`customers.special_instructions` — the standing *"gate code 1234, leave with reception"* that
+is true of every delivery to that customer — was **not fetched for My Runs at all**, because
+`DAY_JOB_COLUMNS` embedded `customers(id, business_name, phone)` and stopped there.
+- `driverInstructions` (`lib/domain/driver-instructions.ts`) is the rule, pure and tested, and
+  `DriverInstructions` is the one block all three driver surfaces draw — the day list, the job
+  page and the depot screen. A rule stated inside a card is a rule no unit test can reach,
+  which is why the previous arrangement let each screen show a different subset.
+- **Ordered by how specific the instruction is**: this delivery, then how this laundry is
+  handled, then how to get into this site, then what is always true of this customer. A driver
+  who reads only the first line reads the one written most deliberately.
+- **A repeated instruction is said once.** A counter hand copying the customer's standing note
+  onto the job is ordinary, and two headings over one sentence reads as two instructions.
+- **The depot screen's `access_notes` is rendered for the first time.** `/run` has selected
+  `customer_locations.access_notes` since it was written and never shown it — the note that
+  says which door to use.
+- **"Machine instructions", not a driver-flavoured rewording**: it is what the counter form
+  calls that box, so a manager on the phone to a round is naming the same field. The labels are
+  sentence case, which is §10b's rule and was caught by measuring rather than by reading — the
+  first draft shipped them `uppercase tracking-wide`, the exact treatment the 2026-08-13 sweep
+  took out of 28 files.
+
+**2 · The month-end run could not say why it found nothing, and read across laundries to find
+it.** With nothing to bill it reported *"Nothing to invoice — 0 customer(s) were already billed
+for that period, and no approved job was waiting"*: true, quoting a zero nobody asked about, and
+naming no remedy. The real answer on this deployment is that **four jobs were completed in the
+window and every one is still `awaiting_review`** — the run only ever sweeps `approved`, so it
+correctly billed nothing and said so in a way that reads as *everything is billed*.
+- `describeWorkAwaitingApproval` is that sentence, pure and in `lib/domain/billing.ts` because
+  `invoices/actions.ts` is a `"use server"` module and can export nothing but server actions.
+  Two head counts, no rows fetched, run on the success path too — *"3 draft invoices … 4 jobs
+  completed in this period are waiting to be approved"* is the more useful half at month end.
+  It sends the operator to price first where the charges are missing, because approving a job
+  with no charges is refused and "approve them" alone would be an instruction that fails.
+- **Seven reads in that action named no tenant, and every one of them feeds a write**: the
+  agreements, their priced lines, the public holidays, the weighed collections, the damaged
+  linen, the customers whose terms stamp the header, and — the one that matters most — **the
+  approved jobs the run bills**. `is_member()` is true of every laundry for a platform admin
+  (0019) and both real owner logins hold that role, so an unfiltered sweep raises one laundry's
+  invoices from another's contracts and jobs. **Blast radius is zero today** because there is one
+  tenancy (§11), and total the day there are two — which is exactly when nobody would look.
+- These are a different *shape* from the ones `tenant-scoped-reads.test.ts` polices: that sweep
+  catches a read keyed on an id **posted from a form**, and none of these is keyed on an id at
+  all. They are keyed on a period, which is what makes them dangerous.
+  `month-end-run.test.ts` is the guard, and it reads the action's source with its comments
+  stripped — the `email-branding.test.ts` trap, since this action's comments quote the message
+  it used to print.
+
+**3 · Charging a customer: a bag count was being multiplied by a per-piece rate.** The defect,
+in its live shape: `LJ00022` is **four bags** of `T22`, and `T22`'s only rate is **$0.24 a
+piece**. The pricer produced 4 × $0.24 = **$0.96 for four bags of towels**, described as
+"Towels — 4", with nothing on screen to suggest anything was wrong. `LJ00023` is the same shape
+and the owner had evidently spotted it there — its frozen charge is a hand-typed `bag_charge` of
+1 × **$40.00**. That is what "charge by customer does not work" looks like from a desk.
+- **§4 already stated the rule the code did not keep**: *"A bulk lot bills by the bag when a bag
+  rate is set and the bags were counted, otherwise by the counter's estimate; a lot with neither
+  cannot be priced and says so."* `billableQuantity` returned a bare number that could be pieces
+  *or* bags, and the multiplication could not tell.
+- `billableMeasure` carries **both numbers** — `pieces` and `bags` — because which one prices the
+  lot depends on which rate exists, not on which the counter happened to record. A rate card
+  prices per piece and per kilo and never per bag, so a lot with no piece count is refused there
+  too. `billableQuantity` survives for the screens that are *counting* laundry rather than
+  pricing it, where a bag counted as one beats a null that would read as no laundry at all.
+- **Every unpriced row now carries a reason**, because "nothing came back priced" names no
+  remedy and the four causes want four different actions: `no_rate`, `no_bag_rate`,
+  `not_measured`, and `no_item_code`.
+- **`no_item_code` is the second half of the same report.** Five of the laundry's nineteen
+  recorded job items name no item at all, and since 2026-08-27 the price screens write **only**
+  the item tier (§31) — 117 prices, every one against an item, and the kind-of-laundry tier they
+  used to write is empty. Telling those five "no rate on the price list" sends somebody to a list
+  that is already full. It is only said where the laundry actually prices by item code, so a
+  rate-card-only laundry still gets the plain "no rate".
+
+**4 · A customer's jobs could not all be seen, and the filter that should have shown them was
+silently thrown away.** The Customer laundry list capped its customer picker at **200** against
+a base of **511**, so **six of the nine businesses that actually have jobs** — `Jay`, `Test1`,
+`Sueno Hair`, `Underground Haircutters`, `Pure - The Essence Of Nature`, `Jurlique` — were not
+in it. Worse than hard to find: a `<select>` whose `defaultValue` matches no option silently
+shows the first one, so arriving from a customer's "All jobs" link and pressing Search posted
+`customer=""` and **dropped the filter**, leaving every job in the laundry on screen under the
+impression it was that customer's.
+- The cap is `CUSTOMER_LIMIT`, shared with the job form rather than restated, and the filtered
+  customer is **added to the options** when the cap left them out — belt and braces, because the
+  cap is a number and this is a property. `withCurrentHolder` makes the same move for a job's
+  assignee, where the same silence cleared an assignment.
+- **Driver visits had no customer filter at all**, so the customer record could point at their
+  laundry jobs and not at the times a driver actually called on them. It has one now, and the
+  link carries `period=all` because `/jobs` opens on **today** — without it the link lands on an
+  empty list, which reads as *no visits recorded*.
+- **Both history cards on a customer record now say how many there are.** They showed ten and
+  never admitted there were more, so a customer with thirty jobs looked like a customer with
+  ten and "All jobs" read as a convenience rather than as the rest of them.
+
+- **1141 unit tests across 69 files (was 1104/66)**; 532 pgTAP assertions unchanged, because this
+  adds no policy and no migration. `verify` green: typecheck, lint, tests and the production
+  build.
+  - **This entry first said 1131 across 68, and the commit message still does.** That figure came
+    from a full run made *before* the last two test files were added — `month-end-run.test.ts` and
+    the six `describeWorkAwaitingApproval` cases — and the `verify` run afterwards was read only
+    for `== PASSED ==`. CI printed the true number and it is the one above. Recorded rather than
+    quietly overwritten, because this file has carried a wrong test count twice before (§7's
+    "count assertions, not lines starting with `ok`") and the habit that produces it is reading a
+    gate for its verdict instead of its output.
+- **Every new guard was confirmed to catch its defect** rather than assumed to be doing
+  something — eight reverts, each watched to fail by name: the month-end tenant filter, the old
+  month-end message, the picker cap, the driver-visits filter, `period=all` on the visits link,
+  the capped-card counts, the bag-count-at-a-piece-rate arithmetic, and the customer's standing
+  instructions.
+- **Measured in a real browser**, `/design-preview` at 320/390/768/1440 in both themes: **72
+  assertions, 0 failures, 0 console errors, 0 overflow inside the section**, the block tinted and
+  bordered rather than a grey footnote, its text body ink rather than `--muted-foreground`, and
+  the third fixture correctly drawing no block at all. The harness was proved non-vacuous by
+  pointing it at a section that does not exist.
+- **`git checkout` was used to undo one of those reverts and took the whole file with it**, so
+  that file's changes were reapplied from scratch. Worth writing down: on an untracked file it
+  does nothing at all, and on a tracked one it is not a targeted undo.
+
+**Merged to `Prod` (`fc33624`) on 2026-09-08**, a clean fast-forward — `origin/Prod` was an
+ancestor of the branch (0 behind, 1 ahead), so there was nothing to reconcile and `Prod` was
+never force-pushed. **Nothing to apply**: this release adds no migration, `git diff Prod...HEAD`
+over `supabase/` is empty, and the live ledger's last entry is still
+`0046_credit_note_gst_inclusive`.
+
+- **CI green on all three jobs** — run 292: Verify (typecheck, lint, **1141** tests across 69
+  files, production build, `== PASSED ==` at 11:16:47Z), Security (gitleaks strict + dependency
+  audit) and the DB job (`pgTAP suite passed`, then the seed applied to the fresh schema).
+  **Read off the logs rather than the statuses**, which is the lesson this file records six times
+  over — and which earned its place again here: the Verify log is where the wrong test count
+  above was caught.
+- **No CI ran on the feature branch, and that is the configuration rather than a gap.**
+  `ci.yml` triggers on `push` and `pull_request` for `Prod` and `Dev` only, so a feature branch
+  pushed on its own is never built; the first CI on this work is the one above. Local `verify`
+  was green on the same tree before the merge.
+- **The elapsed time was checked against a clock before anything was called slow** —
+  `date -u` against the runner's own `started_at`, per the trap four earlier entries record a
+  session walking into by inferring elapsed time from how many tool calls it had made.
+- **The Vercel production deploy is not confirmable from this session**, which is a tooling limit
+  rather than a configuration one — §5 has the distinction. Read it in the Vercel dashboard.
+- **`Dev` was not touched.** It held an identical tree to `Prod` before this, so it is now one
+  release behind and wants a catch-up merge before it is trusted as a staging branch again.
+
+**Not verified behind the auth gate.** This container has no Supabase credentials and the network
+policy refuses `*.supabase.co` (`000` from curl), so no authenticated screen was opened with real
+rows in it — the database facts above come from reading the live database over the Supabase MCP,
+and the screens from the gallery, the guards and the build. **Before trusting it: open My Runs on
+`ats.coreit.com.au` and check the Instructions block carries the customer's standing note; press
+Price this job on `LJ00022` (4 bags of T22) and check it now says the lot is counted in bags with
+no price per bag, instead of billing $0.96; set a price per bag for T22 and press it again; press
+"Create last month's invoices" and check it names the jobs waiting to be approved; then open a
+customer, press All jobs, and confirm the customer stays selected when you press Search.**
+
 ### 2026-09-06 · Every component reviewed against a UX checklist, and the token layer answers
 The owner's instruction: act as a UI/UX team, review every component against the
 `ui-ux-pro-max` skill and redesign where it earns it, fonts and design included. **No migration;

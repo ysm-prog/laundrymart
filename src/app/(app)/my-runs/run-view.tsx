@@ -3,6 +3,7 @@ import { MapPin, Phone } from "lucide-react";
 import { Badge, ButtonLink, Card, cx, humanise } from "@/components/ui";
 import { formatAdelaideDate, formatAdelaideTime } from "@/lib/domain/timezone";
 import { ORDER_STATUS_LABELS, summariseItems, type OrderStatus } from "@/lib/domain/laundry-orders";
+import { DriverInstructions } from "@/components/driver-instructions";
 import type { DayJob } from "@/lib/runs/my-runs";
 
 /**
@@ -194,11 +195,11 @@ export function JobCard({
         </div>
       </div>
 
-      {job.delivery_instructions ? (
-        <p className="mt-2.5 rounded-lg bg-surface-sunken px-3 py-2 text-sm text-muted-foreground">
-          {job.delivery_instructions}
-        </p>
-      ) : null}
+      {/* All three instruction sources, labelled — not just `delivery_instructions`
+          in muted grey. See `DriverInstructions`: what was here read as a note
+          rather than as something to act on, and it silently left out both the
+          job's handling instructions and the customer's standing ones. */}
+      <DriverInstructions job={job} className="mt-2.5" compact />
     </li>
   );
 }

@@ -4,7 +4,8 @@ import { accountLookupsFor, resolveChargeAccount } from "@/lib/invoices/account-
 import { recordAudit } from "@/lib/audit";
 import { describeDbError } from "@/lib/actions";
 import {
-  jobChargeSubtotal, priceJob, pricingSourceLabel, type JobChargeLine, type RateLine,
+  UNPRICED_REASON_TEXT, jobChargeSubtotal, priceJob, pricingSourceLabel,
+  type JobChargeLine, type JobPricingResult, type RateLine, type UnpricedReason,
 } from "@/lib/domain/job-pricing";
 import { itemPriceListFor, priceListFor, type LaundryPriceRow } from "@/lib/domain/laundry-billing";
 import type { OrderItemInput } from "@/lib/domain/laundry-orders";
@@ -181,7 +182,7 @@ export async function loadJobItems(supabase: Client, orderId: string): Promise<O
 
 export type PricedJob = {
   lines: JobChargeLine[];
-  unpriced: Array<{ itemType: string; label: string; description: string }>;
+  unpriced: JobPricingResult["unpriced"];
   card: RateCardContext["card"];
 };
 
@@ -258,6 +259,12 @@ export async function priceAndSaveJob(
   | {
       ok: true; orderNumber: string; customerId: string;
       lines: number; unpriced: number; subtotal: number; source: string;
+      /**
+       * What to say about the rows that were not priced, already in the words a
+       * reviewer can act on. A bare count sent them looking; naming the laundry
+       * and the reason names the screen that fixes it.
+       */
+      unpricedNote: string;
     }
   | { ok: false; orderNumber: string | null; customerId: string | null; card: RateCardContext["card"]; error: string }
 > {
@@ -310,9 +317,40 @@ export async function priceAndSaveJob(
     customerId: job.customer_id,
     lines: lines.length,
     unpriced: unpriced.length,
+    unpricedNote: describeUnpriced(unpriced),
     subtotal,
     source,
   };
+}
+
+/**
+ * The gap, said so somebody can close it.
+ *
+ * "N item(s) had no rate on the card or the price list" was the whole of it, and
+ * it was wrong as well as vague once bag-measured lots stopped being billed at
+ * the piece rate: the commonest gap on this deployment is a lot counted in bags
+ * with no price per bag, which that sentence sends the owner to fix in the wrong
+ * column. Grouped by reason and capped at three examples, because a job with
+ * eleven unpriced rows has one or two causes.
+ */
+function describeUnpriced(unpriced: JobPricingResult["unpriced"]): string {
+  if (unpriced.length === 0) return "";
+
+  const byReason = new Map<UnpricedReason, string[]>();
+  for (const entry of unpriced) {
+    const bucket = byReason.get(entry.reason) ?? [];
+    bucket.push(entry.label);
+    byReason.set(entry.reason, bucket);
+  }
+
+  const parts = [...byReason].map(([reason, labels]) => {
+    const shown = [...new Set(labels)];
+    const named = shown.slice(0, 3).join(", ")
+      + (shown.length > 3 ? ` and ${shown.length - 3} more` : "");
+    return `${named} — ${UNPRICED_REASON_TEXT[reason]}`;
+  });
+
+  return ` Not priced: ${parts.join("; ")}.`;
 }
 
 /**

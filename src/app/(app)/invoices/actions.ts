@@ -26,6 +26,7 @@ import { pushPaymentToXero } from "@/lib/xero/push-payment";
 import { pushVoidToXero } from "@/lib/xero/push-void";
 import { accountLookupsFor, resolveChargeAccount } from "@/lib/invoices/account-coding";
 import { generateInvoicesForJobs } from "@/lib/invoices/from-jobs";
+import { describeWorkAwaitingApproval } from "@/lib/domain/billing";
 import { findOrOpenDraft, rebuildJobLines, removeJobFromDraft } from "@/lib/invoices/open-draft";
 import { loadChargesForJobs } from "@/lib/orders/job-billing";
 import { issueOneInvoice } from "@/lib/invoices/issue";
@@ -100,6 +101,12 @@ export async function generateInvoices(formData: FormData): Promise<void> {
             "minimum_charge, holiday_rule, holiday_region, weekend_surcharge_pct, " +
             "holiday_surcharge_pct, fuel_levy_pct, payment_terms_days, purchase_order_number, " +
             "emergency_service")
+    // §23: every one of these reads feeds a write — they decide who is billed
+    // and for how much — so each names the tenant rather than leaning on RLS.
+    // `is_member()` is true of *every* laundry for a platform admin, and an
+    // unfiltered sweep would raise one laundry's invoices from another's
+    // contracts, jobs and collections.
+    .eq("tenant_id", session.tenantId)
     .eq("status", "active").is("deleted_at", null)
     .lte("start_date", end)
     .returns<BillableAgreement[]>();
@@ -111,6 +118,7 @@ export async function generateInvoices(formData: FormData): Promise<void> {
 
   const { data: holidayRows } = await supabase
     .from("public_holidays").select("holiday_date, region")
+    .eq("tenant_id", session.tenantId)
     .gte("holiday_date", start).lte("holiday_date", end);
 
   const linesByAgreement = new Map<string, BillableLine[]>();
@@ -120,6 +128,7 @@ export async function generateInvoices(formData: FormData): Promise<void> {
       .select("id, agreement_id, item_id, charge_type, pricing_model, unit_price, percentage, " +
               "standard_quantity, included_quantity, taxable, " +
               "items(name, sku, rental_price, wash_only_price, replacement_cost)")
+      .eq("tenant_id", session.tenantId)
       .in("agreement_id", live.map((a) => a.id))
       .returns<BillableLine[]>();
 
@@ -155,6 +164,7 @@ export async function generateInvoices(formData: FormData): Promise<void> {
   // one answer that is defensible without picking a winner between contracts.
   const { data: customerRows } = await supabase
     .from("customers").select("id, payment_terms_days, depot_id")
+    .eq("tenant_id", session.tenantId)
     .in("id", [...byCustomer.keys()])
     .returns<Array<{ id: string; payment_terms_days: number; depot_id: string | null }>>();
   const customerById = new Map((customerRows ?? []).map((row) => [row.id, row]));
@@ -213,6 +223,7 @@ export async function generateInvoices(formData: FormData): Promise<void> {
       const { data: weighed } = await supabase
         .from("pickups")
         .select("total_weight_kg")
+        .eq("tenant_id", session.tenantId)
         .eq("customer_id", customerId)
         .gte("pickup_date", start).lte("pickup_date", end)
         .gt("total_weight_kg", 0)
@@ -269,6 +280,7 @@ export async function generateInvoices(formData: FormData): Promise<void> {
       .from("pickup_lines")
       .select("item_id, damaged_quantity, missing_quantity, " +
               "pickups!inner(customer_id, pickup_date), items(name, replacement_cost)")
+      .eq("tenant_id", session.tenantId)
       .eq("pickups.customer_id", customerId)
       .gte("pickups.pickup_date", start).lte("pickups.pickup_date", end)
       .returns<Array<{
@@ -409,6 +421,7 @@ export async function generateInvoices(formData: FormData): Promise<void> {
   const { data: periodJobs } = await supabase
     .from("laundry_orders")
     .select("id")
+    .eq("tenant_id", session.tenantId)
     .eq("billing_status", "approved")
     .gte("completed_at", periodStartedAt)
     .lt("completed_at", periodEndedAt)
@@ -424,6 +437,51 @@ export async function generateInvoices(formData: FormData): Promise<void> {
     supabase, session, (periodJobs ?? []).map((row) => row.id),
     { issueDate: end, respectManual: true, period: { start, end } },
   );
+
+  /*
+   * **Why the run found less than the operator expected.**
+   *
+   * The sweep above takes only `approved` jobs, which is right — a job nobody
+   * has reviewed must not be billed. What the report could not say is that
+   * anything was *waiting*: with four completed jobs all sitting in
+   * `awaiting_review`, this run correctly bills nothing and used to announce
+   * "no approved job was waiting", which reads as *everything is billed* rather
+   * than as *four are waiting on you*. `/billing/[customerId]` has named this
+   * for one customer since it was written; the month-end run never did.
+   *
+   * Two head counts, no rows fetched. Run unconditionally rather than only on
+   * the empty path, because "3 drafts raised, and 4 more are waiting to be
+   * approved" is the more useful half of the answer at month end.
+   */
+  const { data: waiting } = await supabase
+    .from("laundry_orders")
+    .select("id")
+    .eq("tenant_id", session.tenantId)
+    .eq("billing_status", "awaiting_review")
+    .gte("completed_at", periodStartedAt)
+    .lt("completed_at", periodEndedAt)
+    .limit(1000)
+    .returns<Array<{ id: string }>>();
+
+  const waitingIds = (waiting ?? []).map((row) => row.id);
+  let waitingUnpriced = 0;
+  if (waitingIds.length > 0) {
+    const { data: charged } = await supabase
+      .from("job_charge_snapshots")
+      .select("order_id")
+      .eq("tenant_id", session.tenantId)
+      .in("order_id", waitingIds)
+      .returns<Array<{ order_id: string }>>();
+    const priced = new Set((charged ?? []).map((row) => row.order_id));
+    waitingUnpriced = waitingIds.filter((id) => !priced.has(id)).length;
+  }
+
+  const waitingNote = describeWorkAwaitingApproval({
+    awaitingReview: waitingIds.length, unpriced: waitingUnpriced,
+  });
+  const reviewLink = waitingIds.length > 0
+    ? { href: "/invoices/awaiting", label: "Open the queue" }
+    : undefined;
 
   for (const entry of jobRun.created) touched.add(entry.invoiceId);
 
@@ -464,14 +522,19 @@ export async function generateInvoices(formData: FormData): Promise<void> {
     : "";
   const queueLink = skippedJobs.length > 0
     ? { href: "/invoices/awaiting", label: "Open the queue" }
-    : undefined;
+    : reviewLink;
 
   const skippedNote = skipped > 0 ? ` ${skipped} customer(s) skipped.` : "";
 
   if (touched.size === 0) {
+    // Says the one thing that is true and useful, rather than reciting a zero.
+    // `skipped` is only mentioned when it is not zero: "0 customers were already
+    // billed" is a sentence nobody asked for and it buries the real answer.
+    const already = skipped > 0
+      ? ` ${skipped} customer(s) were already billed for that period.`
+      : "";
     return fail("/invoices",
-      `Nothing to invoice — ${skipped} customer(s) were already billed for that period, `
-      + `and no approved job was waiting.${jobSkipNote}`,
+      `Nothing was invoiced for ${start} to ${end}.${already}${waitingNote}${jobSkipNote}`,
       queueLink);
   }
 
@@ -480,13 +543,17 @@ export async function generateInvoices(formData: FormData): Promise<void> {
   // contracts should say so rather than looking like one contract was missed.
   const covers = contractsBilled > 0 ? ` covering ${counted(contractsBilled, "contract")}` : "";
   const summary = `${counted(touched.size, "draft invoice")} for ${start} to ${end}`
-    + `${covers}.${skippedNote}${jobNote} Nothing has been sent yet.`;
+    + `${covers}.${skippedNote}${jobNote}${waitingNote} Nothing has been sent yet.`;
 
   // An unbillable job is a fact the operator has to act on, so it is said as a
   // failure with the screen that fixes it — the invoices were still created.
   return skippedJobs.length > 0
     ? fail("/invoices", `${summary}${jobSkipNote}`, queueLink)
-    : done("/invoices", summary, { href: "/invoices/drafts", label: "Open drafts" });
+    : done("/invoices", summary, waitingIds.length > 0
+      // Work still waiting outranks "go and look at what you just made": the
+      // drafts are one press away in the register either way.
+      ? { href: "/invoices/awaiting", label: "Open the queue" }
+      : { href: "/invoices/drafts", label: "Open drafts" });
 }
 
 export async function createManualInvoice(formData: FormData): Promise<void> {

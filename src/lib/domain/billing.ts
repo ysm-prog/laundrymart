@@ -241,3 +241,49 @@ export function isConsolidated(method: BillingMethod): boolean {
  * — no caller in `src/`, only its own test — and two answers to one question is
  * the duplication this codebase argues against everywhere else.
  */
+
+/* ---------------------------------------------- what the month-end run found */
+
+/**
+ * What is standing between a period and its invoices.
+ *
+ * **The run's own report could not say this, and that is what made it read as
+ * broken.** With nothing to bill it said *"Nothing to invoice — 0 customer(s)
+ * were already billed for that period, and no approved job was waiting"*, which
+ * is true, mentions a zero nobody asked about, and names no remedy. On this
+ * deployment the real answer at the time of writing is that four jobs were
+ * completed in the window and every one of them is still `awaiting_review`: the
+ * run only ever sweeps `approved`, so it correctly found nothing and said so in
+ * a way that reads as *everything is billed*.
+ *
+ * Pure, and here rather than inline in the action, because `invoices/actions.ts`
+ * is a `"use server"` module — it can export nothing but server actions, so a
+ * sentence written inside it is a sentence no unit test can reach. That is the
+ * trap this repo records shipping three times.
+ *
+ * Returns `""` when there is genuinely nothing waiting, so a caller can append
+ * it unconditionally.
+ */
+export function describeWorkAwaitingApproval(counts: {
+  /** Jobs completed inside the period that nobody has approved yet. */
+  awaitingReview: number;
+  /** Of those, the ones carrying no charges at all — they need pricing first. */
+  unpriced: number;
+}): string {
+  const { awaitingReview, unpriced } = counts;
+  if (awaitingReview <= 0) return "";
+
+  const jobs = `${awaitingReview} job${awaitingReview === 1 ? "" : "s"}`;
+  // Only approved work is billed, so this is the whole reason the run found less
+  // than the operator expected — said as the next action rather than as a state.
+  const head = `${jobs} completed in this period ${awaitingReview === 1 ? "is" : "are"}`
+    + " waiting to be approved, so nothing on";
+  const tail = awaitingReview === 1 ? " it was billed." : " them was billed.";
+
+  if (unpriced <= 0) return ` ${head}${tail} Approve them and run this again.`;
+
+  const priceFirst = unpriced === awaitingReview
+    ? "None of them have charges yet"
+    : `${unpriced} of them have no charges yet`;
+  return ` ${head}${tail} ${priceFirst}, so price them first.`;
+}

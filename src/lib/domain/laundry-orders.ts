@@ -535,11 +535,34 @@ export function isBlankItem(item: OrderItemInput): boolean {
 /**
  * The item rules, as the message the counter hand should see. Same three rules
  * the check constraints in 0014 enforce; said in words here, refused there.
+ *
+ * **`itemCodeRequired` is the owner's decision of 2026-09-08**, and it is the
+ * remedy for a real gap rather than a tightening for its own sake: the price
+ * list is keyed on **item codes** (§31), so a row saved without one can never be
+ * priced automatically. Five of this laundry's nineteen recorded rows were in
+ * exactly that state, and nothing at the counter said so — the job simply
+ * arrived at review unpriceable, which looks like the pricing being broken.
+ *
+ * **Conditional on the laundry actually having an item master**, which is the
+ * same condition `priceJob` uses before it says `no_item_code`. A deployment
+ * with no items would otherwise have a form nobody could submit, and a code that
+ * cannot be chosen is not a code somebody forgot.
  */
-export function validateItem(item: OrderItemInput, position: number): string | null {
+export function validateItem(
+  item: OrderItemInput,
+  position: number,
+  options: { itemCodeRequired?: boolean } = {},
+): string | null {
   const where = `Laundry item ${position}`;
   if (!(ITEM_TYPES as readonly string[]).includes(item.item_type)) {
     return `${where}: choose what kind of laundry it is.`;
+  }
+  if (options.itemCodeRequired && !item.item_id) {
+    // Says *why*, because "pick an item" alone reads as a formality. It is the
+    // difference between a job that prices itself and one somebody has to cost
+    // by hand at month end.
+    return `${where}: choose the item code. Without one this laundry cannot be `
+      + "priced from your price list.";
   }
   if (item.item_type === "other" && !item.custom_description?.trim()) {
     return `${where}: describe what it is, since you chose Other.`;

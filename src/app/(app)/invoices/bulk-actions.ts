@@ -89,6 +89,10 @@ export async function priceSelectedJobs(formData: FormData): Promise<void> {
   let total = 0;
   let gaps = 0;
   let anyCard = false;
+  // The first real explanation of a gap, kept so the batch can say *why* rather
+  // than only how many. One is enough: a selection of forty jobs that could not
+  // be priced has one or two causes, and listing forty is a wall nobody reads.
+  let firstGapNote = "";
 
   for (const id of ids) {
     const result = await priceAndSaveJob(supabase, session, id);
@@ -96,6 +100,7 @@ export async function priceSelectedJobs(formData: FormData): Promise<void> {
       priced.push(result.orderNumber);
       total += result.subtotal;
       gaps += result.unpriced;
+      if (!firstGapNote && result.unpricedNote) firstGapNote = result.unpricedNote;
     } else {
       refused.push(result.error);
       if (result.card) anyCard = true;
@@ -121,8 +126,11 @@ export async function priceSelectedJobs(formData: FormData): Promise<void> {
     return fail(QUEUE, refused[0] ?? "None of those jobs could be priced.", link);
   }
 
+  // Names the cause as well as the count — "counted in bags, and there is no
+  // price per bag for it" points at a different column from "no rate", and the
+  // old wording sent an owner to the wrong one.
   const gapNote = gaps > 0
-    ? ` ${gaps} item(s) had no rate and were left for you to add by hand.`
+    ? ` ${gaps} item(s) were left for you to add by hand.${firstGapNote}`
     : "";
   const refusedNote = refused.length > 0
     ? ` ${refused.length} could not be priced — ${refused[0]}`

@@ -90,10 +90,19 @@ export async function priceJobCharges(formData: FormData): Promise<void> {
   // The gap is said out loud rather than left for the reviewer to notice. It is
   // a success — the rest of the job *was* priced — so it is a `done` with a
   // caveat, not a failure that would have thrown the priced lines away.
-  const gap = priced.unpriced > 0
-    ? ` ${priced.unpriced} item(s) had no rate on the card or the price list and were not priced.`
-    : "";
-  return done(back, `Priced ${priced.lines} charge(s) from ${priced.source}.${gap}`);
+  //
+  // **Named, not counted.** This used to read "N item(s) had no rate on the card
+  // or the price list", which is one sentence for three different causes and
+  // sends the owner to the wrong screen for the commonest of them: a lot counted
+  // in bags is missing a price *per bag*, not a price. `unpricedNote` says which
+  // laundry and why.
+  return done(
+    back,
+    `Priced ${priced.lines} charge(s) from ${priced.source}.${priced.unpricedNote}`,
+    priced.unpriced > 0
+      ? { href: "/invoices/prices", label: "Set your laundry prices" }
+      : undefined,
+  );
 }
 
 /* -------------------------------------------------------------- edit it --- */
