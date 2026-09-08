@@ -2975,9 +2975,16 @@ impression it was that customer's.
   never admitted there were more, so a customer with thirty jobs looked like a customer with
   ten and "All jobs" read as a convenience rather than as the rest of them.
 
-- **1131 unit tests across 68 files (was 1104/66)**; 532 pgTAP assertions unchanged, because this
+- **1141 unit tests across 69 files (was 1104/66)**; 532 pgTAP assertions unchanged, because this
   adds no policy and no migration. `verify` green: typecheck, lint, tests and the production
   build.
+  - **This entry first said 1131 across 68, and the commit message still does.** That figure came
+    from a full run made *before* the last two test files were added — `month-end-run.test.ts` and
+    the six `describeWorkAwaitingApproval` cases — and the `verify` run afterwards was read only
+    for `== PASSED ==`. CI printed the true number and it is the one above. Recorded rather than
+    quietly overwritten, because this file has carried a wrong test count twice before (§7's
+    "count assertions, not lines starting with `ok`") and the habit that produces it is reading a
+    gate for its verdict instead of its output.
 - **Every new guard was confirmed to catch its defect** rather than assumed to be doing
   something — eight reverts, each watched to fail by name: the month-end tenant filter, the old
   month-end message, the picker cap, the driver-visits filter, `period=all` on the visits link,
@@ -2991,6 +2998,30 @@ impression it was that customer's.
 - **`git checkout` was used to undo one of those reverts and took the whole file with it**, so
   that file's changes were reapplied from scratch. Worth writing down: on an untracked file it
   does nothing at all, and on a tracked one it is not a targeted undo.
+
+**Merged to `Prod` (`fc33624`) on 2026-09-08**, a clean fast-forward — `origin/Prod` was an
+ancestor of the branch (0 behind, 1 ahead), so there was nothing to reconcile and `Prod` was
+never force-pushed. **Nothing to apply**: this release adds no migration, `git diff Prod...HEAD`
+over `supabase/` is empty, and the live ledger's last entry is still
+`0046_credit_note_gst_inclusive`.
+
+- **CI green on all three jobs** — run 292: Verify (typecheck, lint, **1141** tests across 69
+  files, production build, `== PASSED ==` at 11:16:47Z), Security (gitleaks strict + dependency
+  audit) and the DB job (`pgTAP suite passed`, then the seed applied to the fresh schema).
+  **Read off the logs rather than the statuses**, which is the lesson this file records six times
+  over — and which earned its place again here: the Verify log is where the wrong test count
+  above was caught.
+- **No CI ran on the feature branch, and that is the configuration rather than a gap.**
+  `ci.yml` triggers on `push` and `pull_request` for `Prod` and `Dev` only, so a feature branch
+  pushed on its own is never built; the first CI on this work is the one above. Local `verify`
+  was green on the same tree before the merge.
+- **The elapsed time was checked against a clock before anything was called slow** —
+  `date -u` against the runner's own `started_at`, per the trap four earlier entries record a
+  session walking into by inferring elapsed time from how many tool calls it had made.
+- **The Vercel production deploy is not confirmable from this session**, which is a tooling limit
+  rather than a configuration one — §5 has the distinction. Read it in the Vercel dashboard.
+- **`Dev` was not touched.** It held an identical tree to `Prod` before this, so it is now one
+  release behind and wants a catch-up merge before it is trusted as a staging branch again.
 
 **Not verified behind the auth gate.** This container has no Supabase credentials and the network
 policy refuses `*.supabase.co` (`000` from curl), so no authenticated screen was opened with real

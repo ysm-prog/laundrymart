@@ -35,9 +35,15 @@ customer's own **laundry prices**. Do not re-guess these.
   unpickable, and a `<select>` with no matching option silently posted `customer=""`, dropping
   the filter. Raised to `CUSTOMER_LIMIT`, filtered customer always an option, `/jobs` gained a
   customer filter, both history cards now count.
-- 1131 tests / 68 files (was 1104/66); `verify` green. **Eight reverts proved each guard catches
-  its defect.** Browser: 72 assertions at 320/390/768/1440 × both themes, 0 failures, harness
-  proved non-vacuous.
+- **1141 tests / 69 files** (was 1104/66); `verify` green. **Eight reverts proved each guard
+  catches its defect.** Browser: 72 assertions at 320/390/768/1440 × both themes, 0 failures,
+  harness proved non-vacuous.
+  - The commit message and the first draft of §18 say **1131/68**: a count taken before the last
+    two test files landed, and never re-read because the `verify` afterwards was checked only for
+    `== PASSED ==`. CI printed the true figure. Read a gate's output, not its verdict.
+- **Merged to `Prod` (`fc33624`) on 2026-09-08**, clean fast-forward, never force-pushed. CI run
+  292 green on all three jobs, read off the logs. Nothing to apply — no migration. `Dev` is now
+  one release behind and wants a catch-up merge.
 - **Not verified behind the auth gate** — no Supabase credentials here and `*.supabase.co` is
   refused by the network policy. Live facts came from the Supabase MCP. The §18 entry ends with
   the five things to press on `ats.coreit.com.au`.
