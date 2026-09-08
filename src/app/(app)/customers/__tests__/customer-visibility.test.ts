@@ -67,6 +67,25 @@ describe("Driver visits can be filtered to one customer", () => {
     // here*, which need different next steps (§29).
     expect(source).toMatch(/FILTER_KEYS\s*=\s*\[[^\]]*"customer"/);
   });
+
+  it("offers a picker rather than only honouring a link", () => {
+    // The filter shipped reachable only by arriving from a customer's record,
+    // which is half a feature: the screen itself had no way to choose one.
+    expect(source).toContain('name: "customer"');
+    expect(source).toContain("filterCustomers");
+  });
+
+  it("draws that picker for the office and not for a round", () => {
+    // `/jobs` is gated on `routes.read`, which a board and a driver hold;
+    // `customers.read` is what means "you may look a customer up", and neither
+    // round-facing role has it. So a round loads no customer list at all.
+    expect(source).toMatch(/can\(session\.role, "customers\.read"\)/);
+  });
+
+  it("shares the cap with the other two pickers rather than restating one", () => {
+    expect(source).toContain("CUSTOMER_LIMIT");
+    expect(source).not.toMatch(/\.limit\(\s*200\s*\)/);
+  });
 });
 
 describe("a customer record reaches the rest of their history", () => {

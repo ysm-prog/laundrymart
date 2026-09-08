@@ -484,7 +484,15 @@ key remains the way to reset or re-assert them through the Auth API, but nothing
   disagree — the generator reads both through the RLS-bound client.
 - **A job's laundry names an item, and the item decides what kind of laundry it is**
   (`sync_laundry_item_type`, 0032). `item_type` is what three pricing tiers, every report and
-  every pre-0032 row match on; `item_id` is the coded item. A trigger derives the first from the
+  every pre-0032 row match on; `item_id` is the coded item.
+  **Since 2026-09-08 the counter must name one** (`validateItem`'s `itemCodeRequired`, refused by
+  `createOrder` and `updateOrder`), because the price list is keyed on item codes and a row
+  without one can never be priced automatically — five of this laundry's nineteen recorded rows
+  were exactly that. **Conditional on the laundry having an item master**, the same condition
+  `priceJob` applies before it says `no_item_code`: a deployment with no items would otherwise
+  have a job form nobody could submit, and the head count that decides it fails *open*, because
+  refusing to take laundry in is worse than an unpriced row.
+  A trigger derives the first from the
   second, so a job of TOW001 filed as "sheets" — which would be priced at the sheet rate with
   nobody able to see why — is impossible however the row is written. An item with no
   `laundry_category` leaves the caller's own answer, because "this is a rented tablecloth" is not
@@ -618,8 +626,10 @@ it — and because a `<select>` handed an id it has no option for silently selec
 pressing Search after arriving from a customer's "All jobs" link posted `customer=""` and threw
 the filter away. The cap is `CUSTOMER_LIMIT` now, shared with the job form, and the filtered
 customer is added to the options regardless. **Driver visits gained a customer filter**, which it
-had never had, so a customer record can point at the times a driver called on them as well as at
-their laundry; that link carries `period=all`, because `/jobs` opens on today and without it
+had never had — with a picker of its own since 2026-09-08, drawn only for a holder of
+`customers.read`, so a **board** and a **driver** (who hold the `routes.read` this screen is
+gated on) load no customer list at all — so a customer record can point at the times a driver
+called on them as well as at their laundry; that link carries `period=all`, because `/jobs` opens on today and without it
 lands on an empty list that reads as *no visits recorded*. Both history cards on the record now
 say how many rows there are, rather than showing ten and implying that is all of them.
 
@@ -2869,6 +2879,66 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-09-08 · An item code is required, and Driver visits gets its own customer picker
+Two follow-ups the owner chose after the four fixes above, plus the merge that took them live.
+**No migration; no schema, RLS, capability, policy or role change** — `git diff` over `supabase/`
+is empty.
+
+**1 · A laundry row must name an item code, where there is an item master to choose from.**
+The price list is keyed on item codes (§31), so a row saved without one can never be priced
+automatically — and five of this laundry's nineteen recorded rows were in exactly that state
+(`LJ00024`, `LJ00021`, `LJ00011`, `LJ00010`, `LJ00009`), with nothing at the counter saying so.
+The job simply arrived at review unpriceable, which reads as the pricing being broken.
+- **The rule is `validateItem`'s new `itemCodeRequired`**, refused by `createOrder` *and*
+  `updateOrder` — both, because an edit that could drop the code would be a second door onto the
+  state this closes, and because it is what fixes the five stranded jobs the next time anybody
+  touches one.
+- **Conditional on the laundry actually keeping an item master**, which is the same condition
+  `priceJob` applies before it blames a missing code. A deployment with no items would otherwise
+  have a job form nobody could submit, and a code that cannot be chosen is not a code somebody
+  forgot. The head count that decides it **fails open**: a read that errors leaves the form
+  behaving as it did before, because refusing to take laundry in is a worse outcome than an
+  unpriced row.
+- **The wording changed as much as the marker.** The picker's empty state used to offer *"leave
+  it blank and pick the kind of laundry"* — which is precisely the route that produced those five
+  jobs. Where a code is required it now names the way out that works: add the code on Money ›
+  Laundry prices. The hint says what the code is *for*, because "pick an item" alone reads as a
+  formality rather than as the difference between a job that prices itself and one costed by hand.
+- **The marker is decorative and the server is the boundary**, stated because it looks like an
+  omission otherwise: the picker holds a *search term*, not the chosen value, so there is nothing
+  for native validation to check — and a hidden `required` input fails with nothing to focus,
+  which is the trap §10c already records for a required control inside a closed disclosure.
+
+**2 · Driver visits offers a customer picker, not just a link.** The filter landed with the four
+fixes above and was reachable only by arriving from a customer's record, which is half a feature.
+- **Drawn only for a holder of `customers.read`.** `/jobs` is gated on `routes.read`, which a
+  **board** and a **driver** hold and neither of which implies looking a customer up — so a
+  round's screen draws no picker and loads no customer list, while the office gets the same
+  filter Customer laundry has. A principled line rather than a payload optimisation, though it is
+  both.
+- `CUSTOMER_LIMIT` is shared with the other two pickers rather than restated, and the filtered
+  customer is added back when the cap left them out — the same property, for the same reason, as
+  the fix one screen over.
+
+- **1154 unit tests across 70 files (was 1141/69)**; 532 pgTAP assertions unchanged. `verify`
+  green: typecheck, lint, tests and the production build.
+- **All three new guards were confirmed to catch their defect**: dropping the `itemCodeRequired`
+  pass-through, making the rule unconditional, and removing the capability gate on the picker.
+- **Measured in a real browser** at 390 and 1440 in both themes: **40 assertions, 0 failures, 0
+  console errors, 0 document overflow** — the field marked required, the hint naming the price
+  list, the empty state no longer offering "leave it blank", and a code actually pickable. The
+  job-form fixture gained a **catalogue**, without which the gallery drew the "no items set up
+  yet" fallback and none of this could be looked at.
+  - **The section overflows 16px at 390 and the page does not**, which is `FormActions`' own
+    `-mx-4 sm:mx-0` bleed — the same measurement the 2026-08-27 entry records on this same
+    fixture, and the reason it measured the document rather than the section. The first run of
+    this harness reported it as a failure; the document is the honest measure and it reads 0.
+
+**Not verified behind the auth gate**, for the standing reason — no Supabase credentials here and
+`*.supabase.co` is refused by the network policy. **Before trusting it: take a job in on
+`ats.coreit.com.au` without picking an item code and check it is refused by name, then open Driver
+visits and pick a customer from the new dropdown.**
+
 ### 2026-09-08 · Four reports: the driver's instructions, the month-end run, charging a customer, and a customer's own jobs
 Four things reported from the deployed app, each traced to a defect in live data before
 anything was written. **No migration; no schema, RLS, capability, policy or role change** —

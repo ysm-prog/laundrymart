@@ -1639,6 +1639,13 @@ export default function DesignPreviewPage() {
               action={previewApply}
               customerAction={previewApply}
               customers={PREVIEW_JOB_CUSTOMERS}
+              /* An item master, so the laundry row draws the **required** item
+                 picker rather than the "no items set up yet" fallback. That is
+                 the live shape — Adelaide keeps 140 sellable codes — and the
+                 state worth looking at since 2026-09-08, when a code became
+                 required: without a catalogue here the marker and its wording
+                 could not be seen at all. */
+              catalogue={PREVIEW_JOB_CATALOGUE}
               drivers={[{ id: "d1", full_name: "Sam Okoye" }]}
               staff={[{ id: "s1", label: "Christian Mignone", role: "operations_manager" }]}
               canBackdate={false}
@@ -1715,6 +1722,25 @@ export default function DesignPreviewPage() {
  * and the picker used to hide every one of them. `active` is the majority and
  * carries no badge; the other three do.
  */
+/**
+ * A handful of real item codes, in the shape the counter meets them.
+ *
+ * `T22` and `T40` are two of the three master records this laundry named "Towels
+ * - Black" before there was a usable price list (§31) — kept here because they
+ * are exactly what makes a code-first picker necessary: the names do not tell
+ * them apart and the code does.
+ */
+const PREVIEW_JOB_CATALOGUE = [
+  { id: "i-t22", item_code: "T22", name: "Towels - Black", description: null,
+    laundry_category: "towels" },
+  { id: "i-t40", item_code: "T40", name: "Towels - Black", description: null,
+    laundry_category: "towels" },
+  { id: "i-htw", item_code: "HTW", name: "Hand Towels", description: null,
+    laundry_category: "hand_towels" },
+  { id: "i-sh", item_code: "SH", name: "Sheets", description: null,
+    laundry_category: "sheets" },
+];
+
 const PREVIEW_JOB_CUSTOMERS: JobCustomer[] = ([
   ["Aspect Hair Studio", "CUST00101", "active"],
   ["Bella Hair & Beauty", "CUST00102", "active"],

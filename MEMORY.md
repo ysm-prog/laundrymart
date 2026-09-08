@@ -9,7 +9,37 @@ where that is genuinely what it is. The multi-tenancy architecture stays: one op
 fact about today's data, not a reason to drop `tenant_id`, RLS, or §23's rule that a read feeding a
 write names its tenant.
 
-## Latest: four reports from the deployed app, fixed
+## Latest: an item code is required, and Driver visits gets a picker
+2026-09-08, on `claude/require-item-code-and-visits-picker`. The owner's two follow-ups after the
+four fixes below. **No migration; no schema, RLS, capability or policy change.**
+
+- **A laundry row must name an item code** — `validateItem({ itemCodeRequired })`, refused by
+  **both** `createOrder` and `updateOrder`. The price list is keyed on item codes, so a row
+  without one is unpriceable; five live rows were exactly that. **Conditional on the laundry
+  having an item master** (the same test `priceJob` uses before saying `no_item_code`), and the
+  head count **fails open** — refusing to take laundry in is worse than an unpriced row.
+- The picker's empty state no longer says *"leave it blank and pick the kind of laundry"*: that
+  was the route that created the problem. The required marker is decorative — the picker holds a
+  search term, not the value — and the server is the boundary.
+- **Driver visits has a customer picker**, drawn only for `customers.read`, so a board/driver
+  (who hold the `routes.read` the screen is gated on) load no customer list.
+- 1154 tests / 70 files. Three reverts proved each guard. Browser: 40 assertions at 390/1440 ×
+  both themes, 0 failures. **The 16px section overflow at 390 is `FormActions`' own `-mx-4`
+  bleed** — document overflow is 0; measure the document, as the 2026-08-27 entry did.
+
+## Owner's decisions, 2026-09-08 — what is open
+Asked and answered; do not re-guess these.
+
+- **Bag pricing: the owner sets the rates themselves.** No build. `laundry_prices.bag_price` is
+  0 rows today, so **every bagged job is currently unpriceable** — correct rather than silently
+  billed at the piece rate, but it needs their numbers (LJ00023's hand-typed charge suggests
+  $40/bag). Affected live: LJ00022 (4 bags), LJ00019 (2 bags).
+- **Wanted next, in their words:** customer email go-live, Xero connection, contracts/rate cards.
+  Two of the three are **configuration only they can do** (Resend DNS + Vercel env vars; Xero
+  credentials); contracts are **built and unused** (0 service agreements). Assess before building.
+- **Dev catch-up** was asked for and is outstanding.
+
+## Previously: four reports from the deployed app, fixed
 2026-09-08, on `claude/driver-instructions-invoice-fixes-1q42fb`. **No migration; no schema, RLS,
 capability, policy or route change** — `git diff` over `supabase/` is empty. §18 has the entry.
 

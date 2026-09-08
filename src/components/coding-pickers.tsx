@@ -71,6 +71,7 @@ export type PickerItem = PickableItem & { sell_price?: number | string | null };
 
 export function ItemPicker<T extends PickerItem>({
   items, chosen, onChoose, onClear, idPrefix = "line", purpose = "coding",
+  required = false,
 }: {
   items: readonly T[];
   chosen: T | null;
@@ -92,6 +93,16 @@ export function ItemPicker<T extends PickerItem>({
    * would read as "this job will not be billed", which is false.
    */
   purpose?: "coding" | "laundry";
+  /**
+   * Whether a laundry row must name an item before the job will save.
+   *
+   * The owner's decision of 2026-09-08, and it changes the *wording* as much as
+   * the marker: the empty state used to offer "leave it blank and pick the kind
+   * of laundry", which is exactly the route that produced five jobs nothing can
+   * price. Where a code is required that sentence would be advice to create the
+   * problem again.
+   */
+  required?: boolean;
   /**
    * Makes this picker's ids unique on the page.
    *
@@ -115,13 +126,20 @@ export function ItemPicker<T extends PickerItem>({
   return (
     <TypeAhead
       id={`${idPrefix}-item`} label="Item" placeholder="Search by code or name — TOW001"
+      required={required}
       hint={purpose === "coding"
         ? "Type the code you know. The price, the GST and the account all come with it."
-        : "Type the code you know. The kind of laundry comes with it."}
+        : required
+          ? "Type the code you know. It is what the job is priced from, and the kind of laundry comes with it."
+          : "Type the code you know. The kind of laundry comes with it."}
       query={query} onQuery={setQuery}
       empty={purpose === "coding"
         ? "No item matches that. Try another code, or switch to “Something else”."
-        : "No item matches that. Try another code, or leave it blank and pick the kind of laundry."}
+        : required
+          // No "leave it blank" here: that is the route that produced the five
+          // jobs nothing can price. It names the way out that actually works.
+          ? "No item matches that. Try another code, or add the code on Money → Laundry prices."
+          : "No item matches that. Try another code, or leave it blank and pick the kind of laundry."}
       results={matches.map((match) => ({
         key: match.id,
         primary: itemLabel(match),
@@ -248,15 +266,23 @@ type Result = { key: string; primary: string; secondary?: string; onPick: () => 
  * a phone.
  */
 export function TypeAhead({
-  id, label, placeholder, hint, query, onQuery, results, empty, mono,
+  id, label, placeholder, hint, query, onQuery, results, empty, mono, required,
 }: {
   id: string; label: string; placeholder: string; hint?: string;
   query: string; onQuery: (value: string) => void;
   results: readonly Result[]; empty: string; mono?: boolean;
+  /**
+   * Marks the field required. Decorative only — this control holds a *search*
+   * term, not the chosen value, so native validation has nothing here to check
+   * and a hidden `required` input would fail with nothing to focus (the trap
+   * §10c records for a required control inside a closed disclosure). The
+   * refusal that binds is the server's.
+   */
+  required?: boolean;
 }) {
   return (
     <div className="relative">
-      <Field label={label} name={id} hint={hint}>
+      <Field label={label} name={id} hint={hint} required={required}>
         <div className="relative">
           <Search className="pointer-events-none absolute left-3 top-1/2 size-4
                              -translate-y-1/2 text-muted-foreground" aria-hidden />

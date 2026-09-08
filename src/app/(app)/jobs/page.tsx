@@ -10,6 +10,8 @@ import {
 import { ListControls, Pagination, pageFrom, rangeFor } from "@/components/list-controls";
 import { FilterChips, PeriodFilter } from "@/components/filters";
 import { filterHref, isFiltered } from "@/lib/filters";
+import { can } from "@/lib/roles";
+import { CUSTOMER_LIMIT } from "@/app/(app)/orders/form-data";
 import {
   ACTIVITY_PERIOD_PRESETS, resolvePeriod, type ResolvedPeriod,
 } from "@/lib/domain/dates";
@@ -57,11 +59,25 @@ const FILTER_KEYS = ["q", "status", "period", "from", "to", "customer"] as const
 
 export default async function JobsPage({ searchParams }: { searchParams: Promise<Search> }) {
   const params = await searchParams;
-  await requireCapability("routes.read");
+  const session = await requireCapability("routes.read");
   // Today by default, as this screen has always been — but a *window* now, so
   // "this week" is one press. It used to be a single day with its own hand-rolled
   // date box that carried the status through and silently dropped the search.
   const period = resolvePeriod(params, businessToday(), "today");
+
+  /*
+   * The customer picker, for the office only.
+   *
+   * `/jobs` is gated on `routes.read`, which a **board** and a **driver** hold
+   * and `customers.read` is what means "you may look a customer up" — neither
+   * round-facing role has it. So a round's screen draws no picker and loads no
+   * customer list, while the office gets the same filter Customer laundry has.
+   * Without this the customer filter existed and was reachable only by arriving
+   * from a customer's record, which is half a feature.
+   */
+  const customers = can(session.role, "customers.read")
+    ? await filterCustomers(session.tenantId, params.customer)
+    : [];
 
   return (
     <div>
@@ -75,6 +91,14 @@ export default async function JobsPage({ searchParams }: { searchParams: Promise
         params={params}
         filterKeys={FILTER_KEYS}
         placeholder="Job number…"
+        filters={customers.length > 0 ? [{
+          name: "customer",
+          label: "Customer",
+          value: params.customer,
+          options: customers.map((customer) => ({
+            value: customer.id, label: customer.business_name,
+          })),
+        }] : undefined}
         chips={
           <>
             <FilterChips
@@ -95,6 +119,44 @@ export default async function JobsPage({ searchParams }: { searchParams: Promise
       </Suspense>
     </div>
   );
+}
+
+/**
+ * The customers this screen offers, and the one it is already filtered to.
+ *
+ * `CUSTOMER_LIMIT` is shared with the job form and Customer laundry rather than
+ * restated — the three pickers must not disagree about how many customers exist,
+ * and a cap of 200 against a base of 511 is what silently dropped a filter on
+ * the screen next door. The filtered customer is added back when the cap left
+ * them out, because a `<select>` handed an id it has no option for shows the
+ * first one instead and writes that back on the next submit.
+ */
+async function filterCustomers(
+  tenantId: string, selected: string | undefined,
+): Promise<Array<{ id: string; business_name: string }>> {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("customers")
+    .select("id, business_name")
+    // Named rather than left to RLS (§23): a platform admin reads every laundry.
+    .eq("tenant_id", tenantId)
+    .is("deleted_at", null)
+    .order("business_name")
+    .limit(CUSTOMER_LIMIT)
+    .returns<Array<{ id: string; business_name: string }>>();
+
+  const rows = data ?? [];
+  if (!selected || rows.some((row) => row.id === selected)) return rows;
+
+  const { data: chosen } = await supabase
+    .from("customers")
+    .select("id, business_name")
+    .eq("tenant_id", tenantId)
+    .eq("id", selected)
+    .maybeSingle<{ id: string; business_name: string }>();
+  return chosen
+    ? [...rows, chosen].sort((a, b) => a.business_name.localeCompare(b.business_name))
+    : rows;
 }
 
 async function JobList({ params, period }: { params: Search; period: ResolvedPeriod }) {
