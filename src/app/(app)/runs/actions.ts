@@ -10,7 +10,9 @@ import {
 } from "@/lib/actions";
 import { logOrderActivity } from "@/lib/orders/activity";
 import { assignOneJobToBoard } from "@/lib/runs/assign";
+import { raiseCollectionStops } from "@/lib/runs/collections";
 import { loadRunDay } from "@/lib/runs/run-day";
+import { counted } from "@/lib/format";
 import type { Session } from "@/lib/auth/context";
 import {
   SEQUENCE_CONFLICT, SEQUENCE_SAVED,
@@ -27,6 +29,7 @@ import {
  */
 
 const RUNS = "/runs";
+const COLLECTIONS = "/runs/collections";
 
 type Supabase = Awaited<ReturnType<typeof createClient>>;
 
@@ -252,4 +255,69 @@ async function moveOneJob(
   });
 
   return { ok: true, orderNumber: order.order_number };
+}
+
+/**
+ * **Put today's standing collections on their rounds.**
+ *
+ * The office's third decision about a day, and the one the schedule exists for:
+ * every customer collected on this weekday gets a pickup stop on their round,
+ * so the van is told to call. It creates *stops*, not laundry orders — see
+ * `lib/runs/collections.ts` for why the database refuses the other shape.
+ *
+ * **`routes.write`, not `routes.sequence`.** This puts work on a round, which is
+ * planning; it does not decide the order of the calls, which since 0036 is the
+ * Owner's and the Office manager's alone. A dispatcher may press this, and the
+ * new stops land at the end of the run where an ordering decision has not been
+ * made about them yet.
+ *
+ * **Pressing it twice is safe and says so.** The stop finder keys on (tenant,
+ * run, customer), so a second press finds the first press's stops; the screen
+ * then reports them as already on the round rather than offering to raise them
+ * again. That is idempotence by construction rather than by a flag somebody has
+ * to remember to check.
+ */
+export async function createCollectionStops(formData: FormData): Promise<void> {
+  const session = await assertCapability("routes.write");
+  const parsed = z.object({
+    date: requiredDate,
+    return_to: z.string().optional(),
+  }).safeParse(toObject(formData));
+  if (!parsed.success) return fail(COLLECTIONS, firstIssue(parsed.error));
+
+  const date = parsed.data.date;
+  const back = returnTo(formData, `${COLLECTIONS}?date=${date}`);
+  const supabase = await createClient();
+
+  const outcome = await raiseCollectionStops(supabase, session, date);
+  if ("error" in outcome) return fail(back, outcome.error);
+
+  revalidatePath(COLLECTIONS);
+  revalidatePath(RUNS);
+  revalidatePath("/jobs");
+
+  if (outcome.created === 0 && outcome.failures.length === 0) {
+    // Not a failure: every due customer is already on a round, which is the
+    // ordinary state after the first press of the day. Saying "0 created" as an
+    // error would teach people to ignore the message.
+    return done(back, "Every collection due on that day is already on a round.");
+  }
+
+  if (outcome.created > 0) {
+    await recordAudit(session, {
+      entity: "daily_route", entityId: date, action: "update",
+      summary: `${counted(outcome.created, "collection stop")} raised for ${date}`,
+    });
+  }
+
+  if (outcome.created === 0) {
+    const first = outcome.failures[0]!;
+    return fail(back, `Nothing was put on a round — ${first.businessName}: ${first.reason}`);
+  }
+
+  const tail = outcome.failures.length > 0
+    ? ` ${counted(outcome.failures.length, "customer")} could not be added `
+      + `(${outcome.failures[0]!.businessName}: ${outcome.failures[0]!.reason}).`
+    : "";
+  return done(back, `${counted(outcome.created, "collection")} put on a round.${tail}`);
 }

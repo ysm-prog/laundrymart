@@ -102,6 +102,32 @@ export const optionalText = z.preprocess(absent, z.string().trim().optional());
 
 export const optionalUuid = z.preprocess(absent, z.string().uuid().optional());
 
+/**
+ * The other reading of "not answered": **cleared**, and therefore written null.
+ *
+ * `optionalText` and `optionalUuid` fold `""` to `undefined`, and supabase-js
+ * drops undefined keys from the JSON it sends — so a field either of them
+ * governs cannot be *cleared* once set. That is long-standing behaviour across
+ * every form in this app and is not changed here; a field that needs a way back
+ * to "nobody said" opts into this one instead, which keeps `undefined` (the
+ * field was not on the form at all → leave the column alone) distinct from
+ * `null` (somebody emptied it → write null).
+ *
+ * Lifted out of `items/actions.ts`, which introduced it for 0044's price basis:
+ * a `"use server"` module can export nothing but server actions, so a second
+ * form needing the same rule could only have got it by copying it — and two
+ * implementations of "what does an empty box mean" is exactly the drift this
+ * file exists to prevent.
+ */
+export const clearable = <T extends z.ZodTypeAny>(inner: T) => z.preprocess(
+  (value) => {
+    if (value === undefined) return undefined;
+    if (value === null) return null;
+    return typeof value === "string" && value.trim() === "" ? null : value;
+  },
+  inner.nullable().optional(),
+);
+
 export const optionalDate = z.preprocess(
   absent,
   z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use the date picker").optional(),
