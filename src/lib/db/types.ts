@@ -45,6 +45,13 @@ export type Customer = {
   opening_balance_overdue?: number;
   /** 0014 — whether this customer is in the overdue chase at all. */
   reminders_enabled?: boolean;
+  /**
+   * 0047 — the standing weekly collection. ISO weekday (1 = Monday), and the
+   * round that calls. Both nullable and both independently so: a day with no
+   * round is the "due, but nobody is going" state the office works from.
+   */
+  collection_weekday?: number | null;
+  collection_board_id?: Uuid | null;
 };
 
 export type CustomerLocation = {

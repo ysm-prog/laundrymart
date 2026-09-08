@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { Field, FormActions, Input, Select, SubmitButton, Textarea } from "@/components/form";
 import { ButtonLink, Card } from "@/components/ui";
 import type { Customer, Depot } from "@/lib/db/types";
+import { WEEKDAYS, describeCollectionSchedule } from "@/lib/domain/collections";
 
 const AU_STATES = ["NSW", "VIC", "QLD", "WA", "SA", "TAS", "ACT", "NT"]
   .map((state) => ({ value: state, label: state }));
@@ -66,12 +67,73 @@ export function CustomerEssentials({
   );
 }
 
+/**
+ * The standing weekly collection (0047), as its own component.
+ *
+ * Split out so `/design-preview` can render it: every real customer screen is
+ * an async server component reading Supabase, so the gallery is the only place
+ * this can be *looked at* — and the risk here is a layout one. The summary line
+ * puts the section label and a whole sentence side by side in a flex row, which
+ * is exactly the shape that overflows a 320px phone.
+ *
+ * `defaultOpen` once an arrangement exists, so a customer who *is* collected
+ * weekly does not have their schedule hidden behind a `+` on the one screen
+ * where it would be changed.
+ */
+export function WeeklyCollection({
+  customer, boards = [],
+}: { customer?: Customer; boards?: Array<{ id: string; name: string }> }) {
+  const schedule = {
+    collection_weekday: customer?.collection_weekday ?? null,
+    collection_board_id: customer?.collection_board_id ?? null,
+  };
+  return (
+    <FormDisclosure
+      summary="Weekly collection"
+      hint={describeCollectionSchedule(schedule,
+        boards.find((board) => board.id === schedule.collection_board_id)?.name)}
+      defaultOpen={!!schedule.collection_weekday}
+    >
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Field
+          label="Collection day" name="collection_weekday"
+          hint="The same day every week. Leave it as No standing collection for a customer who calls when they need us."
+        >
+          <Select
+            name="collection_weekday" placeholder="No standing collection"
+            defaultValue={schedule.collection_weekday?.toString()}
+            options={WEEKDAYS.map((day) => ({ value: day.value.toString(), label: day.label }))}
+          />
+        </Field>
+        <Field
+          label="Collected by" name="collection_board_id"
+          hint={boards.length
+            ? "The round that calls. Without one the customer still shows as due, on nobody's van."
+            : "No active rounds yet — set one up under Fleet, then choose it here."}
+        >
+          <Select
+            name="collection_board_id" placeholder="No round yet"
+            defaultValue={schedule.collection_board_id ?? undefined}
+            options={boards.map((board) => ({ value: board.id, label: board.name }))}
+          />
+        </Field>
+        <p className="text-sm text-muted-foreground sm:col-span-2">
+          This books the visit; it does not price anything. What the customer pays is
+          still what was collected, taken in at the counter and priced per item.
+        </p>
+      </div>
+    </FormDisclosure>
+  );
+}
+
 export function CustomerForm({
-  action, customer, depots, cancelHref, submitLabel,
+  action, customer, depots, boards = [], cancelHref, submitLabel,
 }: {
   action: (formData: FormData) => Promise<void>;
   customer?: Customer;
   depots: Pick<Depot, "id" | "name">[];
+  /** The active rounds, for the standing weekly collection. */
+  boards?: Array<{ id: string; name: string }>;
   cancelHref: string;
   submitLabel: string;
 }) {
@@ -115,6 +177,8 @@ export function CustomerForm({
           </Field>
         </div>
       </FormDisclosure>
+
+      <WeeklyCollection customer={customer} boards={boards} />
 
       <FormDisclosure summary="More" hint="Status, servicing site, notes">
         <div className="grid gap-4 sm:grid-cols-2">

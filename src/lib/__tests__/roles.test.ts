@@ -444,6 +444,18 @@ describe("the chart of accounts (0037)", () => {
       .toEqual(["super_admin", "operations_manager"]);
   });
 
+  it("lets everybody who plans a round also look a customer up", () => {
+    // `/runs/collections` lists customers and is gated on `routes.write` alone,
+    // so this is what stops that being a widening: `customers.read` is the
+    // app's line for "you may look a customer up", and a board holds
+    // `routes.read` and not it. If the two sets ever part company, the screen
+    // would show a role every business in the laundry — so it fails here first.
+    for (const role of rolesWith("routes.write")) {
+      expect(can(role, "customers.read"), `${role} plans rounds but cannot read a customer`)
+        .toBe(true);
+    }
+  });
+
   it("still lets everybody who names an item read the list", () => {
     // The other half, and the one that breaks a screen if it is got wrong: a
     // board reads item names off its run sheet, the plant runs batches keyed on

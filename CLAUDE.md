@@ -580,7 +580,7 @@ passed* are two separate facts. CI is what actually holds the gate; read it rath
 `/` landing · `/login` · `/auth/callback` · `/auth/invite` · `/offline` · `/api/sync` ·
 `/api/media` · `/api/invoices/:id/pdf` ·
 `/api/notifications/sweep` (cron, bearer-token authed, no session)
-`(app)`: `/dashboard` · `/my-runs[/jobs/:id]` · `/runs` · `/boards` ·
+`(app)`: `/dashboard` · `/my-runs[/jobs/:id]` · `/runs[/collections]` · `/boards` ·
 `/billing[/:customerId]` ·
 `/customers[/new|/:id|/:id/edit|/:id/prices]` · `/agreements[/new|/:id]` ·
 `/invoices/awaiting` (the billing queue — a list of *jobs*, under Money because the decision is a
@@ -605,6 +605,19 @@ found-or-created by `assignJobToDriver`. `nav.test.ts` asserts, for every role, 
 navigation href starts with `/routes/`. Drivers and Vehicles were tabs under the old Runs area
 and are not run management, so they moved to their own **Fleet** area rather than vanishing
 with it.
+
+**The Runs area gained a second tab on 2026-09-08: *Due for collection*** — the customers
+whose standing weekly collection falls on a chosen day, and whether each is on a round yet.
+It is where the schedule §33 records is acted on, and one press puts every due customer onto
+their round as a **pickup stop**. Gated on **`routes.write`**, both the tab and the page: the
+list is of customers, `customers.read` is this app's line for looking one up, and a board
+holds `routes.read` and not it — so a round opening the area still lands on Run order, which
+is `navigationFor()` resolving to the first screen a role can open. Every holder of
+`routes.write` also holds `customers.read`, pinned in `roles.test.ts` so a capability change
+that parted them fails a test rather than quietly showing a round every business in the
+laundry. This does **not** reopen the Runs module the 2026-08-14 simplification removed:
+nobody creates a run, opens one or reads a run code, and `nav.test.ts` still asserts that no
+rail href starts with `/routes/`.
 
 **"My Runs" (`/my-runs`) is a board's whole workspace**: the jobs assigned to that round for a
 date it chooses, grouped To deliver / Out for delivery / Completed, in the order the office set
@@ -1038,6 +1051,49 @@ produce on demand.
     re-added `for all`, a dropped `tax_code`, a dropped `reorder_level`, an
     `anon` grant, a dropped policy and a mistyped new column.
 
+- `0047_collection_schedule` — **the weekly round, recorded on the customer.**
+  `customers.collection_weekday` (ISO 1–7) and `customers.collection_board_id`
+  (`on delete set null`), `chk_customers_collection_weekday`,
+  `guard_customer_collection_board()` with its trigger, and two partial indexes.
+  **Adds no table, no policy, no function beyond the guard, and no capability;
+  drops nothing and changes no row** — both columns are nullable with no default,
+  so all 511 existing customers read "not on a schedule".
+  - **Why not a service agreement, which already exists and holds 0 rows.** A
+    contract's `per_item` line bills `standard_quantity × visits` (`invoicing.ts`)
+    — an assumed quantity times the number of *scheduled* visits. It bills the
+    pattern. Since 0040 the contract charges and the job charges land on the
+    **same** monthly draft and the month-end run skips only a customer whose
+    *contract* lines are already there, so a weekly towel contract plus the actual
+    jobs would bill the same towels twice on one invoice. The schedule carries
+    **no price at all**: what the customer pays is still what was collected.
+  - **Two columns, not a table**, because the owner's answer to "how regular is
+    weekly?" was *the same day each week* — exactly one row per customer, so a
+    table would be structure with nothing in it. If a customer ever needs two
+    days this becomes a table and the columns become its first row.
+  - The guard makes the three refusals every foreign reference written from a
+    form in this schema already makes (0036, 0039, 0044, 0045): not another
+    laundry's round, not one that does not exist, not one that has been retired.
+    A trigger rather than a check constraint because two of the three are about
+    *another row*; and it raises out loud where a restrictive policy would write
+    zero rows in silence. Revoked from `public, anon` **and `authenticated`** —
+    the trap 0019 recorded and 0036 shipped.
+  - **A day with no round is deliberately allowed**, and two assertions pin it as
+    a decision: it is exactly the *due, but nobody is going* list the screen
+    exists to show. Only the meaningless half — a round with no day — is left to
+    the application, which says so in a sentence rather than raising.
+  - **Nine self-assertions, every one confirmed to fire** by breaking what it
+    guards against a real Postgres 16: a non-nullable column, an FK made
+    `restrict`, the range constraint dropped, the trigger detached, the revoke
+    removed, RLS disabled, the policy's `archived_at is null` stripped, an `anon`
+    grant, and a **second** FK to `boards`. That last one is load-bearing rather
+    than tidy: two reads embed `boards(name)` through it, and a second reference
+    makes the embed ambiguous and kills both with PGRST201 at request time — the
+    trap 0038 records for `invoice_lines → gl_accounts`.
+  - One of the nine **caught a defect in this very migration**: `pg_get_expr`
+    renders the archive clause as `archived_at IS NULL`, so the lowercase `like`
+    the file is written in matched nothing and the migration failed on a policy
+    that was perfectly intact. `ilike` now.
+
 - `0046_credit_note_gst_inclusive` — **a credit note is read on the same basis as the
   invoice it offsets.** `recalculate_credit_note()`, the twin of `recalculate_invoice()`:
   `subtotal = total = sum(line amounts)` and the GST **extracted from within** the taxable
@@ -1237,7 +1293,8 @@ Proofs in `supabase/tests/`: `rls_isolation`, `rls_coverage`, `driver_scope`,
 `job_billing`, `purchases_scope`, `supplier_payments_scope`, `import_helpers`,
 `import_activation`, `member_directory`, `boards_scope`, `item_master`,
 `audit_log_scope`, `run_sequence`, `accounts_scope`, `open_draft_invoices`,
-`single_laundry`, `charge_accounts`, `gst_inclusive` (**532 assertions** across 28 files).
+`single_laundry`, `charge_accounts`, `gst_inclusive`, `collection_schedule`
+(**548 assertions** across 29 files).
 
 **Count assertions, not lines starting with `ok`.** pgTAP's function is literally named `ok`, so
 psql prints a centred `ok` **column header** above each result — and `grep -c '^\s*ok '` counts
@@ -1873,8 +1930,40 @@ reports six false gaps.
   leaving its usual trace: text typed into `apply_migration` reformatted a little against the file.
   Worth knowing before anybody reads a raw `md5(prosrc)` mismatch as drift.
 
-**`0046_credit_note_gst_inclusive` was applied on 2026-09-01** (`20260901084855`) and is the
-ledger's last entry, **51** in all. One function, no table, no column, no policy, no capability;
+**`0047_collection_schedule` was applied on 2026-09-08** (`20260908122717`) and is the ledger's
+last entry, **52** in all — **before the code merged**, the order every release since 2026-08-18
+records, and load-bearing here rather than conventional: the customer form posts two columns the
+edit page reads at request time, where no typecheck can see their absence.
+
+- **Pre-flight, before anything was written:** both columns absent, the guard absent, **0**
+  existing foreign keys from `customers` to `boards` (so the new one is provably the only one),
+  1 customer policy carrying `archived_at IS NULL`, **0** `anon` grants. 511 customers, 4 boards,
+  14 stops, 18 laundry jobs, 649 invoices, 1 laundry.
+- **The live function body is byte-identical to a database built from `supabase/migrations/`
+  alone** — `md5(prosrc)` = `6b46e98653f6e2146fb0c9b09e3dc662` on both sides, matching **first
+  attempt**, unlike 0042 where two characters in a comment had to be bisected out.
+- **Applied directly rather than rehearsed**, which is the recorded practice for this shape: it
+  carries nine self-assertions and `apply_migration` is atomic, so a failed assertion rolls the
+  whole thing back. It returned clean, so all nine held.
+- **Then proved as real sessions**, in a transaction that ended by raising. The **Office
+  manager** set a Tuesday round on a real customer — **1 row**, which is the assertion that
+  matters, since a policy refusing a caller writes zero rows in silence — read it back, found it
+  through the due query, was refused weekday 8 (**23514**) and an unknown round (*"that round
+  could not be found"*), and **cleared the arrangement again**, which is the half `clearable`
+  exists for. Nothing survived the rollback: **0** customers carry a schedule.
+- **The probe also turned up a `customers`-wide, pre-existing exposure** — a **board** can set a
+  schedule, and equally can rename a customer, rewrite the driver instructions and put one on
+  hold. §33 has the finding and why 0047 deliberately does not paper over it.
+- **Advisors are 23**, unchanged — 22 documented SECURITY DEFINER helpers plus the auth
+  leaked-password toggle. `guard_customer_collection_board` is **absent**, so the revoke naming
+  `authenticated` held: the trap 0019 recorded and 0036 shipped. **0** `anon` table grants and
+  **0** tables in `public` without RLS.
+- Counts unchanged either side: 511 customers (451 active), 4 boards, 14 stops, 18 laundry jobs,
+  649 invoices, 151 audit rows, 1 laundry. **0** customers on a schedule, which is the honest
+  state — the first one is set on `ats.coreit.com.au`.
+
+**`0046_credit_note_gst_inclusive` was applied on 2026-09-01** (`20260901084855`) and was the
+ledger's last entry until the above, **51** in all. One function, no table, no column, no policy, no capability;
 **0 credit notes and 0 credit note lines** existed, so nothing stored was re-interpreted. The live
 body is md5-identical to a database built from `supabase/migrations/` alone, first attempt. Proved
 as real sessions: a **board**'s call moved **nothing** while the Owner and the Office manager each
@@ -2963,6 +3052,93 @@ fixes above and was reachable only by arriving from a customer's record, which i
 `*.supabase.co` is refused by the network policy. **Before trusting it: take a job in on
 `ats.coreit.com.au` without picking an item code and check it is refused by name, then open Driver
 visits and pick a customer from the new dropdown.**
+
+### 2026-09-08 · The weekly round, recorded — so a collection is not remembered
+The owner's description of the business: *"Customer gives us towels weekly, we bill monthly per
+item collected."* The monthly half already worked. The weekly half did not exist at all —
+**nothing anywhere recorded that a customer is collected**, let alone on which day. One migration
+(`0047`), two nullable columns, one guard, two indexes; **no policy, no capability and no role
+change**, and no existing row altered. §33 has the design, §7 the migration.
+
+**Three decisions the owner made, and the build follows all three**: a *due list plus a button
+that creates the work*, *weekly on the same day each week*, and the work being *a stop on the
+board's run*.
+
+- **It is not a service agreement, and that is the load-bearing decision.**
+  `service_agreements` exists, is unit-tested and holds **0 rows** — and adopting it would have
+  billed this laundry **wrongly** rather than merely awkwardly. A contract's `per_item` line
+  bills `standard_quantity × visits`: an assumed quantity times the number of *scheduled* visits.
+  It bills the pattern. Since 0040 the contract charges and the job charges land on the **same**
+  monthly draft and the month-end run skips only a customer whose *contract* lines are already
+  there — so a weekly towel contract plus the actual jobs would put both on one invoice and bill
+  the same towels twice. The schedule carries **no price at all**.
+- **Two columns rather than a table**, because "the same day each week" is exactly one row per
+  customer and a table would be structure with nothing in it. If a customer ever needs two days
+  it becomes a table and these become its first row.
+- **A stop, not a laundry order** — the owner's choice, and the only shape the database accepts:
+  a job with nothing collected yet has no items, and `chk_laundry_orders_assignment_delivery`
+  refuses an assignee on a job that is not a delivery, so a pre-created collection *job* would
+  sit on no round and appear on nobody's screen. `jobs` with `service_type = 'pickup'` is what
+  `/run` already reads to offer the collection capture, and it works with no signal.
+- **What this does *not* close is stated on the screen rather than left to be found.** A pickup
+  captured on `/run` writes `pickups` and `pickup_lines`, which move *inventory*; nothing bills
+  from them. What is collected is still taken in at the counter and priced per item — how all 18
+  of this laundry's jobs are already raised. Turning a captured pickup into a priced laundry job
+  is the obvious next piece and is **not built**.
+- **A delivery and a collection on one day are one visit.** `findOrCreateStop` widens an existing
+  stop to `both` rather than adding a second call; widening is the only direction, because
+  narrowing would take a capture screen away from work somebody else had booked.
+  `retireStopIfEmpty` correspondingly leaves any non-delivery stop alone — nothing points at a
+  collection stop through `laundry_orders`, so "no orders left" does not mean "nothing to do".
+- **A standing collection does not resume for a paused customer**, and they stay listed with the
+  reason rather than hidden. `collectionDueState` is four answers, not a boolean, because they
+  want three actions on two screens.
+- **`clearable` moved out of `items/actions.ts` into `lib/actions.ts`.** `optionalUuid` folds an
+  empty box to `undefined`, supabase-js drops undefined keys, and the column is never written —
+  so a customer put on a Tuesday round could never be taken off one. A `"use server"` module can
+  export nothing but server actions, so the second form needing that rule could only have copied
+  it, which is the drift `lib/actions.ts` exists to prevent.
+
+- **1191 unit tests across 72 files (was 1154/70)** and **548 pgTAP assertions across 29 files
+  (was 532/28)**. `verify` green — typecheck, lint, tests and the production build — and the whole
+  DB job on a fresh Postgres 16, all 52 migrations plus the suite plus the seed.
+- **Every new guard was confirmed to catch its defect**, not assumed to be doing something: nine
+  migration self-assertions broken one at a time against a real Postgres (including a *second* FK
+  to `boards`, which would make the `boards(name)` embed ambiguous and kill two reads with
+  PGRST201 at request time); the pgTAP proof run against a neutered guard (4 failing), a dropped
+  range constraint (2) and an FK made `restrict` (2); and six source-sweep assertions each watched
+  to fail by name — the action's gate widened, the tenant filter dropped, the stop reverted to a
+  delivery, `clearable` reverted to `optionalUuid`, the edit page no longer reading the columns it
+  posts, and the nav tab loosened.
+- **Measured in a real browser**, `/design-preview` at 320/390/768/1440 in both themes: **96
+  assertions, 0 failures, 0 console errors, 0 overflow inside the section, nothing under 36px** —
+  including the summary line, which puts a section label and a whole sentence side by side in a
+  flex row and is the shape that overflows a phone. Document overflow is 7px at 320 and 0
+  elsewhere: the pre-existing dispatch-planner fixture, unchanged. The harness was proved
+  non-vacuous by pointing it at a section that does not exist (8 failures), and it reports the
+  applied background colour so it cannot measure the light theme twice and call it two.
+- One assertion in the migration **caught a defect in the migration**: `pg_get_expr` renders the
+  archive clause as `archived_at IS NULL`, so a lowercase `like` matched nothing and 0047 failed
+  on a policy that was perfectly intact. And the browser harness was right where I was not — it
+  reported three disclosures open where I had asserted two, because the fourth fixture is also
+  scheduled.
+
+**A `customers`-wide, pre-existing exposure was found on the way through and is deliberately
+*not* patched here.** Probed as one of Adelaide's own `board` logins: a round can rename a
+customer, rewrite the standing driver instructions and put a customer on hold straight off
+`/rest/v1/customers` — and now set a collection day too. `customers` carries one permissive
+`for all … is_member(tenant_id)` policy from 0002, the **fifth** table on the shape this schema
+has replaced four times. Guarding two new columns while the name, the phone, the status and the
+driver's note stay open would read as protection and be theatre; the remedy is its own migration
+with the write set worked out first. §33 has the full finding.
+
+**Not verified behind the auth gate.** This container has no Supabase credentials and the network
+policy refuses `*.supabase.co`, so no authenticated screen was opened with real rows in it — the
+database facts come from probes over the Supabase MCP and the screens from the gallery, the
+guards and the build. **Before trusting it: on `ats.coreit.com.au` open a customer, set a
+collection day and a round, and check their record reads "Collected every … by Board N"; then
+open Runs › Due for collection on that weekday, press Create collection stops, and confirm the
+call appears on that board's At the depot screen.**
 
 ### 2026-09-08 · Four reports: the driver's instructions, the month-end run, charging a customer, and a customer's own jobs
 Four things reported from the deployed app, each traced to a defect in live data before
@@ -9529,6 +9705,73 @@ the whole card, and where each field lands is stated here so the next export is 
   per-statement row-count assertions, the way §11 records every other live data change. A reader
   for this export shape would belong beside `myob/inventory.ts` and would read the real file, as
   §25 requires — it does not exist yet.
+
+## 33. The standing weekly collection
+The owner's description of the business, 2026-09-08: *"Customer gives us towels weekly, we
+bill monthly per item collected."* The **monthly** half already worked and needed nothing —
+prices are per item code (§31), `billing_method` is `monthly_consolidated`, and since 0040
+every approved job joins that customer's running draft (§30). What was missing was the
+**weekly** half: nothing anywhere recorded that a customer is collected at all, let alone on
+which day. No column on `customers`, none on `customer_locations`, and **0 route templates**
+— that machinery exists and was unlinked from the nav on 2026-08-14. With nine customers
+using the app a round remembers; with 451 active ones it will not.
+
+- **The schedule is two columns on the customer** (`0047`), and it carries **no price**.
+  §7 has the reasoning for both — most importantly why this is not a `service_agreement`,
+  which would have billed the same towels twice on one invoice rather than merely awkwardly.
+- **What a press creates is a stop, not a laundry order**, which was the owner's choice and
+  is also the only shape the database accepts: a job with nothing collected yet has no items,
+  and `chk_laundry_orders_assignment_delivery` refuses an assignee on a job that is not a
+  delivery — so a pre-created collection *job* would sit on no round and appear on nobody's
+  screen. A `jobs` row with `service_type = 'pickup'` is the shape the app already had:
+  `/run` offers the collection capture for it and works with no signal.
+- **The loop to money is deliberately not automated, and saying so is the point.** A pickup
+  captured on `/run` writes `pickups` + `pickup_lines`, which move *inventory*; nothing bills
+  from them. What is collected is taken in at the counter as a laundry job and priced per
+  item, which is how all of this laundry's jobs are already raised. The screen says that
+  under the button rather than leaving it to be discovered. **Closing it — turning a
+  captured pickup into a priced laundry job — is the obvious next piece of work and is not
+  built.**
+- **`collectionDueState` is four answers rather than a boolean**, because they want three
+  different actions on two different screens: `on_the_run`, `ready`, `no_round`, `paused`.
+  The same call `UNPRICED_REASON_TEXT` makes about laundry nobody can price.
+- **A standing collection resumes only for an `active` customer.** On hold, inactive and
+  prospect are answers somebody in the office decided, and an arrangement that quietly
+  restarted for a paused business would send a van to a customer who had asked to stop. They
+  stay *listed*, with the reason, because hiding them makes a customer who has come back look
+  like one who was never set up. Narrower than `isPickableCustomer`, which answers a
+  different question — *may a person choose this customer for a job they are typing in* —
+  and a person deciding is not a schedule deciding for them.
+- **Idempotent by construction, not by a flag.** `findOrCreateStop` keys on (tenant, run,
+  customer), so a second press finds the first press's stops and the screen reports them as
+  already on the round. A batch that only half worked is reported as a **failure** naming the
+  first casualty, never as a success with a footnote.
+- **A delivery and a collection on the same day are one visit.** `findOrCreateStop` widens an
+  existing stop to `service_type = 'both'` rather than adding a second call — the round
+  knocks once. Widening is the only direction: narrowing would take a capture screen away
+  from work somebody else had already booked. `retireStopIfEmpty` correspondingly leaves any
+  stop that is not purely a delivery alone, because nothing points at a collection stop
+  through `laundry_orders` and "no orders left" therefore does not mean "nothing to do here".
+- **`clearable` moved from `items/actions.ts` into `lib/actions.ts`** for this. `optionalText`
+  and `optionalUuid` fold an empty box to `undefined`, supabase-js drops undefined keys, and
+  the column is therefore never written — so a customer put on a Tuesday round could never be
+  taken off one. Taking a customer *off* a standing collection is at least as ordinary as
+  putting them on. A `"use server"` module can export nothing but server actions, so the
+  second form needing the rule could only have got it by copying it.
+
+**One finding this work turned up, and it is `customers`-wide and pre-existing.** Probed as one
+of Adelaide's own `board` logins on 2026-09-08: a round can **rename a customer, rewrite the
+driver instructions and put a customer on hold** straight off `/rest/v1/customers`, and now also
+set a collection day. `customers` carries exactly **one** permissive `for all … is_member(tenant_id)`
+policy from 0002's `apply_tenant_policy` — the fifth table on the shape this schema has already
+had to replace four times (0006→0017, 0018→0033, 0021→0036, 0002→0040). The app-level gate is
+`customers.write`, which a board does not hold, so no screen offers any of it. **0047 deliberately
+does not paper over this**: guarding two new columns while the customer's name, phone, status and
+standing driver note stay open would read as protection and be theatre. The remedy is its own
+migration — a `can_write_customers()` gate and four explicit policies — and it needs the write set
+worked out first (the Xero push writes `xero_contact_id` as the caller, `set_records_archived` is
+definer, the MYOB import is service-role), which is a decision with real blast radius rather than
+a line to add here.
 
 ## 21. Customer pricing and job billing
 **Two lifecycles on one job, and they meet at exactly one point.** The operational status says

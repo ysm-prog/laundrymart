@@ -114,6 +114,22 @@ export const NAVIGATION: NavItem[] = [
     icon: "runs",
     capability: "routes.read",
     blurb: "A board's day, in the order it drives.",
+    children: [
+      {
+        label: "Run order", href: "/runs", capability: "routes.read",
+        blurb: "What each board is delivering on a day, and the order it drives in.",
+      },
+      {
+        // The standing weekly collection, for one day. Gated on `routes.write`
+        // rather than `routes.read`, because the screen's whole purpose is the
+        // button: a board reading its own day cannot put work on a round, so
+        // offering it the tab would be offering a screen it can only look at.
+        // The area still opens on Run order for them, which is `navigationFor`
+        // resolving an area to the first screen the role can actually open.
+        label: "Due for collection", href: "/runs/collections", capability: "routes.write",
+        blurb: "Customers collected on this weekday, and whether they are on a round yet.",
+      },
+    ],
   },
   {
     // Drivers and Vehicles were children of the old Runs area and are

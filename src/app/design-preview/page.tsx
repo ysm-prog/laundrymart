@@ -13,7 +13,9 @@ import { NotificationBell } from "@/components/notification-bell";
 import { NotificationList, type NotificationListItem } from "@/components/notification-list";
 import { ExceptionCapture } from "@/components/offline-capture";
 import { AgreementWizard } from "@/app/(app)/agreements/agreement-wizard";
-import { CustomerEssentials, FormDisclosure } from "@/app/(app)/customers/customer-form";
+import {
+  CustomerEssentials, FormDisclosure, WeeklyCollection,
+} from "@/app/(app)/customers/customer-form";
 import { EXCEPTION_REASONS } from "@/app/(app)/jobs/exception-reasons";
 import { navigationFor, type NavItem } from "@/lib/nav";
 import {
@@ -26,6 +28,7 @@ import { BillingQueue, type QueueRow } from "@/app/(app)/invoices/awaiting/billi
 import { JobChargesEditor, type EditableCharge } from "@/app/(app)/orders/[id]/job-charges-editor";
 import { ItemPickerPreview } from "./item-picker-preview";
 import { JobForm, type JobCustomer } from "@/app/(app)/orders/job-form";
+import type { Customer } from "@/lib/db/types";
 import {
   InvoiceLineForm, type LineFormAccount, type LineFormItem,
 } from "@/app/(app)/invoices/[id]/line-form";
@@ -1653,6 +1656,37 @@ export default function DesignPreviewPage() {
             />
           </section>
 
+          <section id="weekly-collection-preview" className="space-y-4 border-t pt-8">
+            <PageHeader
+              title="The standing weekly collection"
+              description="On a customer's own record: the day, the round, and what each state reads as."
+            />
+            {/* Three real states, and the reason this is in the gallery at all
+                is the *summary line*: the section label and a whole sentence
+                sit side by side in a flex row, which is the shape that
+                overflows a 320px phone. The customer screens are async server
+                components reading Supabase, so this is the only place either
+                can be looked at. */}
+            <Card title="Set up" description="A day and a round — the arrangement working.">
+              <WeeklyCollection
+                customer={PREVIEW_SCHEDULED_CUSTOMER}
+                boards={PREVIEW_COLLECTION_BOARDS}
+              />
+            </Card>
+            <Card title="Due, on nobody's van" description="A legal state, and the one the office list exists to surface.">
+              <WeeklyCollection
+                customer={{ ...PREVIEW_SCHEDULED_CUSTOMER, collection_board_id: null }}
+                boards={PREVIEW_COLLECTION_BOARDS}
+              />
+            </Card>
+            <Card title="No arrangement" description="Shut by default, because there is nothing to see.">
+              <WeeklyCollection boards={PREVIEW_COLLECTION_BOARDS} />
+            </Card>
+            <Card title="No rounds set up yet" description="The hint names the screen that fixes it, rather than offering an empty picker with no explanation.">
+              <WeeklyCollection customer={{ ...PREVIEW_SCHEDULED_CUSTOMER, collection_board_id: null }} />
+            </Card>
+          </section>
+
           <section id="route-boundaries-preview" className="space-y-4 border-t pt-8">
             <PageHeader
               title="When a screen cannot be drawn"
@@ -2018,3 +2052,17 @@ const PREVIEW_CHARGES: EditableCharge[] = [
     gl_account_id: null,
   },
 ];
+
+const PREVIEW_COLLECTION_BOARDS = [
+  { id: "b1", name: "Board 1" },
+  { id: "b2", name: "Board 2" },
+];
+
+/**
+ * A customer on a standing Tuesday round. Only the fields `WeeklyCollection`
+ * reads are real; the rest of `Customer` is not touched by it.
+ */
+const PREVIEW_SCHEDULED_CUSTOMER = {
+  collection_weekday: 2,
+  collection_board_id: "b2",
+} as Customer;

@@ -9,7 +9,47 @@ where that is genuinely what it is. The multi-tenancy architecture stays: one op
 fact about today's data, not a reason to drop `tenant_id`, RLS, or §23's rule that a read feeding a
 write names its tenant.
 
-## Latest: an item code is required, and Driver visits gets a picker
+## Latest: the standing weekly collection
+2026-09-08, on `claude/weekly-collection-schedule`. The owner's own description of the business —
+*"Customer gives us towels weekly, we bill monthly per item collected."* The monthly half already
+worked; **nothing anywhere recorded that a customer is collected at all.** One migration (`0047`),
+applied live before the merge. §33 has the design, §7 the migration, §11 the apply record.
+
+- **Three owner decisions, do not re-guess:** a **due list plus a button that creates the work**,
+  **weekly on the same day each week**, and the work is **a stop on the board's run**.
+- **`customers.collection_weekday` (ISO 1–7) + `collection_board_id`**, both nullable, carrying
+  **no price**. Emphatically **not** a `service_agreement`: a contract's `per_item` line bills
+  `standard_quantity × visits`, and since 0040 both land on the same monthly draft — a weekly
+  towel contract plus the real jobs would bill the same towels **twice**.
+- **A stop, not a laundry order** — the only shape the database accepts (a job with nothing
+  collected has no items, and `chk_laundry_orders_assignment_delivery` refuses a round on a
+  non-delivery). `/run` already offers the collection capture for `service_type = 'pickup'`.
+- **The loop to money is deliberately open and the screen says so**: a captured pickup writes
+  `pickups`/`pickup_lines`, which move inventory and bill nothing. What comes back is taken in at
+  the counter and priced per item. **Turning a captured pickup into a priced job is the obvious
+  next piece and is not built.**
+- **Runs gained a tab, `/runs/collections`**, gated on `routes.write` — page *and* tab, because
+  the list is of customers and a board holds `routes.read` and not `customers.read`.
+  `roles.test.ts` pins that the two sets stay together.
+- **`clearable` moved into `lib/actions.ts`** so a customer can be taken *off* a schedule;
+  `optionalUuid` folds `""` to `undefined` and supabase-js drops it.
+- 1191 tests / 72 files; 548 pgTAP assertions / 29 files. Nine migration assertions, the pgTAP
+  proof and six source-sweep assertions **each proved to fail** by breaking what they guard.
+  Browser: 96 assertions at 320/390/768/1440 × both themes, 0 failures.
+
+**FINDING, `customers`-wide and pre-existing — not patched here.** Probed as a real `board`
+login: a round can **rename a customer, rewrite the standing driver instructions and put a
+customer on hold** off `/rest/v1/customers`. `customers` carries one permissive
+`for all … is_member(tenant_id)` policy from 0002 — the **fifth** table on the shape this schema
+has replaced four times. Guarding only the two new columns would be theatre. The remedy is its
+own migration (`can_write_customers()` + four policies) and needs the write set worked out first:
+the Xero push writes `xero_contact_id` as the caller, `set_records_archived` is definer, the MYOB
+import is service-role.
+
+**Still to do on the live app:** set the first collection day on `ats.coreit.com.au` — **0**
+customers carry one today.
+
+## Previously: an item code is required, and Driver visits gets a picker
 2026-09-08, on `claude/require-item-code-and-visits-picker`. The owner's two follow-ups after the
 four fixes below. **No migration; no schema, RLS, capability or policy change.**
 
@@ -38,8 +78,10 @@ Asked and answered; do not re-guess these.
   Two of the three are **configuration only they can do** (Resend DNS + Vercel env vars; Xero
   credentials); contracts are **built and unused** (0 service agreements). Assess before building.
 - **Dev catch-up** was asked for and is outstanding.
+- **Weekly collections: done** (see Latest). What is still open under it is the *money* half —
+  turning a captured pickup into a priced laundry job — which is deliberately not built.
 
-## Previously: four reports from the deployed app, fixed
+## Before that: four reports from the deployed app, fixed
 2026-09-08, on `claude/driver-instructions-invoice-fixes-1q42fb`. **No migration; no schema, RLS,
 capability, policy or route change** — `git diff` over `supabase/` is empty. §18 has the entry.
 

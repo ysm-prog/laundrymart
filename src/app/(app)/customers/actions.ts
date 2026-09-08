@@ -7,7 +7,7 @@ import { createClient } from "@/lib/supabase/server";
 import { recordAudit } from "@/lib/audit";
 import { isValidAbn, normaliseAbn } from "@/lib/domain/abn";
 import {
-  checkbox, count, describeDbError, done, fail, firstIssue,
+  checkbox, clearable, count, describeDbError, done, fail, firstIssue,
   optionalText, optionalUuid, returnTo, toObject,
 } from "@/lib/actions";
 
@@ -35,6 +35,25 @@ const customerSchema = z.object({
   special_instructions: optionalText,
   notes: optionalText,
   status: z.enum(["prospect", "active", "on_hold", "inactive", "archived"]),
+
+  /**
+   * The standing weekly collection (0047).
+   *
+   * **`clearable`, not `optionalUuid`/`count`**, and this is the whole reason
+   * that helper moved into `lib/actions.ts`: those fold an empty box to
+   * `undefined`, supabase-js drops undefined keys, and the column is therefore
+   * never written — so a customer put on a Tuesday round could never be taken
+   * off one. Taking a customer *off* a standing collection is at least as
+   * ordinary as putting them on.
+   *
+   * The range is stated here as well as in `chk_customers_collection_weekday`
+   * because a refusal from Postgres names a constraint, and the person choosing
+   * a day needs a sentence.
+   */
+  collection_weekday: clearable(
+    z.coerce.number().int().min(1, "Choose a day of the week").max(7, "Choose a day of the week"),
+  ),
+  collection_board_id: clearable(z.string().uuid()),
 });
 
 export async function createCustomer(formData: FormData): Promise<void> {

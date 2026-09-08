@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { requireCapability } from "@/lib/auth/context";
 import { createClient } from "@/lib/supabase/server";
 import { can } from "@/lib/roles";
+import { describeCollectionSchedule } from "@/lib/domain/collections";
 import { counted, date, money } from "@/lib/format";
 import { describePattern, parsePattern } from "@/lib/domain/service-calendar";
 import { isOverdue, summariseItems } from "@/lib/domain/laundry-orders";
@@ -47,10 +48,10 @@ export default async function CustomerDetailPage({
       "id, customer_number, business_name, trading_name, abn, billing_address_line1, " +
       "billing_suburb, billing_state, billing_postcode, billing_email, phone, " +
       "payment_terms_days, purchase_order_number, special_instructions, notes, status, " +
-      "depot_id, created_at",
+      "depot_id, created_at, collection_weekday, collection_board_id, boards(name)",
     )
     .eq("id", id)
-    .maybeSingle<Customer>();
+    .maybeSingle<Customer & { boards: { name: string } | null }>();
 
   if (!customer) notFound();
 
@@ -98,6 +99,17 @@ export default async function CustomerDetailPage({
 
         <Card title="Operational notes" className="lg:col-span-2">
           <div className="space-y-3 text-sm">
+            {/* The weekly round, first: it is the one line on this card that
+                decides whether a van turns up, and until 2026-09-08 nothing
+                anywhere recorded it. `describeCollectionSchedule` is the same
+                sentence the edit form's disclosure carries, so the record and
+                the form cannot describe one arrangement two ways. */}
+            <div>
+              <p className="font-medium">Weekly collection</p>
+              <p className="mt-0.5 text-muted-foreground">
+                {describeCollectionSchedule(customer, customer.boards?.name)}
+              </p>
+            </div>
             <div>
               <p className="font-medium">Special instructions</p>
               <p className="mt-0.5 whitespace-pre-wrap text-muted-foreground">

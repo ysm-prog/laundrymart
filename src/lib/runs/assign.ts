@@ -130,7 +130,7 @@ export async function assignOneJobToBoard(
   return { ok: true, runId: run.id, stopId: stop.id, previousStopId, reassigned };
 }
 
-type ResolvedRun = {
+export type ResolvedRun = {
   id: string; code: string; route_date: string; depot_id: string | null;
   board_id: string | null; vehicle_id: string | null;
 };
@@ -146,7 +146,7 @@ type ResolvedRun = {
  * of them, which is the same answer the old screen defaulted to when there was
  * only one.
  */
-async function resolveRun(
+export async function resolveRun(
   supabase: Supabase, session: AssigningSession,
   { boardId, runDate }: { boardId: string; runDate: string },
 ): Promise<ResolvedRun | { error: string }> {
@@ -213,23 +213,48 @@ async function createRun(
  * Several jobs for one business gather under one visit rather than producing a
  * duplicate call each. The lookup is by customer, because a stop is a visit to a
  * business and the round knocks once.
+ *
+ * **That last sentence is why `serviceType` widens an existing stop rather than
+ * adding a second one.** A delivery assigned for Tuesday and a standing Tuesday
+ * collection are one visit to one address: the van pulls up once, hands over the
+ * clean and takes away the dirty. So a stop already there for the other half of
+ * the job is promoted to `both`, which is what `/run` reads to decide whether to
+ * offer the collection capture, the delivery capture, or both. Widening is the
+ * only direction — a stop is never narrowed, because narrowing it would take
+ * away a capture screen for work somebody else had already booked.
  */
 async function findOrCreateStop(
   supabase: Supabase, session: AssigningSession,
-  { run, customerId }: { run: ResolvedRun; customerId: string },
+  { run, customerId, serviceType = "delivery" }: {
+    run: ResolvedRun; customerId: string; serviceType?: "delivery" | "pickup";
+  },
 ): Promise<{ id: string; job_number: string } | { error: string }> {
   const { data: existing } = await supabase
     .from("jobs")
-    .select("id, job_number")
+    .select("id, job_number, service_type")
     .eq("tenant_id", session.tenantId)
     .eq("route_id", run.id).eq("customer_id", customerId)
     .is("deleted_at", null)
     .not("status", "in", "(cancelled)")
     .order("sequence")
     .limit(1)
-    .returns<Array<{ id: string; job_number: string }>>();
+    .returns<Array<{ id: string; job_number: string; service_type: string }>>();
 
-  if (existing?.length) return existing[0]!;
+  if (existing?.length) {
+    const stop = existing[0]!;
+    if (stop.service_type !== serviceType && stop.service_type !== "both") {
+      // A failure here is not worth losing the assignment over: the visit is
+      // booked either way, and the worst case is a capture section the round
+      // has to reach through the other half of the stop.
+      const { error } = await supabase
+        .from("jobs").update({ service_type: "both" })
+        .eq("id", stop.id).eq("tenant_id", session.tenantId);
+      if (error) {
+        console.error("widening a stop to both failed", { stopId: stop.id, error: error.message });
+      }
+    }
+    return { id: stop.id, job_number: stop.job_number };
+  }
 
   const { data: number, error: numberError } = await supabase
     .rpc("next_number", { t: session.tenantId, k: "job", p: "JOB" });
@@ -244,11 +269,17 @@ async function findOrCreateStop(
     .order("sequence", { ascending: false }).limit(1)
     .maybeSingle<{ sequence: number }>();
 
+  // The site the van actually goes to for *this* kind of call. 56 of this
+  // laundry's customers bill to one address and are served at another, and
+  // `customer_locations` carries `is_pickup` and `is_delivery` separately for
+  // exactly that reason — collecting from the billing address would be the
+  // wrong door.
   const { data: location } = await supabase
     .from("customer_locations")
     .select("id")
     .eq("tenant_id", session.tenantId)
-    .eq("customer_id", customerId).eq("is_delivery", true)
+    .eq("customer_id", customerId)
+    .eq(serviceType === "pickup" ? "is_pickup" : "is_delivery", true)
     .is("deleted_at", null)
     .order("is_primary", { ascending: false })
     .limit(1)
@@ -267,7 +298,7 @@ async function findOrCreateStop(
       job_number: number as string,
       scheduled_date: run.route_date,
       sequence: (last?.sequence ?? 0) + 1,
-      service_type: "delivery",
+      service_type: serviceType,
       status: run.board_id ? "assigned" : "scheduled",
     })
     .select("id, job_number")
@@ -275,6 +306,23 @@ async function findOrCreateStop(
   if (error) return { error: describeDbError(error) };
 
   return stop;
+}
+
+/**
+ * The collection stop for a customer on a run — the standing weekly pickup.
+ *
+ * A thin, named door onto `findOrCreateStop` rather than exporting that with a
+ * flag: the caller is booking *a collection*, and a boolean at the call site is
+ * how "assign" ends up meaning two things. It is the same reuse
+ * `lib/orders/complete.ts` and `lib/routes/unload.ts` exist for — one
+ * implementation of "the round calls here", so a collection stop and a delivery
+ * stop cannot come out shaped differently.
+ */
+export async function findOrCreateCollectionStop(
+  supabase: Supabase, session: AssigningSession,
+  { run, customerId }: { run: ResolvedRun; customerId: string },
+): Promise<{ id: string; job_number: string } | { error: string }> {
+  return findOrCreateStop(supabase, session, { run, customerId, serviceType: "pickup" });
 }
 
 /**
@@ -306,7 +354,11 @@ export async function retireStopIfEmpty(
       arrived_at: string | null; completed_at: string | null; service_type: string;
     }>();
   if (!stop) return;
-  // Only the stops this feature creates, and only untouched ones.
+  // Only the stops this feature creates, and only untouched ones. A `pickup` or
+  // `both` stop is deliberately left alone even when it is empty of laundry
+  // orders: since the standing collection landed, those carry work of their own
+  // — nothing points at a collection stop through `laundry_orders`, so "no
+  // orders left" does not mean "nothing to do here".
   if (stop.service_type !== "delivery") return;
   if (stop.progress_status !== "not_started") return;
   if (stop.arrived_at || stop.completed_at) return;

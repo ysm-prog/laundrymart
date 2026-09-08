@@ -6,7 +6,8 @@ import { assertCapability } from "@/lib/auth/context";
 import { createClient } from "@/lib/supabase/server";
 import { recordAudit } from "@/lib/audit";
 import {
-  count, describeDbError, done, fail, firstIssue, money, optionalText, optionalUuid, toObject,
+  clearable, count, describeDbError, done, fail, firstIssue, money, optionalText,
+  optionalUuid, toObject,
 } from "@/lib/actions";
 import { ITEM_TYPES } from "@/lib/domain/laundry-orders";
 import { MAX_ITEM_CODE } from "@/lib/domain/items";
@@ -30,23 +31,9 @@ const flag = z.preprocess((value) => value === "true" || value === true, z.boole
  * inputs `FormSection` exists to prevent). So a field the add form never renders
  * arrives `undefined` and must be **left to the column default**, while the same
  * field cleared on the detail form arrives `""` and must be **written as null**.
- *
- * `undefined` and `null` are not interchangeable here, which is the opposite of
- * the call `optionalText` makes: it folds both to `undefined`, and because
- * `JSON.stringify` drops undefined keys, a field it governs cannot be *cleared*
- * once set — clearing it posts `""`, which becomes `undefined`, which is never
- * sent. That is long-standing behaviour across every form in the app and is not
- * changed here; these new fields simply do not inherit it, because a price basis
- * that cannot be put back to "not stated" is a field with a one-way door on it.
+ * `clearable` (`lib/actions.ts`) is that rule; it was written here and moved
+ * there when the collection schedule needed the same one-way door removed.
  */
-const clearable = <T extends z.ZodTypeAny>(inner: T) => z.preprocess(
-  (value) => {
-    if (value === undefined) return undefined;
-    if (value === null) return null;
-    return typeof value === "string" && value.trim() === "" ? null : value;
-  },
-  inner.nullable().optional(),
-);
 
 /**
  * MYOB's "Selling price is" / "Buying price is", or nothing.

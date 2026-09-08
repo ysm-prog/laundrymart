@@ -1,6 +1,7 @@
 import { requireCapability } from "@/lib/auth/context";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/ui";
+import { listActiveBoards } from "@/lib/runs/my-runs";
 import { CustomerForm } from "../customer-form";
 import { createCustomer } from "../actions";
 
@@ -10,11 +11,13 @@ export const dynamic = "force-dynamic";
 // No `searchParams`: the `?error=` this page used to read moved to the flash
 // cookie when `fail()` started redirecting clean, and the prop outlived it.
 export default async function NewCustomerPage() {
-  await requireCapability("customers.write");
+  const session = await requireCapability("customers.write");
 
   const supabase = await createClient();
-  const { data: depots } = await supabase
-    .from("depots").select("id, name").eq("status", "active").order("name");
+  const [{ data: depots }, boards] = await Promise.all([
+    supabase.from("depots").select("id, name").eq("status", "active").order("name"),
+    listActiveBoards(supabase, session.tenantId),
+  ]);
 
   return (
     <div className="max-w-3xl">
@@ -25,6 +28,7 @@ export default async function NewCustomerPage() {
       <CustomerForm
         action={createCustomer}
         depots={depots ?? []}
+        boards={boards}
         cancelHref="/customers"
         submitLabel="Create customer"
       />
