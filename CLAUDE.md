@@ -3110,6 +3110,11 @@ board's run*.
   to fail by name — the action's gate widened, the tenant filter dropped, the stop reverted to a
   delivery, `clearable` reverted to `optionalUuid`, the edit page no longer reading the columns it
   posts, and the nav tab loosened.
+- **The due read is filtered by the date, not by an `.in()` over the due customers**, which is
+  what the first draft did and what a code re-read caught: a Monday with 400 customers on it
+  would have put 400 UUIDs into a GET query string — roughly 15 kB of URL, past what a proxy
+  carries, failing only on the busiest day. A day's stops are a small set whatever the customer
+  base is (14 on the whole deployment), so the matching is done in memory.
 - **Measured in a real browser**, `/design-preview` at 320/390/768/1440 in both themes: **96
   assertions, 0 failures, 0 console errors, 0 overflow inside the section, nothing under 36px** —
   including the summary line, which puts a section label and a whole sentence side by side in a
