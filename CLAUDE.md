@@ -3145,6 +3145,27 @@ collection day and a round, and check their record reads "Collected every … by
 open Runs › Due for collection on that weekday, press Create collection stops, and confirm the
 call appears on that board's At the depot screen.**
 
+**Merged to `Prod` (`3231caa`) and `Dev` (`7c4c591`) on 2026-09-08**, both holding identical trees
+— `git diff Prod Dev` is empty. `Prod` was a clean fast-forward and was never force-pushed; `Dev`
+carries the extra catch-up merge commits its own history needs, and was **3 ahead with an empty
+tree diff** before this (those three were previous catch-up merges), which is the standing drift
+the last several entries record and this one closes. **CI green on all three jobs for all four
+runs** — 298 and 300 on `Prod`, 299 and 301 on `Dev` — Verify (typecheck, lint, 1191 tests across
+72 files, production build, `== PASSED ==`), Security (gitleaks strict + dependency audit), and
+the DB job applying all 52 migrations to a fresh Postgres 16 with the whole pgTAP suite
+(`pgTAP suite passed`) and the seed on top. `/runs/collections` appears in the build's route table.
+
+- **Nothing left to apply**: `0047` went on the hosted project at 12:27Z, **before** the first
+  merge at 12:35Z, which is the order every release since 2026-08-18 records and is load-bearing
+  here — the customer edit page reads two columns at request time.
+- **The elapsed time was checked against a clock before anything was called slow**, and it needed
+  to be: a background `sleep` started and then polled immediately reports back long before the
+  wall clock has moved, which is the illusion four earlier entries in this file record. `date -u`
+  against the runner's own `started_at` settles it — Verify ran 68 and 72 seconds, its ordinary
+  duration.
+- **The Vercel production deploy is not confirmable from this session**, a tooling limit rather
+  than a configuration one (§5). Read it in the Vercel dashboard.
+
 ### 2026-09-08 · Four reports: the driver's instructions, the month-end run, charging a customer, and a customer's own jobs
 Four things reported from the deployed app, each traced to a defect in live data before
 anything was written. **No migration; no schema, RLS, capability, policy or role change** —
