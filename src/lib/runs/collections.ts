@@ -71,12 +71,18 @@ export async function dueCollections(
   // question is "does this run already call there?", and the answer for all of
   // them is a single filtered select. A cancelled stop does not count — it is a
   // call the office deliberately took off the van.
+  //
+  // Filtered by the **date** and not by an `.in()` over the due customers, which
+  // is what the first draft did: a Monday with 400 customers on it would have put
+  // 400 UUIDs into a GET query string — roughly 15 kB of URL, past what a proxy
+  // will carry, and failing only on the busiest day. A day's stops are a small
+  // set whatever the customer base is (14 on the whole deployment today), so the
+  // matching is done in memory below.
   const { data: stops } = await supabase
     .from("jobs")
     .select("id, job_number, customer_id, daily_routes!inner(board_id)")
     .eq("tenant_id", tenantId)
     .eq("scheduled_date", date)
-    .in("customer_id", rows.map((row) => row.id))
     .is("deleted_at", null)
     .neq("status", "cancelled")
     .returns<Array<{
