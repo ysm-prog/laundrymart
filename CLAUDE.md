@@ -3303,6 +3303,28 @@ driver login. Advisors 28, the three additions being this migration's own helper
 families, five migrations, one shape — a permissive `for all` policy whose USING
 half grants every verb. Nothing in `public` carries it any more.
 
+**Merged to `Prod` (`264ac38`) and `Dev` (`a57324f`) on 2026-09-09**, both holding
+identical trees — `git diff Dev Prod` is empty. `Prod` was a clean fast-forward and
+was never force-pushed. The feature branch was **restarted from `origin/Prod`** first,
+keeping its name: its previous pull request was already merged, and a merged pull
+request cannot track new work.
+
+- **CI green on all three jobs for both runs** — 308 and 309 — and read off the logs
+  rather than the statuses. Verify: typecheck, lint, **1205 tests across 74 files**,
+  the production build, `== PASSED ==`. The DB job applying all **53** migrations to a
+  fresh Postgres 16, `pgTAP suite passed`, and `supabase/seed.sql` committing on top of
+  the fresh schema. Security: gitleaks strict plus the dependency audit.
+- **The elapsed time was read off the runner's own step timestamps**, per the trap six
+  earlier entries record. Verify ran 02:24:20 → 02:25:15 on `Prod` and 02:24:43 →
+  02:25:51 on `Dev` — 55 and 68 seconds, its ordinary duration.
+- **Nothing left to apply**: `0049` went on the hosted project at 02:17Z, six minutes
+  before the merge. The standing practice, and what made the live behavioural proof
+  possible before the code moved — though as with `0048` it costs less than usual here,
+  because this release changes no screen.
+- **The Vercel production deploy is not confirmable from this session**, a tooling limit
+  rather than a configuration one (§5). It matters least on a release like this one: the
+  gate that actually closed the hole is on the database, and no screen changed.
+
 ### 2026-09-09 · A delivery round could rewrite a customer's record, and now cannot
 The finding the collection-schedule release turned up and deliberately did not patch, closed
 at the owner's instruction. One migration (`0048`); **no schema change, no capability, no
