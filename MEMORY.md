@@ -9,7 +9,35 @@ where that is genuinely what it is. The multi-tenancy architecture stays: one op
 fact about today's data, not a reason to drop `tenant_id`, RLS, or §23's rule that a read feeding a
 write names its tenant.
 
-## Latest: a round could hand itself another driver's runs, and now cannot
+## Latest: the dependency backlog cleared, and both advisories with it
+2026-09-09, on `claude/driver-instructions-invoice-fixes-1q42fb`, restarted from `Prod` because its
+previous pull request was already merged. **No migration; `git diff` over `src/` and `supabase/` is
+empty**, and 1205 tests / 596 pgTAP assertions are unchanged in count — a dependency bump adds no
+rule to test. §10a has the evidence, §18 the entry.
+
+- **#62 (production) taken and verified**, not waved through: `resend` sends every email and
+  `@react-pdf/renderer` draws the invoice. **57 packages in, 63 out** of 589, measured as package
+  sets per §10a. The one to know: **`@react-pdf/pdfkit@6.0.1` → upstream `pdfkit@0.20.1`**, the
+  renderer dropping its own fork, which took five small transitive packages with it.
+- **Two resolved higher than Dependabot wrote** (the PR was a week old, a caret takes the newest in
+  range): `next` 16.3.4, `lucide-react` 1.43.0. `@supabase/supabase-js` 2.112.3 → 2.116.0 came
+  underneath `@supabase/ssr` — the seventh update its title counts and its diff does not show.
+- **#63 (dev) stays closed, fourth time.** TypeScript 7 needed **no install**: `typescript-eslint@8.70.0`
+  still declares `typescript: >=4.8.4 <6.1.0`, so check the peer range first and only install if it
+  moves. ESLint 10 *was* run and fails on the identical line. **New:** 8.70.0 now accepts
+  `eslint ^10`, so that half may be a *resolution* problem — but the nested copy stays 8.67.0 and a
+  root `overrides` block **did not lift it** (npm recorded `overrides: null`). Forcing it is the
+  next experiment and was deliberately not a rider on this. Took `@types/node`, `lefthook`,
+  `eslint-config-next` 16.3.4 out of it.
+- **`npm audit` is 0 vulnerabilities, from 2** — and CI's audit step is `continue-on-error`, so
+  neither had ever failed a build. Both fixes were **inside existing ranges**: `js-yaml` came free
+  with `eslint-config-next`; `nanoid` needed `postcss` 8.5.26 → **8.5.28**, pinned back only by the
+  lockfile. Proved not introduced by the production bump by diffing package sets either side of it.
+- `verify` green on the final tree: typecheck, lint, 1205 tests / 74 files, production build.
+- **Not merged.** Two commits sit on the feature branch; `Prod` and `Dev` are untouched. CI runs on
+  those two branches only, so nothing has been built in CI yet.
+
+## Previously: a round could hand itself another driver's runs, and now cannot
 2026-09-09, on `claude/driver-instructions-invoice-fixes-1q42fb`. The four tables 0048 named
 as a separate decision, decided. One migration (`0049`), **applied live**; **no schema change,
 no capability, no role change and no screen change** — the only `src/` file is a test. §3 has
@@ -145,6 +173,11 @@ Asked and answered; do not re-guess these.
 - **Wanted next, in their words:** customer email go-live, Xero connection, contracts/rate cards.
   Two of the three are **configuration only they can do** (Resend DNS + Vercel env vars; Xero
   credentials); contracts are **built and unused** (0 service agreements). Assess before building.
+- **Leaked-password protection is OFF and only the owner can turn it on.** It is an auth-config
+  change on the Supabase project, not a database one: `api.supabase.com` and the project host
+  are both refused by this environment's network policy (403 to CONNECT), so no session here can
+  reach it. Dashboard → Authentication → Policies. It is the 28th advisory; the other 27 are the
+  documented permission helpers.
 - **Dev catch-up** was asked for and is outstanding.
 - **Weekly collections: done** (see Latest). What is still open under it is the *money* half —
   turning a captured pickup into a priced laundry job — which is deliberately not built.
