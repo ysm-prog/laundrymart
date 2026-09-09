@@ -9,7 +9,36 @@ where that is genuinely what it is. The multi-tenancy architecture stays: one op
 fact about today's data, not a reason to drop `tenant_id`, RLS, or §23's rule that a read feeding a
 write names its tenant.
 
-## Latest: the standing weekly collection
+## Latest: a round can no longer rewrite a customer's record
+2026-09-09, on `claude/customer-record-write`. The finding the collection release deliberately
+left open, closed at the owner's instruction. One migration (`0048`), **applied live**; **no
+schema change, no capability, no role change and no screen change** — the only `src/` file is a
+test. §3 has the rule, §7 the migration, §11 the apply record.
+
+- **Worse than first reported, and re-probed before anything was written.** All three tables of
+  a customer's record came off 0002's `apply_tenant_policy`, so a **board** could rename a
+  customer, rewrite the standing driver note, **rewrite a site's address and its `access_notes`**,
+  **delete the site**, and **rewrite all 471 contact emails in one statement**. The access notes
+  are the sharp end: that column tells the van which door to use.
+- **The fifth table family on the `for all` shape** (0006→0017, 0018→0033, 0021→0036, 0002→0040).
+  Dropped, never supplemented — its USING half grants the writes too.
+- **The read splits three ways.** `customers` and `customer_locations` **keep an open SELECT**,
+  because a round reads the name, phone, instructions, address and access notes off its run sheet
+  and narrowing them is a login that works and shows nothing. `customer_contacts` narrows to
+  `can_read_customers()` — one screen reads it and it is already gated.
+- **`customers.write` is the whole write set, measured.** `updateCustomerBilling` (`billing.write`)
+  and the Xero contact write (`invoices.write`, on the caller's client) are a strict subset.
+  `customer-write-gate.test.ts` reads the migration's role arrays back out and compares them with
+  `roles.ts`, and was proved to fail from **both** sides.
+- Live proof, all rolled back: every board write **0 rows**, its run sheet still **511 customers /
+  446 sites**; the office manager renames and fixes the access notes **1 row** each. Advisors 25.
+- 1197 tests / 73 files; 569 pgTAP assertions / 30 files.
+
+**Still open and deliberately not swept up:** `depots`, `vehicles`, `drivers`, `fuel_logs` carry
+the same permissive shape. Configuration rather than a customer's record, different write sets,
+and none redirects a van — a separate decision.
+
+## Previously: the standing weekly collection
 2026-09-08, on `claude/weekly-collection-schedule`. The owner's own description of the business —
 *"Customer gives us towels weekly, we bill monthly per item collected."* The monthly half already
 worked; **nothing anywhere recorded that a customer is collected at all.** One migration (`0047`),
@@ -37,9 +66,9 @@ applied live before the merge. §33 has the design, §7 the migration, §11 the 
   proof and six source-sweep assertions **each proved to fail** by breaking what they guard.
   Browser: 96 assertions at 320/390/768/1440 × both themes, 0 failures.
 
-**FINDING, `customers`-wide and pre-existing — not patched here.** Probed as a real `board`
-login: a round can **rename a customer, rewrite the standing driver instructions and put a
-customer on hold** off `/rest/v1/customers`. `customers` carries one permissive
+**FINDING, `customers`-wide and pre-existing — CLOSED by `0048` the next day (see Latest).**
+Probed as a real `board` login: a round could **rename a customer, rewrite the standing driver
+instructions and put a customer on hold** off `/rest/v1/customers`. `customers` carries one permissive
 `for all … is_member(tenant_id)` policy from 0002 — the **fifth** table on the shape this schema
 has replaced four times. Guarding only the two new columns would be theatre. The remedy is its
 own migration (`can_write_customers()` + four policies) and needs the write set worked out first:

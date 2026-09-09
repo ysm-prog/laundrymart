@@ -242,6 +242,18 @@ Resource-scoped beyond tenancy:
   and does not write, which is why read and write are separate role lists.
   **`0037` reached this same gate independently and its half was dropped in the
   merge** — see §27.
+- **A customer's record — `customers`, `customer_locations`, `customer_contacts` — is
+  read by the round and written by the office** (0048). All three shipped on 0002's
+  `apply_tenant_policy`, so one permissive `for all … using is_member(tenant_id)`
+  governed them and **every member could rewrite any of it**: a board renamed a
+  customer, rewrote a site's `access_notes`, deleted the site and rewrote all 471
+  contact emails in one statement, proved by probe rather than by reading. Writes are
+  `can_write_customers()` (the `customers.write` holders). **SELECT deliberately stays
+  open on the first two**, because a delivery round reads the business name, the phone,
+  the standing instructions, the address and the access notes off its own run sheet, and
+  a round that cannot is a working login with an empty screen. `customer_contacts` is
+  the one that narrows, to `can_read_customers()`. The `for all` is dropped rather than
+  supplemented — the 0033 trap, the **fifth** table family to need it.
 - `audit_logs` is **read by four roles and written by everybody** (0035). SELECT needs
   `super_admin`/`operations_manager`/`regional_manager`/`auditor` — the four that hold
   `admin.read`, the auditor being why it is a role list and not `admin.write`. INSERT stays open
@@ -1051,6 +1063,48 @@ produce on demand.
     re-added `for all`, a dropped `tax_code`, a dropped `reorder_level`, an
     `anon` grant, a dropped policy and a mistyped new column.
 
+- `0048_customer_record_write` — **a customer's record is changed by the office.**
+  `can_read_customers()` / `can_write_customers()`; 0002's single permissive
+  `for all` on `customers`, `customer_locations` and `customer_contacts`
+  replaced by four explicit policies each. **Adds no table, no column and no
+  capability; changes no row.**
+  - **The fifth table family on that shape** (0006→0017, 0018→0033, 0021→0036,
+    0002→0040), and the worst of the five, because a permissive `for all`
+    policy's USING half grants the writes as well as SELECT. Probed as one of
+    Adelaide's own `board` logins: a delivery round renamed a customer,
+    rewrote a site's address **and its `access_notes`**, **deleted the site**,
+    and **rewrote all 471 contact emails in one statement**. The access notes
+    are the sharp end — that is not a disclosure, it is a way to silently
+    misdirect a van.
+  - **The read splits three ways, decided by who actually reads each table
+    rather than by symmetry.** `customers` and `customer_locations` keep an
+    `is_member` SELECT, because `/run`, `/my-runs` and the run sequencer read
+    the name, the phone, the standing instructions, the address and the access
+    notes off the run sheet — taking that away is a login that works and shows
+    nothing, the failure this project shipped once already. `customer_contacts`
+    **narrows** to `can_read_customers()`: exactly one screen reads it and that
+    screen is already gated on `customers.read`.
+  - **`customers.write` is the whole write set, measured rather than assumed.**
+    Two writers arrive by another door — `updateCustomerBilling` under
+    `billing.write`, and the Xero push writing `customers.xero_contact_id` on
+    the **caller's own client** under `invoices.write` — and both capabilities
+    are held by `super_admin` and `operations_manager` alone, a strict subset.
+    `customer-write-gate.test.ts` pins that containment, because if the sets
+    part company the Xero push stops remembering the contact by writing zero
+    rows in silence and the next invoice makes a twin.
+  - **The archive clause is carried into all twelve policies** — all three
+    tables are in `archivable_tables()`, so a policy written without 0017's
+    clause makes an archived customer readable again. The 0028 trap, and what
+    these assertions check hardest.
+  - **Ten assertion classes, every one confirmed to fire** against a real
+    Postgres 16: the `for all` left standing, a policy losing the archive
+    clause, a write verb left ungated, **the run-sheet read narrowed by
+    mistake**, the contacts read left open, a helper left on the RPC surface,
+    and a helper made *un*callable by `authenticated` — that last on the
+    regression that would really happen, copying a trigger function's revoke
+    line (which names `authenticated`) onto a policy helper, which would have
+    broken every customer screen in the app.
+
 - `0047_collection_schedule` — **the weekly round, recorded on the customer.**
   `customers.collection_weekday` (ISO 1–7) and `customers.collection_board_id`
   (`on delete set null`), `chk_customers_collection_weekday`,
@@ -1293,8 +1347,8 @@ Proofs in `supabase/tests/`: `rls_isolation`, `rls_coverage`, `driver_scope`,
 `job_billing`, `purchases_scope`, `supplier_payments_scope`, `import_helpers`,
 `import_activation`, `member_directory`, `boards_scope`, `item_master`,
 `audit_log_scope`, `run_sequence`, `accounts_scope`, `open_draft_invoices`,
-`single_laundry`, `charge_accounts`, `gst_inclusive`, `collection_schedule`
-(**548 assertions** across 29 files).
+`single_laundry`, `charge_accounts`, `gst_inclusive`, `collection_schedule`,
+`customer_record_scope` (**569 assertions** across 30 files).
 
 **Count assertions, not lines starting with `ok`.** pgTAP's function is literally named `ok`, so
 psql prints a centred `ok` **column header** above each result — and `grep -c '^\s*ok '` counts
@@ -1930,8 +1984,50 @@ reports six false gaps.
   leaving its usual trace: text typed into `apply_migration` reformatted a little against the file.
   Worth knowing before anybody reads a raw `md5(prosrc)` mismatch as drift.
 
-**`0047_collection_schedule` was applied on 2026-09-08** (`20260908122717`) and is the ledger's
-last entry, **52** in all — **before the code merged**, the order every release since 2026-08-18
+**`0048_customer_record_write` was applied on 2026-09-09** (`20260909005641`) and is the
+ledger's last entry, **53** in all. A **narrowing**, and the one release where the schema
+leading the code costs nothing at all: no screen changes, because every writer of these
+three tables was already gated on `customers.write` and no role losing the database write
+was ever offered the button.
+
+- **Pre-flight:** each of the three tables carrying exactly **one** permissive `ALL` policy
+  (`customers_member`, `customer_locations_member`, `customer_contacts_member`), all three
+  already wrapped with 0017's `archived_at IS NULL`; neither helper present; RLS on all
+  three; **0** `anon` grants across `public`. 511 customers, 446 sites, 471 contacts,
+  **0** archived, 8 memberships.
+- **Both function bodies are byte-identical to a database built from
+  `supabase/migrations/` alone** — `e6f491cd…` and `722b4a7b…`, matching **first attempt**.
+- **12 policies, 4 per table, one verb each; 0 permissive `for all` left; all 12 carry the
+  archive clause.** `anon` cannot execute either helper, `authenticated` can — which is the
+  half that has to be true or every policy errors and the customer module stops working.
+- **Proved as real sessions**, in a transaction that ended by raising, re-running the exact
+  probe that found the hole:
+
+  | as a **board** | before | after |
+  |---|---|---|
+  | reads customers / sites | 511 / 446 | **511 / 446** |
+  | rename a customer | 1 row | **0** |
+  | rewrite the standing driver note | 1 row | **0** |
+  | rewrite a site's address and access notes | 1 row | **0** |
+  | delete a site | 1 row | **0** |
+  | reads customer contacts | 471 | **0** |
+  | rewrite every contact email | 471 rows | **0** |
+  | insert a customer | accepted | **refused 42501** |
+
+  The first row is the one to read hardest: the run sheet is **unchanged**. And the office
+  is unaffected — the Office manager reads 471 contacts, renames a customer (**1 row**) and
+  corrects the access notes (**1 row**), and the Owner sets a collection day (**1 row**).
+  A row count and not a raise, because a policy refusing a caller writes zero rows in
+  silence; every write above was against a row the session had just read back itself, so 0
+  can only mean refused.
+- **Advisors are 25**, up from 23, and both additions are this migration's own helpers —
+  the documented SECURITY DEFINER shape, internally scoped to `auth.uid()` through
+  `has_role`, and the exact counterparts of `can_write_items` and `can_read_purchases`
+  already on the list. **0** `anon` table grants and **0** tables without RLS.
+- Counts unchanged either side: 511 customers, 446 sites, 471 contacts, 649 invoices.
+
+**`0047_collection_schedule` was applied on 2026-09-08** (`20260908122717`) and was the ledger's
+last entry until the above, **52** in all — **before the code merged**, the order every release since 2026-08-18
 records, and load-bearing here rather than conventional: the customer form posts two columns the
 edit page reads at request time, where no typecheck can see their absence.
 
@@ -2968,6 +3064,92 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-09-09 · A delivery round could rewrite a customer's record, and now cannot
+The finding the collection-schedule release turned up and deliberately did not patch, closed
+at the owner's instruction. One migration (`0048`); **no schema change, no capability, no
+role change, no screen change and no row altered.** §3 has the rule, §7 the migration, §11
+the apply record.
+
+**It was `customers`-wide, pre-existing since 0002, and worse than first reported.** All
+three tables of a customer's record — the customer, their sites, their contacts — came off
+`apply_tenant_policy`, so each carried one permissive `for all … using is_member(tenant_id)`
+policy. A permissive `for all` policy's USING half grants the **writes** as well as SELECT.
+Re-probed as one of Adelaide's own `board` logins before anything was written, all rolled
+back:
+
+| what a delivery round could do | rows |
+|---|---|
+| Rename a customer | 1 |
+| Rewrite the standing driver instructions | 1 |
+| Rewrite a site's address **and its access notes** | 1 |
+| **Delete** a customer site outright | 1 |
+| **Rewrite every customer contact email in the business** | 471 |
+
+- **The access notes are the sharp end, and they are why this stopped being a disclosure.**
+  That column is what tells the van which door to use, and `/run` and `/my-runs` render it
+  on every stop. A round could have quietly sent tomorrow's delivery somewhere else. The 471
+  emails are the loudest number; the one-row write is the dangerous one.
+- **It is the fifth table family on the shape this schema has replaced four times**
+  (0006→0017 on `invoices`, 0018→0033 on `laundry_prices`, 0021→0036 on the payable side,
+  0002→0040 on `items`). The `for all` is dropped rather than supplemented, for the reason
+  all four predecessors record: leaving it beside a narrower write policy leaves it as a
+  second door onto every verb.
+- **Nothing in the app changes, and that was checked rather than assumed.** Every writer of
+  these three tables in `src/` was already gated on `customers.write`, and no role losing the
+  database write was ever offered the button. So this release has **no `src/` change at all**
+  beyond a test — the screens were right and the tables were not.
+
+**The read splits three ways, and each way is decided by who actually reads that table.**
+- `customers` and `customer_locations` **keep an open SELECT**. A board and a driver read the
+  business name, the phone, the standing instructions, the address and the access notes off
+  their own run sheet, and neither holds `customers.read`. Narrowing here would have produced
+  a login that works and shows nothing — the failure this project shipped once already, in
+  2026-08-17's driver with no `drivers` row, and one that reads as a broken app rather than
+  as a refusal. Four of the new proof's assertions are that a board **still reads**.
+- `customer_contacts` **narrows** to `can_read_customers()`. Exactly one screen reads it
+  (`/customers/[id]`), already gated on `customers.read`, so no round-facing screen loses a
+  thing and the 471-email read is closed.
+
+**`customers.write` is the whole write set, and it was measured rather than assumed.** Two
+writers arrive by a door other than the customer form: `updateCustomerBilling` under
+`billing.write`, and the Xero push writing `customers.xero_contact_id` **on the caller's own
+client** under `invoices.write`. Both are held by `super_admin` and `operations_manager`
+alone — a strict subset — so neither needs a wider gate. `customer-write-gate.test.ts` pins
+that containment and reads the two role arrays back **out of the migration** to compare them
+with `roles.ts`, because a policy cannot import TypeScript and drift there is silent in the
+worse direction: the role keeps its Edit button and the save writes zero rows with no error.
+
+- **1197 unit tests across 73 files (was 1191/72)** and **569 pgTAP assertions across 30
+  files (was 548/29)**. `verify` green, and the whole DB job on a fresh Postgres 16 — all 53
+  migrations, the suite, and the seed on top.
+- **Every guard was proved to catch its defect.** Ten migration assertion classes broken one
+  at a time; the pgTAP proof run against a database built **without** 0048, where **9 of its
+  21 fail by name** while the four run-sheet reads pass in both — which is the property that
+  must not move. The seam test was broken from **both** sides: dropping a role from the
+  migration's array, adding one, narrowing the run-sheet read, and handing a board
+  `customers.write` in `roles.ts` all fail it.
+- **The last migration assertion fires on the regression that would really happen** — copying
+  a *trigger* function's revoke line, which names `authenticated`, onto a policy helper. Right
+  for 0036 and 0047, and fatal here: every policy would error and the whole customer module
+  would stop working. It reads *"a customers helper is not callable by authenticated"*.
+- **The proof caught its own flaw on the first run.** One assertion read the row back **as the
+  board**, which after this change cannot see contacts — so the subquery returned NULL and the
+  assertion would have passed just as happily over a policy that let the write through. It
+  reads back as the owner now. The same trap `charge_accounts.test.sql` records one table over,
+  and it is why refusals here are asserted by outcome rather than by `throws_ok`.
+
+**Applied to `laundrymart-syd` on 2026-09-09** as `20260909005641`, the ledger's 53rd entry,
+and proved as real sessions afterwards. Every write a round could make is now **0 rows** while
+its run sheet still reads **511 customers and 446 sites**; the Office manager still renames a
+customer and corrects the access notes, and the Owner still sets a collection day, **1 row**
+each. Advisors 25, the two additions being this migration's own helpers. §11 has the table.
+
+**Left open, and named rather than swept up:** `depots`, `vehicles`, `drivers` and `fuel_logs`
+are the rest of 0002's `apply_tenant_policy` list and carry the same permissive shape. They are
+configuration rather than a customer's record, the write sets are different questions, and none
+of them holds a note that redirects a van — so they are a separate decision and not a line to
+add here.
+
 ### 2026-09-08 · The email and Xero runbook, and two decisions recorded
 `docs/RUNBOOK-EMAIL-AND-XERO.md`, at the owner's request. **Documentation only** —
 no source file, no migration, no test.
@@ -9785,19 +9967,24 @@ using the app a round remembers; with 451 active ones it will not.
   putting them on. A `"use server"` module can export nothing but server actions, so the
   second form needing the rule could only have got it by copying it.
 
-**One finding this work turned up, and it is `customers`-wide and pre-existing.** Probed as one
-of Adelaide's own `board` logins on 2026-09-08: a round can **rename a customer, rewrite the
-driver instructions and put a customer on hold** straight off `/rest/v1/customers`, and now also
-set a collection day. `customers` carries exactly **one** permissive `for all … is_member(tenant_id)`
+**One finding this work turned up, and it is `customers`-wide and pre-existing. CLOSED by
+`0048` on 2026-09-09** — a round's every write to a customer's record now touches zero rows,
+proved as real sessions, while its run sheet reads exactly what it did before. What follows is
+the finding as it stood, kept because the reasoning is what stops it being undone. Probed as one
+of Adelaide's own `board` logins on 2026-09-08: a round could **rename a customer, rewrite the
+driver instructions and put a customer on hold** straight off `/rest/v1/customers`, and by then
+also set a collection day. `customers` carries exactly **one** permissive `for all … is_member(tenant_id)`
 policy from 0002's `apply_tenant_policy` — the fifth table on the shape this schema has already
 had to replace four times (0006→0017, 0018→0033, 0021→0036, 0002→0040). The app-level gate is
 `customers.write`, which a board does not hold, so no screen offers any of it. **0047 deliberately
 does not paper over this**: guarding two new columns while the customer's name, phone, status and
-standing driver note stay open would read as protection and be theatre. The remedy is its own
-migration — a `can_write_customers()` gate and four explicit policies — and it needs the write set
-worked out first (the Xero push writes `xero_contact_id` as the caller, `set_records_archived` is
-definer, the MYOB import is service-role), which is a decision with real blast radius rather than
-a line to add here.
+standing driver note stay open would read as protection and be theatre. The remedy was its own
+migration — a `can_write_customers()` gate and four explicit policies — and it needed the write
+set worked out first (the Xero push writes `xero_contact_id` as the caller, `set_records_archived`
+is definer, the MYOB import is service-role). `0048` is that migration, and working the write set
+out is what showed the exposure reached two tables further than this paragraph said: a round could
+also rewrite the **access notes** that tell the van which door to use, delete a site, and rewrite
+all 471 customer contact emails.
 
 ## 21. Customer pricing and job billing
 **Two lifecycles on one job, and they meet at exactly one point.** The operational status says
