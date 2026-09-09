@@ -3150,6 +3150,22 @@ configuration rather than a customer's record, the write sets are different ques
 of them holds a note that redirects a van — so they are a separate decision and not a line to
 add here.
 
+**Merged to `Prod` (`6aa98d6`) and `Dev` (`025d2a9`) on 2026-09-09**, both holding identical trees.
+`Prod` was a clean fast-forward and was never force-pushed. **CI green on all three jobs for both
+runs** — 304 and 305 — Verify (typecheck, lint, 1197 tests across 73 files, production build), the
+DB job applying all 53 migrations to a fresh Postgres 16 with the whole suite (`pgTAP suite
+passed`, read off the log rather than the status) and the seed on top, and Security.
+
+- **Nothing left to apply**: `0048` went on the hosted project at 00:56Z, five minutes before the
+  merge. That order matters less here than in any release this file records — it is a pure
+  narrowing with **no screen change at all** — but it is the standing practice and it is what made
+  the live behavioural proof possible before the code moved.
+- **The elapsed time was read off the runner's own timestamps** rather than inferred: Verify ran
+  01:02:12 → 01:03:05, 53 seconds, its ordinary duration. The trap five earlier entries record.
+- **The Vercel production deploy is not confirmable from this session**, a tooling limit rather
+  than a configuration one (§5) — and it matters less than usual, because this release changes no
+  screen and the gate that actually closed the hole is already live on the database.
+
 ### 2026-09-08 · The email and Xero runbook, and two decisions recorded
 `docs/RUNBOOK-EMAIL-AND-XERO.md`, at the owner's request. **Documentation only** —
 no source file, no migration, no test.
