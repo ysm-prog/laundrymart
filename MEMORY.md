@@ -9,7 +9,41 @@ where that is genuinely what it is. The multi-tenancy architecture stays: one op
 fact about today's data, not a reason to drop `tenant_id`, RLS, or §23's rule that a read feeding a
 write names its tenant.
 
-## Latest: a round can no longer rewrite a customer's record
+## Latest: a round could hand itself another driver's runs, and now cannot
+2026-09-09, on `claude/driver-instructions-invoice-fixes-1q42fb`. The four tables 0048 named
+as a separate decision, decided. One migration (`0049`), **applied live**; **no schema change,
+no capability, no role change and no screen change** — the only `src/` file is a test. §3 has
+the rule, §7 the migration, §11 the apply record.
+
+- **The sixth and last table family on the `for all` shape** (0006→0017, 0018→0033, 0021→0036,
+  0002→0040, 0002→0048). `depots`, `vehicles`, `drivers`, `fuel_logs` — the rest of 0002's
+  `apply_tenant_policy` list. **Nothing in `public` carries that shape any more.**
+- **It is an escalation, not a disclosure, and that is the finding.** `drivers.user_id` is what
+  `current_driver_id()` matches against `auth.uid()`, and the `daily_routes`/`jobs` policies
+  narrow a driver-only member to the row it returns — so anyone who could write `drivers` could
+  point another driver's row at their own login and inherit that driver's runs. Proved as
+  `board2@ats.example.com`, a real board member: **1 row**. It could also rename, **retire** and
+  delete the depot (every site picker filters `status = 'active'`, so one PATCH empties all
+  seven) and add a vehicle and a fuel log.
+- **Three reads stay open**: `drivers` (decisive — `/run` reads the caller's own row to answer
+  "which run is mine", and a driver holds no `fleet.read`), `depots` and `vehicles` (the plant
+  floor and the run sheet). `fuel_logs` **narrows** to `can_read_fleet()`, free because
+  **nothing in `src/` reads it**.
+- **A site is `admin.write`, the fleet is `fleet.write`.** `admin.write` ⊆ `fleet.write`, so
+  `linkDriverLogin` keeps working; `fleet-write-gate.test.ts` pins it and was broken from both
+  sides. **`drivers` is deliberately not narrowed to `admin.write`** — `createDriver` accepts a
+  `user_id` on `fleet.write`, so a dispatcher can already link a login through the create form;
+  that is recorded as pre-existing rather than dressed up as fixed.
+- **Two of the four are empty live** (0 vehicles, 0 fuel logs), so those halves are inert today.
+  Said plainly: "an empty table is not a proof". What is live is 1 depot and 2 drivers.
+- Live proof, all rolled back: every board write **0 rows or 42501**, its reads unchanged, and
+  **Mario Forte's own driver row still resolves** through `current_driver_id()`. The Office
+  manager runs the fleet (**1 row** each) and is refused a site; the Owner adds one and links a
+  driver login. Advisors **28**, the three additions being this migration's own helpers.
+- 1205 tests / 74 files; **596 pgTAP assertions / 31 files**. 14 of the new proof's 27 fail
+  without 0049 while the five road-reads pass in both.
+
+## Previously: a round can no longer rewrite a customer's record
 2026-09-09, on `claude/customer-record-write`. The finding the collection release deliberately
 left open, closed at the owner's instruction. One migration (`0048`), **applied live**; **no
 schema change, no capability, no role change and no screen change** — the only `src/` file is a
@@ -34,11 +68,11 @@ test. §3 has the rule, §7 the migration, §11 the apply record.
   446 sites**; the office manager renames and fixes the access notes **1 row** each. Advisors 25.
 - 1197 tests / 73 files; 569 pgTAP assertions / 30 files.
 
-**Still open and deliberately not swept up:** `depots`, `vehicles`, `drivers`, `fuel_logs` carry
-the same permissive shape. Configuration rather than a customer's record, different write sets,
-and none redirects a van — a separate decision.
+**That open item is closed by `0049`** the same day — see Latest. Working the write set out
+showed the family's exposure was sharper than this paragraph assumed: not a disclosure but a
+route into another driver's runs.
 
-## Previously: the standing weekly collection
+## Earlier: the standing weekly collection
 2026-09-08, on `claude/weekly-collection-schedule`. The owner's own description of the business —
 *"Customer gives us towels weekly, we bill monthly per item collected."* The monthly half already
 worked; **nothing anywhere recorded that a customer is collected at all.** One migration (`0047`),
