@@ -42,6 +42,11 @@ the rule, §7 the migration, §11 the apply record.
   driver login. Advisors **28**, the three additions being this migration's own helpers.
 - 1205 tests / 74 files; **596 pgTAP assertions / 31 files**. 14 of the new proof's 27 fail
   without 0049 while the five road-reads pass in both.
+- **Merged to `Prod` (`264ac38`) and `Dev` (`a57324f`)**, identical trees, clean fast-forward,
+  `Prod` never force-pushed. CI green on all three jobs for runs 308 and 309, read off the logs:
+  1205 tests, `== PASSED ==`, 53 migrations to a fresh Postgres 16, `pgTAP suite passed`, seed on
+  top. `0049` went on the hosted project six minutes before the merge. The Vercel production
+  deploy is not confirmable from here (§5), and matters least on a release that changes no screen.
 
 ## Previously: a round can no longer rewrite a customer's record
 2026-09-09, on `claude/customer-record-write`. The finding the collection release deliberately
