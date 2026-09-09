@@ -254,6 +254,32 @@ Resource-scoped beyond tenancy:
   a round that cannot is a working login with an empty screen. `customer_contacts` is
   the one that narrows, to `can_read_customers()`. The `for all` is dropped rather than
   supplemented — the 0033 trap, the **fifth** table family to need it.
+- **The fleet and the sites are read by the road and changed by the office**
+  (0049). `depots`, `vehicles`, `drivers` and `fuel_logs` are the rest of 0002's
+  `apply_tenant_policy` list, so each carried one permissive
+  `for all … using is_member(tenant_id)` policy — **the sixth and last table
+  family on that shape**. One of them is not a disclosure at all:
+  **`drivers.user_id` is the driver-scoped RLS boundary**, because
+  `current_driver_id()` resolves the caller's driver row by matching that column
+  against `auth.uid()` and the `daily_routes`/`jobs` policies narrow a
+  driver-only member to it. So any member who could UPDATE `drivers` could point
+  somebody else's row at their own login and inherit that driver's runs. Proved
+  as one of Adelaide's own `board` logins: it did exactly that, and also renamed
+  the depot, **retired** it (every site picker in the app filters
+  `status = 'active'`, so one PATCH empties all seven at once), deleted it
+  outright, and added a vehicle and a fuel log. Writes are `can_write_fleet()`
+  (`fleet.write`), except a **site**, which is `can_write_depots()`
+  (`admin.write`) — the same narrower gate `/admin/depots` has always carried.
+  **SELECT deliberately stays open on the first three**: `/run` reads the
+  caller's own `drivers` row to answer "which run is mine", the run sheet and
+  the plant's return count name the van, and the plant floor picks a depot — and
+  a driver, a board and a warehouse operator hold no `fleet.read` whatever.
+  `fuel_logs` is the one that narrows, to `can_read_fleet()`, and it is free:
+  **nothing in `src/` reads that table at all**, so it can break no screen and it
+  stops every member reading the fleet's litres and cost. None of the four is in
+  `archivable_tables()`, so the 0028 trap does not apply — asserted rather than
+  assumed, because a later migration archiving one of them would silently
+  un-hide an archived row through these policies.
 - `audit_logs` is **read by four roles and written by everybody** (0035). SELECT needs
   `super_admin`/`operations_manager`/`regional_manager`/`auditor` — the four that hold
   `admin.read`, the auditor being why it is a role list and not `admin.write`. INSERT stays open
@@ -1105,6 +1131,56 @@ produce on demand.
     line (which names `authenticated`) onto a policy helper, which would have
     broken every customer screen in the app.
 
+- `0049_fleet_and_site_write` — **the fleet and the sites are changed by the
+  office.** `can_read_fleet()` / `can_write_fleet()` / `can_write_depots()`;
+  0002's single permissive `for all` on `depots`, `vehicles`, `drivers` and
+  `fuel_logs` replaced by four explicit policies each. **Adds no table, no
+  column and no capability; changes no row.**
+  - **The sixth and last table family on that shape** (0006→0017, 0018→0033,
+    0021→0036, 0002→0040, 0002→0048), and the only one where the exposure is a
+    privilege escalation rather than a disclosure: **`drivers.user_id` is what
+    `current_driver_id()` matches on**, so a member who could write that table
+    could point another driver's row at their own login and inherit their runs.
+    Probed as one of Adelaide's own `board` logins, which did that (1 row) and
+    also renamed the depot, retired it, deleted it, and added a vehicle and a
+    fuel log.
+  - **The read splits, decided by who actually reads each table.** `depots`,
+    `vehicles` and `drivers` keep an `is_member` SELECT: `/run` and the
+    dashboard read the caller's own driver row to answer "which run is mine",
+    the run sheet and the warehouse return count embed the registration, and the
+    plant floor picks a depot — none of those roles holds `fleet.read`.
+    `fuel_logs` **narrows** to `can_read_fleet()`, which is free because
+    **nothing in `src/` reads it**: the only mention anywhere is `logFuel`'s
+    insert.
+  - **A site is narrower than the fleet**, on `admin.write` — the gate
+    `createDepot` and `updateDepotStatus` have always carried. Retiring the only
+    depot empties every site picker in the app, because all seven filter
+    `status = 'active'` (§24 records that state arriving by accident).
+  - **The write set was measured**: seven writers in `src/`, five on
+    `fleet.write` and two on `admin.write`, and `admin.write` is a strict subset
+    — so `linkDriverLogin` keeps working under the fleet gate.
+    `fleet-write-gate.test.ts` pins that containment, because if the two sets
+    part company the link writes zero rows in silence and the driver is told for
+    ever that their login is not linked yet.
+  - **Stated rather than implied: `drivers` is not narrowed to `admin.write`.**
+    `createDriver` accepts a `user_id` and is gated on `fleet.write`, so a
+    dispatcher can already link a login through the create form; gating the
+    table on `admin.write` would break three roles' use of a working screen to
+    close a door that screen leaves open. What moves is the round, the driver
+    and the plant floor, who hold neither.
+  - **The 0028 trap is asked from the other side.** None of the four is in
+    `archivable_tables()`, so there is no clause to carry — and that *premise*
+    is asserted, because a later migration archiving one of them would make
+    these policies un-hide an archived row.
+  - **Eleven assertion classes, every one confirmed to fire** against a real
+    Postgres 16: the `for all` left standing, a verb policy missing, RLS off, an
+    `anon` grant, a write verb left ungated, a depot write slipped onto the
+    fleet gate, **the driver read narrowed by mistake**, the fuel read left
+    open, a helper left on the RPC surface, a helper made *un*callable by
+    `authenticated`, and a gate answering true with no tenant. The archivable
+    premise was broken too, by redefining `archivable_tables()` to include
+    `depots`.
+
 - `0047_collection_schedule` — **the weekly round, recorded on the customer.**
   `customers.collection_weekday` (ISO 1–7) and `customers.collection_board_id`
   (`on delete set null`), `chk_customers_collection_weekday`,
@@ -1348,7 +1424,7 @@ Proofs in `supabase/tests/`: `rls_isolation`, `rls_coverage`, `driver_scope`,
 `import_activation`, `member_directory`, `boards_scope`, `item_master`,
 `audit_log_scope`, `run_sequence`, `accounts_scope`, `open_draft_invoices`,
 `single_laundry`, `charge_accounts`, `gst_inclusive`, `collection_schedule`,
-`customer_record_scope` (**569 assertions** across 30 files).
+`customer_record_scope`, `fleet_scope` (**596 assertions** across 31 files).
 
 **Count assertions, not lines starting with `ok`.** pgTAP's function is literally named `ok`, so
 psql prints a centred `ok` **column header** above each result — and `grep -c '^\s*ok '` counts
@@ -1983,6 +2059,67 @@ reports six false gaps.
   `set_records_archived`, `sync_invoice_line_account`, `tenant_members`). That is the 0042 trap
   leaving its usual trace: text typed into `apply_migration` reformatted a little against the file.
   Worth knowing before anybody reads a raw `md5(prosrc)` mismatch as drift.
+
+**`0049_fleet_and_site_write` was applied on 2026-09-09** (`20260909021744`) and is the
+ledger's last entry, **54** in all. A **narrowing**, and like 0048 one where the schema
+leading the code costs nothing: no screen changes, because every writer of these four
+tables was already gated on the capability the policy now names.
+
+- **Pre-flight:** each of the four carrying exactly **one** permissive `ALL` policy
+  (`depots_member`, `vehicles_member`, `drivers_member`, `fuel_logs_member`); none of the
+  three helpers present; RLS on all four; **0** `anon` grants across `public`; and — the
+  premise the policies rest on — **0 of the four in `archivable_tables()`**. 1 depot,
+  **0 vehicles**, 2 drivers, **0 fuel logs**, 511 customers, 649 invoices, 8 memberships.
+- **Two of the four are empty on this deployment, and that is said rather than glossed.**
+  With 0 vehicles and 0 fuel logs the van and fuel halves are inert *today* — the same
+  "an empty table is not a proof" shape 0033 and 0036 both record. What is live is the
+  **1 depot** and the **2 drivers**, which are the site every picker filters on and the
+  escalation itself.
+- **All three function bodies are byte-identical to a database built from
+  `supabase/migrations/` alone** — `16691542…`, `428249ed…`, `ea0e509d…`, matching **first
+  attempt**. Stronger still, **the whole policy set hashes identically**: name, command,
+  USING and WITH CHECK across all 16 policies, `9e090171…` on both sides. The ledger's
+  stored statement is a condensed transcription of the repo file's prose; the *objects*
+  are proved equal rather than the text.
+- **16 policies, 4 per table, one verb each; 0 permissive `for all` left.** `anon` cannot
+  execute any of the three helpers, `authenticated` can — the half that has to be true or
+  every fleet and site screen in the app errors.
+- **Proved as real sessions**, in transactions that ended by raising, re-running the exact
+  probe that found the hole — as `board2@ats.example.com`, a real `board` member:
+
+  | as a **board** | before | after |
+  |---|---|---|
+  | reads depots / drivers | 1 / 2 | **1 / 2** |
+  | rename the depot | 1 row | **0** |
+  | retire the depot | 1 row | **0** |
+  | **re-point another driver's row at its own login** | 1 row | **0** |
+  | delete the depot outright | 1 row | **0** |
+  | add a vehicle | accepted | **refused 42501** |
+  | add a fuel log | accepted | **refused 42501** |
+
+  The first row is the one to read hardest: the run sheet is **unchanged**. And
+  **Mario Forte** — the one real board login that *is* linked to a driver row — still
+  reads his own driver row, still resolves through `current_driver_id()`, and still reads
+  the depot name, so `/run` answers exactly as it did.
+- **The office is unaffected, which matters as much as the refusals.** The Office manager
+  adds a van, books it in for a service, marks a driver on leave, logs a tank of fuel and
+  reads it back — **1 row each** — and is **refused a site (42501)**, which is the
+  narrower gate working. The Owner adds a site, renames one, and **links a login to a
+  driver** (1 row), which is the containment `linkDriverLogin` depends on.
+- **Advisors are 28**, up from 25, and all three additions are this migration's own
+  helpers — the documented SECURITY DEFINER shape, internally scoped to `auth.uid()`
+  through `has_role`, and the exact counterparts of `can_write_items` and
+  `can_read_purchases` already on the list. **0** `anon` table grants and **0** tables
+  without RLS.
+- Counts unchanged either side: 1 depot, 0 vehicles, 2 drivers, 0 fuel logs, 511
+  customers, 649 invoices, 254 items, 8 memberships.
+
+**`board2@`, `board3@` and `board4@ats.example.com` hold `board` memberships**, which
+corrects the note below: it says all four hold none, and that is true only of `board1@`,
+whose membership went when Mario Forte replaced it as Board 1 (§24). `board2@` is what the
+probes above ran as, so this is provenance rather than trivia — a probe as a login with no
+membership reads 0 of everything whatever the policies say, which is the vacuous pass the
+0045 record caught.
 
 **`0048_customer_record_write` was applied on 2026-09-09** (`20260909005641`) and is the
 ledger's last entry, **53** in all. A **narrowing**, and the one release where the schema
@@ -3064,6 +3201,108 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-09-09 · A round could hand itself another driver's runs, and now cannot
+The four tables 0048 named as a separate decision, decided. One migration (`0049`);
+**no schema change, no capability, no role change, no screen change and no row
+altered.** §3 has the rule, §7 the migration, §11 the apply record.
+
+**`depots`, `vehicles`, `drivers` and `fuel_logs` are the rest of 0002's
+`apply_tenant_policy` list** — the sixth and last table family on the shape this
+schema has now replaced five times. Each carried one permissive
+`for all … using is_member(tenant_id)` policy, whose USING half grants the writes
+as well as SELECT.
+
+**One of the four is a privilege escalation rather than a disclosure, and it is
+why this went ahead of the other three.** `drivers.user_id` is what
+`current_driver_id()` matches against `auth.uid()`, and the `daily_routes` and
+`jobs` policies narrow a driver-only member to the row it returns. So any member
+who could UPDATE that table could point somebody else's driver row at their own
+login and inherit that driver's runs, stops and paperwork. Re-probed as
+`board2@ats.example.com`, a real `board` member of this laundry, before anything
+was written and rolled back:
+
+| what a delivery round could do | rows |
+|---|---|
+| **Point another driver's row at its own login** | 1 |
+| Rename the depot | 1 |
+| **Retire** the depot — every site picker in the app filters `status = 'active'` | 1 |
+| **Delete** the depot outright | 1 |
+| Add a vehicle, and a fuel log against it | accepted |
+
+- **The depot is the loud one and the driver row is the dangerous one.** Retiring
+  the only site leaves the customer, contract, driver, board, vehicle, inventory
+  and route-template forms all offering nothing to pick — §24 records that exact
+  state arriving by accident on 2026-08-26 and how it read. The `user_id` write
+  is quieter and worse: nothing on any screen would show it had happened.
+- **Two of the four are empty on this deployment**, so the van and fuel halves are
+  inert today. Said plainly rather than counted as a save: "an empty table is not
+  a proof" is the sentence 0033 and 0036 both had to write, and the fix is
+  forward-looking there and live on the depot and the two driver rows.
+- **Nothing in the app changes.** All seven writers in `src/` were already gated
+  on the capability the policy now names — five on `fleet.write`, two on
+  `admin.write` — so the screens were right and the tables were not. There is no
+  `src/` change in this release beyond a test.
+
+**Three reads stay open, and each is decided by who actually reads that table.**
+- `drivers` — **decisive**. `/run` and the dashboard's own card read the caller's
+  driver row to answer "which run is mine", and `/jobs` embeds the name under
+  `routes.read`. A driver and a board hold no `fleet.read` at all, so narrowing
+  this tells a linked driver that their login is not linked — on a screen whose
+  only other advice is to link it.
+- `depots` and `vehicles` — the plant floor picks a depot on `/warehouse` and
+  `/inventory`, and its return count embeds the registration; it holds no
+  `admin.read` and no `fleet.read` either.
+- `fuel_logs` **narrows**, to `can_read_fleet()`, and it is the one that costs
+  nothing: **no screen in the app reads that table**, so the only thing the
+  change can do is stop every member reading the fleet's litres and cost.
+
+**A site is gated more narrowly than the fleet**, on `admin.write` — what
+`/admin/depots` has always required — while vehicles, drivers and fuel logs are
+`fleet.write`. `admin.write` is `super_admin` alone and a strict subset, so
+`linkDriverLogin` keeps working under the wider gate; `fleet-write-gate.test.ts`
+pins that containment, because if the two sets part company the link writes zero
+rows in silence.
+
+**Stated rather than implied: `drivers` is not narrowed to `admin.write`.**
+`createDriver` accepts a `user_id` and is gated on `fleet.write`, so a dispatcher
+can already link a login through the create form today. Gating the table on
+`admin.write` would break three roles' use of a working screen to close a door
+that same screen leaves open, and a trigger on the column alone would either
+break the create form or be walked around by using it. So the escalation this
+closes is the round's, the driver's and the plant floor's — and the dispatcher's
+own ability is recorded as pre-existing rather than dressed up as fixed.
+
+- **1205 unit tests across 74 files (was 1197/73)** and **596 pgTAP assertions
+  across 31 files (was 569/30)**. `verify` green, and the whole DB job on a fresh
+  Postgres 16 — all 53 migrations, the suite, and the seed on top.
+- **Every guard was proved to catch its defect.** Eleven migration assertion
+  classes broken one at a time against a real Postgres, plus the archivable
+  premise broken by redefining `archivable_tables()`. The pgTAP proof run against
+  a database built **without** 0049, where **14 of its 27 fail by name** while the
+  five road-reads pass in both — the property that must not move. The seam test
+  was broken from **both** sides: a role dropped from the migration's array, a
+  board added to it, the driver read narrowed, and a board handed `fleet.write`
+  in `roles.ts` all fail it.
+- **One mutation MISSED first time and was re-run honestly.** Adding
+  `authenticated` to a helper's revoke line applies clean, because the explicit
+  grant two lines later puts it back. The regression that would really happen is
+  a *trigger* function's revoke copied whole — which names `authenticated` and
+  carries no compensating grant, because a trigger function never needs one. That
+  produces `0049 did not apply cleanly: a fleet helper is not callable by
+  authenticated`. The same shape 0048's record had to correct.
+
+**Applied to `laundrymart-syd` on 2026-09-09** as `20260909021744`, the ledger's
+54th entry, and proved as real sessions afterwards. Every write a round could make
+is now **0 rows or a 42501**, while it still reads the depot and both drivers and
+Mario Forte's own driver row still resolves; the Office manager still runs the
+fleet (**1 row** each) and is refused a site; the Owner still adds one and links a
+driver login. Advisors 28, the three additions being this migration's own helpers.
+§11 has the table.
+
+**That is the whole of 0002's `apply_tenant_policy` list now gated.** Six table
+families, five migrations, one shape — a permissive `for all` policy whose USING
+half grants every verb. Nothing in `public` carries it any more.
+
 ### 2026-09-09 · A delivery round could rewrite a customer's record, and now cannot
 The finding the collection-schedule release turned up and deliberately did not patch, closed
 at the owner's instruction. One migration (`0048`); **no schema change, no capability, no
@@ -3148,7 +3387,9 @@ each. Advisors 25, the two additions being this migration's own helpers. §11 ha
 are the rest of 0002's `apply_tenant_policy` list and carry the same permissive shape. They are
 configuration rather than a customer's record, the write sets are different questions, and none
 of them holds a note that redirects a van — so they are a separate decision and not a line to
-add here.
+add here. **Taken the same day, by `0049`** — and the decision turned up something this
+paragraph did not anticipate: `drivers.user_id` is the driver-scoped RLS boundary, so that
+family's exposure is an escalation into another driver's runs rather than a disclosure.
 
 **Merged to `Prod` (`6aa98d6`) and `Dev` (`025d2a9`) on 2026-09-09**, both holding identical trees.
 `Prod` was a clean fast-forward and was never force-pushed. **CI green on all three jobs for both
