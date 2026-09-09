@@ -3287,6 +3287,37 @@ lives**, and turning it on makes Supabase check every new or changed password ag
 HaveIBeenPwned. It is the twenty-eighth advisory; the other 27 are the documented permission
 helpers that are meant to be callable.
 
+**Merged to `Prod` (`9559680`) on 2026-09-09**, a clean fast-forward — `origin/Prod` was an
+ancestor of the branch, so there was nothing to reconcile and `Prod` was never force-pushed. Four
+files, 482 insertions and 388 deletions, of which the lockfile is 729 lines and `package.json`
+twenty; the other two are this record.
+
+- **CI green on all three jobs** — run 312, read off the logs rather than the statuses, which is
+  the lesson this file records six times over. Verify: typecheck, lint, **1205 tests across 74
+  files**, the production build on **Next.js 16.3.4**, `== PASSED ==`. The DB job applying all
+  **53** migrations to a fresh Postgres 16, `pgTAP suite passed`, and `supabase/seed.sql`
+  committing on top of the fresh schema. Security: gitleaks strict, and
+  `npm audit --audit-level=high` reporting **0 vulnerabilities** — the assertion this release
+  turns on, since that step carries `continue-on-error` and cannot fail a build either way.
+- **The elapsed time was read off the runner's own step timestamps**, per the trap seven earlier
+  entries record: Verify ran 13:04:06 → 13:05:16, seventy seconds, its ordinary duration.
+- **Nothing to apply.** No migration; `git diff` over `supabase/` against the previous `Prod` head
+  is empty, and the live ledger's last entry is still `0049_fleet_and_site_write`.
+- **Dependabot closed both pull requests itself and opened a fifth offering two minutes later.**
+  #62 and #63 are closed unmerged — `Prod` moved only by this fast-forward, so neither could have
+  been merged — and **#68** now carries the same two blocked pins with `vitest` **5.0.0** and
+  `@types/react-dom` 19.2.7 beside them. That changes the shape of the question rather than
+  repeating it: vitest 5 is a major that requires Node 22 and Vite 6.4, clears mocks before each
+  test by default and removes the `sequential` option, so it wants a look of its own rather than
+  being taken as a rider on a pin re-test. The pins themselves are unmoved — check
+  `typescript-eslint`'s peer range first, as §10a now says.
+- **`Dev` is one release behind and carries no source change of its own** — **0** non-merge commits
+  `Prod` lacks, and the whole tree difference is this release's four files. The standing catch-up
+  drift the last several entries record, unchanged by this.
+- **The Vercel production deploy is not confirmable from this session**, a tooling limit rather
+  than a configuration one (§5). It matters little here: no source file changed, so what deploys
+  is the same application on newer dependencies.
+
 ### 2026-09-09 · A round could hand itself another driver's runs, and now cannot
 The four tables 0048 named as a separate decision, decided. One migration (`0049`);
 **no schema change, no capability, no role change, no screen change and no row

@@ -34,8 +34,19 @@ rule to test. §10a has the evidence, §18 the entry.
   with `eslint-config-next`; `nanoid` needed `postcss` 8.5.26 → **8.5.28**, pinned back only by the
   lockfile. Proved not introduced by the production bump by diffing package sets either side of it.
 - `verify` green on the final tree: typecheck, lint, 1205 tests / 74 files, production build.
-- **Not merged.** Two commits sit on the feature branch; `Prod` and `Dev` are untouched. CI runs on
-  those two branches only, so nothing has been built in CI yet.
+- **Merged to `Prod` (`9559680`)**, a clean fast-forward, never force-pushed. **CI run 312 green on
+  all three jobs**, read off the logs: 1205 tests / 74 files and the build on Next.js 16.3.4,
+  `pgTAP suite passed` over 53 migrations plus the seed, and `npm audit` **0 vulnerabilities** —
+  which is the assertion, since that step is `continue-on-error`. Verify took 70s, read off the
+  runner's own timestamps. **Nothing to apply**: no migration, ledger still at
+  `0049_fleet_and_site_write`.
+- **Dependabot closed #62 and #63 itself and opened #68 two minutes later** — the same two blocked
+  pins, now with **`vitest` 5.0.0** and `@types/react-dom` 19.2.7. Vitest 5 is a major (needs Node
+  22 and Vite 6.4, clears mocks before each test, drops `sequential`), so it is its own decision
+  rather than a rider on a pin re-test. **Check `typescript-eslint`'s peer range before installing
+  anything.**
+- **`Dev` is one release behind**, carrying **0** non-merge commits `Prod` lacks — the standing
+  catch-up drift, not divergence.
 
 ## Previously: a round could hand itself another driver's runs, and now cannot
 2026-09-09, on `claude/driver-instructions-invoice-fixes-1q42fb`. The four tables 0048 named
