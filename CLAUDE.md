@@ -3458,7 +3458,19 @@ a configuration one (§5). Read it in the Vercel dashboard — and on this relea
 actually reading, because `engines.node` is what tells Vercel to build on 22 and a runner left on
 20 would fail the gate, fall through to `next build` and deploy silently.
 
-**`Dev` was not touched**, so it is one release behind and holds the previous `Prod` tree.
+**`Dev` was brought up the same hour** (`60087a9`), so the two branches hold identical trees —
+`git diff HEAD origin/Prod` is empty. A merge commit rather than a fast-forward, because `Dev`'s own
+history is fourteen earlier catch-up merges; the one non-merge commit it carries that `Prod` lacks
+(`6df2f15`, the collection-lookup batching) was proved to be the **same patch** as `Prod`'s
+cherry-picked `4384780` by diffing the two, so nothing conflicted and the only tree change the merge
+took was this release's five files. **The gate was re-run on the merged tree rather than assumed from
+`Prod`'s run** — CI run 327, all three jobs green and read off the logs: `verify.sh` 11:21:43 →
+11:22:38, fifty-five seconds, carrying the same **1233 tests across 76 files**, the production build
+on **Next.js 16.3.4** and `== PASSED ==`; the DB job's `pgTAP suite passed` over all 54 migrations
+with `supabase/seed.sql` committing on top of the fresh schema; gitleaks strict and the audit clean.
+Both parents are recorded on the merge commit, which is the 2026-08-26 trap where a mid-merge
+`git checkout` cleared `MERGE_HEAD` and GitHub then read the result as conflicted. The standing
+catch-up drift the last several entries record is closed.
 
 ### 2026-09-10 · A collection becomes a laundry job, exactly once
 The loop §33 recorded as *"the obvious next piece of work and is not built"*. One migration

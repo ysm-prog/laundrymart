@@ -28,13 +28,16 @@ write names its tenant.
 - **On `Prod` at `d1b8ad6`**, a clean fast-forward, nothing to apply. **CI run 324 is the first
   this repo has made at Node 22** and was read off the logs: the six `EBADENGINE` warnings and the
   six Node 20 deprecation notices are **gone**, 1233 tests across 76 files, Next.js 16.3.4,
-  `pgTAP suite passed`, 0 vulnerabilities. `verify.sh` ran seventy seconds. `Dev` is one behind.
+  `pgTAP suite passed`, 0 vulnerabilities. `verify.sh` ran seventy seconds.
   **Read the Vercel deploy in the dashboard**: `engines.node` is what puts that build on 22.
 - **Still blocked, settled without installing**: `typescript-eslint@8.70.0` declares
   `typescript: >=4.8.4 <6.1.0`, so TS 7 stays out. ESLint 10 wants the nested-copy experiment
   §10a records. `@types/react-dom` 19.3.0 left alone deliberately.
-- **CI is unproven**: `ci.yml` triggers on `Prod`/`Dev` only, so a feature branch runs none. The
-  first real `setup-node@v7` at 22 is on the merge — read the logs, not the statuses.
+- **`Dev` is level** (`60087a9`, a merge because Dev's own history is fourteen catch-up merges;
+  `git diff HEAD origin/Prod` empty). Its one non-merge commit `Prod` lacks, `6df2f15`, is the
+  same patch as Prod's cherry-picked `4384780`. Gate re-run on the merged tree, not assumed:
+  **CI run 327** green on all three, `verify.sh` 11:21:43 → 11:22:38 (fifty-five seconds, off the
+  runner's own step timestamps), 1233/76, Next 16.3.4, `pgTAP suite passed`, seed committed.
 
 ## Previously: a collection becomes a laundry job, exactly once
 2026-09-10, on `claude/driver-instructions-invoice-fixes-1q42fb`. The loop §33 recorded as *"the
