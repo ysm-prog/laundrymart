@@ -1615,11 +1615,22 @@ saying the gate had stopped running.
   `vi.mock`, `vi.fn` or `vi.spyOn` at all** — 0 files, because every test is over a pure rule; and
   it drops the `sequential` option, which `vitest.config.mts` never set. The one file that touches
   the test runtime at all is `adelaide.test.ts` with `vi.useFakeTimers()`, and it passes.
-- **It is a smaller install, not a larger one.** 575 → **568** packages, measured as package sets
+- **It is a smaller install, not a larger one.** **576 → 569** packages, measured as package sets
   per the rule below: vitest 5 absorbs `@vitest/expect`, `@vitest/runner`, `@vitest/snapshot`,
   `@vitest/utils` and `@vitest/pretty-format` into itself. `vite` did not move (8.2.2, already
   inside vitest 5's `^6.4.0 || ^7.0.0 || ^8.0.0` peer), and neither did anything in the production
   bundle — every change is `dev: true`.
+  - **State the method with the number, because there are at least three and they disagree.**
+    A package set is the distinct `name@version` over `package-lock.json`'s `packages` map, root
+    excluded — 576 → 569. Counting *paths* in that map instead gives 584 → 578, counting distinct
+    *names* gives 540 → 532, and npm's own `npm ci` summary line reports 470 audited, because it
+    omits optional packages the platform does not install. Only the first is comparable across
+    bumps, which is what §10a's rule means by package sets.
+  - **This entry first said 575 → 568, and the commit message on `d1b8ad6` still does.** Both
+    figures were one low; the **delta of 7 was right**, which is the part the paragraph is
+    actually claiming. Recorded rather than quietly swapped, for the reason §7 gives about the
+    inflated pgTAP count: a number corrected in silence is one the next reader has no cause to
+    re-check.
 - **All 1233 tests across 76 files pass with no source change**, on a clean `npm ci`.
 
 **Both pins were re-tested on 2026-08-26 rather than taken on trust, and both still hold.**
@@ -3399,8 +3410,9 @@ are deprecated"* notices. Nobody had read them as anything but noise. Both sets 
 - **The deprecation notice was read at its source rather than assumed away**:
   `shouldShowDeprecationWarning()` in `@supabase/supabase-js` ends `return majorVersion <= 20`, so
   it cannot fire on 22.
-- **A smaller install, not a larger one** — 575 → **568** packages, measured as package sets per
-  §10a rather than off the diff's line count. vitest 5 absorbs `@vitest/expect`, `@vitest/runner`,
+- **A smaller install, not a larger one** — **576 → 569** packages, measured as package sets per
+  §10a rather than off the diff's line count. (First recorded as 575 → 568, one low on both
+  sides; the delta of 7 was right. §10a has the correction and the three rival ways to count.) vitest 5 absorbs `@vitest/expect`, `@vitest/runner`,
   `@vitest/snapshot`, `@vitest/utils` and `@vitest/pretty-format`; `rolldown` went 1.2.5 → 1.2.8
   and `vite` did not move at all, already inside vitest 5's peer range. Every change is
   `dev: true`, so **nothing in the production bundle moved**.
@@ -3417,11 +3429,36 @@ regenerating the lockfile — an experiment of its own, deliberately not made a 
 bump. `@types/react-dom` 19.3.0 is available and was **left alone on purpose**: a types bump in
 the same commit would muddy what this one proves.
 
-**What is not proved from here: CI itself.** `ci.yml` triggers on `Prod` and `Dev` only, so a
-feature branch runs no CI at all — the Node 22 change is proved on this container's Node 22.22.2
-and against the registry's own metadata, and the first real run of `setup-node@v7` at 22 happens
-on the merge. **Before trusting it, read that run's logs rather than its statuses**, which is the
-lesson this file records seven times over.
+**Merged to `Prod` (`d1b8ad6`) on 2026-09-10**, a clean fast-forward — `origin/Prod` was an
+ancestor of the branch (0 behind, 1 ahead), so there was nothing to reconcile and `Prod` was never
+force-pushed. **Nothing to apply**: no migration, and `git diff` over `supabase/` against the
+previous `Prod` is empty, so the live ledger's last entry is still `0050_pickup_to_job`.
+
+**This is the first CI run this repository has ever made at Node 22, and it was read rather than
+assumed** — run 324, all three jobs green, off the logs rather than the statuses.
+- **The six `EBADENGINE` warnings are gone**, which is the assertion this release turns on. The
+  `npm ci` step now prints one warning, the pre-existing `eslint@9.39.5` support notice from the
+  pin §10a holds back, and `found 0 vulnerabilities`. **The six "Node.js 20 and below are
+  deprecated" notices are gone from the build output too.**
+- Verify: typecheck, lint, **1233 tests across 76 files**, the production build on **Next.js
+  16.3.4**, `== PASSED ==`. `verify.sh` ran 11:09:43 → 11:10:53, **seventy seconds**, its ordinary
+  duration — read off the runner's own step timestamps, per the trap seven earlier entries record.
+- Security: gitleaks strict, and `npm audit --audit-level=high` reporting **0 vulnerabilities**.
+- DB: all 54 migrations to a fresh Postgres 16, **`pgTAP suite passed`**, and `supabase/seed.sql`
+  committing on top of the fresh schema. The assertion count is unchanged at 612 across 32 files
+  **by the diff rather than by the log** — `supabase/` is byte-identical to the previous `Prod`,
+  so the DB job did exactly the work run 323 did; the suite verdict is what was actually read.
+- **vitest 5 prints one new advisory this suite did not have before**: 76 workers spawned at
+  ~137ms each, *"at least ~3.33s faster with `isolate: false`"*. Deliberately not taken — worker
+  reuse across files trades the per-file isolation the suite currently has for three seconds, and
+  this repo's tests are cheap. Worth knowing before somebody reads it as a defect.
+
+**The Vercel production deploy is not confirmable from this session**, a tooling limit rather than
+a configuration one (§5). Read it in the Vercel dashboard — and on this release it is worth
+actually reading, because `engines.node` is what tells Vercel to build on 22 and a runner left on
+20 would fail the gate, fall through to `next build` and deploy silently.
+
+**`Dev` was not touched**, so it is one release behind and holds the previous `Prod` tree.
 
 ### 2026-09-10 · A collection becomes a laundry job, exactly once
 The loop §33 recorded as *"the obvious next piece of work and is not built"*. One migration

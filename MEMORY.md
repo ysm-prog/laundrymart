@@ -22,8 +22,14 @@ write names its tenant.
 - **Six `@supabase/*` packages already required `>=22`** — that is the six `EBADENGINE` install
   warnings and six "Node.js 20 is deprecated" build notices, now gone. Gate read at source:
   `shouldShowDeprecationWarning()` ends `return majorVersion <= 20`.
-- **575 → 568 packages** (vitest 5 absorbs its own `@vitest/*` helpers); `vite` unmoved, all
-  `dev: true`, nothing in the production bundle. Whole gate green on a clean `npm ci`, 0 vulns.
+- **576 → 569 packages** (vitest 5 absorbs its own `@vitest/*` helpers); `vite` unmoved, all
+  `dev: true`, nothing in the production bundle. First recorded as 575 → 568, one low on both
+  sides — the delta of 7 was right, and §10a now states which of the three rival counts is meant.
+- **On `Prod` at `d1b8ad6`**, a clean fast-forward, nothing to apply. **CI run 324 is the first
+  this repo has made at Node 22** and was read off the logs: the six `EBADENGINE` warnings and the
+  six Node 20 deprecation notices are **gone**, 1233 tests across 76 files, Next.js 16.3.4,
+  `pgTAP suite passed`, 0 vulnerabilities. `verify.sh` ran seventy seconds. `Dev` is one behind.
+  **Read the Vercel deploy in the dashboard**: `engines.node` is what puts that build on 22.
 - **Still blocked, settled without installing**: `typescript-eslint@8.70.0` declares
   `typescript: >=4.8.4 <6.1.0`, so TS 7 stays out. ESLint 10 wants the nested-copy experiment
   §10a records. `@types/react-dom` 19.3.0 left alone deliberately.
