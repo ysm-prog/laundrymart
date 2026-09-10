@@ -44,6 +44,13 @@ and no existing row altered.** §4 has the rule, §7 the migration, §33 the des
   — the weekly schedule landed two days ago and creates the *stops* (1, none worked). This closes a
   gap before it bites. **Check on `ats.coreit.com.au`: record a pickup, press Take in, confirm the
   counts arrive filled in and the collection then reads as taken in.**
+- **Merged to `Prod` (`5526e9e`) on 2026-09-10**, a clean fast-forward (0 behind, 2 ahead); never
+  force-pushed. **CI run 319 green on all three jobs, read off the logs** — 1233 tests across 76
+  files, the build on Next.js 16.3.4, `pgTAP suite passed` over 54 migrations with **612 assertions
+  across 32 files and 0 `not ok`**, the seed on top, gitleaks strict and 0 vulnerabilities.
+  `verify.sh` ran 05:26:14 → 05:26:54, forty seconds, read off the runner's own timestamps.
+  **Nothing left to apply** — 0050 went on the hosted project seventy minutes earlier. `Dev` is now
+  one release behind, holding a tree identical to the previous `Prod`.
 
 ## Previously: the dependency backlog cleared, and both advisories with it
 2026-09-09, on `claude/driver-instructions-invoice-fixes-1q42fb`, restarted from `Prod` because its

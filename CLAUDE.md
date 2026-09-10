@@ -3463,6 +3463,29 @@ record a pickup with a few items counted, then press Take in on Operations › C
 check the counts arrive already filled in — and that the same collection then reads as taken in
 rather than offering the press a second time.**
 
+**Merged to `Prod` (`5526e9e`) on 2026-09-10**, a clean fast-forward — `origin/Prod` was an
+ancestor of the branch (0 behind, 2 ahead), so there was nothing to reconcile and `Prod` was never
+force-pushed. Two commits: the loop itself, and the re-read that batched the collection lookup and
+keyed the skipped lines by position.
+
+- **CI green on all three jobs** — run 319, read off the logs rather than the statuses, which is
+  the lesson this file records six times over. Verify: typecheck, lint, **1233 tests across 76
+  files**, the production build on **Next.js 16.3.4**, `== PASSED ==`. The DB job applying all
+  **54** migrations to a fresh Postgres 16 — **612 `ok <n> - ` assertions across 32 proof files,
+  0 `not ok`, no plan mismatch**, `pgTAP suite passed` — and `supabase/seed.sql` committing on top
+  of the fresh schema. Security: gitleaks strict, and the install reporting **0 vulnerabilities**.
+- **The elapsed time was read off the runner's own step timestamps**, per the trap seven earlier
+  entries record: `verify.sh` ran 05:26:14 → 05:26:54, **forty seconds**, at the quick end of its
+  ordinary duration.
+- **Nothing to apply.** `0050` went on the hosted project at 04:15Z, seventy minutes before the
+  merge — load-bearing here rather than conventional, because the job page embeds the collection
+  through the new foreign key and the seeding page reads the new column, both at request time.
+  The live ledger's last entry is still `0050_pickup_to_job`.
+- **The Vercel production deploy is not confirmable from this session**, a tooling limit rather
+  than a configuration one (§5). Read it in the Vercel dashboard.
+- **`Dev` is one release behind**, holding a tree identical to the previous `Prod`. The standing
+  catch-up drift, not divergence.
+
 ### 2026-09-09 · The dependency backlog cleared, and both advisories with it
 Two Dependabot pull requests had been open since 2 September and were a week behind `Prod`.
 **No migration; no schema, RLS, capability, policy, route or business rule change** — `git diff`
