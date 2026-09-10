@@ -520,6 +520,23 @@ key remains the way to reset or re-assert them through the Auth API, but nothing
   work billable again, which is what voiding is for. Archiving (0017) hides a job and the
   invoice lines that bill it in the same call, so the two halves of this check can never
   disagree — the generator reads both through the RLS-bound client.
+- **A collection is taken in exactly once, for the customer it was collected from**
+  (`uq_laundry_orders_source_pickup` and `guard_laundry_order_pickup_source`, 0050). A
+  `pickups` row moves *inventory* and bills nobody; it becomes money when somebody takes it
+  in as a laundry job and prices it per item code. `laundry_orders.source_pickup_id` is the
+  record of that, and the index is what makes "once" a fact rather than a convention — since
+  0040 the charges join a *running* draft and merge into one line per item, so a second
+  take-in shows up not as two entries but as a quantity that is quietly double. Partial, so
+  **cancelling the job releases the collection**: a take-in against the wrong customer has to
+  be undoable without stranding the work, which is `uq_invoice_source_jobs_once`'s own
+  reasoning. The guard additionally refuses another laundry's collection and one from a
+  different customer, and names the job when it refuses a duplicate.
+  **What crosses from the collection is `quantity` and nothing else.** The damaged and
+  missing counts are already billed straight off `pickup_lines` as replacement charges, and
+  `total_weight_kg` already feeds a contract's `per_kg` lines — so carrying either onto the
+  job would bill the same lost towel, or the same kilogram, twice on one invoice. The bag
+  count is left behind too: it counts bags where the job's rows count items.
+  `lib/domain/pickup-intake.ts` is that rule, pure and tested.
 - **A job's laundry names an item, and the item decides what kind of laundry it is**
   (`sync_laundry_item_type`, 0032). `item_type` is what three pricing tiers, every report and
   every pre-0032 row match on; `item_id` is the coded item.
@@ -656,6 +673,17 @@ that parted them fails a test rather than quietly showing a round every business
 laundry. This does **not** reopen the Runs module the 2026-08-14 simplification removed:
 nobody creates a run, opens one or reads a run code, and `nav.test.ts` still asserts that no
 rail href starts with `/routes/`.
+
+**A collection becomes money on the Collections list** (2026-09-10). `/operations/pickups`
+gained a *Taken in* column: the job number where a collection has been taken in as laundry,
+and a **Take in** press where it has not — which is also the answer to "what have we collected
+and not yet billed?", a question nothing could previously ask. The press lands on
+`/orders/new?pickup=<id>`, the ordinary job form seeded from the collection. Both the column
+and the press are drawn per **capability** rather than per screen: the list is gated on
+`operations.read`, which a board and a driver hold and neither of which implies taking laundry
+in, so those roles get no column at all and the extra read is skipped with it. The same press
+sits on the stop's own Pickup card. `roles.test.ts` pins `orders.write` inside `orders.read`,
+so the two sets parting company fails a test rather than offering a link that can only bounce.
 
 **"My Runs" (`/my-runs`) is a board's whole workspace**: the jobs assigned to that round for a
 date it chooses, grouped To deliver / Out for delivery / Completed, in the order the office set
@@ -1181,6 +1209,46 @@ produce on demand.
     premise was broken too, by redefining `archivable_tables()` to include
     `depots`.
 
+- `0050_pickup_to_job` — **a collection becomes a laundry job, exactly once.**
+  `laundry_orders.source_pickup_id` (`on delete set null`),
+  `uq_laundry_orders_source_pickup` (partial unique) and
+  `guard_laundry_order_pickup_source()` with its trigger. **Adds no table, no
+  policy and no capability; drops nothing and changes no row** — one nullable
+  column with no default, so every existing job reads "not taken in from a
+  collection".
+  - **One column, not a table**, because a job is taken in from at most one
+    collection — the call 0047 made about the weekday one release earlier. It is
+    not `invoice_source_jobs`, which is many-to-one and earns its table.
+  - **"Once" has to be a database fact.** Since 0040 an approved job's charges
+    join the customer's *running* monthly draft and merge into one line per
+    item, so a collection taken in twice does not appear as two entries anybody
+    could spot — it appears as a quantity that is quietly double. A screen that
+    looks first is a race: two counter hands with the same list open both find
+    nothing and both save.
+  - **Partial, and `cancelled` is outside it.** A job taken in against the wrong
+    customer is cancelled, and the collection is then still sitting there needing
+    to be taken in — the same shape `uq_invoice_source_jobs_once` uses so voiding
+    an invoice releases its jobs. An **archived** job stays inside the index:
+    archiving hides records rather than undoing them.
+  - The guard makes the refusals every foreign reference written from a form in
+    this schema makes (0039, 0044, 0045, 0047), plus two of its own — the
+    collection must be **the same customer's** (a job pointing at somebody else's
+    would put one customer's linen on another's invoice) and must not already be
+    on a live job, said **with the job number**, because 23505 on the index
+    reaches the toast as *"that value is already in use"*.
+  - **SECURITY DEFINER, which strengthens it**: the duplicate check has to see a
+    job the caller's RLS hides, and an invoker-rights read would come back empty —
+    indistinguishable from "not taken in yet". 0044's reasoning when it rebuilt
+    `guard_job_charge_snapshot`. Revoked from `public, anon` **and
+    `authenticated`** — the trap 0019 recorded and 0036 shipped.
+  - Twelve self-assertion classes, every one confirmed to fire against a real
+    Postgres 16: the column made non-nullable or dropped, a **second** FK to
+    `pickups` (which would make the job page's embed ambiguous and kill the read
+    with PGRST201), the FK made `restrict`, the index made non-unique, the index
+    made non-partial, the trigger detached, the guard made INVOKER, the guard put
+    back on the RPC surface, 0025's restrictive write layer dropped, the archive
+    clause stripped, RLS disabled, and an `anon` grant.
+
 - `0047_collection_schedule` — **the weekly round, recorded on the customer.**
   `customers.collection_weekday` (ISO 1–7) and `customers.collection_board_id`
   (`on delete set null`), `chk_customers_collection_weekday`,
@@ -1424,7 +1492,7 @@ Proofs in `supabase/tests/`: `rls_isolation`, `rls_coverage`, `driver_scope`,
 `import_activation`, `member_directory`, `boards_scope`, `item_master`,
 `audit_log_scope`, `run_sequence`, `accounts_scope`, `open_draft_invoices`,
 `single_laundry`, `charge_accounts`, `gst_inclusive`, `collection_schedule`,
-`customer_record_scope`, `fleet_scope` (**596 assertions** across 31 files).
+`customer_record_scope`, `fleet_scope`, `pickup_intake` (**612 assertions** across 32 files).
 
 **Count assertions, not lines starting with `ok`.** pgTAP's function is literally named `ok`, so
 psql prints a centred `ok` **column header** above each result — and `grep -c '^\s*ok '` counts
@@ -2095,8 +2163,51 @@ reports six false gaps.
   leaving its usual trace: text typed into `apply_migration` reformatted a little against the file.
   Worth knowing before anybody reads a raw `md5(prosrc)` mismatch as drift.
 
-**`0049_fleet_and_site_write` was applied on 2026-09-09** (`20260909021744`) and is the
-ledger's last entry, **54** in all. A **narrowing**, and like 0048 one where the schema
+**`0050_pickup_to_job` was applied on 2026-09-10** (`20260910041516`) and is the ledger's
+last entry, **55** in all. Additive — one nullable column with no default — and applied
+**before the code merged**, which matters here rather than being conventional: the job page
+embeds the collection through the new foreign key and the seeding page selects the new column,
+both at request time where their absence is a browser error rather than a compile one.
+
+- **Pre-flight:** the column, the index and the guard all absent; **0** foreign keys from
+  `laundry_orders` to `pickups`, so the one this adds is provably the only one; 0025's **3**
+  restrictive write policies present; **0** `anon` grants across `public`. 18 laundry jobs,
+  511 customers, 254 items, 649 invoices, 1 laundry — and **0 pickups and 0 pickup lines**.
+- **Both objects are byte-identical to a database built from `supabase/migrations/` alone** —
+  the guard body `29ff1f53…` and the index definition `906bfdef…`, matching **first attempt**,
+  unlike 0042 where two characters in a comment had to be bisected out.
+- **Applied directly rather than rehearsed**, the recorded practice for this shape: it carries
+  twelve self-assertion classes and `apply_migration` is atomic, so a failed assertion rolls
+  the whole thing back. It returned clean, so all of them held. Read back after: 1 FK, `on
+  delete set null`, the index unique and partial, the guard SECURITY DEFINER and callable by
+  **neither** `anon` nor `authenticated`.
+- **Then proved as real sessions**, in a transaction that ended by raising — and it had to
+  create its own collection, because this deployment has never captured one. As
+  `cmignone219@gmail.com` (`operations_manager`, a real member and **not** a platform admin):
+
+  | | outcome |
+  |---|---|
+  | takes a collection in | **1 row** |
+  | takes the same one in again | refused — *"that collection has already been taken in as PROBE0001"* |
+  | takes in another customer's collection | refused — *"that collection was from a different customer…"* |
+  | cancels the job | **1 row** |
+  | takes the released collection in again | **1 row** |
+  | a **board** takes laundry in | refused **42501** |
+  | a **board** reads collections | **0** |
+
+  The row counts are the assertions that matter: a restrictive policy refusing a caller writes
+  **zero rows with no error**, the silence this project has shipped twice, so "1 row" is the
+  only thing that distinguishes a working gate from a broken one. Nothing survived the
+  rollback — 0 probe jobs, 0 probe stops, 0 pickups, and 18/15/511/649/254 unchanged.
+- **Advisors are 28, unchanged** — 27 documented SECURITY DEFINER helpers plus the auth
+  leaked-password toggle. `guard_laundry_order_pickup_source` is **absent**, so the revoke
+  naming `authenticated` held: the trap 0019 recorded and 0036 shipped. **0** `anon` table
+  grants and **0** tables in `public` without RLS.
+- **0 jobs carry a collection**, which is the honest state: there is nothing to link to yet.
+  The first one is created on `ats.coreit.com.au`.
+
+**`0049_fleet_and_site_write` was applied on 2026-09-09** (`20260909021744`) and was the
+ledger's last entry until the above, **54** in all. A **narrowing**, and like 0048 one where the schema
 leading the code costs nothing: no screen changes, because every writer of these four
 tables was already gated on the capability the policy now names.
 
@@ -3236,6 +3347,145 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-09-10 · A collection becomes a laundry job, exactly once
+The loop §33 recorded as *"the obvious next piece of work and is not built"*. One migration
+(`0050`), one nullable column, one partial unique index and one guard; **no policy, no
+capability, no role change, and no existing row altered.** §4 has the rule, §7 the migration,
+§33 the design, §11 the apply record.
+
+**A collection moves stock and bills nobody.** A driver captures it on `/run`, which writes
+`pickups` + `pickup_lines` and calls `move_inventory()`; what a customer *pays* still comes
+from a laundry job raised at the counter and priced per item code. So every collection had to
+be re-typed by somebody reading a driver's counts off another screen — and a collection nobody
+re-typed was never billed at all, silently, with no list anywhere of what had been collected
+and not yet charged for.
+
+**The argument for it is in this laundry's own data: all 18 of its laundry jobs say
+`received_via = 'driver_pickup'`.** Every one was typed by hand. The loop is what the counter
+has been doing eighteen times over without the app knowing the two ends were the same work.
+
+- **Take in** sits on the Collections list and on the stop's own Pickup card, and lands on
+  `/orders/new?pickup=<id>` — the **ordinary job form**, seeded. `createOrder` is untouched
+  apart from carrying the link, so laundry is still taken in through one door: one gate, one
+  job number, one atomic item save.
+- **A form and not one press**, which is a decision rather than a shortcut. A collection
+  carries no promised return date and `chk_laundry_orders_delivery_date` requires one when the
+  job is a delivery; the counter is who knows it, and the door count and what the plant
+  actually receives are not always the same number.
+
+**Only `quantity` crosses, and that is the whole safety property.** Read out of
+`invoices/actions.ts` rather than assumed: the month-end run already bills
+`pickup_lines.damaged_quantity` and `missing_quantity` as replacement charges, and
+`pickups.total_weight_kg` already feeds a contract's `per_kg` lines through
+`allocateWeightCharges`. Carrying either onto the job would put the same lost towel, or the
+same kilogram, on the same invoice twice. The pickup's bag count is left behind too — it counts
+bags where the job's rows count items. `PICKUP_INTAKE_EXCLUSIONS` says so **on the seeded
+form**, where somebody would otherwise notice the totals do not add up and re-type them.
+
+**"Taken in once" is a database fact, not a screen remembering.** Since 0040 an approved job's
+charges join the customer's *running* monthly draft and merge into one line per item, so a
+collection taken in twice does not appear as two entries anybody could spot — it appears as a
+quantity that is quietly double. A screen that looks first is a race: two counter hands with
+the same list open both find nothing and both save. `uq_laundry_orders_source_pickup` is what
+makes it true; the guard is what makes the ordinary case a sentence naming the job instead of
+*"that value is already in use"*.
+
+- **Partial, so cancelling releases it.** A take-in against the wrong customer is cancelled and
+  the collection is then still sitting there needing to be taken in — `uq_invoice_source_jobs_once`'s
+  own reasoning, where voiding an invoice releases its jobs. The reader agrees with the index
+  exactly, and a test compares the two: a reader that counted cancelled jobs would hide a link
+  the database would accept, and one that ignored the clause would offer a link it refuses.
+- **The guard's own rule is the customer**, not the duplicate: a job pointing at somebody
+  else's collection would put one customer's linen on another's invoice with nothing on either
+  screen showing it. That is the integrity check the column exists to make possible.
+- **Every line is answered — carried, or named with a reason.** A line that simply disappears
+  is indistinguishable from one that was never collected. An item with no `laundry_category` is
+  carried as `other` described by its own name rather than dropped: 129 of this laundry's 254
+  items have none (§25 — they are the things it buys), the item **code** is what prices the row
+  either way, and refusing a real count over a blank field on another screen is the wrong trade.
+
+**The two entry points are drawn per capability, not per screen.** The Collections list is
+gated on `operations.read` and the stop on `routes.read`; a board and a driver hold those and
+take nothing in, so they get no column, no link and no extra query — the read is skipped with
+it. `roles.test.ts` pins `orders.write` inside `orders.read`, so the two sets parting company
+fails a test rather than offering a press that can only bounce off the auth gate.
+
+- **1233 unit tests across 76 files (was 1205/74)** and **612 pgTAP assertions across 32 files
+  (was 596/31)**. `verify` green, and the whole DB job on a fresh Postgres 16 — all 54
+  migrations, the suite, and the seed on top.
+- **Every new guard was proved to catch its defect**, not assumed to be doing something. Three
+  mutations of the pure rule (carrying `damaged_quantity` into the count, dropping the
+  description an uncategorised item needs, dropping a skipped line silently) each fail their
+  own assertions. Five mutations of the wiring (the form posting a different field name, the
+  link carried through `toRow`, a read losing its tenant filter, the reader disagreeing with
+  the partial index, the take-in offered to every role) each fail theirs. Twelve migration
+  assertion classes broken one at a time against a real Postgres 16 — including a **second** FK
+  to `pickups`, which would make the job page's embed ambiguous and kill the read with PGRST201
+  at request time. And the pgTAP proof run against a database built **without** 0050, where it
+  dies on the missing column, plus three targeted mutations: the duplicate check removed (2
+  fail), the customer check removed (1), and the index made plain-unique (3, including the one
+  that says cancelling releases the collection).
+- **One assertion in the pure rule is written the way it is because of what it defends**: it
+  asserts every seeded row survives `validateItem` with an item code required — the validator
+  `createOrder` actually runs. A rule emitting a row the form then refuses would be a pre-filled
+  screen that cannot be saved and says nothing useful about why.
+- **Re-reading the diff caught the same URL-length shape the collection schedule hit two days
+  earlier.** "Which of these collections are on a job?" was one `.in()` over a page of up to
+  200 uuids — ~7.5 kB of query string, since supabase-js sends a filtered read as a GET. Inside
+  most limits and not by much, and failing only on a busy day. Batched at 100, so the read stays
+  O(1) in the number of rows and bounded in the size of the request.
+
+**Nothing is added to `/design-preview`, and that is deliberate rather than an omission.** This
+release adds no component: the seeded form is `JobForm`, already in the gallery, and everything
+around it is `Notice` and `Link`, also already there. A *second* `JobForm` fixture would emit
+about twenty duplicate DOM ids — the defect class this file records twice — to show a state that
+differs only in pre-filled values.
+
+**Applied to `laundrymart-syd` on 2026-09-10** as `20260910041516`, the ledger's 55th entry, and
+**before the code merged** — the order every release since 2026-08-18 records, and load-bearing
+here rather than conventional: the job page embeds the collection through the new foreign key and
+the seeding page reads the new column, both at request time where no typecheck can see their
+absence. §11 has the record; the short version is that both object hashes matched a database
+built from `supabase/migrations/` alone **first attempt**, and the behaviour was then proved as
+real sessions in a transaction that ended by raising — the office took a collection in (**1
+row**), a second take-in was refused *"that collection has already been taken in as PROBE0001"*,
+another customer's collection was refused by its own sentence, cancelling released it and the
+next take-in landed (**1 row**), and a **board** was refused **42501**. Nothing survived the
+rollback.
+
+**The loop is inert on this deployment today, and saying so is the honest part.** There are **0
+pickups** and **0 pickup lines**: no collection has ever been captured, because the standing
+weekly collection landed two days ago and creates the *stops* (1 so far, none worked). So this
+closes a gap before it has bitten rather than after — which is the opposite of how the last
+several entries in this file came about, and worth the note because "an empty table is not a
+proof" cuts both ways. **Before trusting it: on `ats.coreit.com.au` open a collection stop,
+record a pickup with a few items counted, then press Take in on Operations › Collections and
+check the counts arrive already filled in — and that the same collection then reads as taken in
+rather than offering the press a second time.**
+
+**Merged to `Prod` (`5526e9e`) on 2026-09-10**, a clean fast-forward — `origin/Prod` was an
+ancestor of the branch (0 behind, 2 ahead), so there was nothing to reconcile and `Prod` was never
+force-pushed. Two commits: the loop itself, and the re-read that batched the collection lookup and
+keyed the skipped lines by position.
+
+- **CI green on all three jobs** — run 319, read off the logs rather than the statuses, which is
+  the lesson this file records six times over. Verify: typecheck, lint, **1233 tests across 76
+  files**, the production build on **Next.js 16.3.4**, `== PASSED ==`. The DB job applying all
+  **54** migrations to a fresh Postgres 16 — **612 `ok <n> - ` assertions across 32 proof files,
+  0 `not ok`, no plan mismatch**, `pgTAP suite passed` — and `supabase/seed.sql` committing on top
+  of the fresh schema. Security: gitleaks strict, and the install reporting **0 vulnerabilities**.
+- **The elapsed time was read off the runner's own step timestamps**, per the trap seven earlier
+  entries record: `verify.sh` ran 05:26:14 → 05:26:54, **forty seconds**, at the quick end of its
+  ordinary duration.
+- **Nothing to apply.** `0050` went on the hosted project at 04:15Z, seventy minutes before the
+  merge — load-bearing here rather than conventional, because the job page embeds the collection
+  through the new foreign key and the seeding page reads the new column, both at request time.
+  The live ledger's last entry is still `0050_pickup_to_job`.
+- **The Vercel production deploy is not confirmable from this session**, a tooling limit rather
+  than a configuration one (§5). Read it in the Vercel dashboard.
+- **`Dev` is one release behind**, holding a tree identical to the previous `Prod`. The standing
+  catch-up drift, not divergence.
+
 ### 2026-09-09 · The dependency backlog cleared, and both advisories with it
 Two Dependabot pull requests had been open since 2 September and were a week behind `Prod`.
 **No migration; no schema, RLS, capability, policy, route or business rule change** — `git diff`
@@ -3669,7 +3919,8 @@ board's run*.
   captured on `/run` writes `pickups` and `pickup_lines`, which move *inventory*; nothing bills
   from them. What is collected is still taken in at the counter and priced per item — how all 18
   of this laundry's jobs are already raised. Turning a captured pickup into a priced laundry job
-  is the obvious next piece and is **not built**.
+  is the obvious next piece and is **not built**. *(Built on 2026-09-10 by `0050` — see that
+  entry. The 18 hand-typed jobs are the argument for it: every one says `driver_pickup`.)*
 - **A delivery and a collection on one day are one visit.** `findOrCreateStop` widens an existing
   stop to `both` rather than adding a second call; widening is the only direction, because
   narrowing would take a capture screen away from work somebody else had booked.
@@ -10336,13 +10587,29 @@ using the app a round remembers; with 451 active ones it will not.
   delivery — so a pre-created collection *job* would sit on no round and appear on nobody's
   screen. A `jobs` row with `service_type = 'pickup'` is the shape the app already had:
   `/run` offers the collection capture for it and works with no signal.
-- **The loop to money is deliberately not automated, and saying so is the point.** A pickup
-  captured on `/run` writes `pickups` + `pickup_lines`, which move *inventory*; nothing bills
-  from them. What is collected is taken in at the counter as a laundry job and priced per
-  item, which is how all of this laundry's jobs are already raised. The screen says that
-  under the button rather than leaving it to be discovered. **Closing it — turning a
-  captured pickup into a priced laundry job — is the obvious next piece of work and is not
-  built.**
+- **The loop to money is closed, and it is a seeded form rather than a button** (0050,
+  2026-09-10). A pickup captured on `/run` writes `pickups` + `pickup_lines`, which move
+  *inventory* and bill nobody; what is collected becomes money when somebody takes it in as a
+  laundry job and prices it per item code. **Take in** on the Collections list and on the stop
+  seeds the ordinary job form — the customer, `driver_pickup`, the collection date, the driver,
+  and one laundry row per counted line — and the counter confirms it and presses Save, so
+  `createOrder` stays the one door laundry is taken in through. A form and not one press
+  because a collection carries no promised return date and `chk_laundry_orders_delivery_date`
+  requires one; the counter is who knows it. **This entry read "deliberately not automated…
+  not built" until 0050**, which is what it was: the counts had to be re-typed off another
+  screen, and a collection nobody re-typed was never billed, silently.
+  - **Only `quantity` crosses.** Damaged and missing are already billed off `pickup_lines` as
+    replacement charges and `total_weight_kg` already feeds a contract's `per_kg` lines, so
+    carrying either would bill the same loss twice on one invoice; the bag count is left
+    behind because it counts bags where the job's rows count items. Said on the seeded form
+    itself (`PICKUP_INTAKE_EXCLUSIONS`), where somebody would otherwise notice the totals do
+    not add up and re-type them.
+  - **Every line is answered — carried, or named with a reason.** A line that simply
+    disappears is indistinguishable from one that was never collected. An item with no
+    `laundry_category` is carried as `other` described by its own name rather than dropped:
+    129 of 254 items have none, the item **code** is what prices the row either way, and
+    refusing a real count over a blank field on another screen is the wrong trade.
+  - **Taken in once, and cancelling releases it** — §4 and 0050.
 - **`collectionDueState` is four answers rather than a boolean**, because they want three
   different actions on two different screens: `on_the_run`, `ready`, `no_round`, `paused`.
   The same call `UNPRICED_REASON_TEXT` makes about laundry nobody can price.

@@ -469,3 +469,33 @@ describe("the chart of accounts (0037)", () => {
     }
   });
 });
+
+describe("taking a collection in as laundry (0050)", () => {
+  /*
+   * The Collections list and the stop page both offer "Take in", which lands on
+   * `/orders/new` — gated on `orders.write` — and, once a collection is on a
+   * job, a link to `/orders/:id`, gated on `orders.read`. Both screens are
+   * themselves gated more widely (`operations.read` and `routes.read`), so the
+   * links are drawn per capability rather than per screen.
+   */
+  it("keeps every take-in offer inside the roles that can open where it lands", () => {
+    // If these two sets ever part company, the Collections list would offer a
+    // press that ends on `/dashboard?error=forbidden` — a link that can only
+    // ever fail, on the screen the loop is worked from.
+    for (const role of rolesWith("orders.write")) {
+      expect(can(role, "orders.read"), role).toBe(true);
+    }
+  });
+
+  it("offers it to nobody who cannot take laundry in", () => {
+    // A board and a driver read both screens — the Collections list on
+    // `operations.read`, the stop on `routes.read` — and take nothing in. They
+    // get no link and no extra query rather than a disabled control.
+    for (const role of ["driver", "board", "warehouse_operator"] as const) {
+      expect(can(role, "orders.write"), role).toBe(false);
+    }
+    // The counter is the point of the whole loop: they are who takes the
+    // collection in and prices it (§26, restored 2026-08-24).
+    expect(can("customer_service", "orders.write")).toBe(true);
+  });
+});

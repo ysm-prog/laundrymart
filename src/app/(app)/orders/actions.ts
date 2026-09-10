@@ -77,6 +77,14 @@ const orderSchema = z.object({
   special_instructions: optionalText,
   priority: z.enum(ORDER_PRIORITIES),
   assigned_to: optionalUuid,
+  /**
+   * The collection this job is being taken in from (0050), when the form was
+   * seeded from one. **Deliberately absent from `toRow`**, so it is written by
+   * `createOrder` and by nothing else: where a job came from is a fact about the
+   * moment it was taken in, and an edit that could move or clear it would let
+   * one collection be taken in twice by pointing the first job elsewhere.
+   */
+  source_pickup_id: optionalUuid,
 });
 
 type OrderInput = z.infer<typeof orderSchema>;
@@ -348,6 +356,12 @@ export async function createOrder(formData: FormData): Promise<void> {
       // no default, so every single insert died on the constraint instead.
       order_number: orderNumber as string,
       status: "new",
+      // Written here and only here. The guard refuses another laundry's
+      // collection, one from a different customer, and one already on a live
+      // job — the last by name, because 23505 on the unique index behind it
+      // reaches the toast as "that value is already in use", which is true and
+      // useless to somebody holding a docket.
+      source_pickup_id: parsed.data.source_pickup_id ?? null,
     })
     .select("id, order_number")
     .single();
@@ -376,6 +390,9 @@ export async function createOrder(formData: FormData): Promise<void> {
       items: items.length,
       delivery_required: parsed.data.delivery_required,
       priority: parsed.data.priority,
+      // On the timeline because "where did these counts come from?" is the first
+      // question about a job nobody remembers typing.
+      ...(parsed.data.source_pickup_id ? { from_collection: true } : {}),
     },
   });
   await recordAudit(session, {
@@ -384,7 +401,12 @@ export async function createOrder(formData: FormData): Promise<void> {
   });
 
   revalidatePath(LIST);
-  return done(`/orders/${order.id}`, `Job ${order.order_number} created.`);
+  return done(`/orders/${order.id}`, parsed.data.source_pickup_id
+    // Says the link landed, which is the one thing the counter cannot see on the
+    // job they are about to be shown and the thing that stops it being taken in
+    // a second time.
+    ? `Job ${order.order_number} created from the collection.`
+    : `Job ${order.order_number} created.`);
 }
 
 /* ----------------------------------------------------------------- update */

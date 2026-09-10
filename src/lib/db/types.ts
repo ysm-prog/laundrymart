@@ -610,6 +610,16 @@ export type LaundryOrder = {
   billing_approved_by: Uuid | null;
   /** Why this job is out of the billing queue. Required unless it was cancelled. */
   billing_exclusion_reason: string | null;
+
+  /**
+   * The collection this job was taken in from (0050).
+   *
+   * Null on a job typed at the counter, which is every job written before that
+   * migration. A partial unique index makes it once per collection, and cancelling
+   * the job releases it — see `lib/domain/pickup-intake.ts` for what does and, more
+   * importantly, does *not* cross from the collection onto the job.
+   */
+  source_pickup_id: Uuid | null;
 };
 
 export type LaundryOrderItem = {

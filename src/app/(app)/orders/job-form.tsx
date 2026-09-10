@@ -14,11 +14,11 @@ import {
   DELIVERY_WINDOWS, DELIVERY_WINDOW_LABELS, ITEM_TYPES, ITEM_TYPE_LABELS,
   ORDER_PRIORITIES, PRIORITY_LABELS, QUANTITY_TYPES, QUANTITY_TYPE_LABELS,
   RECEIVED_VIA_LABELS, describeItem, initialDeliveryRequired, initialReceivedVia,
-  receivedViaOptions, type ReceivedVia,
+  receivedViaOptions, type OrderItemInput, type ReceivedVia,
 } from "@/lib/domain/laundry-orders";
 import { customerStatusNeedsSaying } from "@/lib/domain/customers";
 import { businessToday, toZonedDate } from "@/lib/domain/timezone";
-import type { LaundryOrder, LaundryOrderItem } from "@/lib/db/types";
+import type { LaundryOrder } from "@/lib/db/types";
 
 /**
  * Taking laundry in, on one screen.
@@ -64,6 +64,25 @@ export type JobCustomer = {
 export type JobDriver = { id: string; full_name: string };
 export type JobStaff = { id: string; label: string; role: string };
 
+/**
+ * A job the form is being *started* from rather than editing.
+ *
+ * Today that is a collection a driver captured on `/run` (0050): the customer,
+ * how the laundry arrived, who collected it and what was counted at the door,
+ * carried onto the ordinary form so the counter confirms it and presses Save.
+ *
+ * Deliberately **not** an `order`. Passing a half-built `LaundryOrder` would put
+ * the form into editing mode — it would post an `id` and call `updateOrder` — so
+ * the two are separate props and only one of them is ever set.
+ */
+export type JobSeed = {
+  received_via: string;
+  pickup_date: string | null;
+  pickup_driver_id: string | null;
+  /** The collection this job is taken in from, posted back as the link. */
+  source_pickup_id: string;
+};
+
 type ItemRow = {
   key: number;
   /** The item master row, or "" for a row entered as a bare kind of laundry. */
@@ -106,7 +125,7 @@ function numberOrNull(value: string): number | null {
 
 export function JobForm({
   action, customerAction, customers, drivers, staff,
-  order, items, catalogue = [], defaultCustomerId, canBackdate, returnPath,
+  order, items, seed, catalogue = [], defaultCustomerId, canBackdate, returnPath,
 }: {
   action: (formData: FormData) => Promise<void>;
   /** The existing `createCustomer` action — this module adds no customer flow. */
@@ -115,7 +134,15 @@ export function JobForm({
   drivers: JobDriver[];
   staff: JobStaff[];
   order?: LaundryOrder;
-  items?: LaundryOrderItem[];
+  /**
+   * The laundry rows to start from: the ones stored on the job being edited, or
+   * the ones a collection seeded. `LaundryOrderItem` is assignable to this, so
+   * the edit page is unchanged — what the shape drops is `id` and `order_id`,
+   * which a row that does not exist yet has neither of.
+   */
+  items?: OrderItemInput[];
+  /** Set only when starting a job from a collection; never alongside `order`. */
+  seed?: JobSeed;
   /**
    * The laundry's item master, code-first. Empty for a laundry that has not set
    * one up, which is why the kind-of-laundry select stays.
@@ -150,7 +177,12 @@ export function JobForm({
   }
   const [query, setQuery] = useState("");
   const [quickCreate, setQuickCreate] = useState(false);
-  const [receivedVia, setReceivedVia] = useState<string>(() => initialReceivedVia(order));
+  // A seeded job answers with what the collection said — it was collected by a
+  // driver, on a day, by a named one — while an edit still answers with what the
+  // job stores. `order` wins where both are somehow set, because a stored answer
+  // is a fact and a seed is a suggestion.
+  const arrival = order ?? seed;
+  const [receivedVia, setReceivedVia] = useState<string>(() => initialReceivedVia(arrival));
   const [deliveryRequired, setDeliveryRequired] = useState(() => initialDeliveryRequired(order));
   const [deliveryWindow, setDeliveryWindow] = useState<string>(
     order?.delivery_window ?? "no_specific_time",
@@ -231,7 +263,7 @@ export function JobForm({
 
   // The two real answers, plus whatever an older job already holds, so editing
   // one taken in under a retired option cannot rewrite how it arrived.
-  const receivedViaChoices = receivedViaOptions(order?.received_via);
+  const receivedViaChoices = receivedViaOptions(arrival?.received_via);
 
   return (
     <>
@@ -254,6 +286,11 @@ export function JobForm({
         <input type="hidden" name="items" value={itemsPayload} />
         <input type="hidden" name="return_to" value={returnPath} />
         <input type="hidden" name="customer_id" value={customerId} />
+        {/* The collection this job is taken in from (0050). Posted rather than
+            re-derived, so `createOrder` writes the link in the same statement
+            that writes the job — and refused by the guard if it ever names
+            another customer's collection or one already taken in. */}
+        {seed ? <input type="hidden" name="source_pickup_id" value={seed.source_pickup_id} /> : null}
         {deliveryRequired ? <input type="hidden" name="delivery_required" value="on" /> : null}
         {customAddress ? <input type="hidden" name="use_custom_address" value="on" /> : null}
 
@@ -447,12 +484,12 @@ export function JobForm({
             {receivedVia === "driver_pickup" ? (
               <>
                 <Field label="Pickup date" name="pickup_date" hint="Optional.">
-                  <Input name="pickup_date" type="date" defaultValue={order?.pickup_date ?? undefined} />
+                  <Input name="pickup_date" type="date" defaultValue={arrival?.pickup_date ?? undefined} />
                 </Field>
                 <Field label="Collected by" name="pickup_driver_id" className="sm:col-span-2"
                        hint="Your existing drivers.">
                   <Select name="pickup_driver_id" placeholder="Not recorded"
-                          defaultValue={order?.pickup_driver_id}
+                          defaultValue={arrival?.pickup_driver_id ?? undefined}
                           options={drivers.map((driver) => ({ value: driver.id, label: driver.full_name }))} />
                 </Field>
               </>
