@@ -9,7 +9,43 @@ where that is genuinely what it is. The multi-tenancy architecture stays: one op
 fact about today's data, not a reason to drop `tenant_id`, RLS, or §23's rule that a read feeding a
 write names its tenant.
 
-## Latest: the dependency backlog cleared, and both advisories with it
+## Latest: a collection becomes a laundry job, exactly once
+2026-09-10, on `claude/driver-instructions-invoice-fixes-1q42fb`. The loop §33 recorded as *"the
+obvious next piece of work and is not built"*. One migration (`0050`), **applied live**; one
+nullable column, one partial unique index, one guard — **no policy, no capability, no role change
+and no existing row altered.** §4 has the rule, §7 the migration, §33 the design, §11 the record.
+
+- **A collection moves stock and bills nobody.** `/run` writes `pickups` + `pickup_lines` and
+  calls `move_inventory()`; what a customer *pays* comes from a laundry job priced per item code.
+  So every collection had to be re-typed off another screen, and one nobody re-typed was never
+  billed, silently. **All 18 of this laundry's jobs say `driver_pickup`** — the loop, done by hand
+  eighteen times.
+- **Take in** on the Collections list and the stop's Pickup card → `/orders/new?pickup=<id>`, the
+  **ordinary job form**, seeded. `createOrder` is untouched apart from carrying the link. A form
+  and not one press because `chk_laundry_orders_delivery_date` needs a return date and only the
+  counter knows it.
+- **Only `quantity` crosses.** Damaged and missing are already billed off `pickup_lines` as
+  replacement charges and `total_weight_kg` already feeds `per_kg` contract lines — carrying either
+  would bill the same loss twice on one invoice. Bag count too: it counts bags, the job's rows count
+  items. `PICKUP_INTAKE_EXCLUSIONS` says so **on the form**.
+- **Once is a database fact.** Since 0040 the charges join a *running* draft and merge into one line
+  per item, so a second take-in is not two entries — it is a quantity quietly doubled. Partial index,
+  so **cancelling releases the collection** (`uq_invoice_source_jobs_once`'s reasoning). The guard
+  also refuses another customer's collection, and names the job when it refuses a duplicate.
+- **1233 tests / 76 files** (was 1205/74) and **612 pgTAP assertions / 32 files** (was 596/31).
+  `verify` green; whole DB job on a fresh Postgres 16 with all 54 migrations and the seed.
+- **Every guard proved to catch its defect**: 3 mutations of the pure rule, 5 of the wiring, 12
+  migration assertion classes, and the proof run without 0050 plus 3 targeted mutations.
+- **Applied live before the merge** as `20260910041516`, ledger's 55th. Both object hashes matched a
+  local build **first attempt**. Proved as real sessions, rolled back: office **1 row**, second
+  take-in refused *by job number*, another customer's refused, cancel → release → **1 row**, a
+  **board** refused **42501**. Advisors 28, unchanged. Nothing survived.
+- **Inert today, said plainly: 0 pickups and 0 pickup lines.** No collection has ever been captured
+  — the weekly schedule landed two days ago and creates the *stops* (1, none worked). This closes a
+  gap before it bites. **Check on `ats.coreit.com.au`: record a pickup, press Take in, confirm the
+  counts arrive filled in and the collection then reads as taken in.**
+
+## Previously: the dependency backlog cleared, and both advisories with it
 2026-09-09, on `claude/driver-instructions-invoice-fixes-1q42fb`, restarted from `Prod` because its
 previous pull request was already merged. **No migration; `git diff` over `src/` and `supabase/` is
 empty**, and 1205 tests / 596 pgTAP assertions are unchanged in count — a dependency bump adds no
@@ -49,7 +85,7 @@ rule to test. §10a has the evidence, §18 the entry.
   commits `Prod` lacks. CI run 316 green on all three jobs, **re-run on the merged tree rather than
   assumed** from Prod's: 1205 tests across 74 files, `pgTAP suite passed`, `== PASSED ==`.
 
-## Previously: a round could hand itself another driver's runs, and now cannot
+## Earlier: a round could hand itself another driver's runs, and now cannot
 2026-09-09, on `claude/driver-instructions-invoice-fixes-1q42fb`. The four tables 0048 named
 as a separate decision, decided. One migration (`0049`), **applied live**; **no schema change,
 no capability, no role change and no screen change** — the only `src/` file is a test. §3 has

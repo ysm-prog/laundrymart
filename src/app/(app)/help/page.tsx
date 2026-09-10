@@ -130,7 +130,11 @@ const GLOSSARY: Array<{ term: string; also?: string; meaning: string }> = [
   },
   {
     term: "Collection", also: "pickup",
-    meaning: "Dirty linen taken from a customer, counted at the door, with anything damaged or missing recorded on the spot.",
+    meaning: "Dirty linen taken from a customer, counted at the door, with anything damaged or missing recorded on the spot. A collection moves your stock; it does not charge anybody until somebody takes it in as a job.",
+  },
+  {
+    term: "Taken in",
+    meaning: "A collection turned into a customer laundry job, so it can be priced and billed. Press Take in on the Collections list and the counts the driver made are already filled in — check them, say when it goes back, and save. Each collection can only be taken in once.",
   },
   {
     term: "Delivery",

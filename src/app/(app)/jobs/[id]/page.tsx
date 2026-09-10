@@ -1,4 +1,5 @@
 import { Suspense } from "react";
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireCapability } from "@/lib/auth/context";
 import { createClient } from "@/lib/supabase/server";
@@ -14,6 +15,7 @@ import { MediaUploadField } from "@/components/media-upload-field";
 import { ProofOfService } from "@/components/proof-of-service";
 import { parseExceptionNotes } from "@/lib/exceptions";
 import { EXCEPTION_REASONS } from "../exception-reasons";
+import { takenInByPickup } from "@/lib/runs/pickup-intake";
 import { flagException, recordDelivery, recordPickup, setJobProgress } from "../actions";
 
 export const dynamic = "force-dynamic";
@@ -129,7 +131,8 @@ export default async function JobDetailPage({
 
       {doesPickup ? (
         <Suspense fallback={<SkeletonRows rows={4} />}>
-          <PickupSection jobId={id} writable={writable} tenantId={session.tenantId} />
+          <PickupSection jobId={id} writable={writable} tenantId={session.tenantId}
+                       canTakeIn={can(session.role, "orders.write")} />
         </Suspense>
       ) : null}
 
@@ -180,9 +183,11 @@ async function activeItems() {
 }
 
 async function PickupSection({
-  jobId, writable, tenantId,
+  jobId, writable, tenantId, canTakeIn,
 }: {
   jobId: string; writable: boolean; tenantId: string;
+  /** `orders.write` — a board and a driver read this screen and take nothing in. */
+  canTakeIn: boolean;
 }) {
   const supabase = await createClient();
   const [{ data: pickups }, items] = await Promise.all([
@@ -196,6 +201,13 @@ async function PickupSection({
   ]);
 
   const itemName = new Map(items.map((item) => [item.id, item.name]));
+
+  // A collection moves inventory and bills nothing until it is taken in as a
+  // laundry job and priced per item — the loop 0050 closes. One read for the
+  // whole card, and skipped for a role that cannot act on the answer.
+  const takenIn = canTakeIn
+    ? await takenInByPickup(supabase, tenantId, (pickups ?? []).map((pickup) => pickup.id))
+    : new Map<string, { id: string; orderNumber: string }>();
 
   return (
     <Card title="Pickup" description="Dirty linen collected from the customer.">
@@ -220,6 +232,7 @@ async function PickupSection({
                 ]}
               />
               {pickup.notes ? <p className="mt-2 text-sm text-muted-foreground">{pickup.notes}</p> : null}
+              {canTakeIn ? <TakeInLink pickupId={pickup.id} job={takenIn.get(pickup.id)} /> : null}
               <ProofOfService
                 photoPaths={pickup.photo_urls}
                 signaturePath={pickup.signature_url}
@@ -398,5 +411,38 @@ function CountGrid({
         </tbody>
       </table>
     </div>
+  );
+}
+
+/**
+ * The collection, as laundry the customer is billed for.
+ *
+ * `pickups` and `pickup_lines` move *inventory* and bill nothing (§33), so until
+ * somebody takes a collection in as a job and prices it per item code it is
+ * linen the laundry holds and money it does not. This is where that press lives
+ * on the stop; the Collections list carries the same one for a whole day at once.
+ */
+function TakeInLink({
+  pickupId, job,
+}: {
+  pickupId: string; job?: { id: string; orderNumber: string };
+}) {
+  return (
+    <p className="mt-2 text-sm">
+      {job ? (
+        <>
+          Taken in as{" "}
+          <Link href={`/orders/${job.id}`}
+                className="inline-flex min-h-9 items-center font-medium text-primary hover:underline">
+            {job.orderNumber}
+          </Link>
+        </>
+      ) : (
+        <Link href={`/orders/new?pickup=${pickupId}`}
+              className="inline-flex min-h-9 items-center font-medium text-primary hover:underline">
+          Take this in as laundry
+        </Link>
+      )}
+    </p>
   );
 }

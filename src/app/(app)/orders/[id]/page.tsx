@@ -1,4 +1,5 @@
 import { Suspense } from "react";
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireCapability } from "@/lib/auth/context";
 import { createClient } from "@/lib/supabase/server";
@@ -38,6 +39,8 @@ type Detail = LaundryOrder & {
   } | null;
   drivers: { full_name: string } | null;
   assigned_board: { id: string; name: string } | null;
+  /** The collection this job was taken in from (0050), where it was. */
+  source_pickup: { job_id: string; pickup_date: string | null } | null;
 };
 
 export async function generateMetadata({
@@ -72,7 +75,12 @@ export default async function JobDetailPage({
       // assignment), so a bare `drivers(...)` embed is rejected by PostgREST at
       // request time. The board embed is named by the same habit.
       "drivers!laundry_orders_pickup_driver_id_fkey(full_name), " +
-      "assigned_board:boards!laundry_orders_assigned_board_id_fkey(id, name)",
+      "assigned_board:boards!laundry_orders_assigned_board_id_fkey(id, name), " +
+      // Where this job's counts came from. `laundry_orders` has exactly one
+      // foreign key to `pickups` — asserted by 0050, because a second would make
+      // this embed ambiguous and kill the whole read with PGRST201 at request
+      // time, where no typecheck and no unit test can see it.
+      "source_pickup:pickups!laundry_orders_source_pickup_id_fkey(job_id, pickup_date)",
     )
     .eq("id", id)
     .maybeSingle<Detail>();
@@ -310,6 +318,23 @@ export default async function JobDetailPage({
                     met a field the forms no longer have. */}
                 <Row label="Collected by" value={order.drivers?.full_name} />
               </>
+            ) : null}
+            {/* Where the counts came from, which is the first question about a
+                job nobody remembers typing — and the way back to the driver's
+                own note, the bags and the signature, none of which is copied
+                onto the job. */}
+            {order.source_pickup ? (
+              <div className="flex justify-between gap-4">
+                <dt className="text-muted-foreground">Taken in from</dt>
+                <dd className="min-w-0 text-right font-medium break-words">
+                  <Link href={`/jobs/${order.source_pickup.job_id}`}
+                        className="inline-flex min-h-9 items-center text-primary hover:underline">
+                    {order.source_pickup.pickup_date
+                      ? `The collection on ${formatDate(order.source_pickup.pickup_date)}`
+                      : "The collection"}
+                  </Link>
+                </dd>
+              </div>
             ) : null}
             {delivery ? (
               <>
