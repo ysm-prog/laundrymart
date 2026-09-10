@@ -3311,9 +3311,16 @@ twenty; the other two are this record.
   test by default and removes the `sequential` option, so it wants a look of its own rather than
   being taken as a rider on a pin re-test. The pins themselves are unmoved — check
   `typescript-eslint`'s peer range first, as §10a now says.
-- **`Dev` is one release behind and carries no source change of its own** — **0** non-merge commits
-  `Prod` lacks, and the whole tree difference is this release's four files. The standing catch-up
-  drift the last several entries record, unchanged by this.
+- **`Dev` was brought up on 2026-09-10** (`1526696`), so the two branches hold identical trees —
+  `git diff origin/Dev origin/Prod` is empty and `Dev` carries **0** non-merge commits `Prod`
+  lacks. A merge commit rather than a fast-forward, because `Dev`'s own history is ten earlier
+  catch-up merges; nothing conflicted, and the only tree change it took was this release's four
+  files. **The gate was re-run on the merged tree rather than assumed from `Prod`'s run** — CI
+  run 316, all three jobs green and read off the logs: `verify.sh` 00:07:53 → 00:09:04, its
+  ordinary seventy-one seconds, carrying **1205 tests across 74 files**, the production build on
+  **Next.js 16.3.4** and `== PASSED ==`; the DB job's `pgTAP suite passed` over all 53 migrations
+  with the seed committing on top of the fresh schema; gitleaks strict and the audit clean. The
+  standing catch-up drift the last several entries record is closed.
 - **The Vercel production deploy is not confirmable from this session**, a tooling limit rather
   than a configuration one (§5). It matters little here: no source file changed, so what deploys
   is the same application on newer dependencies.

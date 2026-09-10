@@ -45,8 +45,9 @@ rule to test. §10a has the evidence, §18 the entry.
   22 and Vite 6.4, clears mocks before each test, drops `sequential`), so it is its own decision
   rather than a rider on a pin re-test. **Check `typescript-eslint`'s peer range before installing
   anything.**
-- **`Dev` is one release behind**, carrying **0** non-merge commits `Prod` lacks — the standing
-  catch-up drift, not divergence.
+- **`Dev` is level with `Prod` again** (`1526696`, 2026-09-10) — identical trees, **0** non-merge
+  commits `Prod` lacks. CI run 316 green on all three jobs, **re-run on the merged tree rather than
+  assumed** from Prod's: 1205 tests across 74 files, `pgTAP suite passed`, `== PASSED ==`.
 
 ## Previously: a round could hand itself another driver's runs, and now cannot
 2026-09-09, on `claude/driver-instructions-invoice-fixes-1q42fb`. The four tables 0048 named
