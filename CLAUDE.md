@@ -1570,6 +1570,41 @@ still not liftable by a root override. ESLint 10.9.0 raises
 also what makes the next attempt at the other two cheap — the dependency that has to move first
 lives inside it.
 
+**Re-run on 2026-09-09 against #63's versions, and the answer has changed shape without changing.**
+The same group came back a fourth time (#22 → #44 → #53 → **#63**), and this time the two halves
+part company:
+- **TypeScript 7 needed no install at all, because the peer range is the authoritative statement.**
+  `typescript-eslint@8.70.0` — the newest published, two minors ahead of the nested 8.67.0 — still
+  declares `typescript: >=4.8.4 <6.1.0`. So the blocker is exactly where #10940 says it is, and
+  running the linter to watch it fail proves nothing the manifest does not already say. Check
+  `npm view typescript-eslint@latest peerDependencies` first; only install if that range has moved.
+- **ESLint 10 was installed and run, and fails identically** — `scopeManager.addGlobals is not a
+  function`, same file and same line as 2026-09-01, dying in `addDeclaredGlobals` before any rule
+  runs. **What is new is that this may now be a *resolution* problem rather than a support one**:
+  8.70.0's peers accept `eslint: ^8.57.0 || ^9.0.0 || ^10.0.0`, which 8.67.0 does not.
+- **The nested copy did not move, and a root `overrides` block did not lift it** — which is §10a's
+  standing claim, now checked from the other side rather than inferred from an error message.
+  `eslint-config-next@16.3.4` asks for `typescript-eslint: ^8.46.0` and npm kept the pinned 8.67.0
+  because it satisfies; adding `"overrides": { "eslint-config-next": { "typescript-eslint":
+  "^8.70.0" } }` and reinstalling left the nested copy at 8.67.0 **and recorded `overrides: null`
+  in the lockfile** — npm did not register it at all. Whether forcing 8.70.0 (by regenerating the
+  lockfile, which is its own change) unblocks ESLint 10 is the experiment to run next, and it was
+  deliberately not made a rider on a routine dependency take.
+- **Taken instead:** `eslint-config-next` `^16.3.4`, `@types/node` `^26.4.0` (resolving 26.5.0) and
+  `lefthook` `^2.1.12`, all green on TypeScript 6 + ESLint 9. #63 stays closed.
+
+**An advisory is not a build failure here, and both of the ones that existed are now gone.**
+CI's audit step carries `continue-on-error: true`, so `npm audit --audit-level=high` has never
+failed a run — which is why two high-severity transitive advisories could sit there unnoticed
+through green CI. Both were cleared on 2026-09-09 **without reaching past an existing range**:
+`js-yaml` 4.3.1 → 4.3.2 came free with `eslint-config-next` (through `@eslint/eslintrc` 3.3.6 →
+3.3.7), and `nanoid` 3.3.17 → 3.3.18 needed `postcss` 8.5.26 → **8.5.28**, a patch already inside
+the `^8.5.26` the file carried and pinned back only by the lockfile. `postcss@8.5.28` requires
+`nanoid ^3.3.18`, so one bump also lifts the copy Next bundles under its own postcss. `npm audit`
+reports **0 vulnerabilities**, from 2. **Neither was introduced by the production bump landing the
+same day** — proved by diffing the package sets either side of it, where both sat at identical
+versions.
+
 **A vitest patch is not a small lockfile change**, which is worth knowing before the next one:
 4.1.10 → 4.1.11 moved **26 packages**, carrying `rolldown` 1.2.2 → 1.2.5 and `vite` 8.2.0 → 8.2.2
 with it. All `dev: true`, so none of it reaches the production bundle, and the one package added is
@@ -3201,6 +3236,88 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-09-09 · The dependency backlog cleared, and both advisories with it
+Two Dependabot pull requests had been open since 2 September and were a week behind `Prod`.
+**No migration; no schema, RLS, capability, policy, route or business rule change** — `git diff`
+over `src/` and `supabase/` is empty, and the 1205 tests are unchanged in count because a
+dependency bump adds no rule to test. §10a holds the evidence.
+
+**#62, the production group, was taken and verified rather than waved through.** `resend` carries
+every email this app sends and `@react-pdf/renderer` draws the invoice, so the gate was run on the
+new versions before anything landed. Measured as **package sets** rather than by the lockfile's
+line count, which is the rule §10a records twice: **57 in, 63 out** against 589.
+- **The one worth knowing is `@react-pdf/pdfkit@6.0.1` giving way to upstream `pdfkit@0.20.1`.**
+  The renderer has stopped carrying its own fork, which is why `js-md5`, `safe-buffer`,
+  `string_decoder`, `util-deprecate` and `vite-compatible-readable-stream` went with it. Nothing
+  in `src/` names any of them.
+- **Two resolved higher than Dependabot wrote**, because the PR is a week old and a caret takes
+  the newest in range: `next` to 16.3.4 rather than 16.3.3, and `lucide-react` to 1.43.0 rather
+  than 1.37.0. `@supabase/supabase-js` moved 2.112.3 → 2.116.0 underneath `@supabase/ssr`, which
+  is the seventh update that PR's title counts and the one its `package.json` diff does not show.
+
+**#63, the dev group, is still half-blocked and stays closed** — the fourth time that pair has
+been offered. §10a has the detail; the short version is that TypeScript 7 is settled upstream by
+`typescript-eslint`'s own peer range and needed no install to establish, while ESLint 10 was
+installed, run, and failed on the identical line it failed on eight days ago. What is new is that
+the newest `typescript-eslint` now *accepts* ESLint 10, so that half may be a resolution problem
+rather than a support one — and a root `overrides` block was proved not to lift the nested copy,
+which is §10a's standing claim checked from the other side. `@types/node`, `lefthook` and
+`eslint-config-next` were taken out of it.
+
+**Both high-severity advisories are gone, and this is the part that had been hiding in plain
+sight.** CI's audit step is `continue-on-error`, so `npm audit` has never failed a run and two
+transitive advisories sat there through every green build. Neither was introduced by the
+production bump — proved by diffing the package sets either side of it, where both sat at
+identical versions. Both fixes were **already inside the ranges the file carried**: `js-yaml` came
+free with `eslint-config-next`, and `nanoid` needed `postcss` 8.5.26 → 8.5.28, a patch pinned back
+only by the lockfile. `npm audit` reports **0 vulnerabilities**, from 2.
+
+- 1205 unit tests across 74 files and 596 pgTAP assertions, both unchanged. `verify` green on the
+  final tree: typecheck, lint, tests and the production build.
+- **`npm audit` was read as an outcome, not as a step that passed.** The audit reporting clean is
+  the assertion here, because the step it runs in cannot fail a build.
+
+**Leaked-password protection is still off, and it could not be turned on from this session.**
+Enabling it is an auth-config change on the Supabase project, which the database tools do not
+reach — it needs the dashboard or a personal access token against the Management API. Neither is
+available here: `api.supabase.com` and the project host are both refused by this environment's
+network policy (`connect_rejected`, the gateway answering 403 to CONNECT), which is the same wall
+the 2026-09-08 entry records. **Authentication › Policies in the Supabase dashboard is where it
+lives**, and turning it on makes Supabase check every new or changed password against
+HaveIBeenPwned. It is the twenty-eighth advisory; the other 27 are the documented permission
+helpers that are meant to be callable.
+
+**Merged to `Prod` (`9559680`) on 2026-09-09**, a clean fast-forward — `origin/Prod` was an
+ancestor of the branch, so there was nothing to reconcile and `Prod` was never force-pushed. Four
+files, 482 insertions and 388 deletions, of which the lockfile is 729 lines and `package.json`
+twenty; the other two are this record.
+
+- **CI green on all three jobs** — run 312, read off the logs rather than the statuses, which is
+  the lesson this file records six times over. Verify: typecheck, lint, **1205 tests across 74
+  files**, the production build on **Next.js 16.3.4**, `== PASSED ==`. The DB job applying all
+  **53** migrations to a fresh Postgres 16, `pgTAP suite passed`, and `supabase/seed.sql`
+  committing on top of the fresh schema. Security: gitleaks strict, and
+  `npm audit --audit-level=high` reporting **0 vulnerabilities** — the assertion this release
+  turns on, since that step carries `continue-on-error` and cannot fail a build either way.
+- **The elapsed time was read off the runner's own step timestamps**, per the trap seven earlier
+  entries record: Verify ran 13:04:06 → 13:05:16, seventy seconds, its ordinary duration.
+- **Nothing to apply.** No migration; `git diff` over `supabase/` against the previous `Prod` head
+  is empty, and the live ledger's last entry is still `0049_fleet_and_site_write`.
+- **Dependabot closed both pull requests itself and opened a fifth offering two minutes later.**
+  #62 and #63 are closed unmerged — `Prod` moved only by this fast-forward, so neither could have
+  been merged — and **#68** now carries the same two blocked pins with `vitest` **5.0.0** and
+  `@types/react-dom` 19.2.7 beside them. That changes the shape of the question rather than
+  repeating it: vitest 5 is a major that requires Node 22 and Vite 6.4, clears mocks before each
+  test by default and removes the `sequential` option, so it wants a look of its own rather than
+  being taken as a rider on a pin re-test. The pins themselves are unmoved — check
+  `typescript-eslint`'s peer range first, as §10a now says.
+- **`Dev` is one release behind and carries no source change of its own** — **0** non-merge commits
+  `Prod` lacks, and the whole tree difference is this release's four files. The standing catch-up
+  drift the last several entries record, unchanged by this.
+- **The Vercel production deploy is not confirmable from this session**, a tooling limit rather
+  than a configuration one (§5). It matters little here: no source file changed, so what deploys
+  is the same application on newer dependencies.
+
 ### 2026-09-09 · A round could hand itself another driver's runs, and now cannot
 The four tables 0048 named as a separate decision, decided. One migration (`0049`);
 **no schema change, no capability, no role change, no screen change and no row
