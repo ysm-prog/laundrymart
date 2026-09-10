@@ -9,7 +9,28 @@ where that is genuinely what it is. The multi-tenancy architecture stays: one op
 fact about today's data, not a reason to drop `tenant_id`, RLS, or §23's rule that a read feeding a
 write names its tenant.
 
-## Latest: a collection becomes a laundry job, exactly once
+## Latest: vitest 5, and the Node 22 floor
+2026-09-10, on `claude/driver-instructions-invoice-fixes-1q42fb`. Dependabot #68 taken in part.
+**No migration; `git diff` over `src/` and `supabase/` is empty.** §10a has the evidence.
+
+- **vitest `^4.1.11` → `^5.0.0`.** Both changes that made it look risky are inert here: it clears
+  mocks by default and **this suite has no `vi.mock`/`vi.fn`/`vi.spyOn` in any file**; it drops
+  `sequential`, which the config never set. 1233 tests across 76 files pass, no source change.
+- **Node 20 → 22 in three places**: the two `ci.yml` pins *and* `engines.node`, because Vercel
+  reads that field to choose the build's Node. Leaving it would have let Vercel fail the gate,
+  fall through to `next build` and deploy silently (§5).
+- **Six `@supabase/*` packages already required `>=22`** — that is the six `EBADENGINE` install
+  warnings and six "Node.js 20 is deprecated" build notices, now gone. Gate read at source:
+  `shouldShowDeprecationWarning()` ends `return majorVersion <= 20`.
+- **575 → 568 packages** (vitest 5 absorbs its own `@vitest/*` helpers); `vite` unmoved, all
+  `dev: true`, nothing in the production bundle. Whole gate green on a clean `npm ci`, 0 vulns.
+- **Still blocked, settled without installing**: `typescript-eslint@8.70.0` declares
+  `typescript: >=4.8.4 <6.1.0`, so TS 7 stays out. ESLint 10 wants the nested-copy experiment
+  §10a records. `@types/react-dom` 19.3.0 left alone deliberately.
+- **CI is unproven**: `ci.yml` triggers on `Prod`/`Dev` only, so a feature branch runs none. The
+  first real `setup-node@v7` at 22 is on the merge — read the logs, not the statuses.
+
+## Previously: a collection becomes a laundry job, exactly once
 2026-09-10, on `claude/driver-instructions-invoice-fixes-1q42fb`. The loop §33 recorded as *"the
 obvious next piece of work and is not built"*. One migration (`0050`), **applied live**; one
 nullable column, one partial unique index, one guard — **no policy, no capability, no role change

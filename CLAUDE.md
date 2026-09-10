@@ -1594,9 +1594,33 @@ working day, not a promise about a particular clock time.
 
 ## 10a. Toolchain pins
 Next 16 (Turbopack), React 19, Tailwind 4 (CSS-first — no `tailwind.config.ts`), Zod 4,
-vitest 4. Two pins are held back on purpose: TypeScript **6** and ESLint **9**. Next 16 needs
+vitest 5. Two pins are held back on purpose: TypeScript **6** and ESLint **9**. Next 16 needs
 `experimental.useTypeScriptCli` and the auth gate lives in `src/proxy.ts`, not
 `src/middleware.ts`.
+
+**The floor is Node 22, since 2026-09-10, and vitest 5 is what forced the question rather than
+what created it.** `vitest@5.0.0` declares `node: ^22.12.0 || ^24.0.0 || >=26.0.0`, and CI pinned
+`node-version: "20"` — so the bump could not be taken without moving the runner. But **six
+`@supabase/*` packages had already declared `>=22.0.0`**, which is why every CI install printed six
+`EBADENGINE` warnings and every production build printed six *"Node.js 20 and below are
+deprecated"* notices. Both sets are gone. `engines.node` is `>=22` as well as the two workflow
+pins, because **Vercel reads `engines.node` to pick the build's Node version** and the two must
+not disagree — the build command is `bash scripts/verify.sh || next build` (§5), so a Vercel
+runner left on 20 would fail the gate, fall through, and deploy anyway with nothing on screen
+saying the gate had stopped running.
+- **The deprecation notice is gated on the major and was read rather than assumed**:
+  `shouldShowDeprecationWarning()` in `@supabase/supabase-js` ends `return majorVersion <= 20`.
+- **The two behaviour changes that made vitest 5 look risky are both inert here**, checked rather
+  than reasoned about: it clears mocks between tests by default, and **this suite contains no
+  `vi.mock`, `vi.fn` or `vi.spyOn` at all** — 0 files, because every test is over a pure rule; and
+  it drops the `sequential` option, which `vitest.config.mts` never set. The one file that touches
+  the test runtime at all is `adelaide.test.ts` with `vi.useFakeTimers()`, and it passes.
+- **It is a smaller install, not a larger one.** 575 → **568** packages, measured as package sets
+  per the rule below: vitest 5 absorbs `@vitest/expect`, `@vitest/runner`, `@vitest/snapshot`,
+  `@vitest/utils` and `@vitest/pretty-format` into itself. `vite` did not move (8.2.2, already
+  inside vitest 5's `^6.4.0 || ^7.0.0 || ^8.0.0` peer), and neither did anything in the production
+  bundle — every change is `dev: true`.
+- **All 1233 tests across 76 files pass with no source change**, on a clean `npm ci`.
 
 **Both pins were re-tested on 2026-08-26 rather than taken on trust, and both still hold.**
 Dependabot offered TypeScript 7 and ESLint 10 together (PR #22); each was installed and `eslint .`
@@ -3347,6 +3371,58 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-09-10 · vitest 5, and the Node 22 floor that was already overdue
+Dependabot's fifth offering of the blocked dev group (#22 → #44 → #53 → #63 → **#68**), taken in
+part. **No migration; no schema, RLS, capability, policy, route or business rule change** — `git
+diff` over `src/` and `supabase/` is empty, and the 1233 tests are unchanged in count because a
+dependency bump adds no rule to test. §10a holds the evidence.
+
+**vitest 5 is a major, and the interesting part is that none of what made it look risky applies
+here.** The two changes flagged when #68 arrived were that it clears mocks between tests by
+default and drops the `sequential` option. Checked rather than reasoned about: **this suite
+contains no `vi.mock`, `vi.fn` or `vi.spyOn` in any file**, because every test is over a pure rule
+in `lib/domain/` or a source sweep; and `vitest.config.mts` has never set `sequential`. All **1233
+tests across 76 files pass with no source change at all**.
+
+**What it did force is a Node bump that six other packages had already been asking for.**
+`vitest@5.0.0` requires `node: ^22.12.0 || ^24.0.0 || >=26.0.0` and CI pinned **20** — but the six
+`@supabase/*` packages have declared `>=22.0.0` for some time, which is why every CI install
+printed six `EBADENGINE` warnings and every production build printed six *"Node.js 20 and below
+are deprecated"* notices. Nobody had read them as anything but noise. Both sets are gone.
+
+- **Three pins moved together, and the third is the one that is easy to miss.** The two
+  `node-version` entries in `ci.yml`, and **`engines.node`**, because Vercel reads that field to
+  pick the build's Node version. Leaving it at `>=20` would have let the Vercel runner stay on a
+  Node vitest refuses — and the build command is `bash scripts/verify.sh || next build` (§5), so
+  the gate would have failed, fallen through to a plain build, and **deployed anyway with nothing
+  on screen saying the gate had stopped running**. That is the §5 trap reached by a new route.
+- **The deprecation notice was read at its source rather than assumed away**:
+  `shouldShowDeprecationWarning()` in `@supabase/supabase-js` ends `return majorVersion <= 20`, so
+  it cannot fire on 22.
+- **A smaller install, not a larger one** — 575 → **568** packages, measured as package sets per
+  §10a rather than off the diff's line count. vitest 5 absorbs `@vitest/expect`, `@vitest/runner`,
+  `@vitest/snapshot`, `@vitest/utils` and `@vitest/pretty-format`; `rolldown` went 1.2.5 → 1.2.8
+  and `vite` did not move at all, already inside vitest 5's peer range. Every change is
+  `dev: true`, so **nothing in the production bundle moved**.
+- **The whole gate is green on a clean `npm ci`**: typecheck, lint, 1233 tests across 76 files,
+  and the production build on Next.js 16.3.4. `npm audit` reports 0 vulnerabilities.
+
+**The other half of #68 stays closed, and settling it needed no install.** §10a's rule is to read
+`typescript-eslint`'s peer range first: `8.70.0` still declares `typescript: >=4.8.4 <6.1.0`, so
+**TypeScript 7 is blocked exactly where [#10940](https://github.com/typescript-eslint/typescript-eslint/issues/10940)
+says it is** and running the linter to watch it fail would prove nothing the manifest does not.
+ESLint 10 is untouched here for the reason §10a records: 8.70.0 *does* accept `eslint ^10.0.0`
+while the copy nested inside `eslint-config-next` is 8.67.0 and does not, and forcing it means
+regenerating the lockfile — an experiment of its own, deliberately not made a rider on a routine
+bump. `@types/react-dom` 19.3.0 is available and was **left alone on purpose**: a types bump in
+the same commit would muddy what this one proves.
+
+**What is not proved from here: CI itself.** `ci.yml` triggers on `Prod` and `Dev` only, so a
+feature branch runs no CI at all — the Node 22 change is proved on this container's Node 22.22.2
+and against the registry's own metadata, and the first real run of `setup-node@v7` at 22 happens
+on the merge. **Before trusting it, read that run's logs rather than its statuses**, which is the
+lesson this file records seven times over.
+
 ### 2026-09-10 · A collection becomes a laundry job, exactly once
 The loop §33 recorded as *"the obvious next piece of work and is not built"*. One migration
 (`0050`), one nullable column, one partial unique index and one guard; **no policy, no
