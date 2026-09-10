@@ -3483,8 +3483,18 @@ keyed the skipped lines by position.
   The live ledger's last entry is still `0050_pickup_to_job`.
 - **The Vercel production deploy is not confirmable from this session**, a tooling limit rather
   than a configuration one (§5). Read it in the Vercel dashboard.
-- **`Dev` is one release behind**, holding a tree identical to the previous `Prod`. The standing
-  catch-up drift, not divergence.
+- **`Dev` was brought up the same hour** (`9e9f01a`), so the two branches hold identical trees —
+  `git diff HEAD origin/Prod` is empty. A merge commit rather than a fast-forward, because `Dev`'s
+  own history is twelve earlier catch-up merges; it carried **0** non-merge commits `Prod` lacked,
+  so nothing conflicted and the only tree change it took was this release's files. **The gate was
+  re-run on the merged tree rather than assumed from `Prod`'s run** — CI run 321, all three jobs
+  green and read off the logs: `verify.sh` 05:33:36 → 05:34:27, fifty-one seconds, carrying the
+  same **1233 tests across 76 files**, the production build on **Next.js 16.3.4** and
+  `== PASSED ==`; the DB job's **612 `ok <n> - ` assertions across 32 proof files, 0 `not ok`**,
+  `pgTAP suite passed` over all 54 migrations with the seed on top; gitleaks strict and 0
+  vulnerabilities. Both parents are recorded on the merge commit, which is the 2026-08-26 trap
+  where a mid-merge `git checkout` cleared `MERGE_HEAD` and GitHub then read the result as
+  conflicted. The standing catch-up drift the last several entries record is closed.
 
 ### 2026-09-09 · The dependency backlog cleared, and both advisories with it
 Two Dependabot pull requests had been open since 2 September and were a week behind `Prod`.

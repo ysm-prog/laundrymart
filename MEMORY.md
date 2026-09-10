@@ -49,8 +49,12 @@ and no existing row altered.** §4 has the rule, §7 the migration, §33 the des
   files, the build on Next.js 16.3.4, `pgTAP suite passed` over 54 migrations with **612 assertions
   across 32 files and 0 `not ok`**, the seed on top, gitleaks strict and 0 vulnerabilities.
   `verify.sh` ran 05:26:14 → 05:26:54, forty seconds, read off the runner's own timestamps.
-  **Nothing left to apply** — 0050 went on the hosted project seventy minutes earlier. `Dev` is now
-  one release behind, holding a tree identical to the previous `Prod`.
+  **Nothing left to apply** — 0050 went on the hosted project seventy minutes earlier.
+- **`Dev` brought up the same hour** (`9e9f01a`), trees identical to `Prod` (`git diff` empty), a
+  merge commit with both parents recorded. **The gate was re-run on the merged tree** — CI run 321,
+  all three jobs green off the logs: 1233 tests across 76 files, the build on Next.js 16.3.4,
+  `pgTAP suite passed` with 612 assertions across 32 files and 0 `not ok`, the seed on top.
+  `verify.sh` ran 05:33:36 → 05:34:27, fifty-one seconds. The standing catch-up drift is closed.
 
 ## Previously: the dependency backlog cleared, and both advisories with it
 2026-09-09, on `claude/driver-instructions-invoice-fixes-1q42fb`, restarted from `Prod` because its
