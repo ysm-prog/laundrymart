@@ -148,28 +148,39 @@ async function takenInJob(
 }
 
 /**
+ * How many collection ids go into one `.in()`.
+ *
+ * A uuid is 36 characters and supabase-js sends a filtered read as a **GET**, so
+ * the ids ride in the query string: the Collections list caps at 200, which is
+ * ~7.5 kB of URL — inside most limits and not by much, and the shape that took
+ * the due-collections list down when it was 400. Two bounded round trips beat
+ * one that fails only on the busiest day.
+ */
+const ID_BATCH = 100;
+
+/**
  * Which of a page of collections are already on a job.
  *
- * One filtered read for the whole page rather than one per row — and filtered by
- * the **collection ids on the page**, which is safe where the same shape was not
- * for the due-collections list: a page is capped at 200, where a Monday's due
- * list is however many customers a laundry has.
+ * Batched reads rather than one per row: the question is "are any of these on a
+ * job?", and the answer for a hundred of them is a single filtered select.
  */
 export async function takenInByPickup(
   supabase: Supabase, tenantId: string, pickupIds: string[],
 ): Promise<Map<string, { id: string; orderNumber: string }>> {
   const wanted = [...new Set(pickupIds)];
-  if (wanted.length === 0) return new Map();
+  const found = new Map<string, { id: string; orderNumber: string }>();
 
-  const { data } = await supabase
-    .from("laundry_orders")
-    .select("id, order_number, source_pickup_id")
-    .eq("tenant_id", tenantId)
-    .in("source_pickup_id", wanted)
-    .neq("status", "cancelled")
-    .returns<Array<{ id: string; order_number: string; source_pickup_id: string }>>();
-
-  return new Map((data ?? []).map((job) => [
-    job.source_pickup_id, { id: job.id, orderNumber: job.order_number },
-  ]));
+  for (let at = 0; at < wanted.length; at += ID_BATCH) {
+    const { data } = await supabase
+      .from("laundry_orders")
+      .select("id, order_number, source_pickup_id")
+      .eq("tenant_id", tenantId)
+      .in("source_pickup_id", wanted.slice(at, at + ID_BATCH))
+      .neq("status", "cancelled")
+      .returns<Array<{ id: string; order_number: string; source_pickup_id: string }>>();
+    for (const job of data ?? []) {
+      found.set(job.source_pickup_id, { id: job.id, orderNumber: job.order_number });
+    }
+  }
+  return found;
 }

@@ -3429,6 +3429,11 @@ fails a test rather than offering a press that can only bounce off the auth gate
   asserts every seeded row survives `validateItem` with an item code required — the validator
   `createOrder` actually runs. A rule emitting a row the form then refuses would be a pre-filled
   screen that cannot be saved and says nothing useful about why.
+- **Re-reading the diff caught the same URL-length shape the collection schedule hit two days
+  earlier.** "Which of these collections are on a job?" was one `.in()` over a page of up to
+  200 uuids — ~7.5 kB of query string, since supabase-js sends a filtered read as a GET. Inside
+  most limits and not by much, and failing only on a busy day. Batched at 100, so the read stays
+  O(1) in the number of rows and bounded in the size of the request.
 
 **Nothing is added to `/design-preview`, and that is deliberate rather than an omission.** This
 release adds no component: the seeded form is `JobForm`, already in the gallery, and everything

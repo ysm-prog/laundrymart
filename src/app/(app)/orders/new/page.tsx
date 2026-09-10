@@ -198,7 +198,10 @@ function CollectionSummary({ collection }: { collection: CollectionToTakeIn }) {
       {skipped.length ? (
         <Notice tone="warning" title={`${counted(skipped.length, "line")} could not be carried over`}>
           <ul className="list-disc space-y-0.5 pl-4">
-            {skipped.map((line) => <li key={line}>{line}</li>)}
+            {/* Keyed by position, not by the sentence: two lines naming the
+                same retired item produce the same words, and React would then
+                see duplicate keys. */}
+            {skipped.map((line, index) => <li key={index}>{line}</li>)}
           </ul>
         </Notice>
       ) : null}
