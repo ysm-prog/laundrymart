@@ -2229,25 +2229,37 @@ reports six false gaps.
   leaving its usual trace: text typed into `apply_migration` reformatted a little against the file.
   Worth knowing before anybody reads a raw `md5(prosrc)` mismatch as drift.
 
-**`0052_invoice_money_guards` is NOT applied to `laundrymart-syd`** (2026-10-12), written on
-`claude/e2e-gap-fixes` under the same instruction. **It too must go on before that branch
-merges, and after 0051**: the invoice page, the PDF, the credit-note action and `resettleInvoice`
-select `invoices.amount_credited`, and the Settings screens call `save_tenant_settings` — none
-of which exists until it is applied. Before applying, check the live
-`guard_laundry_order_billing` body is still 0017's (the rebuild assumes it). After applying,
-**INV00006 will read `amount_credited = 81.00`** (CN00001 + CN00002, both issued against a void
-invoice); that is the honest figure, and its two payments can now be reversed from the invoice
-page to clear the money off it.
+**`0051_laundry_item_ownership` and `0052_invoice_money_guards` were applied on 2026-10-12**
+(`20261012033302`, `20261012033303`) — by Darshan, pasted into the Supabase SQL editor, because
+the connector's `apply_migration` timed out five times waiting on a confirmation prompt that never
+reached the chat (it gates any SQL containing `delete`, and 0051's rebuilt writer has one). Both
+went on **before** #77 and #78 merged, the order this file requires. The ledger is **57** entries.
 
-**`0051_laundry_item_ownership` is NOT applied to `laundrymart-syd`** (2026-10-12) — it was
-written on `claude/ats-jay-changes` with the instruction not to touch the live database. **It
-must go on before that branch merges**: the job page, the edit page and My Runs select
-`laundry_order_items.ownership` at request time, and PostgREST answers a missing column with an
-error rather than a null — so merging first would 500 every job page and the board's day. The
-ledger's last entry is still `0050_pickup_to_job`.
+- **Verified over the connector afterwards, not taken on trust.** The column, its check
+  constraint and `invoices.amount_credited` are present; the triggers `guard_invoice_void` and
+  `sync_invoice_credits` are attached. Every function 0051/0052 creates was hashed against a fresh
+  Postgres 16 built from #78's `supabase/migrations/` alone: `guard_invoice_void`,
+  `save_tenant_settings`, `save_tenant_abn`, `recalculate_invoice` and `recalculate_credit_note`
+  are **byte-identical**; `save_laundry_order_items`, `sync_invoice_credits` and
+  `guard_laundry_order_billing` differ **only in comments and whitespace** (identical once
+  `--` comments and whitespace are stripped — the live bodies are shorter, the SQL-editor paste
+  having lost some comment lines). That is the same cosmetic trace the 2026-08-27 check records.
+- **Privileges as designed:** the two trigger functions are callable by neither `anon` nor
+  `authenticated`; `save_laundry_order_items` stays INVOKER; `save_tenant_settings` and
+  `save_tenant_abn` are DEFINER and callable by `authenticated` only.
+- **Behaviour, in a transaction that ended by raising:** saving a real `new` job's laundry with
+  rows marked rental, own and unanswered read back `rental, own, null`, and `borrowed` was refused
+  by the check constraint. Nothing survived the rollback.
+- **Advisors 28 → 30**, the additions being `save_tenant_settings` and `save_tenant_abn` — the
+  documented DEFINER shape, role-checked inside. **0** `anon` table grants, **0** tables without RLS.
+- **INV00006 reads `amount_credited = 81.00`** (void, total 74.80, paid 74.80), exactly as
+  predicted: CN00001 + CN00002 issued against a void invoice. Its two payments can now be reversed
+  from the invoice page.
+- 24 laundry item rows, **0** carrying an ownership answer yet — honest, since every one predates
+  the column.
 
-**`0050_pickup_to_job` was applied on 2026-09-10** (`20260910041516`) and is the ledger's
-last entry, **55** in all. Additive — one nullable column with no default — and applied
+**`0050_pickup_to_job` was applied on 2026-09-10** (`20260910041516`) and was the ledger's
+last entry until 0051, **55** in all. Additive — one nullable column with no default — and applied
 **before the code merged**, which matters here rather than being conventional: the job page
 embeds the collection through the new foreign key and the seeding page selects the new column,
 both at request time where their absence is a browser error rather than a compile one.
@@ -3430,10 +3442,56 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-10-12 · Merged and deployed: Jay's ATS changes and the end-to-end gap fixes
+Approved by Darshan. **#77** (`claude/ats-jay-changes`) and **#78** (`claude/e2e-gap-fixes`) were
+merged into `Dev`, and `Dev` was then promoted to `Prod` through #79. Both entries below this one
+are what shipped. `Prod` was never force-pushed: it was an ancestor of `Dev`, so #79 carried exactly
+those two PRs plus #76's record and nothing had to be reconciled.
+
+| | merge commit | CI |
+|---|---|---|
+| #77 → `Dev` | `ac65d13` | run 341 **cancelled by concurrency**, because #78 landed eight seconds later |
+| #78 → `Dev` | `426cb5a` | run 342 **green** on all three jobs |
+| #79 `Dev` → `Prod` | `26fb2a1` | **green** — see below |
+
+- **Run 342 was read from the logs, not from the statuses.** Verify: typecheck, lint,
+  **1332 tests across 84 files**, the production build on Next.js 16.3.4, `== PASSED ==` at
+  03:42:10Z. `verify.sh` ran from 03:41:01 to 03:42:10, sixty-nine seconds. DB: every migration
+  applied to a fresh Postgres 16, `pgTAP suite passed`, and the seed committed on top. Security:
+  gitleaks strict and the audit both passed.
+- **Run 341's cancellation is not a gap in coverage.** It tested `ac65d13`, which is an ancestor
+  of `426cb5a`, and run 342 covers that whole tree.
+- **Both migrations were live before either merge.** Darshan applied them through the SQL editor
+  (§11 has the verification record). This order is load-bearing here, not conventional: the job
+  pages select `ownership`, and the invoice page, the PDF and the credit-note action select
+  `amount_credited`.
+- **The Vercel production deploy cannot be confirmed from this session.** That is a tooling limit
+  (§5). Check it in the Vercel dashboard.
+
+**Needs a live check on `ats.coreit.com.au`. Nothing behind the auth gate has been opened with real
+rows:**
+1. **Rental and Own.** Take a job in with one Rental row and one Own row. Both should show on the
+   job page and on My Runs. No item carries a rental price yet, so every row will default to Own;
+   flip one by hand.
+2. **Customer prices.** Pick a customer with no price of their own and re-rate an item on the usual
+   list. That customer's Charges card should then offer the new rate.
+3. **Driver note.** Assign a job with a note. The note should head the Instructions block on My Runs.
+4. **Emptied draft.** Take the only job off a running draft. Issue should then be refused.
+5. **INV00006.** It is void, paid $74.80, and now reads credited $81.00. Reverse its two payments
+   from the invoice page; Owner or Office only, with a reason. Then check that its Void sentence and
+   balance read sensibly.
+6. **Settings › Invoicing.** Enter the ABN, address and bank details. The missing-details warning
+   should then clear from an invoice, and the PDF should read "Total (inc GST)".
+7. **Settings › Notifications.** Save a change and reload. It should persist. It never did before
+   0052's `save_tenant_settings`.
+8. **Credit notes.** Issue a credit note against an issued invoice. The invoice's balance should
+   fall by that amount, and a second credit past total minus payments should be refused.
+
 ### 2026-10-12 · Gaps from the end-to-end test: money, screens, the job form, wording
 An end-to-end run on `ats.coreit.com.au` (customer *ZZ TEST Demo Laundry*, LJ00027/LJ00028,
 INV00006, CN00001/CN00002) found eighteen gaps. Branch `claude/e2e-gap-fixes`, stacked on
-`claude/ats-jay-changes`. One migration (`0052`), **written and not applied**.
+`claude/ats-jay-changes`. One migration (`0052`), written on the branch and **applied to
+`laundrymart-syd` on 2026-10-12 before the merge** (§11).
 
 **Money.**
 - **A paid invoice could be voided** — INV00006, $74.80 paid and two credit notes, voided,
@@ -3490,12 +3548,13 @@ Runs names the board rather than "you" on somebody else's day.
 - **One existing proof was rewritten to the decision**: `gst_inclusive` credited a *draft*
   invoice and credited $100 against $72.70, both now refused; it issues the invoice first and
   splits the credit within the total.
-- **Not verified behind the auth gate**, and 0052 is not applied. Live check list in §11.
+- **Not verified behind the auth gate.** The live checks are listed under the merge record
+  above.
 
 ### 2026-10-12 · Jay's ATS changes: wording, Rental/Own, customer prices, a note for the driver, the money path
 From Jay's email "ATS Changes" (12 Oct), on `claude/ats-jay-changes`, stacked on the
-demo-readiness fixes. **One migration, `0051_laundry_item_ownership`, written and NOT applied**
-— see §11 for why it must go on before the merge. No capability, role or policy change.
+demo-readiness fixes. **One migration, `0051_laundry_item_ownership`**, written on the branch
+and applied before the merge (§11). No capability, role or policy change.
 
 - **"Customer drop-off" reads "Dropped off at counter"** (label only; `customer_dropoff` is
   still stored). "Customer pickup" is now the only *Customer…* choice on the job form, which is
