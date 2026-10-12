@@ -127,6 +127,25 @@ export function buildItemPriceRows<T extends PricedItem>(
   }));
 }
 
+/**
+ * The rate an item is actually charged at for this scope: the customer's own
+ * price, then the usual price, then nothing.
+ *
+ * `buildItemPriceRows` keeps the two apart because the *price screen* has to: a
+ * blank field over the usual price is the whole point of the customer screen. A
+ * picker turning an item into money wants the answer, not the split. Before this
+ * existed, `attachListPrices` read `price` alone. For a customer, `price` is
+ * only their *own* row, so every customer with no override lost the usual list
+ * and fell through to `items.sell_price`. Re-rating an item on the usual list
+ * therefore never reached their charges or their invoice lines, and that is
+ * what "change charge by customer is not working" looked like from a desk.
+ */
+export function effectiveListPrice(
+  row: Pick<ItemPriceRow, "price" | "fallback">,
+): PriceValue | null {
+  return row.price ?? row.fallback;
+}
+
 /** Restated rather than imported: `laundry-billing.ts` keeps its `toPrice` private. */
 function toPrice(row: LaundryPriceRow): LaundryPrice {
   const bag = row.bag_price === null || row.bag_price === undefined ? null : toNumber(row.bag_price);

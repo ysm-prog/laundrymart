@@ -10,7 +10,7 @@ import {
 } from "@/lib/directory";
 import {
   DELIVERY_WINDOW_LABELS, PRIORITY_LABELS, RECEIVED_VIA_LABELS,
-  actionsFor, buildStatusTrack, describeItem, isOrderStatus, isOverdue,
+  actionsFor, buildStatusTrack, describeItem, isOrderStatus, ownershipLabel, isOverdue,
   type DeliveryWindow, type OrderPriority, type ReceivedVia,
 } from "@/lib/domain/laundry-orders";
 import { businessToday } from "@/lib/domain/timezone";
@@ -97,7 +97,7 @@ export default async function JobDetailPage({
 
   const [items, activity, members] = await Promise.all([
     supabase.from("laundry_order_items")
-      .select("id, order_id, item_id, item_type, custom_description, quantity_type, exact_quantity, bag_count, estimated_quantity, notes")
+      .select("id, order_id, item_id, item_type, custom_description, quantity_type, exact_quantity, bag_count, estimated_quantity, notes, ownership")
       .eq("order_id", id).order("created_at")
       .returns<LaundryOrderItem[]>(),
     supabase.from("laundry_order_activity")
@@ -408,6 +408,12 @@ export default async function JobDetailPage({
           empty={<EmptyState title="No items recorded" description="Every job should have at least one." />}
           columns={[
             { header: "Item", cell: (row) => describeItem(row) },
+            {
+              // Rental or Own (0051). "—" on a row taken in before the question
+              // was asked, rather than a guess.
+              header: "Rental or own",
+              cell: (row) => ownershipLabel(row.ownership) ?? "—",
+            },
             {
               header: "How counted",
               cell: (row) => (row.quantity_type === "exact" ? "Counted" : "Bulk lot"),

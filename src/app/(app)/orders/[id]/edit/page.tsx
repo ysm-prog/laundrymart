@@ -35,7 +35,7 @@ export default async function EditJobPage({
   const [{ data: order }, { data: items }] = await Promise.all([
     supabase.from("laundry_orders").select("*").eq("id", id).maybeSingle<LaundryOrder>(),
     supabase.from("laundry_order_items")
-      .select("id, order_id, item_id, item_type, custom_description, quantity_type, exact_quantity, bag_count, estimated_quantity, notes")
+      .select("id, order_id, item_id, item_type, custom_description, quantity_type, exact_quantity, bag_count, estimated_quantity, notes, ownership")
       .eq("order_id", id).order("created_at")
       .returns<LaundryOrderItem[]>(),
   ]);

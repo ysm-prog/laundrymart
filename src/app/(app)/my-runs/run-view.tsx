@@ -152,7 +152,7 @@ export function JobCard({
           )}
 
           <p className="mt-1 text-sm text-muted-foreground">
-            {summariseItems(job.laundry_order_items, 3)}
+            {summariseItems(job.laundry_order_items, 3, { ownership: true })}
           </p>
 
           <p className="mt-0.5 text-sm text-muted-foreground">

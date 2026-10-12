@@ -19,6 +19,10 @@ import { logOrderActivity } from "@/lib/orders/activity";
 import { completeLaundryOrder } from "@/lib/orders/complete";
 import { loadBoardDayJobs } from "@/lib/runs/my-runs";
 import { assignOneJobToBoard, retireStopIfEmpty } from "@/lib/runs/assign";
+import { saveDriverNote } from "@/lib/runs/driver-note";
+import {
+  DRIVER_NOTE_FIELD, DRIVER_NOTE_MAX, readDriverNote,
+} from "@/lib/domain/driver-instructions";
 import type { OrderStatus } from "@/lib/domain/laundry-orders";
 
 /**
@@ -54,6 +58,8 @@ type Supabase = Awaited<ReturnType<typeof createClient>>;
 
 type AssignableOrder = {
   id: string;
+  /** Read so the assign form's note is only written when it changed. */
+  delivery_instructions: string | null;
   order_number: string;
   status: OrderStatus;
   delivery_required: boolean;
@@ -66,7 +72,7 @@ type AssignableOrder = {
 
 const ASSIGNABLE_COLUMNS =
   "id, order_number, status, delivery_required, customer_id, stop_id, due_date, " +
-  "assigned_board_id, assigned_delivery_date";
+  "assigned_board_id, assigned_delivery_date, delivery_instructions";
 
 async function loadAssignable(
   supabase: Supabase, tenantId: string, id: string,
@@ -155,6 +161,12 @@ export async function assignJobToBoard(formData: FormData): Promise<void> {
 
   const { order_id: orderId, board_id: boardId } = parsed.data;
   const deliveryDate = parsed.data.assigned_delivery_date;
+  // The single form opens showing the current instruction, so emptying the box
+  // clears it — see `readDriverNote`.
+  const note = readDriverNote(formData.get(DRIVER_NOTE_FIELD), { blankClears: true });
+  if (note.kind === "too_long") {
+    return fail(backTo, `Keep the note for the driver to ${DRIVER_NOTE_MAX} characters.`);
+  }
   const supabase = await createClient();
 
   const order = await loadAssignable(supabase, session.tenantId, orderId);
@@ -176,6 +188,16 @@ export async function assignJobToBoard(formData: FormData): Promise<void> {
   if ("error" in board) return fail(backTo, board.error);
 
   if (order.assigned_board_id === boardId && order.assigned_delivery_date === deliveryDate) {
+    // Same board, same day: the only thing that can have changed is the note.
+    // Saving it is the whole of the press, rather than refusing the form.
+    if (note.kind === "set" && note.value !== (order.delivery_instructions ?? null)) {
+      const saved = await saveDriverNote(supabase, session.tenantId, order.id, note.value);
+      if (!saved.ok) return fail(backTo, `Job ${order.order_number}: ${saved.error}.`);
+      revalidateAssignmentScreens(order.id);
+      return done(backTo, note.value
+        ? `Note for the driver saved on job ${order.order_number}.`
+        : `Note for the driver cleared on job ${order.order_number}.`);
+    }
     return fail(backTo,
       `Job ${order.order_number} is already with ${board.name} for `
       + `${formatAdelaideDate(deliveryDate, "medium")}.`);
@@ -204,6 +226,15 @@ export async function assignJobToBoard(formData: FormData): Promise<void> {
       : assigned.error);
   }
 
+  // The note goes on after the assignment, so a refused assignment writes
+  // nothing. A note that will not save is said rather than swallowed: the job is
+  // assigned, and the round would otherwise go without the instruction.
+  let noteProblem: string | null = null;
+  if (note.kind === "set" && note.value !== (order.delivery_instructions ?? null)) {
+    const saved = await saveDriverNote(supabase, session.tenantId, order.id, note.value);
+    if (!saved.ok) noteProblem = saved.error;
+  }
+
   await logOrderActivity(supabase, session, order.id, {
     activity_type: reassigning ? "run_reassigned" : "run_assigned",
     previous: {
@@ -223,6 +254,9 @@ export async function assignJobToBoard(formData: FormData): Promise<void> {
   revalidateAssignmentScreens(order.id);
 
   const when = formatAdelaideDate(deliveryDate, "medium");
+  if (noteProblem) {
+    return fail(backTo, `Job ${order.order_number} assigned to ${board.name} for ${when}, but ${noteProblem}.`);
+  }
   return done(backTo,
     reassigning
       ? `Job ${order.order_number} moved to ${board.name} for ${when}.`

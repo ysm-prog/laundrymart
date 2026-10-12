@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Card, CONTROL, SELECT_CHEVRON, cx } from "@/components/ui";
 import { SubmitButton } from "@/components/form";
+import { DRIVER_NOTE_FIELD, DRIVER_NOTE_MAX } from "@/lib/domain/driver-instructions";
 import { reassignJobsToBoard } from "./actions";
 import type { RunBoard } from "@/lib/runs/my-runs";
 
@@ -106,6 +107,15 @@ export function MoveToBoard({
                 <option key={board.id} value={board.id}>{board.name}</option>
               ))}
             </select>
+          </div>
+          {/* Optional, and applied to every job that moves. Blank leaves each
+              job's own instruction alone — see `readDriverNote`. */}
+          <div className="min-w-0 flex-1 sm:max-w-sm">
+            <label htmlFor="move-driver-note" className="mb-1 block text-sm font-medium">
+              Note for the driver <span className="font-normal text-muted-foreground">(optional)</span>
+            </label>
+            <input id="move-driver-note" name={DRIVER_NOTE_FIELD} maxLength={DRIVER_NOTE_MAX}
+                   placeholder="Added to every job moved" className={CONTROL} />
           </div>
           <SubmitButton pendingLabel="Moving…">
             Move {selected.size} job(s)

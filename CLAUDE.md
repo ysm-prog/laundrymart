@@ -1209,6 +1209,16 @@ produce on demand.
     premise was broken too, by redefining `archivable_tables()` to include
     `depots`.
 
+- `0051_laundry_item_ownership` — **Rental or Own, per laundry row.**
+  `laundry_order_items.ownership` (nullable, `check in ('rental','own')`) and
+  `save_laundry_order_items()` rebuilt from **0032's** body to carry it — 0014 and 0032 are
+  the only definitions, checked. **Adds no table, policy, capability or index; changes no
+  row** — every existing row reads null, "not recorded", never guessed. **Never read by
+  pricing.** Six self-assertion classes (column shape, the constraint, the writer carrying
+  the column *and* 0032's `item_id`, still INVOKER, `anon`/`authenticated` EXECUTE, RLS on and
+  no `anon` grant, 0025's restrictive layer present). `laundry_item_ownership.test.sql` (7)
+  proves the round trip and was confirmed to fail on a database without 0051.
+  **Written, not applied** (§11).
 - `0050_pickup_to_job` — **a collection becomes a laundry job, exactly once.**
   `laundry_orders.source_pickup_id` (`on delete set null`),
   `uq_laundry_orders_source_pickup` (partial unique) and
@@ -1492,7 +1502,8 @@ Proofs in `supabase/tests/`: `rls_isolation`, `rls_coverage`, `driver_scope`,
 `import_activation`, `member_directory`, `boards_scope`, `item_master`,
 `audit_log_scope`, `run_sequence`, `accounts_scope`, `open_draft_invoices`,
 `single_laundry`, `charge_accounts`, `gst_inclusive`, `collection_schedule`,
-`customer_record_scope`, `fleet_scope`, `pickup_intake` (**612 assertions** across 32 files).
+`customer_record_scope`, `fleet_scope`, `pickup_intake`, `laundry_item_ownership`
+(**619 assertions** across 33 files).
 
 **Count assertions, not lines starting with `ok`.** pgTAP's function is literally named `ok`, so
 psql prints a centred `ok` **column header** above each result — and `grep -c '^\s*ok '` counts
@@ -2197,6 +2208,13 @@ reports six false gaps.
   `set_records_archived`, `sync_invoice_line_account`, `tenant_members`). That is the 0042 trap
   leaving its usual trace: text typed into `apply_migration` reformatted a little against the file.
   Worth knowing before anybody reads a raw `md5(prosrc)` mismatch as drift.
+
+**`0051_laundry_item_ownership` is NOT applied to `laundrymart-syd`** (2026-10-12) — it was
+written on `claude/ats-jay-changes` with the instruction not to touch the live database. **It
+must go on before that branch merges**: the job page, the edit page and My Runs select
+`laundry_order_items.ownership` at request time, and PostgREST answers a missing column with an
+error rather than a null — so merging first would 500 every job page and the board's day. The
+ledger's last entry is still `0050_pickup_to_job`.
 
 **`0050_pickup_to_job` was applied on 2026-09-10** (`20260910041516`) and is the ledger's
 last entry, **55** in all. Additive — one nullable column with no default — and applied
@@ -3382,6 +3400,70 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-10-12 · Jay's ATS changes: wording, Rental/Own, customer prices, a note for the driver, the money path
+From Jay's email "ATS Changes" (12 Oct), on `claude/ats-jay-changes`, stacked on the
+demo-readiness fixes. **One migration, `0051_laundry_item_ownership`, written and NOT applied**
+— see §11 for why it must go on before the merge. No capability, role or policy change.
+
+- **"Customer drop-off" reads "Dropped off at counter"** (label only; `customer_dropoff` is
+  still stored). "Customer pickup" is now the only *Customer…* choice on the job form, which is
+  how Jay put it: *Pickup by driver* versus *Customer pickup*.
+- **Rental / Own on every laundry row** (0051). Stored per row because one bag holds both;
+  defaults to **Rental** when the picked item carries a `rental_price` and **Own** otherwise
+  (`defaultOwnership`), re-answered on each pick and flippable. A row from before 0051 opens
+  unanswered rather than guessed. Shown on the job page (*Rental or own* column) and on My Runs
+  ("Towels × 40 (Rental)"). **Pricing reads none of it.**
+- **The item and its quantity now sit side by side** on every width, which they did not: the
+  old grid put "How many" three fields below the item on a phone. Measured in a browser at
+  320/390/1440 — input tops within 2px, the toggle 44px, 0 console errors, no new overflow.
+- **"Change charge by customer" was a real defect, and it was the usual price, not the
+  customer's own.** `attachListPrices` handed every picker `row.price`, which for a customer is
+  their *own* row only — so a customer with no override lost the usual list on the Charges card
+  and the invoice composer and was charged the item's MYOB selling price instead. Re-rating an
+  item on the usual list therefore never reached any customer who had not been given their own
+  rate. `effectiveListPrice` is the rule now, tested against the pricer's own resolution.
+  - **And a posted customer id was written unchecked.** `saveLaundryPrices` put the form's
+    `customer_id` into `laundry_prices` with only the FK behind it, so a platform admin could
+    file a price against another laundry's customer, where no pricer would ever read it, and be
+    told it saved. It now names the tenant (§23).
+  - What was checked and found right: field names (`present`, `unit_<id>`, `customer_id`)
+    agree with `parsePriceForm`; every read filters `tenant_id`; RLS (`can_read_pricing`, 0033's
+    writes and 0025's restrictive layer) admits the Owner and the Office manager; blank clears
+    only rows that were on the form; and `priceJob` reads the customer's item rows ahead of the
+    usual ones.
+- **"Note for the driver" on Assign, on the job page's dispatch card and on the Runs bulk
+  move.** Saved into `laundry_orders.delivery_instructions`, which the `DriverInstructions`
+  block already shows first on My Runs — no new column. The single form opens showing the
+  current instruction, so emptying it clears it; the bulk move never clears, because an empty
+  box there would otherwise wipe every selected job's instruction (`readDriverNote`). Capped at
+  280 characters. A note that does not land is said, not swallowed: the write reads its row
+  count back, because 0025's restrictive layer refuses with zero rows and no error.
+- **The money path, traced end to end, and two breaks fixed.**
+  - **An emptied running draft could be issued as a $0.00 tax invoice** and pushed to Xero —
+    take the last job off a draft and press Issue (or Issue Selected). `issueRefusal` refuses a
+    draft with no lines, before anything is recalculated.
+  - **The register's working pane drew "Record payment" on a voided invoice** (any non-draft
+    with a balance), a form that could only be refused. `canTakePayment` is now the one rule
+    for both payment forms, and a test holds it to `paymentRefusal` status by status.
+  - Traced and sound: complete → `awaiting_review` (0017 hook) → price (`priceAndSaveJob`, list
+    tier included) → approve (freezes) → running draft (`invoice_generated`, lines rebuilt) →
+    issue (re-dated, terms re-derived) → send (`invoice_sent`) → payment (recalculated from the
+    lines; paying in full moves the jobs to `paid` from either invoiced state, which 0017's
+    guard permits). Taking a job off a draft deletes the link *before* returning the job to
+    `approved`, the order 0017's release rule needs.
+  - **Still open:** a credit note does not reduce its invoice's balance.
+- **1282 unit tests across 80 files (was 1244/77)** and **619 pgTAP assertions across 33 files
+  (was 612/32)**. `verify` green; all 55 migrations applied to a fresh Postgres 16 with the
+  whole suite and the seed. Each new guard was confirmed to catch its defect (the
+  `list_price: row.price` revert; the ownership proof against a database without 0051).
+
+**Not verified behind the auth gate, and these need a live check:** apply 0051 first; then on
+`ats.coreit.com.au` take a job in with one rental and one own row and confirm both show on the
+job page and My Runs; give a customer no own price, re-rate that item on the usual list and
+confirm the job's Charges card offers the new rate; assign a job with a note and confirm it
+heads the Instructions block on My Runs; take the only job off a draft and confirm Issue is
+refused; and take one job with lines through to a full payment and confirm the job reads Paid.
+
 ### 2026-10-12 · Demo-readiness: payments on imported invoices, credits, and the home screen
 A pre-demo QA pass on the live app and the money code. **No migration; no schema, RLS,
 capability or policy change.**
@@ -10700,6 +10782,10 @@ refusal rather than a screen choice. Both halves are stated on the screen itself
   changes what the next charge and the next line cost, with nothing to re-key. `attachListPrices`
   is the one read behind it, resolved through the same `buildItemPriceRows` the price screens
   render from, so the screen and the pricer cannot come to disagree about what a customer pays.
+  **It hands the picker `effectiveListPrice(row)` — the customer's own rate, then the usual one —
+  and until 2026-10-12 it handed `row.price` alone**, which for a customer is only their own row.
+  So every customer without an override lost the usual list and fell through to
+  `items.sell_price`, and re-rating an item never reached their charges or invoice lines.
 - **A list rate is taken verbatim and never grossed up.** `items.sell_price` carries a *basis*
   and an exclusive one is grossed up by `lineRateFromItem` (0043); a price-list rate is a number
   the owner typed into a box labelled "what the customer pays". Applying the item's basis to it

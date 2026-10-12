@@ -393,7 +393,7 @@ export const PRIORITY_LABELS: Record<OrderPriority, string> = {
 export const RECEIVED_VIA = ["customer_dropoff", "driver_pickup", "other"] as const;
 export type ReceivedVia = (typeof RECEIVED_VIA)[number];
 export const RECEIVED_VIA_LABELS: Record<ReceivedVia, string> = {
-  customer_dropoff: "Customer drop-off",
+  customer_dropoff: "Dropped off at counter",
   driver_pickup: "Pickup by driver",
   other: "Other",
 };
@@ -516,7 +516,49 @@ export type OrderItemInput = {
   bag_count?: number | null;
   estimated_quantity?: number | null;
   notes?: string | null;
+  /**
+   * Whose linen this row is (0051): `rental` or `own`. A plain string because a
+   * stored row arrives untyped; `ownershipLabel` reads it back. Never priced.
+   */
+  ownership?: string | null;
 };
+
+/* -------------------------------------------------------------- ownership */
+
+/**
+ * Is a row of laundry the laundry's own **rental** linen, or the customer's
+ * **own**? Jay's ATS change of 2026-10-12, answered per row because one bag can
+ * hold both. A record of whose linen it is and nothing more: pricing reads none
+ * of it, so the answer cannot move what a customer is charged.
+ */
+export const ITEM_OWNERSHIP = ["rental", "own"] as const;
+export type ItemOwnership = (typeof ITEM_OWNERSHIP)[number];
+
+export const ITEM_OWNERSHIP_LABELS: Record<ItemOwnership, string> = {
+  rental: "Rental",
+  own: "Own",
+};
+
+/**
+ * What the toggle starts on when an item is picked: **Rental** for an item the
+ * laundry hires out — one carrying a rental price on the item master — and
+ * **Own** for anything else, including a row that names no item at all.
+ *
+ * `rental_price` is the signal because it is the one field on `items` that only
+ * means something for linen the laundry lends (0002). A default, not a rule:
+ * the counter can flip it, and a flipped answer is what is saved.
+ */
+export function defaultOwnership(
+  item: { rental_price?: number | string | null } | null | undefined,
+): ItemOwnership {
+  const price = Number(item?.rental_price ?? 0);
+  return Number.isFinite(price) && price > 0 ? "rental" : "own";
+}
+
+/** The label for a stored answer, or null where the row never had one. */
+export function ownershipLabel(value: string | null | undefined): string | null {
+  return value === "rental" || value === "own" ? ITEM_OWNERSHIP_LABELS[value] : null;
+}
 
 /**
  * Is this row worth keeping? The form always carries at least one blank row, and
@@ -616,11 +658,27 @@ export function describeItem(item: OrderItemInput, label?: string | null): strin
 }
 
 /** The list's laundry column: the first couple of items, then a count. */
-export function summariseItems(items: readonly OrderItemInput[], limit = 2): string {
+export function summariseItems(
+  items: readonly OrderItemInput[],
+  limit = 2,
+  options: { ownership?: boolean } = {},
+): string {
   if (items.length === 0) return "No items";
-  const shown = items.slice(0, limit).map((item) => describeItem(item)).join(", ");
+  const shown = items.slice(0, limit)
+    .map((item) => (options.ownership ? describeItemWithOwnership(item) : describeItem(item)))
+    .join(", ");
   const rest = items.length - limit;
   return rest > 0 ? `${shown} +${rest} more` : shown;
+}
+
+/**
+ * An item line with its Rental / Own answer appended — "Towels × 40 (Rental)" —
+ * for the round's screens, where whose linen it is matters at the door. A row
+ * with no answer (before 0051) reads exactly as `describeItem` does.
+ */
+export function describeItemWithOwnership(item: OrderItemInput): string {
+  const label = ownershipLabel(item.ownership);
+  return label ? `${describeItem(item)} (${label})` : describeItem(item);
 }
 
 /* ---------------------------------------------------------------- overdue */

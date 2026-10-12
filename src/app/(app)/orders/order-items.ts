@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { optionalText, optionalUuid } from "@/lib/actions";
-import { isBlankItem, type OrderItemInput } from "@/lib/domain/laundry-orders";
+import { isBlankItem, ITEM_OWNERSHIP, type OrderItemInput } from "@/lib/domain/laundry-orders";
 
 /**
  * Reading the laundry list back off the job form.
@@ -44,6 +44,14 @@ const itemSchema = z.object({
   bag_count: optionalCount,
   estimated_quantity: optionalCount,
   notes: optionalText,
+  /**
+   * Rental or Own (0051). `""` and `null` both mean unanswered, for the reason
+   * `optionalText` accepts both: the form spells absence `null` in JSON.
+   */
+  ownership: z.preprocess(
+    (value) => (value === "" || value === null ? undefined : value),
+    z.enum(ITEM_OWNERSHIP, "Choose Rental or Own").optional(),
+  ),
 });
 
 /**
@@ -94,6 +102,7 @@ export function parseOrderItems(raw: FormDataEntryValue | null): ItemsResult {
       bag_count: item.bag_count ?? null,
       estimated_quantity: item.estimated_quantity ?? null,
       notes: item.notes ?? null,
+      ownership: item.ownership ?? null,
     }))
     .filter((item) => !isBlankItem(item));
   return { ok: true, items };

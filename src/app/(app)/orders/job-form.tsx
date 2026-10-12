@@ -13,8 +13,9 @@ import { CustomerEssentials, FormDisclosure } from "@/app/(app)/customers/custom
 import {
   DELIVERY_WINDOWS, DELIVERY_WINDOW_LABELS, ITEM_TYPES, ITEM_TYPE_LABELS,
   ORDER_PRIORITIES, PRIORITY_LABELS, QUANTITY_TYPES, QUANTITY_TYPE_LABELS,
-  RECEIVED_VIA_LABELS, describeItem, initialDeliveryRequired, initialReceivedVia,
-  receivedViaOptions, type OrderItemInput, type ReceivedVia,
+  ITEM_OWNERSHIP, ITEM_OWNERSHIP_LABELS, RECEIVED_VIA_LABELS, defaultOwnership, describeItem,
+  initialDeliveryRequired, initialReceivedVia, receivedViaOptions,
+  type ItemOwnership, type OrderItemInput, type ReceivedVia,
 } from "@/lib/domain/laundry-orders";
 import { customerStatusNeedsSaying } from "@/lib/domain/customers";
 import { businessToday, toZonedDate } from "@/lib/domain/timezone";
@@ -94,6 +95,8 @@ type ItemRow = {
   bagCount: string;
   estimatedQuantity: string;
   notes: string;
+  /** Rental or Own (0051). "" only on an edited row that never had an answer. */
+  ownership: ItemOwnership | "";
 };
 
 const QUICK_CREATE_FORM = "job-customer-quick-create";
@@ -112,6 +115,9 @@ function blankItem(key: number): ItemRow {
     bagCount: "",
     estimatedQuantity: "",
     notes: "",
+    // A row naming no item is the customer's own laundry until an item says
+    // otherwise — `defaultOwnership` re-answers the moment one is picked.
+    ownership: defaultOwnership(null),
   };
 }
 
@@ -150,6 +156,8 @@ export function JobForm({
   catalogue?: Array<{
     id: string; item_code: string | null; name: string;
     description?: string | null; laundry_category: string | null;
+    /** Only to default the Rental / Own toggle — never read as a price. */
+    rental_price?: number | string | null;
   }>;
   defaultCustomerId?: string;
   /** `orders.manage` — only they may record a job as arriving on an earlier day. */
@@ -201,6 +209,9 @@ export function JobForm({
       bagCount: item.bag_count == null ? "" : String(item.bag_count),
       estimatedQuantity: item.estimated_quantity == null ? "" : String(item.estimated_quantity),
       notes: item.notes ?? "",
+      // A stored answer wins; a row from before 0051 is left unanswered rather
+      // than guessed at, so saving an old job does not invent a fact about it.
+      ownership: item.ownership === "rental" || item.ownership === "own" ? item.ownership : "",
     }));
   });
 
@@ -243,6 +254,7 @@ export function JobForm({
       bag_count: row.quantityType === "bulk_lot" ? numberOrNull(row.bagCount) : null,
       estimated_quantity: row.quantityType === "bulk_lot" ? numberOrNull(row.estimatedQuantity) : null,
       notes: row.notes.trim() || null,
+      ownership: row.ownership || null,
     })),
   ), [rows]);
 
@@ -525,7 +537,10 @@ export function JobForm({
                   ) : null}
                 </div>
 
-                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                {/* The item and how many of it sit side by side on every width —
+                    Jay's ask, 2026-10-12. They are one answer ("40 × TW"), and on a
+                    phone the old grid put the count three fields further down. */}
+                <div className="flex items-start gap-3">
                   {/* **The item, by code — the same picker the invoice composer
                       and the job's charges use.** Staff know TOW001 and type it;
                       the nine kinds of laundry are the fallback beneath, for a
@@ -543,7 +558,7 @@ export function JobForm({
                       an item is now chosen the same way on every screen that
                       names one, rather than by a dropdown here and a type-ahead
                       there. */}
-                  <div className="sm:col-span-2">
+                  <div className="min-w-0 flex-1">
                     {catalogue.length > 0 ? (
                       <ItemPicker
                         idPrefix={`laundry-${row.key}`}
@@ -570,6 +585,10 @@ export function JobForm({
                           ...(picked.laundry_category
                             ? { itemType: picked.laundry_category }
                             : {}),
+                          // Rental linen defaults to Rental, anything else to
+                          // Own. Re-answered on every pick, because the default
+                          // is about the item and the item just changed.
+                          ownership: defaultOwnership(itemById.get(picked.id) ?? null),
                         })}
                         onClear={() => patch(row.key, { itemId: "" })}
                       />
@@ -585,6 +604,29 @@ export function JobForm({
                     )}
                   </div>
 
+
+                  {row.quantityType === "exact" ? (
+                    <label className="w-24 shrink-0 space-y-1 sm:w-32">
+                      <span className="block text-sm font-medium text-foreground">
+                        How many
+                      </span>
+                      <input className={CONTROL} type="number" min={1} step={1} inputMode="numeric"
+                             value={row.exactQuantity}
+                             onChange={(event) => patch(row.key, { exactQuantity: event.target.value })} />
+                    </label>
+                  ) : (
+                    <label className="w-24 shrink-0 space-y-1 sm:w-32">
+                      <span className="block text-sm font-medium text-foreground">
+                        Bags / lots
+                      </span>
+                      <input className={CONTROL} type="number" min={1} step={1} inputMode="numeric"
+                             value={row.bagCount}
+                             onChange={(event) => patch(row.key, { bagCount: event.target.value })} />
+                    </label>
+                  )}
+                </div>
+
+                <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                   <label className="space-y-1">
                     <span className="block text-sm font-medium text-foreground">
                       Kind of laundry
@@ -623,35 +665,42 @@ export function JobForm({
                     </label>
                   ) : null}
 
-                  {row.quantityType === "exact" ? (
+
+                  {/* Rental or Own (0051). A pair of radios rather than a select:
+                      two answers, both always visible, one tap. Never priced. */}
+                  <fieldset className="space-y-1">
+                    <legend className="block text-sm font-medium text-foreground">
+                      Rental or own
+                    </legend>
+                    <div className="flex gap-2">
+                      {ITEM_OWNERSHIP.map((value) => (
+                        <label key={value}
+                               className={cx(
+                                 "flex min-h-11 flex-1 cursor-pointer items-center justify-center rounded-lg border px-3 text-sm",
+                                 row.ownership === value
+                                   ? "border-foreground bg-foreground text-background"
+                                   : "border-control-border hover:bg-surface-muted",
+                               )}>
+                          <input type="radio" className="sr-only"
+                                 name={`ownership-${row.key}`} value={value}
+                                 checked={row.ownership === value}
+                                 onChange={() => patch(row.key, { ownership: value as ItemOwnership })} />
+                          {ITEM_OWNERSHIP_LABELS[value]}
+                        </label>
+                      ))}
+                    </div>
+                  </fieldset>
+
+                  {row.quantityType === "bulk_lot" ? (
                     <label className="space-y-1">
                       <span className="block text-sm font-medium text-foreground">
-                        How many
+                        Rough count
                       </span>
                       <input className={CONTROL} type="number" min={1} step={1} inputMode="numeric"
-                             value={row.exactQuantity}
-                             onChange={(event) => patch(row.key, { exactQuantity: event.target.value })} />
+                             placeholder="Optional" value={row.estimatedQuantity}
+                             onChange={(event) => patch(row.key, { estimatedQuantity: event.target.value })} />
                     </label>
-                  ) : (
-                    <>
-                      <label className="space-y-1">
-                        <span className="block text-sm font-medium text-foreground">
-                          Bags / lots
-                        </span>
-                        <input className={CONTROL} type="number" min={1} step={1} inputMode="numeric"
-                               value={row.bagCount}
-                               onChange={(event) => patch(row.key, { bagCount: event.target.value })} />
-                      </label>
-                      <label className="space-y-1">
-                        <span className="block text-sm font-medium text-foreground">
-                          Rough count
-                        </span>
-                        <input className={CONTROL} type="number" min={1} step={1} inputMode="numeric"
-                               placeholder="Optional" value={row.estimatedQuantity}
-                               onChange={(event) => patch(row.key, { estimatedQuantity: event.target.value })} />
-                      </label>
-                    </>
-                  )}
+                  ) : null}
 
                   <label className="space-y-1 sm:col-span-2 lg:col-span-4">
                     <span className="block text-sm font-medium text-foreground">

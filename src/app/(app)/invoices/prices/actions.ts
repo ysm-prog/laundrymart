@@ -51,6 +51,21 @@ export async function saveLaundryPrices(formData: FormData): Promise<void> {
 
   const supabase = await createClient();
 
+  // §23: the customer id is posted, and it lands in `laundry_prices.customer_id`.
+  // Nothing else checked it belonged to this laundry — the FK only proves the
+  // customer exists somewhere — so a platform admin's session could file a price
+  // against another business's customer inside this one, where no pricer would
+  // ever read it and the save would report success.
+  if (customerId) {
+    const { data: customer, error: customerError } = await supabase
+      .from("customers").select("id")
+      .eq("tenant_id", session.tenantId)
+      .eq("id", customerId)
+      .maybeSingle<{ id: string }>();
+    if (customerError) return fail(path, describeDbError(customerError));
+    if (!customer) return fail(path, "That customer is not in this laundry. Reload the page and try again.");
+  }
+
   // The items the form claims to have shown, read back rather than trusted.
   // Two things depend on this and both are load-bearing: `item_type` is NOT NULL
   // on the price row and is **derived** from the item's own category rather than

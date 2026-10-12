@@ -54,3 +54,27 @@ export function settleHeaderOnly(total: number, amountPaid: number, amount: numb
   const paid = newPaid >= total - CENT;
   return { amountPaid: newPaid, paid };
 }
+
+// Whether to draw the payment form at all. The same rule `paymentRefusal`
+// applies, stated once so the register's working pane and the invoice page
+// cannot disagree: the pane used to offer the form on any non-draft with a
+// balance, so a voided invoice showed a "Record payment" button that could
+// only ever be refused.
+export function canTakePayment(invoice: {
+  invoice_type: string | null; status: string; balance: number | string;
+}): boolean {
+  return invoice.invoice_type !== "credit"
+    && (PAYABLE_STATUSES as readonly string[]).includes(invoice.status)
+    && Number(invoice.balance) > CENT;
+}
+
+// Whether a draft may be issued. A running draft (§30) can be emptied by taking
+// its last job back off it; issuing it then sends the customer a $0.00 tax
+// invoice and pushes it to Xero. Refused, with the remedy named.
+export function issueRefusal(input: { status: string; lineCount: number }): string | null {
+  if (input.status !== "draft") return "it is no longer a draft";
+  if (input.lineCount <= 0) {
+    return "it has nothing on it — add a line or a job first, or leave it as a draft";
+  }
+  return null;
+}

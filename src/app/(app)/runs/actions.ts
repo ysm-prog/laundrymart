@@ -10,6 +10,10 @@ import {
 } from "@/lib/actions";
 import { logOrderActivity } from "@/lib/orders/activity";
 import { assignOneJobToBoard } from "@/lib/runs/assign";
+import { saveDriverNote } from "@/lib/runs/driver-note";
+import {
+  DRIVER_NOTE_FIELD, DRIVER_NOTE_MAX, readDriverNote,
+} from "@/lib/domain/driver-instructions";
 import { raiseCollectionStops } from "@/lib/runs/collections";
 import { loadRunDay } from "@/lib/runs/run-day";
 import { counted } from "@/lib/format";
@@ -158,6 +162,12 @@ export async function reassignJobsToBoard(formData: FormData): Promise<void> {
     + (parsed.data.return_board ? `&board=${parsed.data.return_board}` : "");
 
   if (orderIds.length === 0) return fail(back, "Select at least one job to move.");
+  // Blank does **not** clear here: this form shows no one job's instruction, so
+  // an empty box means "no note", never "wipe forty jobs' instructions".
+  const note = readDriverNote(formData.get(DRIVER_NOTE_FIELD), { blankClears: false });
+  if (note.kind === "too_long") {
+    return fail(back, `Keep the note for the driver to ${DRIVER_NOTE_MAX} characters.`);
+  }
   if (orderIds.length > MAX_REASSIGN) {
     return fail(back,
       `That is ${orderIds.length} jobs. Move at most ${MAX_REASSIGN} at a time so a failure is readable.`);
@@ -176,11 +186,20 @@ export async function reassignJobsToBoard(formData: FormData): Promise<void> {
 
   const moved: string[] = [];
   const skipped: Array<{ orderNumber: string; reason: string }> = [];
+  const noteFailed: string[] = [];
 
   for (const orderId of orderIds) {
     const result = await moveOneJob(supabase, session, orderId, board, parsed.data.date);
-    if (result.ok) moved.push(result.orderNumber);
-    else skipped.push({ orderNumber: result.orderNumber, reason: result.reason });
+    if (!result.ok) {
+      skipped.push({ orderNumber: result.orderNumber, reason: result.reason });
+      continue;
+    }
+    moved.push(result.orderNumber);
+    // Only on a job that actually moved, so a refused job is left exactly as it was.
+    if (note.kind === "set") {
+      const saved = await saveDriverNote(supabase, session.tenantId, orderId, note.value);
+      if (!saved.ok) noteFailed.push(result.orderNumber);
+    }
   }
 
   revalidatePath(RUNS);
@@ -197,6 +216,12 @@ export async function reassignJobsToBoard(formData: FormData): Promise<void> {
   const tail = skipped.length > 0
     ? ` ${skipped.length} could not be moved (${skipped[0]!.orderNumber}: ${skipped[0]!.reason}).`
     : "";
+  // A note that did not land is a partial success, said as one: the round would
+  // otherwise go out without the instruction somebody typed for it.
+  if (noteFailed.length > 0) {
+    return fail(back, `${moved.length} job(s) moved to ${board.name}, but the note for the driver `
+      + `was not saved on ${noteFailed.join(", ")}.${tail}`);
+  }
   return done(back, `${moved.length} job(s) moved to ${board.name}.${tail}`);
 }
 

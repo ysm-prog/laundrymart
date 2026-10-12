@@ -266,7 +266,7 @@ const PREVIEW_DAY_JOBS: DayJob[] = [
     },
     laundry_order_items: [
       { item_type: "towels", custom_description: null, quantity_type: "exact",
-        exact_quantity: 250, bag_count: null, estimated_quantity: null, notes: null },
+        exact_quantity: 250, bag_count: null, estimated_quantity: null, notes: null, ownership: "rental" },
     ],
   },
   {
@@ -284,7 +284,7 @@ const PREVIEW_DAY_JOBS: DayJob[] = [
     },
     laundry_order_items: [
       { item_type: "sheets", custom_description: null, quantity_type: "bulk_lot",
-        exact_quantity: null, bag_count: 5, estimated_quantity: 60, notes: null },
+        exact_quantity: null, bag_count: 5, estimated_quantity: 60, notes: null, ownership: "own" },
     ],
   },
   {
@@ -301,7 +301,7 @@ const PREVIEW_DAY_JOBS: DayJob[] = [
     },
     laundry_order_items: [
       { item_type: "bath_towels", custom_description: null, quantity_type: "exact",
-        exact_quantity: 80, bag_count: null, estimated_quantity: null, notes: null },
+        exact_quantity: 80, bag_count: null, estimated_quantity: null, notes: null, ownership: "own" },
     ],
   },
 ];

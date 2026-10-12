@@ -59,6 +59,8 @@ export type RunJobItem = {
   bag_count: number | null;
   estimated_quantity: number | null;
   notes: string | null;
+  /** `rental` or `own` (0051); null on rows written before it. */
+  ownership: string | null;
 };
 
 export type RunJob = {
@@ -303,7 +305,7 @@ export async function loadJobsForStops(
       "expected_delivery_time, delivery_address, delivery_instructions, special_instructions, " +
       "customer_id, stop_id, " +
       "laundry_order_items(item_type, custom_description, quantity_type, exact_quantity, " +
-      "bag_count, estimated_quantity, notes)",
+      "bag_count, estimated_quantity, notes, ownership)",
     )
     .eq("tenant_id", tenantId)
     .in("stop_id", stopIds)
@@ -377,7 +379,7 @@ const DAY_JOB_COLUMNS =
   // class this repo has already shipped once.
   "jobs!laundry_orders_stop_id_fkey(sequence), " +
   "laundry_order_items(item_type, custom_description, quantity_type, exact_quantity, " +
-  "bag_count, estimated_quantity, notes)";
+  "bag_count, estimated_quantity, notes, ownership)";
 
 /**
  * Every job assigned to this board for this Adelaide day.
