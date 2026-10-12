@@ -176,6 +176,9 @@ async function Aging() {
     .from("invoices")
     .select("balance, due_date, status")
     .in("status", ["issued", "part_paid", "overdue"])
+    // Receivables only: an imported credit carries a negative balance and no
+    // due date, so it landed in "Current" and netted the tile below zero.
+    .gt("balance", 0.005).neq("invoice_type", "credit")
     .is("deleted_at", null)
     .returns<Array<{ balance: number; due_date: string | null; status: string }>>();
 

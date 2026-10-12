@@ -15,6 +15,7 @@ const data: InvoicePdfData = {
   invoice: {
     id: "8f14e45f-ceea-467a-9dfd-1a2b3c4d5e6f",
     invoice_number: "INV00042",
+    invoice_type: "consolidated",
     status: "issued",
     issue_date: "2026-07-31",
     due_date: "2026-08-14",

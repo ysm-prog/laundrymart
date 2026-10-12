@@ -3382,6 +3382,37 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-10-12 · Demo-readiness: payments on imported invoices, credits, and the home screen
+A pre-demo QA pass on the live app and the money code. **No migration; no schema, RLS,
+capability or policy change.**
+
+- **Recording a payment on an imported MYOB invoice wiped it.** The 646 imports are headers
+  with no lines and MYOB's paid-to-date in `amount_paid` (no `payments` rows), and
+  `recalculate_invoice` totals from lines and payments — so a $500 invoice with $200 paid in
+  MYOB, paid another $100, became total $0, paid $100, status Paid. `recordPayment` now adds
+  to `amount_paid` on a header with no lines and recalculates only when lines exist
+  (`settleHeaderOnly`). `issueOneInvoice` reads the status before recalculating for the same
+  reason.
+- **`recordPayment` checked nothing about the invoice.** `paymentRefusal`
+  (`lib/domain/payment-gate.ts`, tested) refuses a draft (paying one made it unissuable and
+  dropped it out of `uq_invoices_open_draft`), a void, a credit, an already-paid invoice, an
+  overpayment and a future date. The customer is taken from the invoice, not the form. The
+  form is drawn only on a payable invoice and says how much MYOB recorded as paid.
+- **Credit notes** are refused on drafts, voids and credits, and capped at the invoice total.
+  *Still open:* a credit note does not reduce the invoice's balance.
+- **The home screen's "Needs a decision" listed the ten oldest invoices** — 2011 MYOB history
+  worth cents, and negative credits as things to "Chase". It and the past-terms KPI now count
+  positive, non-credit balances, largest first; the aging tiles match.
+- **The "Today's run" card showed "not linked to a driver" to the owner and office** (they
+  hold `run.execute` through `TENANT_ALL`), and for a board it looked up
+  `daily_routes.driver_id`, which runs created since 0031 do not carry. Now only drivers and
+  boards see it, and it opens My Runs.
+- **Money › Awaiting invoice rendered `\u2014`/`\u2019`/`\u2026` literally** — JSX
+  attribute strings do not process escapes.
+- **A credit (`invoice_type = 'credit'`) was titled "Tax invoice"** on screen and in the PDF,
+  and a draft PDF printed as a tax invoice. Titles now read Credit / Draft invoice / Tax
+  invoice / Invoice, the last two by whether GST is charged.
+
 ### 2026-09-10 · vitest 5, and the Node 22 floor that was already overdue
 Dependabot's fifth offering of the blocked dev group (#22 → #44 → #53 → #63 → **#68**), taken in
 part. **No migration; no schema, RLS, capability, policy, route or business rule change** — `git
@@ -3458,7 +3489,19 @@ a configuration one (§5). Read it in the Vercel dashboard — and on this relea
 actually reading, because `engines.node` is what tells Vercel to build on 22 and a runner left on
 20 would fail the gate, fall through to `next build` and deploy silently.
 
-**`Dev` was not touched**, so it is one release behind and holds the previous `Prod` tree.
+**`Dev` was brought up the same hour** (`60087a9`), so the two branches hold identical trees —
+`git diff HEAD origin/Prod` is empty. A merge commit rather than a fast-forward, because `Dev`'s own
+history is fourteen earlier catch-up merges; the one non-merge commit it carries that `Prod` lacks
+(`6df2f15`, the collection-lookup batching) was proved to be the **same patch** as `Prod`'s
+cherry-picked `4384780` by diffing the two, so nothing conflicted and the only tree change the merge
+took was this release's five files. **The gate was re-run on the merged tree rather than assumed from
+`Prod`'s run** — CI run 327, all three jobs green and read off the logs: `verify.sh` 11:21:43 →
+11:22:38, fifty-five seconds, carrying the same **1233 tests across 76 files**, the production build
+on **Next.js 16.3.4** and `== PASSED ==`; the DB job's `pgTAP suite passed` over all 54 migrations
+with `supabase/seed.sql` committing on top of the fresh schema; gitleaks strict and the audit clean.
+Both parents are recorded on the merge commit, which is the 2026-08-26 trap where a mid-merge
+`git checkout` cleared `MERGE_HEAD` and GitHub then read the result as conflicted. The standing
+catch-up drift the last several entries record is closed.
 
 ### 2026-09-10 · A collection becomes a laundry job, exactly once
 The loop §33 recorded as *"the obvious next piece of work and is not built"*. One migration

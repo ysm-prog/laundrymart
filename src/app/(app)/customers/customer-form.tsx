@@ -60,7 +60,7 @@ export function CustomerEssentials({
       {withSite ? (
         <Field label="Site address" name="site_address" required className="sm:col-span-2"
                hint="Where the driver collects and delivers — saved as their first site">
-          <Input name="site_address" required placeholder="12 Wharf Road, Balmain" formId={formId} />
+          <Input name="site_address" required placeholder="12 King William St, Adelaide" formId={formId} />
         </Field>
       ) : null}
     </div>

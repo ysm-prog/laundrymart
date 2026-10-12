@@ -39,6 +39,7 @@ export type InvoicePdfData = {
   invoice: {
     id: string;
     invoice_number: string;
+    invoice_type: string;
     status: string;
     issue_date: string;
     due_date: string | null;
@@ -74,7 +75,7 @@ export async function loadInvoiceForPdf(
 
   const { data: invoice } = await supabase
     .from("invoices")
-    .select("id, invoice_number, status, issue_date, due_date, period_start, period_end, " +
+    .select("id, invoice_number, invoice_type, status, issue_date, due_date, period_start, period_end, " +
             "purchase_order_number, payment_terms_days, subtotal, tax_amount, total, " +
             "amount_paid, balance, currency, notes, " +
             "customers(business_name, customer_number, abn, billing_email, " +
