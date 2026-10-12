@@ -2036,7 +2036,7 @@ const PREVIEW_CHARGES: EditableCharge[] = [
     gl_account_id: "g2",
   },
   {
-    key: "c2", description: "Sheets — 40 (price list)", charge_type: "wash_only",
+    key: "c2", description: "Sheets — 40", charge_type: "wash_only",
     quantity: 40, unit_price: 2.4, taxable: true,
     source_agreement_id: null, source_agreement_line_id: null,
     source_item_id: null, source_laundry_item_type: "sheets",

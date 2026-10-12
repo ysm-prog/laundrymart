@@ -4,7 +4,13 @@ import { buildInvoiceEmail, escapeHtml } from "@/lib/email/invoice-email";
 import type { InvoicePdfData } from "../invoice-data";
 
 const data: InvoicePdfData = {
-  tenant: { name: "Harbour Linen Co", abn: "51 824 753 556", gstRate: 0.1 },
+  tenant: {
+    name: "Harbour Linen Co", abn: "51824753556", gstRate: 0.1,
+    profile: {
+      addressLines: ["1 Mill Road", "Adelaide SA 5000"], phone: null, email: null,
+      bankAccountName: "Harbour Linen Co", bsb: "062-000", accountNumber: "12345678",
+    },
+  },
   customer: {
     business_name: "Bondi Bistro",
     customer_number: "CUST00042",
@@ -27,6 +33,7 @@ const data: InvoicePdfData = {
     tax_amount: 48,
     total: 528,
     amount_paid: 100,
+    amount_credited: 0,
     balance: 428,
     currency: "AUD",
     notes: "Thanks for your business.",
@@ -160,5 +167,26 @@ describe("the service breakdown on a consolidated PDF", () => {
       ...data, breakdown: { weeks: [], totals: [], jobCount: 0 },
     });
     expect(single.byteLength).toBe(none.byteLength);
+  });
+});
+
+describe("customer copy (2026-10-12 end-to-end gaps)", () => {
+  it("tells the customer how to pay, quoting the invoice number", () => {
+    const { text, html } = buildInvoiceEmail(data);
+    expect(text).toContain("BSB: 062-000");
+    expect(text).toContain("Please quote INV00042 as the payment reference.");
+    expect(html).toContain("062-000");
+  });
+
+  it("labels the total as including GST", () => {
+    expect(buildInvoiceEmail(data).text).toContain("Total (inc GST): $528.00");
+  });
+
+  it("prints no ledger code and no internal charge type on the PDF", async () => {
+    const { readFileSync } = await import("node:fs");
+    const source = readFileSync(new URL("../invoice-document.tsx", import.meta.url), "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, "").replace(/\{\/\*[\s\S]*?\*\/\}/g, "");
+    expect(source).not.toMatch(/line\.account_code/);
+    expect(source).not.toMatch(/CHARGE_TYPE_LABELS/);
   });
 });

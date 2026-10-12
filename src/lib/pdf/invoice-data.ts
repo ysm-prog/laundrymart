@@ -11,6 +11,7 @@
 import { createClient } from "@/lib/supabase/server";
 import type { ChargeType } from "@/lib/domain/pricing";
 import { loadInvoiceBreakdown, type InvoiceBreakdown } from "@/lib/invoices/breakdown";
+import { parseInvoiceProfile, type InvoiceProfile } from "@/lib/domain/invoice-profile";
 
 export type InvoicePdfLine = {
   description: string;
@@ -28,7 +29,7 @@ export type InvoicePdfLine = {
 };
 
 export type InvoicePdfData = {
-  tenant: { name: string; abn: string | null; gstRate: number };
+  tenant: { name: string; abn: string | null; gstRate: number; profile: InvoiceProfile };
   customer: {
     business_name: string;
     customer_number: string;
@@ -51,6 +52,7 @@ export type InvoicePdfData = {
     tax_amount: number;
     total: number;
     amount_paid: number;
+    amount_credited: number;
     balance: number;
     currency: string;
     notes: string | null;
@@ -77,7 +79,7 @@ export async function loadInvoiceForPdf(
     .from("invoices")
     .select("id, invoice_number, invoice_type, status, issue_date, due_date, period_start, period_end, " +
             "purchase_order_number, payment_terms_days, subtotal, tax_amount, total, " +
-            "amount_paid, balance, currency, notes, " +
+            "amount_paid, amount_credited, balance, currency, notes, " +
             "customers(business_name, customer_number, abn, billing_email, " +
             "billing_address_line1, billing_address_line2, billing_suburb, billing_state, " +
             "billing_postcode)")
@@ -102,9 +104,9 @@ export async function loadInvoiceForPdf(
       .returns<InvoicePdfLine[]>(),
     supabase
       .from("tenants")
-      .select("name, abn, gst_rate")
+      .select("name, abn, gst_rate, settings")
       .eq("id", tenantId)
-      .maybeSingle<{ name: string; abn: string | null; gst_rate: number }>(),
+      .maybeSingle<{ name: string; abn: string | null; gst_rate: number; settings: unknown }>(),
   ]);
 
   const c = invoice.customers;
@@ -114,6 +116,7 @@ export async function loadInvoiceForPdf(
       name: tenant?.name ?? "Laundry",
       abn: tenant?.abn ?? null,
       gstRate: Number(tenant?.gst_rate ?? 0.1),
+      profile: parseInvoiceProfile(tenant?.settings),
     },
     customer: {
       business_name: c?.business_name ?? "Unknown customer",

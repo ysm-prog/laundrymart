@@ -17,7 +17,7 @@
 
 import { Document, Page, StyleSheet, Text, View } from "@react-pdf/renderer";
 import { formatMoney } from "@/lib/domain/pricing";
-import { CHARGE_TYPE_LABELS } from "@/lib/domain/pricing";
+import { formatAbn, invoiceTotalsRows, paymentInstructions } from "@/lib/domain/invoice-profile";
 import type { InvoicePdfData } from "./invoice-data";
 
 const styles = StyleSheet.create({
@@ -35,8 +35,6 @@ const styles = StyleSheet.create({
   tableHeader: { flexDirection: "row", backgroundColor: "#f3f4f6", paddingVertical: 5, paddingHorizontal: 6 },
   tableRow: { flexDirection: "row", paddingVertical: 5, paddingHorizontal: 6, borderBottomWidth: 1, borderBottomColor: "#f3f4f6" },
   colDescription: { flex: 4 },
-  colCode: { flex: 1.2 },
-  colType: { flex: 1.6 },
   colNumber: { flex: 1.2, textAlign: "right" },
   colAmount: { flex: 1.4, textAlign: "right" },
   totals: { marginTop: 12, alignSelf: "flex-end", width: 220 },
@@ -81,7 +79,12 @@ export function InvoiceDocument({ data }: { data: InvoicePdfData }) {
         <View style={styles.header}>
           <View>
             <Text style={styles.brand}>{tenant.name}</Text>
-            {tenant.abn ? <Text style={styles.text}>ABN {tenant.abn}</Text> : null}
+            {tenant.abn ? <Text style={styles.text}>ABN {formatAbn(tenant.abn)}</Text> : null}
+            {tenant.profile.addressLines.map((line) => (
+              <Text key={line} style={styles.text}>{line}</Text>
+            ))}
+            {tenant.profile.phone ? <Text style={styles.text}>{tenant.profile.phone}</Text> : null}
+            {tenant.profile.email ? <Text style={styles.text}>{tenant.profile.email}</Text> : null}
           </View>
           <View>
             <Text style={styles.docTitle}>{heading}</Text>
@@ -126,14 +129,13 @@ export function InvoiceDocument({ data }: { data: InvoicePdfData }) {
         </View>
 
         <View style={styles.tableHeader}>
-          <Text style={[styles.text, styles.bold, styles.colDescription]}>Description</Text>
           {/*
-            The account code, for the bookkeeper on the other end. It is the
-            column that turns a PDF into something that can be keyed straight
-            into a ledger, which is the whole point of coding a line at all.
+            No ledger code and no internal charge type (2026-10-12). Both are
+            this laundry's bookkeeping vocabulary — `4-1100`, "Wash only" — and a
+            customer reading them is reading somebody else's chart of accounts.
+            The codes still travel to Xero, which is where they are used.
           */}
-          <Text style={[styles.text, styles.bold, styles.colCode]}>Code</Text>
-          <Text style={[styles.text, styles.bold, styles.colType]}>Charge</Text>
+          <Text style={[styles.text, styles.bold, styles.colDescription]}>Description</Text>
           <Text style={[styles.text, styles.bold, styles.colNumber]}>Qty</Text>
           <Text style={[styles.text, styles.bold, styles.colNumber]}>Unit</Text>
           <Text style={[styles.text, styles.bold, styles.colAmount]}>Amount</Text>
@@ -149,11 +151,6 @@ export function InvoiceDocument({ data }: { data: InvoicePdfData }) {
               <Text style={[styles.text, styles.colDescription]}>
                 {line.description}{line.taxable ? "" : " (GST free)"}
               </Text>
-              {/* Blank, not a dash: an uncoded line is normal on a customer's copy. */}
-              <Text style={[styles.text, styles.colCode]}>{line.account_code ?? ""}</Text>
-              <Text style={[styles.text, styles.colType]}>
-                {CHARGE_TYPE_LABELS[line.charge_type] ?? line.charge_type}
-              </Text>
               <Text style={[styles.text, styles.colNumber]}>{Number(line.quantity)}</Text>
               <Text style={[styles.text, styles.colNumber]}>{cash(line.unit_price)}</Text>
               <Text style={[styles.text, styles.colAmount]}>{cash(line.amount)}</Text>
@@ -162,31 +159,30 @@ export function InvoiceDocument({ data }: { data: InvoicePdfData }) {
         )}
 
         <View style={styles.totals}>
-          <View style={styles.totalRow}>
-            <Text style={styles.text}>Subtotal</Text>
-            <Text style={styles.text}>{cash(invoice.subtotal)}</Text>
-          </View>
-          <View style={styles.totalRow}>
-            <Text style={styles.text}>GST ({gstPercent}%)</Text>
-            <Text style={styles.text}>{cash(invoice.tax_amount)}</Text>
-          </View>
-          <View style={styles.grandTotal}>
-            <Text style={[styles.text, styles.bold]}>Total</Text>
-            <Text style={[styles.text, styles.bold]}>{cash(invoice.total)}</Text>
-          </View>
-          {Number(invoice.amount_paid) > 0 ? (
-            <>
-              <View style={styles.totalRow}>
-                <Text style={styles.text}>Paid</Text>
-                <Text style={styles.text}>{cash(invoice.amount_paid)}</Text>
-              </View>
-              <View style={styles.totalRow}>
-                <Text style={[styles.text, styles.bold]}>Balance due</Text>
-                <Text style={[styles.text, styles.bold]}>{cash(invoice.balance)}</Text>
-              </View>
-            </>
-          ) : null}
+          {invoiceTotalsRows({
+            total: invoice.total, taxAmount: invoice.tax_amount, amountPaid: invoice.amount_paid,
+            amountCredited: invoice.amount_credited ?? 0, balance: invoice.balance,
+          }).map((row) => (
+            <View key={row.label} style={row.strong ? styles.grandTotal : styles.totalRow}>
+              <Text style={[styles.text, row.strong ? styles.bold : {}, row.muted ? styles.muted : {}]}>
+                {row.label === "Includes GST of" ? `Includes GST (${gstPercent}%) of` : row.label}
+              </Text>
+              <Text style={[styles.text, row.strong ? styles.bold : {}, row.muted ? styles.muted : {}]}>
+                {cash(row.value)}
+              </Text>
+            </View>
+          ))}
         </View>
+
+        {invoice.status !== "void" && invoice.status !== "draft"
+          && paymentInstructions(tenant.profile, invoice.invoice_number).length > 0 ? (
+          <View style={styles.notes} wrap={false}>
+            <Text style={styles.label}>HOW TO PAY</Text>
+            {paymentInstructions(tenant.profile, invoice.invoice_number).map((line) => (
+              <Text key={line} style={styles.text}>{line}</Text>
+            ))}
+          </View>
+        ) : null}
 
         {/* The audit trail behind a rolled-up invoice. Rendered only when the
             invoice really covers several jobs — on a per-job invoice the lines

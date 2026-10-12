@@ -290,7 +290,11 @@ describe("priceJob — the price-list fallback", () => {
     expect(result.lines[0]!.amount).toBe(20);
     // Provenance is honest: this price came from the list, not an agreement.
     expect(result.lines[0]!.source_agreement_id).toBeNull();
-    expect(result.lines[0]!.description).toContain("price list");
+    // Carried by the pricing model, not by text in the customer-facing
+    // description (2026-10-12: "(price list)" was printing on invoices).
+    expect(result.lines[0]!.description).not.toContain("price list");
+    expect(result.lines[0]!.pricing_model).toBe("per_item");
+    expect(result.lines[0]!.source_agreement_line_id).toBeNull();
   });
 
   it("lets the rate card win outright where it has an answer", () => {

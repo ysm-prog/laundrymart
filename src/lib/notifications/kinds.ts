@@ -34,7 +34,28 @@ export type NotificationEvent = {
   audience: Capability;
   /** Swept events are produced by the cron check; the rest ride a server action. */
   source: "action" | "sweep";
+  /**
+   * No longer offered on the settings screen: nothing in the workflow raises
+   * it any more. The kind stays so historical notifications still render.
+   */
+  retired?: boolean;
 };
+
+/**
+ * Who sees a notification, in the words on the settings screen. The audience is
+ * a capability string, and "Shown to anyone who can invoices write" was what the
+ * screen printed (2026-10-12).
+ */
+export const AUDIENCE_WORDS: Partial<Record<Capability, string>> = {
+  "invoices.write": "the people who raise and send invoices",
+  "routes.write": "the people who plan the day's deliveries",
+  "fleet.write": "the people who look after the vans and drivers",
+  "warehouse.write": "the people who run the plant",
+};
+
+export function audienceWords(audience: Capability): string {
+  return AUDIENCE_WORDS[audience] ?? "the people who can act on it";
+}
 
 export const NOTIFICATION_EVENTS: Record<NotificationKind, NotificationEvent> = {
   invoice_overdue: {
@@ -54,6 +75,8 @@ export const NOTIFICATION_EVENTS: Record<NotificationKind, NotificationEvent> = 
     description: "Fires the moment a driver submits a failed inspection from their run.",
     audience: "fleet.write",
     source: "action",
+    // Vehicle inspections left the workflow on 2026-08-14; nothing raises this.
+    retired: true,
   },
   vehicle_out_of_service: {
     label: "A vehicle is taken off the road",

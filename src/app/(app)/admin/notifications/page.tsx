@@ -1,7 +1,7 @@
 import { requireCapability } from "@/lib/auth/context";
 import { createClient } from "@/lib/supabase/server";
 import { emailIsConfigured } from "@/lib/email/send";
-import { NOTIFICATION_EVENTS, NOTIFICATION_KINDS } from "@/lib/notifications/kinds";
+import { NOTIFICATION_EVENTS, NOTIFICATION_KINDS, audienceWords } from "@/lib/notifications/kinds";
 import { parseSettings } from "@/lib/notifications/settings";
 import { Card, Eyebrow, Notice, PageHeader } from "@/components/ui";
 import { Checkbox, Field, FormActions, Input, SubmitButton } from "@/components/form";
@@ -59,7 +59,7 @@ export default async function NotificationSettingsPage() {
           description="These appear in the bell at the top of the screen, for the people who can act on them."
         >
           <ul className="space-y-3">
-            {NOTIFICATION_KINDS.map((kind) => {
+            {NOTIFICATION_KINDS.filter((kind) => !NOTIFICATION_EVENTS[kind].retired).map((kind) => {
               const event = NOTIFICATION_EVENTS[kind];
               return (
                 <li key={kind} className="border-b pb-3 last:border-0 last:pb-0">
@@ -70,7 +70,7 @@ export default async function NotificationSettingsPage() {
                   />
                   <p className="mt-1 pl-5.5 text-xs text-muted-foreground">{event.description}</p>
                   <p className="mt-1 pl-5.5">
-                    <Eyebrow>Shown to anyone who can {event.audience.replace(".", " ")}</Eyebrow>
+                    <Eyebrow>Shown to {audienceWords(event.audience)}</Eyebrow>
                   </p>
                 </li>
               );

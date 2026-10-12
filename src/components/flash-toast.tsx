@@ -49,12 +49,16 @@ export function FlashToast({ flash }: { flash: Flash | null }) {
   const isError = current.tone === "error";
 
   return (
-    <div className="pointer-events-none fixed inset-x-3 bottom-3 z-50 flex justify-center
-                    sm:inset-x-auto sm:bottom-5 sm:right-5 sm:justify-end">
+    // Top-right, under the 4rem header — never bottom-right (2026-10-12). Down
+    // there it sat over the sticky `FormActions` and the action column, so a
+    // press meant for Issue invoice or Issue credit note landed on the toast.
+    // The header is the one strip that holds no primary action.
+    <div className="pointer-events-none fixed inset-x-3 top-[4.5rem] z-40 flex justify-center
+                    sm:inset-x-auto sm:right-5 sm:justify-end">
       <div
         role={isError ? "alert" : "status"}
         className={cx(
-          "pointer-events-auto flex max-w-[26rem] animate-slide-up items-start gap-3 rounded-xl",
+          "pointer-events-auto flex max-w-[22rem] animate-rise items-start gap-3 rounded-xl",
           "border bg-surface py-3 pl-4 pr-3 text-sm shadow-lg",
           isError ? "border-danger/30" : "border-success/30",
         )}

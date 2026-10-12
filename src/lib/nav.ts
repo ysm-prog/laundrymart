@@ -364,6 +364,11 @@ export const NAVIGATION: NavItem[] = [
         blurb: "What the app tells you about, and what it emails your customers.",
       },
       {
+        // Write, not read: a form and nothing else, and the Owner's alone.
+        label: "Invoicing", href: "/admin/invoicing", capability: "admin.write",
+        blurb: "Your ABN, address and bank details on every invoice.",
+      },
+      {
         // Write, not read: the page is an upload form and nothing else, so a
         // read-only role would get a screen it cannot submit.
         label: "Bring in your books", href: "/admin/import", capability: "admin.write",
