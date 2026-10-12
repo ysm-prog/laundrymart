@@ -25,12 +25,18 @@ import { confirmDayLoad, startDayRoute } from "./actions";
  * it up, which is the honest way to say "I went back for it".
  */
 export function DayWorkflow({
-  jobs, boardId, date, returnTo,
+  jobs, boardId, date, returnTo, assignee = "you",
 }: {
   jobs: DayJob[];
   boardId: string;
   date: string;
   returnTo: string;
+  /**
+   * Who the work is assigned to, in the sentence. "you" for the round's own
+   * login; the board's name when a manager is looking at somebody else's day —
+   * "assigned to you" on Board 3's day was simply untrue (2026-10-12).
+   */
+  assignee?: string;
 }) {
   const loadable = loadableJobs(jobs);
   const dispatchable = dispatchableJobs(jobs);
@@ -56,7 +62,7 @@ export function DayWorkflow({
       <div className={row}>
         <p className="min-w-0 flex-1 text-sm">
           <span className="font-semibold">Next: confirm the load.</span>{" "}
-          {loadable.length} {loadable.length === 1 ? "job is" : "jobs are"} assigned to you for{" "}
+          {loadable.length} {loadable.length === 1 ? "job is" : "jobs are"} assigned to {assignee} for{" "}
           {formatAdelaideDate(date, "medium")}
           {confirmedAlready > 0
             ? ` (${confirmedAlready} already confirmed — this covers the rest).`
@@ -70,7 +76,7 @@ export function DayWorkflow({
             eyebrow="Before you set off"
             consequence={
               `You are confirming that the ${loadable.length} `
-              + `${loadable.length === 1 ? "job" : "jobs"} assigned to you for `
+              + `${loadable.length === 1 ? "job" : "jobs"} assigned to ${assignee} for `
               + `${formatAdelaideDate(date, "medium")} are loaded and ready for delivery.`
             }
             pendingLabel="Confirming…"

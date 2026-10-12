@@ -5,7 +5,7 @@
 -- to more than the invoice, and a credit note that left the balance where it
 -- was. Each is asserted here by running the guard against real rows.
 begin;
-select plan(16);
+select plan(20);
 
 insert into public.tenants (id, name, gst_rate) values
   ('a0000000-0000-4000-8000-0000000000e2','Laundry A', 0.10);
@@ -127,6 +127,37 @@ select throws_like(
      where id = 'd0000000-0000-4000-8000-0000000000e3'$$,
   '%still on an invoice%',
   '0017''s release rule survived the rebuild');
+
+-- ------------------------------------- the Owner can save their own settings
+insert into auth.users (id, email) values
+  ('e1111111-1111-4111-8111-1111111111e2','owner@example.com'),
+  ('e2222222-2222-4222-8222-2222222222e2','office@example.com');
+insert into public.memberships (user_id, tenant_id, role) values
+  ('e1111111-1111-4111-8111-1111111111e2','a0000000-0000-4000-8000-0000000000e2','super_admin'),
+  ('e2222222-2222-4222-8222-2222222222e2','a0000000-0000-4000-8000-0000000000e2','operations_manager');
+update public.tenants set settings = '{"notifications":{"inApp":{}}}'
+ where id = 'a0000000-0000-4000-8000-0000000000e2';
+
+set local role authenticated;
+set local "request.jwt.claim.sub" = 'e1111111-1111-4111-8111-1111111111e2';
+select lives_ok(
+  $$select public.save_tenant_settings('a0000000-0000-4000-8000-0000000000e2',
+      'invoiceProfile', '{"bsb":"062-000"}'::jsonb)$$,
+  'the owner saves invoice details');
+set local "request.jwt.claim.sub" = 'e2222222-2222-4222-8222-2222222222e2';
+select throws_ok(
+  $$select public.save_tenant_settings('a0000000-0000-4000-8000-0000000000e2',
+      'invoiceProfile', '{"bsb":"000-000"}'::jsonb)$$,
+  '42501', 'only the owner can change these settings',
+  'the office manager may not');
+select throws_ok(
+  $$select public.save_tenant_abn('a0000000-0000-4000-8000-0000000000e2', '123')$$,
+  '42501', NULL, 'nor change the ABN');
+reset role;
+
+select is((select settings from public.tenants where id='a0000000-0000-4000-8000-0000000000e2'),
+          '{"notifications":{"inApp":{}},"invoiceProfile":{"bsb":"062-000"}}'::jsonb,
+          'one key is merged and the notification settings survive');
 
 select is((select count(*)::int from pg_proc
             where proname in ('sync_invoice_credits','guard_invoice_void')

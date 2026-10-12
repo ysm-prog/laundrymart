@@ -13,7 +13,7 @@ import { CustomerEssentials, FormDisclosure } from "@/app/(app)/customers/custom
 import {
   DELIVERY_WINDOWS, DELIVERY_WINDOW_LABELS, ITEM_TYPES, ITEM_TYPE_LABELS,
   ORDER_PRIORITIES, PRIORITY_LABELS, QUANTITY_TYPES, QUANTITY_TYPE_LABELS,
-  ITEM_OWNERSHIP, ITEM_OWNERSHIP_LABELS, RECEIVED_VIA_LABELS, defaultOwnership, describeItem,
+  ITEM_OWNERSHIP, ITEM_OWNERSHIP_LABELS, RECEIVED_VIA_LABELS, defaultOwnership, summariseItems,
   initialDeliveryRequired, initialReceivedVia, receivedViaOptions,
   type ItemOwnership, type OrderItemInput, type ReceivedVia,
 } from "@/lib/domain/laundry-orders";
@@ -879,14 +879,16 @@ export function JobForm({
             : <ButtonLink href="/orders">Cancel</ButtonLink>}
           <span className="ml-auto hidden text-sm text-muted-foreground sm:inline">
             {rows.length === 1 ? "1 laundry item" : `${rows.length} laundry items`}
-            {rows[0] ? ` · ${describeItem({
-              item_type: rows[0].itemType,
-              custom_description: rows[0].customDescription,
-              quantity_type: rows[0].quantityType,
-              exact_quantity: numberOrNull(rows[0].exactQuantity),
-              bag_count: numberOrNull(rows[0].bagCount),
-              estimated_quantity: numberOrNull(rows[0].estimatedQuantity),
-            })}` : ""}
+            {/* Every row, not the first one: "2 laundry items · 100 × Towels"
+                hid the 40 hand towels (2026-10-12). */}
+            {rows.length > 0 ? ` · ${summariseItems(rows.map((row) => ({
+              item_type: row.itemType,
+              custom_description: row.customDescription,
+              quantity_type: row.quantityType,
+              exact_quantity: numberOrNull(row.exactQuantity),
+              bag_count: numberOrNull(row.bagCount),
+              estimated_quantity: numberOrNull(row.estimatedQuantity),
+            })), 3)}` : ""}
           </span>
         </FormActions>
       </form>

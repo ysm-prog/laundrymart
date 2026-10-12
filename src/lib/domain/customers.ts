@@ -42,3 +42,17 @@ export function isPickableCustomer(status: string | null | undefined): boolean {
 export function customerStatusNeedsSaying(status: string | null | undefined): boolean {
   return isPickableCustomer(status) && status !== "active";
 }
+
+/**
+ * The billing address a quick-created customer gets (2026-10-12). The
+ * quick-create asks for one address — the site — and saved it as the site
+ * alone, so the customer's invoices printed no address at all. When no billing
+ * address was given, the site address is it; one that was given is kept.
+ */
+export function billingAddressFromSite<T extends { billing_address_line1?: string | null }>(
+  customer: T, siteAddress: string | null | undefined,
+): T {
+  const site = siteAddress?.trim();
+  if (!site || customer.billing_address_line1?.trim()) return customer;
+  return { ...customer, billing_address_line1: site };
+}

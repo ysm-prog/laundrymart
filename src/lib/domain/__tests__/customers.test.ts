@@ -46,3 +46,16 @@ describe("customerStatusNeedsSaying", () => {
     expect(customerStatusNeedsSaying("archived")).toBe(false);
   });
 });
+
+import { billingAddressFromSite } from "../customers";
+describe("billingAddressFromSite", () => {
+  it("copies the site address when no billing address was given", () => {
+    const customer: { business_name: string; billing_address_line1?: string | null } = { business_name: "ZZ" };
+    expect(billingAddressFromSite(customer, "1 Mill Rd, Adelaide"))
+      .toEqual({ business_name: "ZZ", billing_address_line1: "1 Mill Rd, Adelaide" });
+  });
+  it("keeps a billing address that was given, and does nothing with no site", () => {
+    expect(billingAddressFromSite({ billing_address_line1: "PO Box 1" }, "1 Mill Rd").billing_address_line1).toBe("PO Box 1");
+    expect(billingAddressFromSite({ billing_address_line1: null }, "  ").billing_address_line1).toBeNull();
+  });
+});

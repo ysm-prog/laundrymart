@@ -7,7 +7,7 @@ import { createClient } from "@/lib/supabase/server";
 import { recordAudit } from "@/lib/audit";
 import { describeDbError, done, fail, firstIssue, toObject } from "@/lib/actions";
 import { emailIsConfigured, sendEmail } from "@/lib/email/send";
-import { NOTIFICATION_KINDS, type NotificationKind } from "@/lib/notifications/kinds";
+import { NOTIFICATION_EVENTS, NOTIFICATION_KINDS, type NotificationKind } from "@/lib/notifications/kinds";
 import {
   defaultSettings, parseSettings, serialiseSettings, DEFAULT_OVERDUE_REMINDER,
 } from "@/lib/notifications/settings";
@@ -54,7 +54,9 @@ export async function saveNotificationSettings(formData: FormData): Promise<void
 
   // An unchecked checkbox posts nothing at all, so every kind is read from the
   // form explicitly rather than by iterating what arrived.
+  // A retired kind is not on the form, so it keeps whatever it was.
   for (const kind of NOTIFICATION_KINDS) {
+    if (NOTIFICATION_EVENTS[kind].retired) continue;
     settings.inApp[kind as NotificationKind] = formData.get(`in_app_${kind}`) === "on";
   }
 

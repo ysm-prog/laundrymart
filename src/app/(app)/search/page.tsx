@@ -65,8 +65,9 @@ export default async function SearchPage({
 
       {term.length === 0 ? (
         <Notice tone="info" title="What you can look up">
-          Customers and their sites, contracts, invoices, stops, item types,
-          drivers and vehicles — whatever your role can already open.
+          Customers and their sites, customer laundry (by job number or customer),
+          contracts, invoices, stops, items, drivers and vehicles — whatever your
+          role can already open.
         </Notice>
       ) : (
         <Results term={term} role={session.role} />
@@ -132,8 +133,14 @@ async function search(term: string, role: Role): Promise<Group[]> {
 
   const groups: Group[] = [];
 
+  type LaundryRow = {
+    id: string; order_number: string; status: string; received_at: string | null;
+    customers: { business_name: string } | null;
+  };
+  const laundrySelect = "id, order_number, status, received_at, customers!inner(business_name)";
+
   const [customers, agreements, invoices, jobs, items, drivers, vehicles,
-         suppliers, bills] = await Promise.all([
+         suppliers, bills, laundryByNumber, laundryByCustomer] = await Promise.all([
     can(role, "customers.read")
       ? supabase.from("customers")
           .select("id, customer_number, business_name, trading_name, billing_suburb, status")
@@ -226,6 +233,20 @@ async function search(term: string, role: Role): Promise<Group[]> {
             suppliers: { name: string } | null;
           }>>()
       : empty(),
+    // Customer laundry by job number (LJ00027) — the box said it searched jobs
+    // and found none of these (2026-10-12) — and by the customer's name.
+    can(role, "orders.read")
+      ? supabase.from("laundry_orders").select(laundrySelect)
+          .ilike("order_number", like)
+          .order("received_at", { ascending: false }).limit(LIMIT)
+          .returns<LaundryRow[]>()
+      : empty(),
+    can(role, "orders.read")
+      ? supabase.from("laundry_orders").select(laundrySelect)
+          .ilike("customers.business_name", like)
+          .order("received_at", { ascending: false }).limit(LIMIT)
+          .returns<LaundryRow[]>()
+      : empty(),
   ]);
 
   push(groups, "Customers", "Businesses you collect from", (customers.data ?? []).map((row) => ({
@@ -248,6 +269,18 @@ async function search(term: string, role: Role): Promise<Group[]> {
       href: `/invoices/${row.id}`,
       title: `${row.invoice_number} · ${row.customers?.business_name ?? "Unknown customer"}`,
       detail: `Issued ${formatDate(row.issue_date)} · ${money(row.balance)} outstanding`,
+      trailing: <StatusBadge status={row.status} />,
+    })));
+
+  const laundry = new Map<string, LaundryRow>();
+  for (const row of [...(laundryByNumber.data ?? []), ...(laundryByCustomer.data ?? [])]) {
+    if (laundry.size < LIMIT && !laundry.has(row.id)) laundry.set(row.id, row as LaundryRow);
+  }
+  push(groups, "Customer laundry", "Jobs taken in at the counter or collected",
+    [...laundry.values()].map((row) => ({
+      href: `/orders/${row.id}`,
+      title: `${row.order_number} · ${row.customers?.business_name ?? "Unknown customer"}`,
+      detail: row.received_at ? `Received ${formatDate(row.received_at.slice(0, 10))}` : "",
       trailing: <StatusBadge status={row.status} />,
     })));
 

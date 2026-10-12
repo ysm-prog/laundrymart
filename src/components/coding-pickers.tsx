@@ -6,6 +6,7 @@ import {
   accountLabel, isRevenueAccount, searchAccounts, type PickableAccount,
 } from "@/lib/domain/accounts";
 import { itemLabel, searchItems, type PickableItem } from "@/lib/domain/items";
+import { listboxKey } from "@/lib/domain/listbox-keys";
 import type { PriceValue } from "@/lib/domain/laundry-prices";
 import { CONTROL, cx, Eyebrow, Notice } from "@/components/ui";
 import { Field } from "@/components/form";
@@ -280,6 +281,9 @@ export function TypeAhead({
    */
   required?: boolean;
 }) {
+  // Nothing highlighted until the first arrow (`listboxKey`).
+  const [active, setActive] = useState(-1);
+  const open = query.trim().length > 0;
   return (
     <div className="relative">
       <Field label={label} name={id} hint={hint} required={required}>
@@ -290,22 +294,35 @@ export function TypeAhead({
             id={id} type="search" autoComplete="off"
             className={cx(CONTROL, "pl-9", mono && "font-mono")}
             placeholder={placeholder}
-            role="combobox" aria-expanded={query.trim().length > 0}
+            role="combobox" aria-expanded={open} aria-autocomplete="list"
             aria-controls={`${id}-results`}
-            value={query} onChange={(event) => onQuery(event.target.value)}
+            aria-activedescendant={open && active >= 0 ? `${id}-result-${active}` : undefined}
+            value={query}
+            onChange={(event) => { onQuery(event.target.value); setActive(-1); }}
+            onKeyDown={(event) => {
+              // Enter inside the picker never submits the job form.
+              if (event.key === "Enter") event.preventDefault();
+              if (!open) return;
+              const action = listboxKey(event.key, active, results.length);
+              if (action.kind === "move") { event.preventDefault(); setActive(action.active); }
+              else if (action.kind === "pick") { results[action.index]?.onPick(); setActive(-1); }
+              else if (action.kind === "close") { event.preventDefault(); onQuery(""); setActive(-1); }
+            }}
           />
         </div>
       </Field>
 
       {query.trim() ? (
-        <ul id={`${id}-results`}
+        <ul id={`${id}-results`} role="listbox"
             className="absolute inset-x-0 top-full z-20 mt-1 max-h-72 overflow-y-auto
                        rounded-xl border bg-surface py-1 shadow-lg">
-          {results.map((result) => (
-            <li key={result.key}>
-              <button type="button" onClick={result.onPick}
-                      className="flex min-h-12 w-full flex-col items-start justify-center
-                                 px-4 py-2 text-left transition hover:bg-surface-muted">
+          {results.map((result, index) => (
+            <li key={result.key} id={`${id}-result-${index}`} role="option"
+                aria-selected={index === active}>
+              <button type="button" onClick={result.onPick} tabIndex={-1}
+                      className={cx("flex min-h-12 w-full flex-col items-start justify-center",
+                                    "px-4 py-2 text-left transition hover:bg-surface-muted",
+                                    index === active && "bg-surface-muted")}>
                 <span className={cx("text-sm font-medium", mono && "font-mono")}>{result.primary}</span>
                 {result.secondary ? (
                   <span className="text-xs text-muted-foreground">{result.secondary}</span>
@@ -355,7 +372,7 @@ export function DescriptionWithItems<T extends PickerItem>({
 }) {
   const [focused, setFocused] = useState(false);
   const [dismissed, setDismissed] = useState(false);
-  const [active, setActive] = useState(0);
+  const [active, setActive] = useState(-1);
 
   const matches = useMemo(
     () => (hasItem || !value.trim() || items.length === 0 ? [] : searchItems(items, value, 6)),
@@ -366,7 +383,7 @@ export function DescriptionWithItems<T extends PickerItem>({
   function pick(item: T) {
     onChooseItem(item);
     setDismissed(true);
-    setActive(0);
+    setActive(-1);
   }
 
   return (
@@ -384,27 +401,24 @@ export function DescriptionWithItems<T extends PickerItem>({
         aria-expanded={open}
         aria-controls={`${id}-items`}
         aria-autocomplete="list"
-        aria-activedescendant={open ? `${id}-item-${active}` : undefined}
-        onChange={(event) => { onChange(event.target.value); setDismissed(false); setActive(0); }}
+        aria-activedescendant={open && active >= 0 ? `${id}-item-${active}` : undefined}
+        onChange={(event) => { onChange(event.target.value); setDismissed(false); setActive(-1); }}
         onFocus={() => setFocused(true)}
         // A click on a suggestion blurs the box before it lands, so closing is
         // deferred a tick. Without it every pick would be swallowed.
         onBlur={() => window.setTimeout(() => setFocused(false), 120)}
         onKeyDown={(event) => {
+          // Enter in this box never submits the form (`listboxKey`): it picks
+          // the highlighted suggestion or does nothing.
+          if (event.key === "Enter") event.preventDefault();
           if (!open) return;
-          if (event.key === "ArrowDown") {
-            event.preventDefault(); setActive((i) => (i + 1) % matches.length);
-          } else if (event.key === "ArrowUp") {
-            event.preventDefault(); setActive((i) => (i - 1 + matches.length) % matches.length);
-          } else if (event.key === "Enter") {
-            // Only ever inside an open list — otherwise Enter belongs to the form.
-            // Guarded rather than asserted: the list can reshuffle under a
-            // keystroke, and picking `undefined` would clear the row's item.
-            const chosen = matches[active];
-            if (chosen) { event.preventDefault(); pick(chosen); }
-          } else if (event.key === "Escape") {
-            event.preventDefault(); setDismissed(true);
-          }
+          const action = listboxKey(event.key, active, matches.length);
+          if (action.kind === "move") { event.preventDefault(); setActive(action.active); }
+          else if (action.kind === "pick") {
+            // Guarded: the list can reshuffle under a keystroke.
+            const chosen = matches[action.index];
+            if (chosen) pick(chosen);
+          } else if (action.kind === "close") { event.preventDefault(); setDismissed(true); }
         }}
       />
 

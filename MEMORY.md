@@ -9,7 +9,14 @@ where that is genuinely what it is. The multi-tenancy architecture stays: one op
 fact about today's data, not a reason to drop `tenant_id`, RLS, or §23's rule that a read feeding a
 write names its tenant.
 
-## Latest: Jay's ATS changes (2026-10-12), on `claude/ats-jay-changes`
+## Latest: e2e gap fixes (2026-10-12), branch `claude/e2e-gap-fixes`
+Stacked on `claude/ats-jay-changes` (PR #77). 18 gaps from the end-to-end test; CLAUDE.md
+changelog has the detail. **`0052_invoice_money_guards` written, NOT applied** — must go on
+after 0051 and before merge (invoice page/PDF select `amount_credited`; settings call
+`save_tenant_settings`). Credit rule: issued credits ≤ total − payments. Not verified behind
+the auth gate.
+
+## Previously: Jay's ATS changes (2026-10-12), on `claude/ats-jay-changes`
 Stacked on the demo-readiness fixes; PR into Dev, **not merged**. CLAUDE.md's 2026-10-12 entry
 has the detail.
 - **`0051_laundry_item_ownership` is written and NOT applied.** Apply it before merging: three

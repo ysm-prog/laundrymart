@@ -1,5 +1,7 @@
 "use server";
 
+import { billingAddressFromSite } from "@/lib/domain/customers";
+
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { assertCapability } from "@/lib/auth/context";
@@ -79,7 +81,9 @@ export async function createCustomer(formData: FormData): Promise<void> {
   const { data, error } = await supabase
     .from("customers")
     .insert({
-      ...parsed.data,
+      // The site is the billing address too unless one was given — otherwise
+      // a quick-created customer's invoices print no address (2026-10-12).
+      ...billingAddressFromSite(parsed.data, siteAddress),
       tenant_id: session.tenantId,
       created_by: session.userId,
       customer_number: customerNumber as string,
