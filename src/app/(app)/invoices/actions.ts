@@ -14,7 +14,8 @@ import {
   consolidate, contractCharges,
   type BillableAgreement, type BillableLine,
 } from "@/lib/domain/invoicing";
-import { toInstant } from "@/lib/domain/timezone";
+import { businessToday, toInstant } from "@/lib/domain/timezone";
+import { paymentRefusal, settleHeaderOnly } from "@/lib/domain/payment-gate";
 import {
   count, describeDbError, done, fail, firstIssue, money, optionalText,
   optionalUuid, requiredDate, returnTo, toObject,
@@ -1006,15 +1007,50 @@ export async function recordPayment(formData: FormData): Promise<void> {
   const backTo = returnTo(formData, `/invoices/${parsed.data.invoice_id}`);
   const supabase = await createClient();
 
+  // Read the invoice first: the form is not evidence of its state, and the
+  // customer is taken from the invoice rather than from a hidden field.
+  const { data: current } = await supabase
+    .from("invoices")
+    .select("status, invoice_type, total, amount_paid, balance, customer_id")
+    .eq("tenant_id", session.tenantId)
+    .eq("id", parsed.data.invoice_id)
+    .maybeSingle();
+  if (!current) return fail(backTo, "That invoice could not be found.");
+
+  const refusal = paymentRefusal({
+    status: current.status,
+    invoiceType: current.invoice_type,
+    balance: Number(current.balance),
+    amount: parsed.data.amount,
+    paidOn: parsed.data.paid_on,
+    today: businessToday(),
+  });
+  if (refusal) return fail(backTo, refusal);
+
+  const { count: lineCount } = await supabase
+    .from("invoice_lines").select("id", { count: "exact", head: true })
+    .eq("tenant_id", session.tenantId)
+    .eq("invoice_id", parsed.data.invoice_id);
+
   // `select("id")` because the Xero push needs the row: the payment's own id is
   // sent as Xero's Idempotency-Key, which is what stops a retry posting the
   // money twice.
   const { data: payment, error } = await supabase.from("payments").insert({
-    ...parsed.data, tenant_id: session.tenantId, created_by: session.userId,
+    ...parsed.data, customer_id: current.customer_id,
+    tenant_id: session.tenantId, created_by: session.userId,
   }).select("id").single<{ id: string }>();
   if (error) return fail(backTo, describeDbError(error));
 
-  await supabase.rpc("recalculate_invoice", { p_invoice: parsed.data.invoice_id });
+  if (lineCount && lineCount > 0) {
+    await supabase.rpc("recalculate_invoice", { p_invoice: parsed.data.invoice_id });
+  } else {
+    // An imported header (no lines): recalculating would zero its total and
+    // forget what MYOB recorded as paid. Add this payment to it instead.
+    const settled = settleHeaderOnly(Number(current.total), Number(current.amount_paid),
+                                     parsed.data.amount);
+    await supabase.from("invoices").update({ amount_paid: settled.amountPaid })
+      .eq("id", parsed.data.invoice_id).eq("tenant_id", session.tenantId);
+  }
 
   const { data: invoice } = await supabase
     .from("invoices").select("total, amount_paid")
@@ -1189,6 +1225,20 @@ export async function createCreditNote(formData: FormData): Promise<void> {
 
   const backTo = `/invoices/${parsed.data.invoice_id}`;
   const supabase = await createClient();
+
+  // A credit note offsets something the customer was sent, and never by more
+  // than it was for. The customer comes from the invoice, not the form.
+  const { data: target } = await supabase
+    .from("invoices").select("status, invoice_type, total, customer_id")
+    .eq("tenant_id", session.tenantId).eq("id", parsed.data.invoice_id).maybeSingle();
+  if (!target) return fail(backTo, "That invoice could not be found.");
+  if (target.invoice_type === "credit" || !["issued", "part_paid", "overdue", "paid"].includes(target.status)) {
+    return fail(backTo, "A credit note can only be raised against an issued invoice.");
+  }
+  if (parsed.data.amount > Number(target.total) + 0.005) {
+    return fail(backTo, `A credit note cannot be for more than the invoice total of ${formatMoney(Number(target.total))}.`);
+  }
+  parsed.data.customer_id = target.customer_id;
 
   const { data: creditNumber, error: numberError } = await supabase
     .rpc("next_number", { t: session.tenantId, k: "credit_note", p: "CN" });

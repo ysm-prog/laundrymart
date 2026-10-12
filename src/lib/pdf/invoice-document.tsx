@@ -67,7 +67,13 @@ export function InvoiceDocument({ data }: { data: InvoicePdfData }) {
   const gstPercent = Math.round(tenant.gstRate * 1000) / 10;
 
   // "Tax invoice" is only the correct heading when GST is actually charged.
-  const heading = Number(invoice.tax_amount) > 0 ? "TAX INVOICE" : "INVOICE";
+  // A credit is money owed to the customer, not a tax invoice; a draft can
+  // still change, so it must not print looking like the final document.
+  const heading = invoice.invoice_type === "credit" || Number(invoice.total) < 0
+    ? "CREDIT"
+    : invoice.status === "draft"
+      ? "DRAFT INVOICE"
+      : Number(invoice.tax_amount) > 0 ? "TAX INVOICE" : "INVOICE";
 
   return (
     <Document title={`${heading} ${invoice.invoice_number}`} author={tenant.name}>

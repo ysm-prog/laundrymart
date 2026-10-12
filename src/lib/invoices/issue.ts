@@ -44,16 +44,21 @@ export type IssueResult =
 export async function issueOneInvoice(
   supabase: Client, session: Session, invoiceId: string,
 ): Promise<IssueResult> {
-  await supabase.rpc("recalculate_invoice", { p_invoice: invoiceId });
-
   // Read the terms back rather than trusting a caller: the due date has to be
   // derived from what this invoice actually promises, and a form field is not
-  // evidence of it.
+  // evidence of it. The status is read first so a non-draft is refused before
+  // anything is recalculated: an imported MYOB header has no lines, and
+  // recalculating one zeroes its total.
   const { data: terms } = await supabase
     .from("invoices")
-    .select("payment_terms_days")
+    .select("payment_terms_days, status")
     .eq("id", invoiceId).eq("tenant_id", session.tenantId)
-    .maybeSingle<{ payment_terms_days: number | null }>();
+    .maybeSingle<{ payment_terms_days: number | null; status: string }>();
+  if (!terms || terms.status !== "draft") {
+    return { ok: false, error: "it is no longer a draft" };
+  }
+
+  await supabase.rpc("recalculate_invoice", { p_invoice: invoiceId });
 
   const issuedOn = businessToday();
   const { data, error } = await supabase
