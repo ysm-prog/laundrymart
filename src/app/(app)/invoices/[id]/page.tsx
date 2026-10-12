@@ -1,3 +1,4 @@
+import { canTakePayment } from "@/lib/domain/payment-gate";
 import { Suspense } from "react";
 import { notFound } from "next/navigation";
 import { requireCapability } from "@/lib/auth/context";
@@ -616,7 +617,7 @@ async function Payments({ invoice, writable }: { invoice: InvoiceDetail; writabl
         </p>
       ) : null}
 
-      {writable && payable(invoice) ? (
+      {writable && canTakePayment(invoice) ? (
         <form action={recordPayment} className="mt-4 grid gap-3 border-t pt-4 sm:grid-cols-2 lg:grid-cols-5 print:hidden">
           <input type="hidden" name="invoice_id" value={invoice.id} />
           <input type="hidden" name="customer_id" value={invoice.customer_id} />
@@ -683,13 +684,6 @@ function documentTitle(invoice: { invoice_type: string; status: string; total: n
   if (invoice.status === "draft") return "Draft invoice";
   // Matches the PDF: "Tax invoice" only when GST is actually charged.
   return Number(invoice.tax_amount) > 0 ? "Tax invoice" : "Invoice";
-}
-
-/** A payment belongs on a sent, positive, unsettled invoice (see payment-gate.ts). */
-function payable(invoice: { invoice_type: string; status: string; balance: number }): boolean {
-  return invoice.invoice_type !== "credit"
-    && ["issued", "part_paid", "overdue"].includes(invoice.status)
-    && Number(invoice.balance) > 0.005;
 }
 
 /** A credit note offsets an invoice the customer has been sent. */

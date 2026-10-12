@@ -151,3 +151,27 @@ describe("the coded item on a row (0032)", () => {
     expect(result.ok && result.items[0]!.item_id).toBeNull();
   });
 });
+
+describe("Rental or Own on a laundry row (0051)", () => {
+  it("carries each row's answer through, as the form posts it", () => {
+    const result = parseOrderItems(payload([
+      { ...TOWELS_EXACT, item_id: null, ownership: "rental" },
+      { ...TOWELS_EXACT, item_id: null, item_type: "uniforms", ownership: "own" },
+    ]));
+    expect(result.ok && result.items.map((item) => item.ownership)).toEqual(["rental", "own"]);
+  });
+
+  it("reads null, blank and absent all as unanswered rather than refusing the list", () => {
+    const result = parseOrderItems(payload([
+      { ...TOWELS_EXACT, ownership: null },
+      { ...TOWELS_EXACT, ownership: "" },
+      { ...TOWELS_EXACT },
+    ]));
+    expect(result.ok && result.items.map((item) => item.ownership)).toEqual([null, null, null]);
+  });
+
+  it("refuses a word the database would refuse, by name", () => {
+    const result = parseOrderItems(payload([{ ...TOWELS_EXACT, ownership: "borrowed" }]));
+    expect(result.ok).toBe(false);
+  });
+});

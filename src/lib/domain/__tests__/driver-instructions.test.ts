@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  driverInstructions, hasDriverInstructions, type InstructedJob,
+  DRIVER_NOTE_FIELD, DRIVER_NOTE_MAX, driverInstructions, hasDriverInstructions, readDriverNote,
+  type InstructedJob,
 } from "../driver-instructions";
 
 const job = (overrides: InstructedJob = {}): InstructedJob => ({ ...overrides });
@@ -95,5 +96,42 @@ describe("driverInstructions", () => {
     expect(driverInstructions(job({
       delivery_instructions: "Ring twice", customers: null,
     }))).toHaveLength(1);
+  });
+});
+
+describe("readDriverNote — the assign forms' note for the driver (2026-10-12)", () => {
+  it("writes nothing when the form did not carry the field", () => {
+    expect(readDriverNote(null, { blankClears: true })).toEqual({ kind: "absent" });
+  });
+
+  it("saves a note, trimmed", () => {
+    expect(readDriverNote("  Ring twice  ", { blankClears: true }))
+      .toEqual({ kind: "set", value: "Ring twice" });
+  });
+
+  it("clears on the single form, where the box opened showing the current note", () => {
+    expect(readDriverNote("   ", { blankClears: true })).toEqual({ kind: "set", value: null });
+  });
+
+  it("never clears on the bulk move, where an empty box means no note", () => {
+    // Reading blank as "clear" there would wipe forty jobs' instructions.
+    expect(readDriverNote("", { blankClears: false })).toEqual({ kind: "absent" });
+  });
+
+  it("refuses an essay, by the cap it names", () => {
+    expect(readDriverNote("x".repeat(DRIVER_NOTE_MAX + 1), { blankClears: true }))
+      .toEqual({ kind: "too_long" });
+    expect(readDriverNote("x".repeat(DRIVER_NOTE_MAX), { blankClears: true }).kind).toBe("set");
+  });
+
+  it("reaches the round as the first instruction on My Runs", () => {
+    const note = readDriverNote("Leave with reception", { blankClears: true });
+    const value = note.kind === "set" ? note.value : null;
+    expect(driverInstructions({ delivery_instructions: value })[0])
+      .toMatchObject({ kind: "delivery", text: "Leave with reception" });
+  });
+
+  it("is posted under one name", () => {
+    expect(DRIVER_NOTE_FIELD).toBe("driver_note");
   });
 });

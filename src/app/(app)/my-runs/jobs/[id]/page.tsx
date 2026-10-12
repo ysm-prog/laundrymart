@@ -8,7 +8,7 @@ import {
 } from "@/components/ui";
 import { SubmitButton } from "@/components/form";
 import {
-  ORDER_STATUS_LABELS, describeItem, type OrderStatus,
+  ORDER_STATUS_LABELS, describeItemWithOwnership, type OrderStatus,
 } from "@/lib/domain/laundry-orders";
 import {
   formatAdelaideDate, formatAdelaideDateTime, getAdelaideToday, isCalendarDate,
@@ -137,7 +137,7 @@ export default async function BoardJobPage({
             <ul className="divide-y">
               {job.laundry_order_items.map((item, index) => (
                 <li key={index} className="flex flex-wrap items-baseline justify-between gap-2 py-2.5">
-                  <span className="text-sm font-medium">{describeItem(item)}</span>
+                  <span className="text-sm font-medium">{describeItemWithOwnership(item)}</span>
                   {item.notes ? (
                     <span className="text-sm text-muted-foreground">{item.notes}</span>
                   ) : null}

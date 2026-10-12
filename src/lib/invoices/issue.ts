@@ -5,6 +5,7 @@ import { describeDbError } from "@/lib/actions";
 import { pushInvoiceToXero } from "@/lib/xero/push";
 import { addDays } from "@/lib/domain/dates";
 import { businessToday } from "@/lib/domain/timezone";
+import { issueRefusal } from "@/lib/domain/payment-gate";
 
 /**
  * Issuing one invoice — the single implementation.
@@ -54,9 +55,15 @@ export async function issueOneInvoice(
     .select("payment_terms_days, status")
     .eq("id", invoiceId).eq("tenant_id", session.tenantId)
     .maybeSingle<{ payment_terms_days: number | null; status: string }>();
-  if (!terms || terms.status !== "draft") {
-    return { ok: false, error: "it is no longer a draft" };
-  }
+  if (!terms) return { ok: false, error: "it is no longer a draft" };
+
+  // An emptied running draft must not go out as a $0.00 tax invoice.
+  const { count: lineCount } = await supabase
+    .from("invoice_lines").select("id", { count: "exact", head: true })
+    .eq("tenant_id", session.tenantId)
+    .eq("invoice_id", invoiceId);
+  const refusal = issueRefusal({ status: terms.status, lineCount: lineCount ?? 0 });
+  if (refusal) return { ok: false, error: refusal };
 
   await supabase.rpc("recalculate_invoice", { p_invoice: invoiceId });
 

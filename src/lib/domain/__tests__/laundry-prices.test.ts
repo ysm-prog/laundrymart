@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  buildItemPriceRows, laundryPriceItemType, liveItemRate, priceRowHint, seedPriceFromItem,
+  buildItemPriceRows, effectiveListPrice, laundryPriceItemType, liveItemRate, priceRowHint, seedPriceFromItem,
   type ItemPriceRow, type PricedItem,
 } from "../laundry-prices";
 import type { LaundryPriceRow } from "../laundry-billing";
@@ -107,6 +107,38 @@ describe("buildItemPriceRows", () => {
     const rows: LaundryPriceRow[] = [row({}), row({ item_id: null, unit_price: 5 })];
     expect(buildItemPriceRows([T22], rows, null)[0]?.price?.unitPrice).toBe(0.24);
     expect(priceListFor("c1", rows).get("towels")?.unitPrice).toBe(5);
+  });
+});
+
+describe("effectiveListPrice — what a picker charges a customer", () => {
+  it("charges a customer with no override the usual price, not the item's own", () => {
+    // The defect: pickers read `price` alone, which for a customer is only their
+    // own row — so the usual list vanished and items.sell_price answered instead.
+    const [r] = buildItemPriceRows([T22], [row({ unit_price: 0.3 })], "c1");
+    expect(r!.price).toBeNull();
+    expect(effectiveListPrice(r!)).toMatchObject({ unitPrice: 0.3 });
+    expect(liveItemRate(T22, effectiveListPrice(r!)).rate).toBe(0.3);
+  });
+
+  it("lets the customer's own price win over the usual one", () => {
+    const [r] = buildItemPriceRows([T22], [
+      row({ unit_price: 0.3 }), row({ customer_id: "c1", unit_price: 0.18 }),
+    ], "c1");
+    expect(liveItemRate(T22, effectiveListPrice(r!)).rate).toBe(0.18);
+  });
+
+  it("ignores another customer's price", () => {
+    const [r] = buildItemPriceRows([T22], [row({ customer_id: "c2", unit_price: 0.1 })], "c1");
+    expect(effectiveListPrice(r!)).toBeNull();
+  });
+
+  it("agrees with the pricer for the same rows", () => {
+    // The screen and `priceJob` must not disagree about one customer's rate.
+    const rows = [row({ unit_price: 0.3 }), row({ customer_id: "c1", unit_price: 0.18 })];
+    const [r] = buildItemPriceRows([T22], rows, "c1");
+    const pricer = priceListFor("c1", rows);
+    expect(pricer.get("towels")).toBeUndefined(); // item rows never answer for a category
+    expect(effectiveListPrice(r!)?.unitPrice).toBe(0.18);
   });
 });
 
