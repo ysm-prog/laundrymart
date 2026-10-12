@@ -3452,13 +3452,16 @@ those two PRs plus #76's record and nothing had to be reconciled.
 |---|---|---|
 | #77 → `Dev` | `ac65d13` | run 341 **cancelled by concurrency**, because #78 landed eight seconds later |
 | #78 → `Dev` | `426cb5a` | run 342 **green** on all three jobs |
-| #79 `Dev` → `Prod` | `26fb2a1` | **green** — see below |
+| #79 `Dev` → `Prod` | `26fb2a1` | run 344 **green** on all three jobs |
 
 - **Run 342 was read from the logs, not from the statuses.** Verify: typecheck, lint,
   **1332 tests across 84 files**, the production build on Next.js 16.3.4, `== PASSED ==` at
   03:42:10Z. `verify.sh` ran from 03:41:01 to 03:42:10, sixty-nine seconds. DB: every migration
   applied to a fresh Postgres 16, `pgTAP suite passed`, and the seed committed on top. Security:
   gitleaks strict and the audit both passed.
+- **Run 344 (`Prod`) was read the same way and matches.** Verify: 1332 tests across 84 files, the
+  build, and `== PASSED ==` at 03:44:10Z. `verify.sh` ran from 03:43:00, seventy seconds. DB:
+  `pgTAP suite passed`, and the seed committed. Security: passed.
 - **Run 341's cancellation is not a gap in coverage.** It tested `ac65d13`, which is an ancestor
   of `426cb5a`, and run 342 covers that whole tree.
 - **Both migrations were live before either merge.** Darshan applied them through the SQL editor
