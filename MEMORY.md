@@ -9,24 +9,28 @@ where that is genuinely what it is. The multi-tenancy architecture stays: one op
 fact about today's data, not a reason to drop `tenant_id`, RLS, or §23's rule that a read feeding a
 write names its tenant.
 
-## Latest: e2e gap fixes (2026-10-12), branch `claude/e2e-gap-fixes`
-Stacked on `claude/ats-jay-changes` (PR #77). 18 gaps from the end-to-end test; CLAUDE.md
-changelog has the detail. **`0052_invoice_money_guards` written, NOT applied** — must go on
-after 0051 and before merge (invoice page/PDF select `amount_credited`; settings call
-`save_tenant_settings`). Credit rule: issued credits ≤ total − payments. Not verified behind
-the auth gate.
+## Latest: #77 and #78 merged and on Prod (2026-10-12)
+`Dev` is at `426cb5a` and `Prod` at `26fb2a1` (#79). The trees are identical. 0051 and 0052 are
+**live** (Darshan applied them through the SQL editor). The ledger has 57 entries, verified over the
+connector, and advisors are at 30. CI is green on Dev (run 342) and on Prod. CLAUDE.md's merge
+record lists eight live checks. **None of them has been done**, because nothing behind the auth gate
+has been opened.
+
+**The Supabase MCP `apply_migration` cannot apply SQL containing `delete` from this chat.** It
+waits on a confirmation prompt that never arrives and times out at 60 s. Hand such migrations to
+Darshan for the SQL editor, then verify over the connector.
+
+## Previously: e2e gap fixes (2026-10-12), `claude/e2e-gap-fixes`
+18 gaps from the end-to-end test (`0052_invoice_money_guards`). Credit rule: issued credits must
+not exceed total − payments.
 
 ## Previously: Jay's ATS changes (2026-10-12), on `claude/ats-jay-changes`
-Stacked on the demo-readiness fixes; PR into Dev, **not merged**. CLAUDE.md's 2026-10-12 entry
-has the detail.
-- **`0051_laundry_item_ownership` is written and NOT applied.** Apply it before merging: three
-  screens select `laundry_order_items.ownership` at request time.
+Merged (#77) and on Prod. CLAUDE.md's 2026-10-12 entry has the detail. 0051 is live.
 - Customer prices: `attachListPrices` now hands pickers `effectiveListPrice` (own → usual). It
   used to drop the usual price for every customer without an override.
 - The note for the driver goes into `delivery_instructions`; the bulk move never clears it.
 - `issueRefusal` stops a $0 emptied draft going out; `canTakePayment` is the one payment-form rule.
-- Still open: credit notes don't reduce balance; record #74's Prod promotion of the docs record (#76
-  is on Dev only).
+- Credit notes now reduce the balance (#78); #76's record reached Prod with #79.
 
 ## Previously: vitest 5, and the Node 22 floor
 2026-09-10, on `claude/driver-instructions-invoice-fixes-1q42fb`. Dependabot #68 taken in part.
