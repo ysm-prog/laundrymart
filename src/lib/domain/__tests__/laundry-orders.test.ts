@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
-  ORDER_ACTIONS, ORDER_STAGES, ORDER_STATUSES, RECEIVED_VIA, RECEIVED_VIA_OPTIONS,
+  ORDER_ACTIONS, ORDER_STAGES, ORDER_STATUSES, RECEIVED_VIA, RECEIVED_VIA_LABELS, RECEIVED_VIA_OPTIONS,
   TERMINAL_STATUSES,
   actionsFor, buildStatusTrack, capabilitiesForMove, checkTransition, describeItem,
   initialDeliveryRequired, initialReceivedVia, isBlankItem, leavesTheRound,
   isOrderStatus, isOverdue, nextStatuses, receivedInstant, receivedViaOptions,
-  stagesFor, summariseItems, validateItem,
+  stagesFor, summariseItems, validateItem, defaultOwnership, describeItemWithOwnership,
+  ownershipLabel,
   type OrderStatus,
 } from "@/lib/domain/laundry-orders";
 import type { Capability } from "@/lib/roles";
@@ -609,5 +610,49 @@ describe("describeItem with a coded item", () => {
     expect(describeItem(
       { item_type: "towels", quantity_type: "exact", exact_quantity: 12 }, "   ",
     )).toBe("12 × Towels");
+  });
+});
+
+describe("Rental or Own (0051)", () => {
+  it("defaults to Rental for an item the laundry hires out, and Own otherwise", () => {
+    expect(defaultOwnership({ rental_price: 1.2 })).toBe("rental");
+    expect(defaultOwnership({ rental_price: "0.85" })).toBe("rental");
+    expect(defaultOwnership({ rental_price: 0 })).toBe("own");
+    expect(defaultOwnership({ rental_price: null })).toBe("own");
+    expect(defaultOwnership(null)).toBe("own");
+  });
+
+  it("labels a stored answer and leaves an old row unlabelled", () => {
+    expect(ownershipLabel("rental")).toBe("Rental");
+    expect(ownershipLabel("own")).toBe("Own");
+    expect(ownershipLabel(null)).toBeNull();
+    expect(ownershipLabel("borrowed")).toBeNull();
+  });
+
+  it("shows the answer on the round's line and nothing on an unanswered one", () => {
+    const row = { item_type: "towels", quantity_type: "exact", exact_quantity: 40 };
+    expect(describeItemWithOwnership({ ...row, ownership: "rental" }))
+      .toBe(`${describeItem(row)} (Rental)`);
+    expect(describeItemWithOwnership(row)).toBe(describeItem(row));
+    expect(summariseItems([{ ...row, ownership: "own" }], 2, { ownership: true }))
+      .toContain("(Own)");
+    expect(summariseItems([{ ...row, ownership: "own" }])).not.toContain("(Own)");
+  });
+
+  it("is not part of what makes a row blank, so a toggle alone is not a laundry item", () => {
+    expect(isBlankItem({ item_type: "", quantity_type: "exact", ownership: "own" })).toBe(true);
+  });
+});
+
+describe("How it arrived, in Jay's words (2026-10-12)", () => {
+  it("offers 'Pickup by driver' and 'Dropped off at counter', so 'Customer pickup' is the only Customer choice", () => {
+    expect(RECEIVED_VIA_OPTIONS.map((value) => RECEIVED_VIA_LABELS[value]))
+      .toEqual(["Pickup by driver", "Dropped off at counter"]);
+    expect(RECEIVED_VIA_OPTIONS.some((value) => RECEIVED_VIA_LABELS[value].startsWith("Customer")))
+      .toBe(false);
+  });
+
+  it("keeps the stored value, so no historical job changes meaning", () => {
+    expect(RECEIVED_VIA).toContain("customer_dropoff");
   });
 });

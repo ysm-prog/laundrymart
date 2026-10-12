@@ -107,3 +107,49 @@ export function driverInstructions(job: InstructedJob): DriverInstruction[] {
 export function hasDriverInstructions(job: InstructedJob): boolean {
   return driverInstructions(job).length > 0;
 }
+
+/* ------------------------------------------------------ the note at assign */
+
+/**
+ * The longest note the assign forms accept. A note at assign time is a line
+ * for the door ("ring twice, leave with reception"), not a letter; a cap that
+ * is said out loud beats a column that quietly accepts an essay nobody reads
+ * standing on a doorstep.
+ */
+export const DRIVER_NOTE_MAX = 280;
+
+/** The field the assign forms post the note in. One name, so form and action cannot drift. */
+export const DRIVER_NOTE_FIELD = "driver_note";
+
+export type DriverNote =
+  | { kind: "absent" }
+  | { kind: "set"; value: string | null }
+  | { kind: "too_long" };
+
+/**
+ * Read the "Note for the driver" field off an assign form (Jay's change,
+ * 2026-10-12). It is saved into `laundry_orders.delivery_instructions`, which is
+ * the job's own instruction the `DriverInstructions` block already shows first,
+ * so a note written while assigning reaches the round with no new column.
+ *
+ * Three answers, because they want three different writes:
+ * - **absent**: the form did not carry the field, so nothing is written;
+ * - **set**: write this value, where `null` clears it. Blank clears only where
+ *   the caller says blank is meaningful, which is the single-job form: it opens
+ *   showing the current instruction, so emptying the box is a decision;
+ * - **too_long**: refused, with the cap named.
+ *
+ * `blankClears` is false for the bulk move. That form shows no one job's
+ * instruction, so an empty box there means "no note", and reading it as "clear"
+ * would wipe forty jobs' instructions because somebody left a box empty.
+ */
+export function readDriverNote(
+  raw: FormDataEntryValue | null,
+  options: { blankClears: boolean },
+): DriverNote {
+  if (raw === null || typeof raw !== "string") return { kind: "absent" };
+  const value = raw.trim();
+  if (value === "") return options.blankClears ? { kind: "set", value: null } : { kind: "absent" };
+  if (value.length > DRIVER_NOTE_MAX) return { kind: "too_long" };
+  return { kind: "set", value };
+}

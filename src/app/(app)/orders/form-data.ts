@@ -51,6 +51,8 @@ export type JobCatalogueItem = {
   name: string;
   description: string | null;
   laundry_category: string | null;
+  /** Read only to default the Rental / Own toggle (0051) — never to price. */
+  rental_price: number | string | null;
 };
 
 /**
@@ -121,7 +123,7 @@ export async function loadJobFormData(
     // would offer choices that can only fail.
     supabase
       .from("items")
-      .select("id, item_code, name, description, laundry_category")
+      .select("id, item_code, name, description, laundry_category, rental_price")
       .eq("tenant_id", session.tenantId)
       .eq("status", "active")
       .is("deleted_at", null)

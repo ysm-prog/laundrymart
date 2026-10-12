@@ -164,7 +164,8 @@ async function Day({
       />
 
       {canWork ? (
-        <DayWorkflow jobs={jobs} boardId={boardId} date={date} returnTo={returnTo} />
+        <DayWorkflow jobs={jobs} boardId={boardId} date={date} returnTo={returnTo}
+                     assignee={isSelf ? "you" : boardName} />
       ) : null}
 
       {sequence && sequence.stops.length > 0 ? (

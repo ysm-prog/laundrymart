@@ -9,7 +9,26 @@ where that is genuinely what it is. The multi-tenancy architecture stays: one op
 fact about today's data, not a reason to drop `tenant_id`, RLS, or §23's rule that a read feeding a
 write names its tenant.
 
-## Latest: vitest 5, and the Node 22 floor
+## Latest: e2e gap fixes (2026-10-12), branch `claude/e2e-gap-fixes`
+Stacked on `claude/ats-jay-changes` (PR #77). 18 gaps from the end-to-end test; CLAUDE.md
+changelog has the detail. **`0052_invoice_money_guards` written, NOT applied** — must go on
+after 0051 and before merge (invoice page/PDF select `amount_credited`; settings call
+`save_tenant_settings`). Credit rule: issued credits ≤ total − payments. Not verified behind
+the auth gate.
+
+## Previously: Jay's ATS changes (2026-10-12), on `claude/ats-jay-changes`
+Stacked on the demo-readiness fixes; PR into Dev, **not merged**. CLAUDE.md's 2026-10-12 entry
+has the detail.
+- **`0051_laundry_item_ownership` is written and NOT applied.** Apply it before merging: three
+  screens select `laundry_order_items.ownership` at request time.
+- Customer prices: `attachListPrices` now hands pickers `effectiveListPrice` (own → usual). It
+  used to drop the usual price for every customer without an override.
+- The note for the driver goes into `delivery_instructions`; the bulk move never clears it.
+- `issueRefusal` stops a $0 emptied draft going out; `canTakePayment` is the one payment-form rule.
+- Still open: credit notes don't reduce balance; record #74's Prod promotion of the docs record (#76
+  is on Dev only).
+
+## Previously: vitest 5, and the Node 22 floor
 2026-09-10, on `claude/driver-instructions-invoice-fixes-1q42fb`. Dependabot #68 taken in part.
 **No migration; `git diff` over `src/` and `supabase/` is empty.** §10a has the evidence.
 

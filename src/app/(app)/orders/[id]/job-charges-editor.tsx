@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { Trash2 } from "lucide-react";
 import { CHARGE_TYPES, CHARGE_TYPE_LABELS, round2, type ChargeType } from "@/lib/domain/pricing";
 import { formatMoney } from "@/lib/domain/pricing";
-import type { JobChargeInput } from "../job-charges";
+import { chargeSourceLabel, type JobChargeInput } from "../job-charges";
 import { chargePatchForItem } from "@/lib/domain/coding";
 import { GST_RATE_FALLBACK } from "@/lib/domain/items";
 import { Button, CONTROL, IconButton, SELECT_CHEVRON } from "@/components/ui";
@@ -219,14 +219,11 @@ export function JobChargesEditor({
                 />
                 GST applies
               </label>
-              {row.source_agreement_line_id ? (
-                <span className="text-xs text-muted-foreground">
-                  From the rate card
-                  {row.source_laundry_item_type ? ` · ${row.source_laundry_item_type.replace(/_/g, " ")}` : ""}
-                </span>
-              ) : (
-                <span className="text-xs text-muted-foreground">Added by hand</span>
-              )}
+              <span className="text-xs text-muted-foreground">
+                {chargeSourceLabel(row)}
+                {chargeSourceLabel(row) !== "Added by hand" && row.source_laundry_item_type
+                  ? ` · ${row.source_laundry_item_type.replace(/_/g, " ")}` : ""}
+              </span>
               <span className="ml-auto hidden text-sm font-medium tabular-nums sm:inline">
                 {formatMoney(round2(Number(row.quantity ?? 0) * Number(row.unit_price ?? 0)))}
               </span>

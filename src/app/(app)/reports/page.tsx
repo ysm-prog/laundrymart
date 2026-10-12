@@ -5,6 +5,10 @@ import { can } from "@/lib/roles";
 import { createClient } from "@/lib/supabase/server";
 import { date, money, number, relativeDays, today } from "@/lib/format";
 import { addDays } from "@/lib/domain/dates";
+import { getAdelaideDayRange } from "@/lib/domain/timezone";
+import {
+  AGING_BUCKETS, AGING_LABELS, SMALL_BALANCE, summariseReceivables,
+} from "@/lib/domain/receivables";
 import { generateServiceDates, parsePattern, type HolidayRule } from "@/lib/domain/service-calendar";
 import {
   Card, DataTable, EmptyState, PageHeader, SkeletonRows,
@@ -35,7 +39,7 @@ const REPORTS = [
 ] as const;
 
 type ReportKey = (typeof REPORTS)[number]["key"];
-type Search = { report?: string; from?: string; to?: string };
+type Search = { report?: string; from?: string; to?: string; small?: string };
 
 export default async function ReportsPage({ searchParams }: { searchParams: Promise<Search> }) {
   const params = await searchParams;
@@ -92,7 +96,9 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
       <Suspense key={`${report}:${from}:${to}`} fallback={<SkeletonRows rows={8} />}>
         {report === "operations" ? <Operations from={from} to={to} /> : null}
         {report === "revenue" ? <Revenue from={from} to={to} /> : null}
-        {report === "receivables" ? <Receivables /> : null}
+        {report === "receivables"
+          ? <Receivables from={from} to={to} includeSmall={params.small === "1"} />
+          : null}
         {report === "drivers" ? <DriverProductivity from={from} to={to} /> : null}
         {report === "vehicles" ? <VehicleUtilisation from={from} to={to} /> : null}
         {report === "inventory" ? <InventoryPosition /> : null}
@@ -104,7 +110,8 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
 
 async function Operations({ from, to }: { from: string; to: string }) {
   const supabase = await createClient();
-  const [pickups, deliveries, jobs] = await Promise.all([
+  const window = { start: getAdelaideDayRange(from).start, end: getAdelaideDayRange(to).end };
+  const [pickups, deliveries, jobs, takenIn, finished] = await Promise.all([
     supabase.from("pickups").select("pickup_date, pickup_lines(quantity, damaged_quantity, missing_quantity)")
       .gte("pickup_date", from).lte("pickup_date", to)
       .returns<Array<{ pickup_date: string; pickup_lines: Array<{ quantity: number; damaged_quantity: number; missing_quantity: number }> }>>(),
@@ -114,7 +121,21 @@ async function Operations({ from, to }: { from: string; to: string }) {
     supabase.from("jobs").select("scheduled_date, status")
       .gte("scheduled_date", from).lte("scheduled_date", to)
       .returns<Array<{ scheduled_date: string; status: string }>>(),
+    // Customer laundry, which is what the business means by "jobs". This report
+    // counted only driver visits, so a month of 28 laundry jobs read "2 jobs,
+    // 0% completion" (2026-10-12).
+    supabase.from("laundry_orders").select("id", { count: "exact", head: true })
+      .gte("received_at", window.start).lt("received_at", window.end),
+    supabase.from("laundry_orders").select("delivery_required")
+      .eq("status", "completed")
+      .gte("completed_at", window.start).lt("completed_at", window.end)
+      .returns<Array<{ delivery_required: boolean }>>(),
   ]);
+  const laundry = {
+    takenIn: takenIn.count ?? 0,
+    completed: finished.data?.length ?? 0,
+    delivered: (finished.data ?? []).filter((row) => row.delivery_required).length,
+  };
 
   const byDay = new Map<string, {
     day: string; pickups: number; pickedUp: number; damaged: number; missing: number;
@@ -166,20 +187,26 @@ async function Operations({ from, to }: { from: string; to: string }) {
 
   return (
     <div className="space-y-4">
+      <div className="grid gap-3 sm:grid-cols-3">
+        <Stat label="Laundry jobs taken in" value={number(laundry.takenIn)} />
+        <Stat label="Laundry jobs completed" value={number(laundry.completed)} />
+        <Stat label="Laundry jobs delivered" value={number(laundry.delivered)}
+              hint={`${number(laundry.completed - laundry.delivered)} collected by the customer`} />
+      </div>
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Stat label="Jobs" value={number(totals.jobs)} />
-        <Stat label="Completed" value={number(totals.completed)}
-              hint={totals.jobs ? `${Math.round((totals.completed / totals.jobs) * 100)}% completion` : undefined} />
+        <Stat label="Driver visits" value={number(totals.jobs)} />
+        <Stat label="Visits completed" value={number(totals.completed)}
+              hint={totals.jobs ? `${Math.round((totals.completed / totals.jobs) * 100)}% of visits` : undefined} />
         <Stat label="Items collected" value={number(totals.pickedUp)} />
         <Stat label="Items delivered" value={number(totals.delivered)} />
       </div>
-      <Card title="By day">
+      <Card title="Driver visits by day">
         <DataTable
           rows={rows}
           empty={<EmptyState title="No activity in this range" />}
           columns={[
             { header: "Day", cell: (row) => date(row.day) },
-            { header: "Jobs", cell: (row) => number(row.jobs), align: "right" },
+            { header: "Visits", cell: (row) => number(row.jobs), align: "right" },
             { header: "Completed", cell: (row) => number(row.completed), align: "right" },
             { header: "Problems", cell: (row) => number(row.exceptions), align: "right", hideBelow: "sm" },
             { header: "Collected", cell: (row) => number(row.pickedUp), align: "right" },
@@ -245,36 +272,68 @@ async function Revenue({ from, to }: { from: string; to: string }) {
   );
 }
 
-async function Receivables() {
+async function Receivables({ from, to, includeSmall }: {
+  from: string; to: string; includeSmall: boolean;
+}) {
   const supabase = await createClient();
-  const now = today();
   const { data } = await supabase
     .from("invoices")
-    .select("id, invoice_number, due_date, balance, status, customers(business_name)")
+    .select("id, invoice_number, invoice_type, issue_date, due_date, balance, customers(business_name)")
     .in("status", ["issued", "part_paid", "overdue"]).gt("balance", 0)
-    .order("due_date")
-    .returns<Array<{ id: string; invoice_number: string; due_date: string | null; balance: number; status: string; customers: { business_name: string } | null }>>();
+    .neq("invoice_type", "credit")
+    .gte("issue_date", from).lte("issue_date", to)
+    .returns<Array<{
+      id: string; invoice_number: string; invoice_type: string | null; issue_date: string;
+      due_date: string | null; balance: number; customers: { business_name: string } | null;
+    }>>();
 
-  const rows = (data ?? []).map((row) => ({
-    ...row,
-    overdueDays: row.due_date ? Math.max(0, relativeDays(row.due_date, now)) : 0,
-  }));
+  // Aged as at the end of the range, so a past period reads as it stood then.
+  const summary = summariseReceivables(
+    (data ?? []).map((row) => ({ ...row, customer: row.customers?.business_name ?? "Unknown customer" })),
+    to, { includeSmall },
+  );
+  const toggle = `/reports?report=receivables&from=${from}&to=${to}${includeSmall ? "" : "&small=1"}`;
 
   return (
-    <Card title="Outstanding payments">
-      <DataTable
-        rows={rows}
-        rowHref={(row) => `/invoices/${row.id}`}
-        empty={<EmptyState title="Nothing outstanding" description="Every issued invoice is paid." />}
-        columns={[
-          { header: "Invoice", cell: (row) => row.invoice_number },
-          { header: "Customer", cell: (row) => row.customers?.business_name ?? "—" },
-          { header: "Due", cell: (row) => date(row.due_date), hideBelow: "sm" },
-          { header: "Days overdue", cell: (row) => (row.overdueDays > 0 ? number(row.overdueDays) : "—"), align: "right" },
-          { header: "Balance", cell: (row) => money(row.balance), align: "right" },
-        ]}
-      />
-    </Card>
+    <div className="space-y-4">
+      <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-6">
+        <Stat label="Total owed" value={money(summary.total)}
+              hint={`${number(summary.invoiceCount)} invoices issued ${date(from)} – ${date(to)}`} />
+        {AGING_BUCKETS.map((bucket) => (
+          <Stat key={bucket} label={AGING_LABELS[bucket]} value={money(summary.totals[bucket])}
+                tone={bucket === "90+" && summary.totals[bucket] > 0 ? "danger" : "default"} />
+        ))}
+      </div>
+      <Card
+        title="Outstanding payments by customer"
+        description={`Largest balance first. Credits are not included. Aged as at ${date(to)}.`}
+        actions={
+          <Link href={toggle} className="text-sm font-medium text-primary underline underline-offset-2 print:hidden">
+            {includeSmall ? `Hide balances under $${SMALL_BALANCE}` : summary.hiddenSmall > 0
+              ? `Show ${number(summary.hiddenSmall)} balances under $${SMALL_BALANCE}`
+              : `Show balances under $${SMALL_BALANCE}`}
+          </Link>
+        }
+      >
+        <DataTable
+          rows={summary.customers}
+          empty={<EmptyState title="Nothing outstanding"
+                             description="No invoice issued in this range is still owed." />}
+          columns={[
+            { header: "Customer", cell: (row) => row.customer },
+            { header: "Invoices", cell: (row) => number(row.invoices), align: "right", hideBelow: "sm" },
+            ...AGING_BUCKETS.map((bucket) => ({
+              header: AGING_LABELS[bucket],
+              cell: (row: (typeof summary.customers)[number]) =>
+                row.buckets[bucket] > 0 ? money(row.buckets[bucket]) : "—",
+              align: "right" as const,
+              hideBelow: "md" as const,
+            })),
+            { header: "Owed", cell: (row) => money(row.total), align: "right" },
+          ]}
+        />
+      </Card>
+    </div>
   );
 }
 

@@ -1209,6 +1209,36 @@ produce on demand.
     premise was broken too, by redefining `archivable_tables()` to include
     `depots`.
 
+- `0051_laundry_item_ownership` — **Rental or Own, per laundry row.**
+  `laundry_order_items.ownership` (nullable, `check in ('rental','own')`) and
+  `save_laundry_order_items()` rebuilt from **0032's** body to carry it — 0014 and 0032 are
+  the only definitions, checked. **Adds no table, policy, capability or index; changes no
+  row** — every existing row reads null, "not recorded", never guessed. **Never read by
+  pricing.** Six self-assertion classes (column shape, the constraint, the writer carrying
+  the column *and* 0032's `item_id`, still INVOKER, `anon`/`authenticated` EXECUTE, RLS on and
+  no `anon` grant, 0025's restrictive layer present). `laundry_item_ownership.test.sql` (7)
+  proves the round trip and was confirmed to fail on a database without 0051.
+  **Written, not applied** (§11).
+- `0052_invoice_money_guards` — **a credit note counts, and a paid invoice stays paid.**
+  From the 2026-10-12 end-to-end test (INV00006, CN00001/CN00002).
+  `invoices.amount_credited` (sum of issued/applied credit notes, kept by the
+  `sync_invoice_credits` trigger on `credit_notes`) and **`invoices.balance` re-derived as
+  `total - amount_paid - amount_credited`** (dropped and re-added: Postgres 16 cannot change a
+  generated expression in place; nothing in the schema names it). The same trigger is the
+  **cumulative credit cap**: the issued credit notes on an invoice may never total more than
+  what is still owed — **total less payments** — and a draft or void invoice cannot be
+  credited. Only a note whose contribution *grows* is judged, so voiding a note is always
+  possible. `guard_invoice_void` refuses voiding an invoice with any payment row, a non-zero
+  `amount_paid` (a MYOB import), or an issued credit note. `guard_laundry_order_billing`
+  rebuilt from **0017's** body (the only definition, checked) with one new edge,
+  `paid → invoice_sent`, allowed only while the job's invoice is no longer `paid` — what a
+  reversed payment produces. And `save_tenant_settings(t, key, value)` /
+  `save_tenant_abn(t, abn)`: SECURITY DEFINER, `super_admin` checked inside, one whitelisted
+  key merged server-side — because `tenants` has **no UPDATE policy except the platform
+  admin's**, so Settings › Notifications had been writing zero rows for an Owner and saying
+  "saved". **Backfills `amount_credited` from existing credit notes; on the live project that
+  is INV00006 alone.** Seven self-assertions; `invoice_money_guards.test.sql` (20).
+  **Written, not applied** (§11).
 - `0050_pickup_to_job` — **a collection becomes a laundry job, exactly once.**
   `laundry_orders.source_pickup_id` (`on delete set null`),
   `uq_laundry_orders_source_pickup` (partial unique) and
@@ -1492,7 +1522,8 @@ Proofs in `supabase/tests/`: `rls_isolation`, `rls_coverage`, `driver_scope`,
 `import_activation`, `member_directory`, `boards_scope`, `item_master`,
 `audit_log_scope`, `run_sequence`, `accounts_scope`, `open_draft_invoices`,
 `single_laundry`, `charge_accounts`, `gst_inclusive`, `collection_schedule`,
-`customer_record_scope`, `fleet_scope`, `pickup_intake` (**612 assertions** across 32 files).
+`customer_record_scope`, `fleet_scope`, `pickup_intake`, `laundry_item_ownership`,
+`invoice_money_guards` (**639 assertions** across 34 files).
 
 **Count assertions, not lines starting with `ok`.** pgTAP's function is literally named `ok`, so
 psql prints a centred `ok` **column header** above each result — and `grep -c '^\s*ok '` counts
@@ -2197,6 +2228,23 @@ reports six false gaps.
   `set_records_archived`, `sync_invoice_line_account`, `tenant_members`). That is the 0042 trap
   leaving its usual trace: text typed into `apply_migration` reformatted a little against the file.
   Worth knowing before anybody reads a raw `md5(prosrc)` mismatch as drift.
+
+**`0052_invoice_money_guards` is NOT applied to `laundrymart-syd`** (2026-10-12), written on
+`claude/e2e-gap-fixes` under the same instruction. **It too must go on before that branch
+merges, and after 0051**: the invoice page, the PDF, the credit-note action and `resettleInvoice`
+select `invoices.amount_credited`, and the Settings screens call `save_tenant_settings` — none
+of which exists until it is applied. Before applying, check the live
+`guard_laundry_order_billing` body is still 0017's (the rebuild assumes it). After applying,
+**INV00006 will read `amount_credited = 81.00`** (CN00001 + CN00002, both issued against a void
+invoice); that is the honest figure, and its two payments can now be reversed from the invoice
+page to clear the money off it.
+
+**`0051_laundry_item_ownership` is NOT applied to `laundrymart-syd`** (2026-10-12) — it was
+written on `claude/ats-jay-changes` with the instruction not to touch the live database. **It
+must go on before that branch merges**: the job page, the edit page and My Runs select
+`laundry_order_items.ownership` at request time, and PostgREST answers a missing column with an
+error rather than a null — so merging first would 500 every job page and the board's day. The
+ledger's last entry is still `0050_pickup_to_job`.
 
 **`0050_pickup_to_job` was applied on 2026-09-10** (`20260910041516`) and is the ledger's
 last entry, **55** in all. Additive — one nullable column with no default — and applied
@@ -3382,6 +3430,132 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-10-12 · Gaps from the end-to-end test: money, screens, the job form, wording
+An end-to-end run on `ats.coreit.com.au` (customer *ZZ TEST Demo Laundry*, LJ00027/LJ00028,
+INV00006, CN00001/CN00002) found eighteen gaps. Branch `claude/e2e-gap-fixes`, stacked on
+`claude/ats-jay-changes`. One migration (`0052`), **written and not applied**.
+
+**Money.**
+- **A paid invoice could be voided** — INV00006, $74.80 paid and two credit notes, voided,
+  payments left attached, the job still Paid, and a toast claiming the jobs were back in the
+  queue. Now refused by `voidInvoice` *and* `guard_invoice_void`, the Void button is replaced
+  by the sentence saying why, and `releaseVoidedInvoiceJobs` returns what it actually released:
+  a job it could not move is reported as a failure, never as "back in the queue".
+- **Credit notes are capped cumulatively.** The rule chosen: **the issued credit notes on an
+  invoice never total more than what is still owed — total less payments.** A credit past that
+  is a refund, which this app cannot pay, and the negative balance it leaves can never be
+  settled. A paid invoice that needs crediting has a payment reversed first. `creditRefusal`
+  is the sentence; `sync_invoice_credits` is the boundary.
+- **A credit note reduces the balance and drives the status**, through
+  `invoices.amount_credited`, on header-only MYOB imports too (the trigger never touches
+  `amount_paid`). `settledStatus` + `resettleInvoice` are the one place an invoice becomes
+  paid/part paid, shared by payments, credit notes and reversals. The invoice page shows Total
+  (inc GST), Paid, Credited, Balance and Ex GST.
+- **A payment can be reversed** — `reversePayment`, `invoices.write` (Owner and Office), reason
+  required, `ConfirmSubmit`, the whole payment written to the audit log because the row is
+  deleted. With lines: `recalculate_invoice`. Header-only: taken back off `amount_paid` and
+  refused below zero. Refused for a payment already in Xero. Allowed on a void invoice — that
+  is how INV00006's payments get cleaned up.
+- **Tax invoice PDF**: seller address, phone, email and bank details from
+  `tenants.settings.invoiceProfile`, edited on the new **Settings › Invoicing** (Owner only);
+  a warning on the invoice page when the ABN, address or bank details are missing; a totals
+  block reading *Total (inc GST)* / *Includes GST (10%) of* / *Amount ex GST* so it cannot look
+  like a sum that does not add up; **no ledger code and no charge type** on the PDF; the pricer
+  no longer writes "(price list)" into descriptions (provenance is `pricing_model`); and a
+  **credit-note PDF** at `/api/credit-notes/:id/pdf`, linked from the invoice.
+- **Found on the way: an Owner's settings never saved.** `tenants` has no UPDATE policy except
+  the platform admin's, so Settings › Notifications wrote zero rows for a real Owner and said
+  "saved". Both writers now go through `save_tenant_settings` (0052).
+
+**Screens.** The flash toast is top-right under the header, never over the action column;
+Mark Delivered returns to the job's own board; global search finds laundry jobs by number and
+customer; *Outstanding payments* is grouped by customer, largest first, aged (current / 1–30 /
+31–60 / 61–90 / 90+), totalled, credits excluded, balances under $1 behind a toggle, and filtered
+to invoices issued in the range (so widen the range for older debt); *Daily operations* counts
+laundry jobs taken in / completed / delivered, with driver visits labelled as such; a job on an
+issued invoice reads by the invoice's status, not "On a draft invoice"; charges are labelled by
+source (price list / rate card / by hand).
+
+**Job form.** Enter in an item type-ahead never submits the job, and the first ArrowDown
+highlights the first suggestion (`listboxKey`); the footer summarises every row; a quick-created
+customer's site address becomes its billing address when none is given, and the form says so.
+
+**Wording.** The customer page no longer says jobs are priced by hand without a rate card or that
+billing derives from the agreement; Customer Service's summary says it takes laundry in;
+notification audiences are in words and the retired vehicle-inspection alert is not offered; My
+Runs names the board rather than "you" on somebody else's day.
+
+- 1332 unit tests across 84 files, 639 pgTAP assertions across 34
+  files; `verify` green; the DB suite and the seed on a fresh Postgres 16.
+- **One existing proof was rewritten to the decision**: `gst_inclusive` credited a *draft*
+  invoice and credited $100 against $72.70, both now refused; it issues the invoice first and
+  splits the credit within the total.
+- **Not verified behind the auth gate**, and 0052 is not applied. Live check list in §11.
+
+### 2026-10-12 · Jay's ATS changes: wording, Rental/Own, customer prices, a note for the driver, the money path
+From Jay's email "ATS Changes" (12 Oct), on `claude/ats-jay-changes`, stacked on the
+demo-readiness fixes. **One migration, `0051_laundry_item_ownership`, written and NOT applied**
+— see §11 for why it must go on before the merge. No capability, role or policy change.
+
+- **"Customer drop-off" reads "Dropped off at counter"** (label only; `customer_dropoff` is
+  still stored). "Customer pickup" is now the only *Customer…* choice on the job form, which is
+  how Jay put it: *Pickup by driver* versus *Customer pickup*.
+- **Rental / Own on every laundry row** (0051). Stored per row because one bag holds both;
+  defaults to **Rental** when the picked item carries a `rental_price` and **Own** otherwise
+  (`defaultOwnership`), re-answered on each pick and flippable. A row from before 0051 opens
+  unanswered rather than guessed. Shown on the job page (*Rental or own* column) and on My Runs
+  ("Towels × 40 (Rental)"). **Pricing reads none of it.**
+- **The item and its quantity now sit side by side** on every width, which they did not: the
+  old grid put "How many" three fields below the item on a phone. Measured in a browser at
+  320/390/1440 — input tops within 2px, the toggle 44px, 0 console errors, no new overflow.
+- **"Change charge by customer" was a real defect, and it was the usual price, not the
+  customer's own.** `attachListPrices` handed every picker `row.price`, which for a customer is
+  their *own* row only — so a customer with no override lost the usual list on the Charges card
+  and the invoice composer and was charged the item's MYOB selling price instead. Re-rating an
+  item on the usual list therefore never reached any customer who had not been given their own
+  rate. `effectiveListPrice` is the rule now, tested against the pricer's own resolution.
+  - **And a posted customer id was written unchecked.** `saveLaundryPrices` put the form's
+    `customer_id` into `laundry_prices` with only the FK behind it, so a platform admin could
+    file a price against another laundry's customer, where no pricer would ever read it, and be
+    told it saved. It now names the tenant (§23).
+  - What was checked and found right: field names (`present`, `unit_<id>`, `customer_id`)
+    agree with `parsePriceForm`; every read filters `tenant_id`; RLS (`can_read_pricing`, 0033's
+    writes and 0025's restrictive layer) admits the Owner and the Office manager; blank clears
+    only rows that were on the form; and `priceJob` reads the customer's item rows ahead of the
+    usual ones.
+- **"Note for the driver" on Assign, on the job page's dispatch card and on the Runs bulk
+  move.** Saved into `laundry_orders.delivery_instructions`, which the `DriverInstructions`
+  block already shows first on My Runs — no new column. The single form opens showing the
+  current instruction, so emptying it clears it; the bulk move never clears, because an empty
+  box there would otherwise wipe every selected job's instruction (`readDriverNote`). Capped at
+  280 characters. A note that does not land is said, not swallowed: the write reads its row
+  count back, because 0025's restrictive layer refuses with zero rows and no error.
+- **The money path, traced end to end, and two breaks fixed.**
+  - **An emptied running draft could be issued as a $0.00 tax invoice** and pushed to Xero —
+    take the last job off a draft and press Issue (or Issue Selected). `issueRefusal` refuses a
+    draft with no lines, before anything is recalculated.
+  - **The register's working pane drew "Record payment" on a voided invoice** (any non-draft
+    with a balance), a form that could only be refused. `canTakePayment` is now the one rule
+    for both payment forms, and a test holds it to `paymentRefusal` status by status.
+  - Traced and sound: complete → `awaiting_review` (0017 hook) → price (`priceAndSaveJob`, list
+    tier included) → approve (freezes) → running draft (`invoice_generated`, lines rebuilt) →
+    issue (re-dated, terms re-derived) → send (`invoice_sent`) → payment (recalculated from the
+    lines; paying in full moves the jobs to `paid` from either invoiced state, which 0017's
+    guard permits). Taking a job off a draft deletes the link *before* returning the job to
+    `approved`, the order 0017's release rule needs.
+  - **Still open:** a credit note does not reduce its invoice's balance.
+- **1282 unit tests across 80 files (was 1244/77)** and **619 pgTAP assertions across 33 files
+  (was 612/32)**. `verify` green; all 55 migrations applied to a fresh Postgres 16 with the
+  whole suite and the seed. Each new guard was confirmed to catch its defect (the
+  `list_price: row.price` revert; the ownership proof against a database without 0051).
+
+**Not verified behind the auth gate, and these need a live check:** apply 0051 first; then on
+`ats.coreit.com.au` take a job in with one rental and one own row and confirm both show on the
+job page and My Runs; give a customer no own price, re-rate that item on the usual list and
+confirm the job's Charges card offers the new rate; assign a job with a note and confirm it
+heads the Instructions block on My Runs; take the only job off a draft and confirm Issue is
+refused; and take one job with lines through to a full payment and confirm the job reads Paid.
+
 ### 2026-10-12 · Demo-readiness: payments on imported invoices, credits, and the home screen
 A pre-demo QA pass on the live app and the money code. **No migration; no schema, RLS,
 capability or policy change.**
@@ -3412,6 +3586,29 @@ capability or policy change.**
 - **A credit (`invoice_type = 'credit'`) was titled "Tax invoice"** on screen and in the PDF,
   and a draft PDF printed as a tax invoice. Titles now read Credit / Draft invoice / Tax
   invoice / Invoice, the last two by whether GST is charged.
+
+**Merged to `Dev` (`96f46e7`, PR #74) and `Prod` (`33e2035`, PR #75) on 2026-10-12**, on the
+owner's approval (Darshan). Both are merge commits made through pull requests, and `Prod` was never
+force-pushed. #75 also carried `Dev`'s two documentation-only catch-up commits (`6df2f15`,
+`cf72d3b`), which is why `Dev` → `Prod` was a pull request rather than a fast-forward.
+
+- **CI green on all three jobs for every run**, read off the logs rather than the statuses: 334
+  (`Dev` push), 335 (#75's own pull-request run), 336 (`Prod` push). Verify: typecheck, lint,
+  **1244 tests across 77 files** (`payment-gate.test.ts` contributing 11), the production build on
+  **Next.js 16.3.4**, `== PASSED ==`. `verify.sh` ran 01:41:55 → 01:43:03 on `Prod`, sixty-eight
+  seconds, its ordinary duration, read off the runner's step timestamps. DB: every migration on a
+  fresh Postgres 16, `pgTAP suite passed`, and the seed on top. Security: gitleaks strict plus the
+  audit.
+- **Nothing to apply.** No migration; `git diff` over `supabase/` is empty, and the live ledger's
+  last entry is still `0050_pickup_to_job`. The database was not touched in landing this.
+- **The Vercel production deploy cannot be confirmed from this session.** That is a tooling
+  limit, not a configuration one (§5); check the Vercel dashboard.
+- **Not verified behind the auth gate.** Nothing has been opened with real rows in it. Before the
+  demo: on `ats.coreit.com.au`, open an imported invoice MYOB marked part-paid, record a small
+  payment, and check the total does not move and the balance falls by exactly that amount. Then
+  open the home screen as the Owner and check *Needs a decision* leads with the largest positive
+  balance, not 2011 history.
+- **Still open:** a credit note does not reduce its invoice's balance.
 
 ### 2026-09-10 · vitest 5, and the Node 22 floor that was already overdue
 Dependabot's fifth offering of the blocked dev group (#22 → #44 → #53 → #63 → **#68**), taken in
@@ -10677,6 +10874,10 @@ refusal rather than a screen choice. Both halves are stated on the screen itself
   changes what the next charge and the next line cost, with nothing to re-key. `attachListPrices`
   is the one read behind it, resolved through the same `buildItemPriceRows` the price screens
   render from, so the screen and the pricer cannot come to disagree about what a customer pays.
+  **It hands the picker `effectiveListPrice(row)` — the customer's own rate, then the usual one —
+  and until 2026-10-12 it handed `row.price` alone**, which for a customer is only their own row.
+  So every customer without an override lost the usual list and fell through to
+  `items.sell_price`, and re-rating an item never reached their charges or invoice lines.
 - **A list rate is taken verbatim and never grossed up.** `items.sell_price` carries a *basis*
   and an exclusive one is grossed up by `lineRateFromItem` (0043); a price-list rate is a number
   the owner typed into a box labelled "what the customer pays". Applying the item's basis to it

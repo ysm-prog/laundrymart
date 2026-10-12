@@ -8,7 +8,7 @@ import {
 } from "@/components/ui";
 import { SubmitButton } from "@/components/form";
 import {
-  ORDER_STATUS_LABELS, describeItem, type OrderStatus,
+  ORDER_STATUS_LABELS, describeItemWithOwnership, type OrderStatus,
 } from "@/lib/domain/laundry-orders";
 import {
   formatAdelaideDate, formatAdelaideDateTime, getAdelaideToday, isCalendarDate,
@@ -62,7 +62,13 @@ export default async function BoardJobPage({
   const backDate = date && isCalendarDate(date)
     ? date
     : job.assigned_delivery_date ?? getAdelaideToday();
-  const backTo = `/my-runs?date=${backDate}`;
+  // And the board: without it a manager who marked the job delivered landed on
+  // their default board's day — Board 1's, usually empty — and the job seemed
+  // to vanish (2026-10-12). For the round itself `board=<its own id>` resolves
+  // to "me", so carrying it costs the round nothing.
+  const backTo = job.assigned_board_id
+    ? `/my-runs?date=${backDate}&board=${job.assigned_board_id}`
+    : `/my-runs?date=${backDate}`;
 
   const board = job.assigned_board_id
     ? await boardById(supabase, session.tenantId, job.assigned_board_id)
@@ -137,7 +143,7 @@ export default async function BoardJobPage({
             <ul className="divide-y">
               {job.laundry_order_items.map((item, index) => (
                 <li key={index} className="flex flex-wrap items-baseline justify-between gap-2 py-2.5">
-                  <span className="text-sm font-medium">{describeItem(item)}</span>
+                  <span className="text-sm font-medium">{describeItemWithOwnership(item)}</span>
                   {item.notes ? (
                     <span className="text-sm text-muted-foreground">{item.notes}</span>
                   ) : null}

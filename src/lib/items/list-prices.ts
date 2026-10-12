@@ -1,6 +1,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { LaundryPriceRow } from "@/lib/domain/laundry-billing";
-import { buildItemPriceRows, type PricedItem, type PriceValue } from "@/lib/domain/laundry-prices";
+import {
+  buildItemPriceRows, effectiveListPrice, type PricedItem, type PriceValue,
+} from "@/lib/domain/laundry-prices";
 
 /**
  * Hang this customer's listed price on each item a picker is about to offer.
@@ -51,6 +53,8 @@ export async function attachListPrices<T extends PricedItem>(
   // `buildItemPriceRows` resolves each item against the scope it is given, so
   // passing the customer id here is what makes their own rate win. With none —
   // a manual invoice raised against nobody — the usual list is the answer.
+  // `effectiveListPrice`, not `price`: for a customer `price` is their own row
+  // alone, so reading it drops the usual price for everybody without an override.
   return buildItemPriceRows(items, data ?? [], customerId)
-    .map(({ item, price }) => ({ ...item, list_price: price }));
+    .map((row) => ({ ...row.item, list_price: effectiveListPrice(row) }));
 }

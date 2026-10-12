@@ -1,3 +1,5 @@
+import { canTakePayment, creditRefusal, voidRefusal } from "@/lib/domain/payment-gate";
+import { invoiceProfileGaps, parseInvoiceProfile } from "@/lib/domain/invoice-profile";
 import { Suspense } from "react";
 import { notFound } from "next/navigation";
 import { requireCapability } from "@/lib/auth/context";
@@ -12,7 +14,7 @@ import { uncodedLineCount } from "@/lib/domain/accounts";
 import { loadInvoiceBreakdown } from "@/lib/invoices/breakdown";
 import { describePeriod } from "@/lib/domain/billing-period";
 import { loadInvoiceSourceJobs } from "@/lib/invoices/open-draft";
-import { BILLING_STATUS_LABELS, isBillingStatus } from "@/lib/domain/billing";
+import { jobStatusOnInvoice } from "@/lib/domain/billing";
 import type { Invoice, InvoiceLine, Payment } from "@/lib/db/types";
 import {
   Button, ButtonLink, Card, DataTable, EmptyState, Notice,
@@ -26,13 +28,14 @@ import { PrintButton } from "@/components/print-button";
 import { emailIsConfigured } from "@/lib/email/send";
 import {
   addInvoiceLine, createCreditNote, emailInvoice, issueInvoice, recordPayment,
-  removeInvoiceLine, removeJobFromInvoice, setInvoiceLineAccount, voidInvoice,
+  removeInvoiceLine, removeJobFromInvoice, reversePayment, setInvoiceLineAccount, voidInvoice,
 } from "../actions";
 
 export const dynamic = "force-dynamic";
 
 type InvoiceDetail = Invoice & {
   void_reason: string | null;
+  amount_credited: number;
   customers: {
     business_name: string; customer_number: string; abn: string | null;
     billing_address_line1: string | null; billing_suburb: string | null;
@@ -54,7 +57,7 @@ export default async function InvoiceDetailPage({
     .from("invoices")
     .select("id, invoice_number, customer_id, invoice_type, status, issue_date, due_date, " +
             "period_start, period_end, purchase_order_number, payment_terms_days, subtotal, " +
-            "tax_amount, total, amount_paid, balance, notes, void_reason, emailed_at, emailed_to, " +
+            "tax_amount, total, amount_paid, amount_credited, balance, notes, void_reason, emailed_at, emailed_to, " +
             "customers(business_name, customer_number, abn, billing_address_line1, billing_suburb, " +
             "billing_state, billing_postcode, billing_email)")
     .eq("id", id)
@@ -63,6 +66,24 @@ export default async function InvoiceDetailPage({
   if (!invoice) notFound();
 
   const editable = writable && invoice.status === "draft";
+
+  // What stands between this invoice and being voided (0052), and what the
+  // tax invoice is missing about the business that issues it.
+  const [{ count: paymentCount }, { count: creditNoteCount }, { data: tenantRow }] = await Promise.all([
+    supabase.from("payments").select("id", { count: "exact", head: true })
+      .eq("invoice_id", id).eq("tenant_id", session.tenantId),
+    supabase.from("credit_notes").select("id", { count: "exact", head: true })
+      .eq("invoice_id", id).eq("tenant_id", session.tenantId).in("status", ["issued", "applied"]),
+    supabase.from("tenants").select("abn, settings").eq("id", session.tenantId)
+      .maybeSingle<{ abn: string | null; settings: unknown }>(),
+  ]);
+  const voidBlocked = voidRefusal({
+    status: invoice.status, amountPaid: Number(invoice.amount_paid),
+    paymentCount: paymentCount ?? 0, creditNoteCount: creditNoteCount ?? 0,
+  });
+  const profileGaps = invoiceProfileGaps(tenantRow?.abn ?? null, parseInvoiceProfile(tenantRow?.settings));
+  const creditableNow = Math.max(0, Math.round(
+    (Number(invoice.total) - Number(invoice.amount_paid) - Number(invoice.amount_credited ?? 0)) * 100) / 100);
   const emailConfigured = emailIsConfigured();
 
   // The running draft, told apart from every other draft the same way
@@ -96,6 +117,15 @@ export default async function InvoiceDetailPage({
         }
       />
 
+      {profileGaps.length > 0 && invoice.invoice_type !== "credit" ? (
+        <Notice tone="warning" title="The printed invoice is missing details">
+          It does not yet show {profileGaps.join(", ")}.{" "}
+          {can(session.role, "admin.write")
+            ? <a className="underline" href="/admin/invoicing">Add them in Settings › Invoicing.</a>
+            : "Ask the owner to add them in Settings › Invoicing."}
+        </Notice>
+      ) : null}
+
       {invoice.status === "void" ? (
         <Notice tone="danger" title="This invoice is void">
           {invoice.void_reason ?? "No reason recorded."}
@@ -114,12 +144,17 @@ export default async function InvoiceDetailPage({
         </Notice>
       ) : null}
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Stat label="Subtotal" value={money(invoice.subtotal)} />
-        <Stat label="GST" value={money(invoice.tax_amount)} />
-        <Stat label="Total" value={money(invoice.total)} />
+      {/* Line amounts include GST (0043), so "Subtotal / GST / Total" printed
+          the same figure twice with the tax between them — a sum that reads as
+          wrong. The total leads and the GST is stated as part of it. */}
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+        <Stat label="Total (inc GST)" value={money(invoice.total)}
+              hint={`Includes GST of ${money(invoice.tax_amount)}`} />
+        <Stat label="Paid" value={money(invoice.amount_paid)} />
+        <Stat label="Credited" value={money(invoice.amount_credited ?? 0)} />
         <Stat label="Balance" value={money(invoice.balance)}
               tone={Number(invoice.balance) > 0 ? "warning" : "success"} />
+        <Stat label="Ex GST" value={money(Number(invoice.total) - Number(invoice.tax_amount))} />
       </div>
 
       {/* **Two columns from `xl`, not one long scroll (§10b).** An invoice is
@@ -136,11 +171,11 @@ export default async function InvoiceDetailPage({
           </Suspense>
 
           <Suspense fallback={<SkeletonRows rows={3} />}>
-            <Payments invoice={invoice} writable={writable} />
+            <Payments invoice={invoice} writable={writable} tenantId={session.tenantId} />
           </Suspense>
 
           <Suspense fallback={null}>
-            <CreditNotes invoiceId={id} />
+            <CreditNotes invoiceId={id} tenantId={session.tenantId} />
           </Suspense>
         </div>
 
@@ -161,7 +196,8 @@ export default async function InvoiceDetailPage({
           </Card>
 
           <Suspense fallback={null}>
-            <SourceJobs invoiceId={id} tenantId={session.tenantId} editable={editable} />
+            <SourceJobs invoiceId={id} tenantId={session.tenantId} editable={editable}
+                        invoiceStatus={invoice.status} />
           </Suspense>
 
           {writable ? (
@@ -205,7 +241,10 @@ export default async function InvoiceDetailPage({
                     </form>
                   ) : null}
             </div>
-            {invoice.status !== "void" ? (
+            {invoice.status !== "void" && voidBlocked ? (
+              <p className="mt-4 border-t pt-4 text-sm text-muted-foreground">{voidBlocked}</p>
+            ) : null}
+            {invoice.status !== "void" && !voidBlocked ? (
               <form action={voidInvoice} className="mt-4 border-t pt-4">
                 <input type="hidden" name="id" value={id} />
                 <ConfirmSubmit
@@ -219,7 +258,18 @@ export default async function InvoiceDetailPage({
             ) : null}
           </Card>
 
-          {creditable(invoice) ? (
+          {creditable(invoice) && creditableNow <= 0.005 ? (
+          <Card title="Credit note">
+            <p className="text-sm text-muted-foreground">
+              {creditRefusal({
+                status: invoice.status, invoiceType: invoice.invoice_type, total: Number(invoice.total),
+                amountPaid: Number(invoice.amount_paid),
+                alreadyCredited: Number(invoice.amount_credited ?? 0), amount: 0.01,
+              })}
+            </p>
+          </Card>
+          ) : null}
+          {creditable(invoice) && creditableNow > 0.005 ? (
           <Card title="Credit note" description="Always references this invoice.">
             <form action={createCreditNote} className="grid gap-3 sm:grid-cols-2">
               <input type="hidden" name="invoice_id" value={id} />
@@ -234,10 +284,10 @@ export default async function InvoiceDetailPage({
               <Field
                 label="Amount (inc GST)"
                 name="amount"
-                hint="What the customer is credited. Enter the amount as it appears on the invoice."
+                hint={`What the customer is credited, at most ${money(creditableNow)} — what is still owed after payments and earlier credits.`}
                 required
               >
-                <Input name="amount" type="number" step="0.01" min={0} required />
+                <Input name="amount" type="number" step="0.01" min={0} max={creditableNow} required />
               </Field>
               <Field label="Reason" name="reason" required>
                 <Input name="reason" required placeholder="Short delivery on 12 March" />
@@ -278,9 +328,9 @@ export default async function InvoiceDetailPage({
  * question asked of an issued invoice too. The controls are what disappear.
  */
 async function SourceJobs({
-  invoiceId, tenantId, editable,
+  invoiceId, tenantId, editable, invoiceStatus,
 }: {
-  invoiceId: string; tenantId: string; editable: boolean;
+  invoiceId: string; tenantId: string; editable: boolean; invoiceStatus: string;
 }) {
   const supabase = await createClient();
   const jobs = await loadInvoiceSourceJobs(supabase, tenantId, invoiceId);
@@ -299,9 +349,7 @@ async function SourceJobs({
               <p className="mt-0.5 text-xs text-muted-foreground">
                 {job.completedAt ? formatIso(job.completedAt.slice(0, 10)) : "No completion date"}
                 {" · "}
-                {isBillingStatus(job.billingStatus)
-                  ? BILLING_STATUS_LABELS[job.billingStatus]
-                  : job.billingStatus}
+                {jobStatusOnInvoice(job.billingStatus, invoiceStatus)}
               </p>
             </div>
             <span className="text-sm font-semibold tabular-nums">{money(job.total)}</span>
@@ -588,12 +636,14 @@ async function loadChartOfAccounts(tenantId: string): Promise<LineFormAccount[]>
   return data ?? [];
 }
 
-async function Payments({ invoice, writable }: { invoice: InvoiceDetail; writable: boolean }) {
+async function Payments({ invoice, writable, tenantId }: {
+  invoice: InvoiceDetail; writable: boolean; tenantId: string;
+}) {
   const supabase = await createClient();
   const { data } = await supabase
     .from("payments")
     .select("id, invoice_id, customer_id, paid_on, amount, method, reference")
-    .eq("invoice_id", invoice.id).order("paid_on", { ascending: false })
+    .eq("invoice_id", invoice.id).eq("tenant_id", tenantId).order("paid_on", { ascending: false })
     .returns<Payment[]>();
 
   return (
@@ -606,6 +656,23 @@ async function Payments({ invoice, writable }: { invoice: InvoiceDetail; writabl
           { header: "Amount", cell: (row) => money(row.amount), align: "right" },
           { header: "Method", cell: (row) => humanise(row.method), hideBelow: "sm" },
           { header: "Reference", cell: (row) => row.reference ?? "—", hideBelow: "md" },
+          ...(writable ? [{
+            header: "",
+            cell: (row: Payment) => (
+              <form action={reversePayment} className="print:hidden">
+                <input type="hidden" name="payment_id" value={row.id} />
+                <input type="hidden" name="invoice_id" value={invoice.id} />
+                <ConfirmSubmit
+                  label="Reverse"
+                  eyebrow="Changes the balance"
+                  consequence={`Reversing takes this ${money(row.amount)} payment off ${invoice.invoice_number} and puts it back on the balance owed. The payment is kept in the activity log.`}
+                  reasonName="reason"
+                  reasonLabel="Why is it being reversed?"
+                  pendingLabel="Reversing…"
+                />
+              </form>
+            ),
+          }] : []),
         ]}
       />
 
@@ -616,7 +683,7 @@ async function Payments({ invoice, writable }: { invoice: InvoiceDetail; writabl
         </p>
       ) : null}
 
-      {writable && payable(invoice) ? (
+      {writable && canTakePayment(invoice) ? (
         <form action={recordPayment} className="mt-4 grid gap-3 border-t pt-4 sm:grid-cols-2 lg:grid-cols-5 print:hidden">
           <input type="hidden" name="invoice_id" value={invoice.id} />
           <input type="hidden" name="customer_id" value={invoice.customer_id} />
@@ -650,12 +717,12 @@ async function Payments({ invoice, writable }: { invoice: InvoiceDetail; writabl
   );
 }
 
-async function CreditNotes({ invoiceId }: { invoiceId: string }) {
+async function CreditNotes({ invoiceId, tenantId }: { invoiceId: string; tenantId: string }) {
   const supabase = await createClient();
   const { data } = await supabase
     .from("credit_notes")
     .select("id, credit_note_number, status, issue_date, reason, total")
-    .eq("invoice_id", invoiceId).order("issue_date", { ascending: false })
+    .eq("invoice_id", invoiceId).eq("tenant_id", tenantId).order("issue_date", { ascending: false })
     .returns<Array<{ id: string; credit_note_number: string; status: string; issue_date: string; reason: string | null; total: number }>>();
 
   if (!data?.length) return null;
@@ -666,7 +733,16 @@ async function CreditNotes({ invoiceId }: { invoiceId: string }) {
         rows={data}
         empty={<EmptyState title="No credit notes" />}
         columns={[
-          { header: "Credit note", cell: (row) => row.credit_note_number },
+          {
+            header: "Credit note",
+            // A route handler, so a plain anchor rather than a client link.
+            cell: (row) => (
+              <a className="font-medium underline" href={`/api/credit-notes/${row.id}/pdf`}
+                 target="_blank" rel="noreferrer">
+                {row.credit_note_number}
+              </a>
+            ),
+          },
           { header: "Issued", cell: (row) => date(row.issue_date) },
           { header: "Reason", cell: (row) => row.reason ?? "—", hideBelow: "sm" },
           { header: "Total", cell: (row) => money(row.total), align: "right" },
@@ -683,13 +759,6 @@ function documentTitle(invoice: { invoice_type: string; status: string; total: n
   if (invoice.status === "draft") return "Draft invoice";
   // Matches the PDF: "Tax invoice" only when GST is actually charged.
   return Number(invoice.tax_amount) > 0 ? "Tax invoice" : "Invoice";
-}
-
-/** A payment belongs on a sent, positive, unsettled invoice (see payment-gate.ts). */
-function payable(invoice: { invoice_type: string; status: string; balance: number }): boolean {
-  return invoice.invoice_type !== "credit"
-    && ["issued", "part_paid", "overdue"].includes(invoice.status)
-    && Number(invoice.balance) > 0.005;
 }
 
 /** A credit note offsets an invoice the customer has been sent. */

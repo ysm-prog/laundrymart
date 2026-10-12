@@ -7,7 +7,7 @@ import { createClient } from "@/lib/supabase/server";
 import { recordAudit } from "@/lib/audit";
 import { describeDbError, done, fail, firstIssue, toObject } from "@/lib/actions";
 import { emailIsConfigured, sendEmail } from "@/lib/email/send";
-import { NOTIFICATION_KINDS, type NotificationKind } from "@/lib/notifications/kinds";
+import { NOTIFICATION_EVENTS, NOTIFICATION_KINDS, type NotificationKind } from "@/lib/notifications/kinds";
 import {
   defaultSettings, parseSettings, serialiseSettings, DEFAULT_OVERDUE_REMINDER,
 } from "@/lib/notifications/settings";
@@ -54,7 +54,9 @@ export async function saveNotificationSettings(formData: FormData): Promise<void
 
   // An unchecked checkbox posts nothing at all, so every kind is read from the
   // form explicitly rather than by iterating what arrived.
+  // A retired kind is not on the form, so it keeps whatever it was.
   for (const kind of NOTIFICATION_KINDS) {
+    if (NOTIFICATION_EVENTS[kind].retired) continue;
     settings.inApp[kind as NotificationKind] = formData.get(`in_app_${kind}`) === "on";
   }
 
@@ -68,10 +70,13 @@ export async function saveNotificationSettings(formData: FormData): Promise<void
     },
   };
 
-  const { error } = await supabase
-    .from("tenants")
-    .update({ settings: serialiseSettings(settings, tenant?.settings) })
-    .eq("id", session.tenantId);
+  // Through `save_tenant_settings` (0052), not an UPDATE: `tenants` has no
+  // update policy for an Owner who is not a platform admin, so the UPDATE this
+  // used to be wrote zero rows in silence and the toast still said "saved".
+  const { error } = await supabase.rpc("save_tenant_settings", {
+    t: session.tenantId, p_key: "notifications",
+    p_value: serialiseSettings(settings, tenant?.settings).notifications,
+  });
   if (error) return fail(BACK, describeDbError(error));
 
   await recordAudit(session, {
@@ -141,10 +146,10 @@ export async function resetNotificationSettings(): Promise<void> {
   const settings = defaultSettings();
   settings.customerEmail.overdueReminder = { ...DEFAULT_OVERDUE_REMINDER };
 
-  const { error } = await supabase
-    .from("tenants")
-    .update({ settings: serialiseSettings(settings, tenant?.settings) })
-    .eq("id", session.tenantId);
+  const { error } = await supabase.rpc("save_tenant_settings", {
+    t: session.tenantId, p_key: "notifications",
+    p_value: serialiseSettings(settings, tenant?.settings).notifications,
+  });
   if (error) return fail(BACK, describeDbError(error));
 
   await recordAudit(session, {

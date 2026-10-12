@@ -7,6 +7,7 @@ import { invoiceFileName, renderInvoicePdf } from "@/lib/pdf/render";
 import { buildInvoiceEmail } from "@/lib/email/invoice-email";
 import { sendEmail } from "@/lib/email/send";
 import { logOrderActivity } from "@/lib/orders/activity";
+import { settledStatus } from "@/lib/domain/payment-gate";
 
 /**
  * Emailing one invoice, with the PDF attached — the single implementation.
@@ -176,17 +177,22 @@ export async function markInvoiceJobsPaid(
  * signed off and are still frozen, and it was the invoice that was wrong. If
  * the *price* was wrong, the reviewer sends the job back explicitly.
  */
+export type ReleaseOutcome =
+  | { ok: true; released: number }
+  | { ok: false; error: string; released: number };
+
 export async function releaseVoidedInvoiceJobs(
   supabase: Client, session: Session, invoiceId: string,
-): Promise<void> {
-  const { data: sources } = await supabase
+): Promise<ReleaseOutcome> {
+  const { data: sources, error: readError } = await supabase
     .from("invoice_source_jobs")
     .select("order_id")
     .eq("invoice_id", invoiceId)
     .returns<Array<{ order_id: string }>>();
+  if (readError) return { ok: false, error: describeDbError(readError), released: 0 };
 
   const jobIds = (sources ?? []).map((row) => row.order_id);
-  if (jobIds.length === 0) return;
+  if (jobIds.length === 0) return { ok: true, released: 0 };
 
   // **Order matters, and the guard is what makes it matter.** 0017 permits
   // `invoice_generated → approved` only when no `invoice_source_jobs` row
@@ -198,12 +204,66 @@ export async function releaseVoidedInvoiceJobs(
     .delete()
     .eq("invoice_id", invoiceId)
     .eq("tenant_id", session.tenantId);
-  if (unlinkError) return;
+  if (unlinkError) return { ok: false, error: describeDbError(unlinkError), released: 0 };
 
-  await supabase
+  const { data: moved, error: moveError } = await supabase
     .from("laundry_orders")
     .update({ billing_status: "approved" })
     .in("id", jobIds)
     .eq("tenant_id", session.tenantId)
-    .in("billing_status", ["invoice_generated", "invoice_sent"]);
+    .in("billing_status", ["invoice_generated", "invoice_sent"])
+    .select("id");
+  if (moveError) return { ok: false, error: describeDbError(moveError), released: 0 };
+
+  // A job that did not move is stranded in a state the void did not undo (a
+  // `paid` job is the case the 12 October test found). Said, never hidden: the
+  // toast used to claim every job was back in the queue regardless.
+  const released = moved?.length ?? 0;
+  if (released < jobIds.length) {
+    return {
+      ok: false, released,
+      error: `${jobIds.length - released} of ${jobIds.length} jobs on it could not be put back in the billing queue — check their billing status.`,
+    };
+  }
+  return { ok: true, released };
+}
+
+/**
+ * Re-derive an issued invoice's status from its paid and credited figures, and
+ * carry the jobs on it with it: settled → their jobs are paid; no longer settled
+ * (a reversed payment) → their jobs go back to `invoice_sent` (0052's one way
+ * back off `paid`). Shared by payments, credit notes and reversals so the three
+ * cannot disagree about when an invoice is paid.
+ */
+export async function resettleInvoice(
+  supabase: Client, session: Session, invoiceId: string,
+): Promise<{ status: string; paid: boolean } | null> {
+  const { data: row } = await supabase
+    .from("invoices").select("status, total, amount_paid, amount_credited")
+    .eq("id", invoiceId).eq("tenant_id", session.tenantId)
+    .maybeSingle<{ status: string; total: number; amount_paid: number; amount_credited: number }>();
+  if (!row) return null;
+
+  const next = settledStatus({
+    status: row.status, total: Number(row.total),
+    amountPaid: Number(row.amount_paid), amountCredited: Number(row.amount_credited ?? 0),
+  });
+  if (next.status !== row.status) {
+    await supabase.from("invoices")
+      .update({ status: next.status, paid_at: next.paid ? new Date().toISOString() : null })
+      .eq("id", invoiceId).eq("tenant_id", session.tenantId);
+  }
+  if (next.paid) {
+    await markInvoiceJobsPaid(supabase, session, invoiceId);
+  } else if (row.status === "paid") {
+    const { data: sources } = await supabase
+      .from("invoice_source_jobs").select("order_id").eq("invoice_id", invoiceId)
+      .returns<Array<{ order_id: string }>>();
+    const jobIds = (sources ?? []).map((s) => s.order_id);
+    if (jobIds.length > 0) {
+      await supabase.from("laundry_orders").update({ billing_status: "invoice_sent" })
+        .in("id", jobIds).eq("tenant_id", session.tenantId).eq("billing_status", "paid");
+    }
+  }
+  return next;
 }

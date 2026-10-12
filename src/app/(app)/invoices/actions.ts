@@ -15,7 +15,9 @@ import {
   type BillableAgreement, type BillableLine,
 } from "@/lib/domain/invoicing";
 import { businessToday, toInstant } from "@/lib/domain/timezone";
-import { paymentRefusal, settleHeaderOnly } from "@/lib/domain/payment-gate";
+import {
+  creditRefusal, paymentRefusal, reversalRefusal, settleHeaderOnly, unsettleHeaderOnly, voidRefusal,
+} from "@/lib/domain/payment-gate";
 import {
   count, describeDbError, done, fail, firstIssue, money, optionalText,
   optionalUuid, requiredDate, returnTo, toObject,
@@ -32,7 +34,7 @@ import { findOrOpenDraft, rebuildJobLines, removeJobFromDraft } from "@/lib/invo
 import { loadChargesForJobs } from "@/lib/orders/job-billing";
 import { issueOneInvoice } from "@/lib/invoices/issue";
 import {
-  markInvoiceJobsPaid, releaseVoidedInvoiceJobs, sendInvoice,
+  releaseVoidedInvoiceJobs, resettleInvoice, sendInvoice,
 } from "@/lib/invoices/send";
 
 /**
@@ -1052,25 +1054,9 @@ export async function recordPayment(formData: FormData): Promise<void> {
       .eq("id", parsed.data.invoice_id).eq("tenant_id", session.tenantId);
   }
 
-  const { data: invoice } = await supabase
-    .from("invoices").select("total, amount_paid")
-    .eq("tenant_id", session.tenantId)
-    .eq("id", parsed.data.invoice_id).single();
-
-  if (invoice) {
-    const paid = Number(invoice.amount_paid) >= Number(invoice.total);
-    await supabase.from("invoices")
-      .update({
-        status: paid ? "paid" : "part_paid",
-        paid_at: paid ? new Date().toISOString() : null,
-      })
-      .eq("id", parsed.data.invoice_id).eq("tenant_id", session.tenantId);
-
-    // Settling the invoice settles every job on it. A part payment moves
-    // nothing: a job is paid when the document covering it is, not when some
-    // of it is.
-    if (paid) await markInvoiceJobsPaid(supabase, session, parsed.data.invoice_id);
-  }
+  // Paid, part paid or still issued is decided once, counting credit notes as
+  // well as payments (0052), and carries the jobs on the invoice with it.
+  await resettleInvoice(supabase, session, parsed.data.invoice_id);
 
   await recordAudit(session, {
     entity: "payment", entityId: parsed.data.invoice_id, action: "create",
@@ -1122,6 +1108,92 @@ export async function retryXeroPayment(formData: FormData): Promise<void> {
               push.skipped ? { href: "/invoices/xero", label: "Xero settings" } : undefined);
 }
 
+/**
+ * Reverse a recorded payment — the money did not arrive, or was recorded against
+ * the wrong invoice. Owner and Office only (`invoices.write` is theirs alone),
+ * a reason is required and the whole payment goes into the audit trail, because
+ * the row itself is deleted.
+ *
+ * An invoice with lines is re-totalled by `recalculate_invoice`, which sums the
+ * remaining payments. A header-only MYOB import keeps its paid-up figure in
+ * `amount_paid` with no payment rows behind it, so there the payment is taken
+ * back off that figure instead — the same split `recordPayment` makes.
+ */
+export async function reversePayment(formData: FormData): Promise<void> {
+  const session = await assertCapability("invoices.write");
+  const parsed = z.object({
+    payment_id: z.string().uuid(),
+    invoice_id: z.string().uuid(),
+    reason: z.string().trim().min(3, "Give a reason for reversing the payment"),
+  }).safeParse(toObject(formData));
+  if (!parsed.success) return fail("/invoices", firstIssue(parsed.error));
+
+  const backTo = returnTo(formData, `/invoices/${parsed.data.invoice_id}`);
+  const supabase = await createClient();
+
+  const { data: payment } = await supabase
+    .from("payments")
+    .select("id, amount, paid_on, method, reference, xero_payment_id")
+    .eq("id", parsed.data.payment_id).eq("invoice_id", parsed.data.invoice_id)
+    .eq("tenant_id", session.tenantId)
+    .maybeSingle<{ id: string; amount: number; paid_on: string; method: string;
+                   reference: string | null; xero_payment_id: string | null }>();
+  if (!payment) return fail(backTo, "That payment could not be found on this invoice.");
+
+  const { data: invoice } = await supabase
+    .from("invoices").select("status, invoice_number, amount_paid")
+    .eq("id", parsed.data.invoice_id).eq("tenant_id", session.tenantId)
+    .maybeSingle<{ status: string; invoice_number: string; amount_paid: number }>();
+  if (!invoice) return fail(backTo, "That invoice could not be found.");
+
+  const { count: lineCount } = await supabase
+    .from("invoice_lines").select("id", { count: "exact", head: true })
+    .eq("tenant_id", session.tenantId).eq("invoice_id", parsed.data.invoice_id);
+  const headerOnly = !lineCount;
+
+  const refusal = reversalRefusal({
+    headerOnly, amountPaid: Number(invoice.amount_paid), amount: Number(payment.amount),
+    xeroPosted: Boolean(payment.xero_payment_id),
+  });
+  if (refusal) return fail(backTo, refusal);
+
+  const { error } = await supabase
+    .from("payments").delete()
+    .eq("id", payment.id).eq("tenant_id", session.tenantId);
+  if (error) return fail(backTo, describeDbError(error));
+
+  if (headerOnly) {
+    await supabase.from("invoices")
+      .update({ amount_paid: unsettleHeaderOnly(Number(invoice.amount_paid), Number(payment.amount)) })
+      .eq("id", parsed.data.invoice_id).eq("tenant_id", session.tenantId);
+  } else {
+    const { error: totalError } = await supabase
+      .rpc("recalculate_invoice", { p_invoice: parsed.data.invoice_id });
+    if (totalError) return fail(backTo, describeDbError(totalError));
+  }
+
+  // A void invoice keeps its status — reversing is how a payment left on one by
+  // an older bug is cleaned up. Anything else is re-settled from the figures.
+  const next = invoice.status === "void"
+    ? null
+    : await resettleInvoice(supabase, session, parsed.data.invoice_id);
+
+  await recordAudit(session, {
+    entity: "payment", entityId: parsed.data.invoice_id, action: "delete",
+    summary: `reversed ${formatMoney(Number(payment.amount))} on ${invoice.invoice_number}: ${parsed.data.reason}`,
+    metadata: {
+      payment_id: payment.id, amount: Number(payment.amount), paid_on: payment.paid_on,
+      method: payment.method, reference: payment.reference, reason: parsed.data.reason,
+      header_only: headerOnly,
+    },
+  });
+  revalidatePath(`/invoices/${parsed.data.invoice_id}`);
+  revalidatePath("/invoices");
+
+  return done(backTo, `Payment of ${formatMoney(Number(payment.amount))} reversed`
+    + (next ? `. ${invoice.invoice_number} is now ${next.status.replace("_", " ")}.` : "."));
+}
+
 export async function voidInvoice(formData: FormData): Promise<void> {
   const session = await assertCapability("invoices.write");
   const parsed = z.object({
@@ -1132,6 +1204,27 @@ export async function voidInvoice(formData: FormData): Promise<void> {
 
   const backTo = `/invoices/${parsed.data.id}`;
   const supabase = await createClient();
+
+  // Refused before the write, with the remedy named. `guard_invoice_void` (0052)
+  // is the boundary and refuses the same thing out loud; this is the sentence.
+  const { data: current } = await supabase
+    .from("invoices").select("status, amount_paid")
+    .eq("id", parsed.data.id).eq("tenant_id", session.tenantId)
+    .maybeSingle<{ status: string; amount_paid: number }>();
+  if (!current) return fail(backTo, "That invoice could not be found.");
+  const [{ count: paymentCount }, { count: creditNoteCount }] = await Promise.all([
+    supabase.from("payments").select("id", { count: "exact", head: true })
+      .eq("invoice_id", parsed.data.id).eq("tenant_id", session.tenantId),
+    supabase.from("credit_notes").select("id", { count: "exact", head: true })
+      .eq("invoice_id", parsed.data.id).eq("tenant_id", session.tenantId)
+      .in("status", ["issued", "applied"]),
+  ]);
+  const refusal = voidRefusal({
+    status: current.status, amountPaid: Number(current.amount_paid),
+    paymentCount: paymentCount ?? 0, creditNoteCount: creditNoteCount ?? 0,
+  });
+  if (refusal) return fail(backTo, refusal);
+
   const { error } = await supabase
     .from("invoices")
     .update({
@@ -1146,8 +1239,8 @@ export async function voidInvoice(formData: FormData): Promise<void> {
   // be billable afterwards — so the jobs go back to `approved` with their
   // frozen charges intact. This is the *only* way out of an invoiced billing
   // state, which is why the guard checks the link rows rather than trusting a
-  // caller (migration 0017).
-  await releaseVoidedInvoiceJobs(supabase, session, parsed.data.id);
+  // caller (migration 0017). The outcome is reported, never assumed.
+  const release = await releaseVoidedInvoiceJobs(supabase, session, parsed.data.id);
 
   // Void it in Xero too, *after* voiding it here and never blocking on it. An
   // invoice voided here used to stay AUTHORISED in Xero, so a void was a
@@ -1169,7 +1262,11 @@ export async function voidInvoice(formData: FormData): Promise<void> {
   revalidatePath(backTo);
   revalidatePath("/invoices/awaiting");
 
-  const released = "Invoice voided. Any jobs on it are back in the ready-to-invoice queue.";
+  const released = !release.ok
+    ? `Invoice voided, but its jobs were not all released: ${release.error}`
+    : release.released > 0
+      ? `Invoice voided. ${counted(release.released, "job")} back in the billing queue.`
+      : "Invoice voided.";
 
   // A refusal the operator has to act on is said as a failure — the void here
   // still happened, and the sentence has to make clear that Xero did not follow.
@@ -1177,6 +1274,7 @@ export async function voidInvoice(formData: FormData): Promise<void> {
   if (!voided.ok && !voided.skipped) {
     return fail(backTo, `${released} But Xero did not: ${voided.reason}`);
   }
+  if (!release.ok) return fail(backTo, released);
   return done(backTo, released);
 }
 
@@ -1229,15 +1327,18 @@ export async function createCreditNote(formData: FormData): Promise<void> {
   // A credit note offsets something the customer was sent, and never by more
   // than it was for. The customer comes from the invoice, not the form.
   const { data: target } = await supabase
-    .from("invoices").select("status, invoice_type, total, customer_id")
+    .from("invoices")
+    .select("status, invoice_type, total, amount_paid, amount_credited, customer_id")
     .eq("tenant_id", session.tenantId).eq("id", parsed.data.invoice_id).maybeSingle();
   if (!target) return fail(backTo, "That invoice could not be found.");
-  if (target.invoice_type === "credit" || !["issued", "part_paid", "overdue", "paid"].includes(target.status)) {
-    return fail(backTo, "A credit note can only be raised against an issued invoice.");
-  }
-  if (parsed.data.amount > Number(target.total) + 0.005) {
-    return fail(backTo, `A credit note cannot be for more than the invoice total of ${formatMoney(Number(target.total))}.`);
-  }
+  // The cumulative cap (0052): every issued credit note together may never
+  // exceed what is still owed — `sync_invoice_credits` refuses the same thing.
+  const refusal = creditRefusal({
+    status: target.status, invoiceType: target.invoice_type,
+    total: Number(target.total), amountPaid: Number(target.amount_paid),
+    alreadyCredited: Number(target.amount_credited ?? 0), amount: parsed.data.amount,
+  });
+  if (refusal) return fail(backTo, refusal);
   parsed.data.customer_id = target.customer_id;
 
   const { data: creditNumber, error: numberError } = await supabase
@@ -1307,11 +1408,15 @@ export async function createCreditNote(formData: FormData): Promise<void> {
     .eq("id", note.id).eq("tenant_id", session.tenantId)
     .maybeSingle<{ total: number; tax_amount: number }>();
 
+  // A credit that clears the balance settles the invoice like a payment would.
+  await resettleInvoice(supabase, session, parsed.data.invoice_id);
+
   await recordAudit(session, {
     entity: "credit_note", entityId: note.id, action: "create",
     summary: `${note.credit_note_number} against invoice`,
   });
   revalidatePath(backTo);
+  revalidatePath("/invoices");
   return done(backTo, totals
     ? `Credit note ${note.credit_note_number} issued for ${formatMoney(totals.total)}`
       + `, including ${formatMoney(totals.tax_amount)} GST.`

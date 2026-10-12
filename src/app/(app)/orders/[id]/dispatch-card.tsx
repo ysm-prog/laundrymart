@@ -31,6 +31,7 @@ export async function DispatchCard({
     expected_delivery_date: string | null;
     assigned_board_id: string | null;
     assigned_delivery_date: string | null;
+    delivery_instructions?: string | null;
   };
   canAssign: boolean;
   /**
@@ -132,6 +133,7 @@ export async function DispatchCard({
             expectedDeliveryDate={order.expected_delivery_date ?? order.due_date}
             boards={boards}
             returnTo={returnTo}
+            driverNote={order.delivery_instructions}
             currentAssignment={
               order.assigned_board_id
                 ? {

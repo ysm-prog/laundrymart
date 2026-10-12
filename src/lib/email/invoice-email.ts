@@ -16,6 +16,7 @@
 
 import { formatMoney } from "@/lib/domain/pricing";
 import type { InvoicePdfData } from "@/lib/pdf/invoice-data";
+import { paymentInstructions } from "@/lib/domain/invoice-profile";
 import {
   emailShell, escapeHtml, notice, paragraph, mutedParagraph, summary, withTextCredit,
 } from "@/lib/email/layout";
@@ -40,6 +41,8 @@ export function buildInvoiceEmail(data: InvoicePdfData): InvoiceEmail {
   const balance = formatMoney(Number(invoice.balance ?? 0), currency);
   const due = auDate(invoice.due_date);
   const outstanding = Number(invoice.balance ?? 0) > 0;
+  const howToPay = outstanding && tenant.profile
+    ? paymentInstructions(tenant.profile, invoice.invoice_number) : [];
 
   const subject = `${tenant.name} — invoice ${invoice.invoice_number} (${total})`;
 
@@ -52,10 +55,11 @@ export function buildInvoiceEmail(data: InvoicePdfData): InvoiceEmail {
     "",
     `Please find attached invoice ${invoice.invoice_number} ${period}from ${tenant.name}.`,
     "",
-    `Total: ${total}`,
+    `Total (inc GST): ${total}`,
     outstanding ? `Amount due: ${balance}` : "This invoice is paid in full — no action needed.",
     outstanding ? `Due date: ${due}` : "",
     invoice.purchase_order_number ? `Your PO: ${invoice.purchase_order_number}` : "",
+    ...(howToPay.length ? ["", "How to pay:", ...howToPay] : []),
     "",
     "Reply to this email if anything looks wrong and we will sort it out.",
     "",
@@ -64,7 +68,7 @@ export function buildInvoiceEmail(data: InvoicePdfData): InvoiceEmail {
   ].filter((line) => line !== "").join("\n");
 
   const rows = [
-    { label: "Total", value: total },
+    { label: "Total (inc GST)", value: total },
     ...(outstanding
       ? [{ label: "Amount due", value: balance }, { label: "Due date", value: due }]
       : []),
@@ -89,6 +93,7 @@ export function buildInvoiceEmail(data: InvoicePdfData): InvoiceEmail {
       ),
       summary(rows),
       outstanding ? "" : notice("ok", "This invoice is paid in full — no action needed."),
+      howToPay.length ? paragraph(`How to pay — ${howToPay.join(" · ")}`) : "",
       mutedParagraph("Reply to this email if anything looks wrong and we will sort it out."),
     ].join("\n"),
     footNote: tenant.abn ? `${tenant.name} · ABN ${tenant.abn}` : tenant.name,

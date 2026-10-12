@@ -285,7 +285,7 @@ async function Agreements({ customerId }: { customerId: string }) {
       <DataTable
         rows={data ?? []}
         rowHref={(row) => `/agreements/${row.id}`}
-        empty={<EmptyState title="No service agreement" description="Routes and billing both derive from the agreement." />}
+        empty={<EmptyState title="No service agreement" description="Not needed for laundry jobs — those are priced from your price list. An agreement is for a standing contract: a service pattern with its own prices." />}
         columns={[
           { header: "Agreement", cell: (row) => `${row.agreement_number} v${row.version}` },
           { header: "Pickup pattern", cell: (row) => describePattern(parsePattern(row.pickup_pattern)), hideBelow: "sm" },

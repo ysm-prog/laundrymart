@@ -11,6 +11,8 @@ import { renderToBuffer, type DocumentProps } from "@react-pdf/renderer";
 import { createElement, type ReactElement } from "react";
 import { InvoiceDocument } from "./invoice-document";
 import type { InvoicePdfData } from "./invoice-data";
+import { CreditNoteDocument } from "./credit-note";
+import type { CreditNotePdfData } from "./credit-note-data";
 
 export async function renderInvoicePdf(data: InvoicePdfData): Promise<Buffer> {
   // renderToBuffer is typed against the <Document> element rather than the
@@ -22,4 +24,9 @@ export async function renderInvoicePdf(data: InvoicePdfData): Promise<Buffer> {
 /** `INV00042.pdf` — safe on every filesystem and readable in a mail client. */
 export function invoiceFileName(invoiceNumber: string): string {
   return `${invoiceNumber.replace(/[^A-Za-z0-9_-]/g, "") || "invoice"}.pdf`;
+}
+
+export async function renderCreditNotePdf(data: CreditNotePdfData): Promise<Buffer> {
+  const document = createElement(CreditNoteDocument, { data }) as ReactElement<DocumentProps>;
+  return Buffer.from(await renderToBuffer(document));
 }

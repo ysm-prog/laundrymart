@@ -640,6 +640,8 @@ export type LaundryOrderItem = {
   bag_count: number | null;
   estimated_quantity: number | null;
   notes: string | null;
+  /** `rental` or `own` (0051); null on rows written before it. Never priced. */
+  ownership?: string | null;
 };
 
 export type LaundryOrderActivity = {

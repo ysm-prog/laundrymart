@@ -1,3 +1,4 @@
+import { canTakePayment } from "@/lib/domain/payment-gate";
 import { Suspense } from "react";
 import Link from "next/link";
 import { requireCapability } from "@/lib/auth/context";
@@ -544,7 +545,7 @@ async function InvoicePane({ params, writable }: { params: Search; writable: boo
               </Notice>
             )}
 
-            {invoice.status !== "draft" && Number(invoice.balance) > 0 ? (
+            {canTakePayment(invoice) ? (
               <form action={recordPayment} className="grid gap-2 border-t pt-3 sm:grid-cols-2">
                 <input type="hidden" name="invoice_id" value={invoice.id} />
                 <input type="hidden" name="customer_id" value={invoice.customer_id} />

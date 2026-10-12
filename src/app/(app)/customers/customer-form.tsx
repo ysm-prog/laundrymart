@@ -59,7 +59,7 @@ export function CustomerEssentials({
       </Field>
       {withSite ? (
         <Field label="Site address" name="site_address" required className="sm:col-span-2"
-               hint="Where the driver collects and delivers — saved as their first site">
+               hint="Where the driver collects and delivers. Saved as their first site, and as their billing address — the one printed on invoices — until you add a different one.">
           <Input name="site_address" required placeholder="12 King William St, Adelaide" formId={formId} />
         </Field>
       ) : null}

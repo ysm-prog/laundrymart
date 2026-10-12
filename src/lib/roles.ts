@@ -422,7 +422,7 @@ export const ROLE_SUMMARY: Record<Role, string> = {
   driver: "Their own run, on their phone, and nothing else",
   finance: "Supplier bills, what you owe, and reports",
   warehouse_operator: "The plant floor and stock — not the customer's job",
-  customer_service: "Customers and the day's stops — not taking jobs in",
+  customer_service: "The counter: takes laundry in, looks after customers and the day's stops — not billing",
   sales: "Customers and their contracts",
   branch_manager: "Everything at one site except jobs and invoices",
   regional_manager: "Everything across sites except jobs and invoices",

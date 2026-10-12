@@ -2,6 +2,7 @@ import { CONTROL, SELECT_CHEVRON, cx } from "@/components/ui";
 import { SubmitButton } from "@/components/form";
 import { preferredRunDate } from "@/lib/domain/run-assignment";
 import { formatAdelaideDate } from "@/lib/domain/timezone";
+import { DRIVER_NOTE_FIELD, DRIVER_NOTE_MAX } from "@/lib/domain/driver-instructions";
 import { assignJobToBoard } from "./actions";
 
 /**
@@ -22,7 +23,7 @@ import { assignJobToBoard } from "./actions";
  */
 export function AssignForm({
   orderId, defaultBoardId, defaultDate, expectedDeliveryDate, boards, returnTo,
-  currentAssignment, compact = false,
+  currentAssignment, driverNote = "", compact = false,
 }: {
   orderId: string;
   defaultBoardId: string | null;
@@ -33,6 +34,12 @@ export function AssignForm({
   returnTo: string;
   /** Set when the job already has a board: the form becomes a reassignment. */
   currentAssignment?: { boardName: string; deliveryDate: string } | null;
+  /**
+   * The job's current delivery instruction, so the note field opens showing it
+   * and emptying the box is a decision rather than an accident (see
+   * `readDriverNote`).
+   */
+  driverNote?: string | null;
   compact?: boolean;
 }) {
   const date = preferredRunDate({ due_date: expectedDeliveryDate }, defaultDate);
@@ -99,6 +106,26 @@ export function AssignForm({
             required
           />
         </div>
+      </div>
+
+      {/* Saved into the job's delivery instructions, which My Runs already shows
+          first in the Instructions block — Jay's change, 2026-10-12. Optional. */}
+      <div>
+        <label htmlFor={`driver-note-${orderId}`} className="mb-1 block text-sm font-medium">
+          Note for the driver <span className="font-normal text-muted-foreground">(optional)</span>
+        </label>
+        <input
+          id={`driver-note-${orderId}`}
+          name={DRIVER_NOTE_FIELD}
+          defaultValue={driverNote ?? ""}
+          maxLength={DRIVER_NOTE_MAX}
+          placeholder="Ring twice; leave with reception"
+          aria-describedby={`driver-note-hint-${orderId}`}
+          className={CONTROL}
+        />
+        <p id={`driver-note-hint-${orderId}`} className="mt-1 text-xs text-muted-foreground">
+          Shown to the round on My Runs, under this job&apos;s instructions.
+        </p>
       </div>
 
       <SubmitButton size="lg" pendingLabel={reassigning ? "Reassigning…" : "Assigning…"}>
