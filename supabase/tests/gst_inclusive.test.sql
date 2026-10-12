@@ -134,6 +134,9 @@ select is((select count(*)::int from pg_trigger
 -- `recalculate_credit_note()` is the twin of `recalculate_invoice()`, so the
 -- model now lives in one place for both documents. Asserted by running it
 -- against real rows, exactly as the invoice half is.
+--
+-- Issued first: since 0052 a draft cannot be credited (change its lines instead).
+update public.invoices set status = 'issued' where id='40000000-0000-4000-8000-00000000000a';
 insert into public.credit_notes
   (id, tenant_id, customer_id, invoice_id, credit_note_number, status,
    subtotal, tax_amount, total)
@@ -179,7 +182,9 @@ select is((select total from public.credit_notes where id='50000000-0000-4000-80
 
 -- The header follows the lines rather than a figure the caller passed, which is
 -- what moving this into the database bought.
-update public.credit_note_lines set taxable = true
+-- (0052 caps credit at what is owed, so the two corrections together are the
+-- $72.70 invoice rather than more than it.)
+update public.credit_note_lines set taxable = true, unit_price = 45.40, amount = 45.40
  where credit_note_id='50000000-0000-4000-8000-00000000000a';
 insert into public.credit_note_lines
   (tenant_id, credit_note_id, description, quantity, unit_price, amount, taxable) values
@@ -187,9 +192,9 @@ insert into public.credit_note_lines
    'Second correction', 1, 27.30, 27.30, true);
 select public.recalculate_credit_note('50000000-0000-4000-8000-00000000000a');
 select is((select subtotal from public.credit_notes where id='50000000-0000-4000-8000-00000000000a'),
-          100.00::numeric, 'two credit lines are summed by the database, not by a caller');
+          72.70::numeric, 'two credit lines are summed by the database, not by a caller');
 select is((select tax_amount from public.credit_notes where id='50000000-0000-4000-8000-00000000000a'),
-          9.09::numeric, 'and the GST is found inside the summed total');
+          6.61::numeric, 'and the GST is found inside the summed total');
 
 -- Callable by a signed-in user because the action reaches it over /rest/v1/rpc,
 -- and by nobody else. SECURITY INVOKER, so RLS and 0025 still decide who may

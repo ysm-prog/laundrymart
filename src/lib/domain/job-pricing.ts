@@ -441,9 +441,8 @@ export function priceJob(input: {
  * `billableQuantity` has already refused the lot with neither.
  *
  * `source_agreement_id` and friends stay null, which is the honest provenance:
- * this price came from the list, not from any agreement. The snapshot row's
- * description says so too, so a reviewer reading it a year later can tell which
- * tier answered.
+ * this price came from the list, not from any agreement. `pricing_model` set
+ * with no agreement line is how a reviewer can tell which tier answered.
  */
 function priceFromList(
   item: OrderItemInput,
@@ -470,7 +469,10 @@ function priceFromList(
 
   return {
     sequence,
-    description: `${detail} (price list)`,
+    // No "(price list)" suffix: the description prints on the customer's
+    // invoice, and which tier priced it is provenance, carried by
+    // `pricing_model` with no agreement line (`chargeSourceLabel`).
+    description: detail,
     charge_type: "wash_only",
     quantity,
     unit_price: round2(unitPrice),

@@ -142,3 +142,20 @@ export function parseJobCharges(raw: FormDataEntryValue | null): ParsedJobCharge
     })),
   };
 }
+
+/**
+ * Where a charge's price came from, for the label under it (2026-10-12). A
+ * price-list charge used to read "Added by hand" because only a rate-card
+ * line was recognised, and the pricer wrote "(price list)" into the
+ * description instead — which then printed on the customer's invoice. The
+ * provenance is already on the row: a rate line names its agreement line, a
+ * list price carries a pricing model and no agreement line, a hand-typed
+ * charge carries neither.
+ */
+export function chargeSourceLabel(row: {
+  source_agreement_line_id?: string | null; pricing_model?: string | null;
+}): "From the rate card" | "From the price list" | "Added by hand" {
+  if (row.source_agreement_line_id) return "From the rate card";
+  if (row.pricing_model) return "From the price list";
+  return "Added by hand";
+}

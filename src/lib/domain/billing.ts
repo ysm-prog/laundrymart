@@ -287,3 +287,20 @@ export function describeWorkAwaitingApproval(counts: {
     : `${unpriced} of them have no charges yet`;
   return ` ${head}${tail} ${priceFirst}, so price them first.`;
 }
+
+/**
+ * A job's billing state as read *from its invoice* (2026-10-12). Issuing does
+ * not move a job — only sending and paying do — so a job on an issued invoice
+ * still carries `invoice_generated`, whose label is "On a draft invoice". On a
+ * screen that is plainly showing an issued, part-paid or paid invoice that
+ * reads as stale. The invoice's own status is the better answer there.
+ */
+export function jobStatusOnInvoice(jobStatus: string, invoiceStatus: string): string {
+  if (jobStatus === "paid" || invoiceStatus === "paid") return "Paid";
+  if (invoiceStatus === "void") return "Invoice void";
+  if (invoiceStatus === "draft") return BILLING_STATUS_LABELS.invoice_generated;
+  if (invoiceStatus === "part_paid") return "Part paid";
+  if (invoiceStatus === "overdue") return "Overdue";
+  if (jobStatus === "invoice_sent") return BILLING_STATUS_LABELS.invoice_sent;
+  return "Invoice issued";
+}

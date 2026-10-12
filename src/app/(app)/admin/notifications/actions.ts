@@ -68,10 +68,13 @@ export async function saveNotificationSettings(formData: FormData): Promise<void
     },
   };
 
-  const { error } = await supabase
-    .from("tenants")
-    .update({ settings: serialiseSettings(settings, tenant?.settings) })
-    .eq("id", session.tenantId);
+  // Through `save_tenant_settings` (0052), not an UPDATE: `tenants` has no
+  // update policy for an Owner who is not a platform admin, so the UPDATE this
+  // used to be wrote zero rows in silence and the toast still said "saved".
+  const { error } = await supabase.rpc("save_tenant_settings", {
+    t: session.tenantId, p_key: "notifications",
+    p_value: serialiseSettings(settings, tenant?.settings).notifications,
+  });
   if (error) return fail(BACK, describeDbError(error));
 
   await recordAudit(session, {
@@ -141,10 +144,10 @@ export async function resetNotificationSettings(): Promise<void> {
   const settings = defaultSettings();
   settings.customerEmail.overdueReminder = { ...DEFAULT_OVERDUE_REMINDER };
 
-  const { error } = await supabase
-    .from("tenants")
-    .update({ settings: serialiseSettings(settings, tenant?.settings) })
-    .eq("id", session.tenantId);
+  const { error } = await supabase.rpc("save_tenant_settings", {
+    t: session.tenantId, p_key: "notifications",
+    p_value: serialiseSettings(settings, tenant?.settings).notifications,
+  });
   if (error) return fail(BACK, describeDbError(error));
 
   await recordAudit(session, {
