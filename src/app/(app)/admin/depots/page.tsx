@@ -53,15 +53,15 @@ export default async function DepotsPage({
         <Card title="Add a depot">
           <form action={createDepot} className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <Field label="Code" name="code" required>
-              <Input name="code" required placeholder="SYD" />
+              <Input name="code" required placeholder="ADL2" />
             </Field>
             <Field label="Name" name="name" required>
-              <Input name="name" required placeholder="Sydney depot" />
+              <Input name="name" required placeholder="Second Adelaide site" />
             </Field>
             <Field label="Address" name="address_line1"><Input name="address_line1" /></Field>
             <Field label="Suburb" name="suburb"><Input name="suburb" /></Field>
             <Field label="State" name="state">
-              <Select name="state" placeholder="—" options={AU_STATES} defaultValue="NSW" />
+              <Select name="state" placeholder="—" options={AU_STATES} defaultValue="SA" />
             </Field>
             <Field label="Postcode" name="postcode"><Input name="postcode" /></Field>
             <Field label="Contact" name="contact_name"><Input name="contact_name" /></Field>

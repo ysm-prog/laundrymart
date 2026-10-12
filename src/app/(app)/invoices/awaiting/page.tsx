@@ -192,7 +192,7 @@ export default async function AwaitingInvoicePage({
         eyebrow="Billing"
         title="Awaiting invoice"
         description="Work that is finished and not yet billed. Completing a job never raises an
-                     invoice on its own \u2014 approving its charges puts them on that customer\u2019s
+                     invoice on its own — approving its charges puts them on that customer’s
                      invoice for the period."
       />
 
@@ -216,7 +216,7 @@ export default async function AwaitingInvoicePage({
         q={params.q}
         params={params}
         filterKeys={FILTER_KEYS}
-        placeholder="Job number or customer\u2026"
+        placeholder="Job number or customer…"
         filters={[
           ...(customers.length > 1 ? [{
             name: "customer", label: "Customer", value: params.customer,
@@ -272,7 +272,7 @@ export default async function AwaitingInvoicePage({
       <Card
         title="Awaiting review"
         description="Price the jobs that need it, check the charges, then approve them. Approving
-                     freezes the price and puts it on the customer\u2019s draft invoice."
+                     freezes the price and puts it on the customer’s draft invoice."
         actions={filtered && awaiting.length > 0
           ? <span className="text-2xs text-muted-foreground">Filtered</span> : null}
       >
@@ -295,8 +295,8 @@ export default async function AwaitingInvoicePage({
 
       <Card
         title="Approved, not on a draft"
-        description="Approving puts a job straight onto its customer\u2019s draft invoice, so this
-                     is normally empty. A job sits here only when that could not be done \u2014
+        description="Approving puts a job straight onto its customer’s draft invoice, so this
+                     is normally empty. A job sits here only when that could not be done —
                      adding it to a draft is how it gets there."
       >
         {approved.length === 0 ? (

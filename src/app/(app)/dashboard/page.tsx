@@ -6,7 +6,7 @@ import { can } from "@/lib/roles";
 import { counted, date as formatDate, money, number, relativeDays, today } from "@/lib/format";
 import {
   ButtonLink, Card, DataTable, EmptyState, Eyebrow, FlashMessages, PageHeader, SkeletonRows,
-  SkeletonStats, Stage, Stat, StatusBadge, cx, humanise,
+  SkeletonStats, Stage, Stat, cx, humanise,
 } from "@/components/ui";
 import { QuickActions } from "@/components/quick-actions";
 import { parseExceptionNotes } from "@/lib/exceptions";
@@ -98,7 +98,10 @@ export default async function DashboardPage({
         <Kpis date={date} seesMoney={seesMoney} />
       </Suspense>
 
-      {can(session.role, "run.execute") ? (
+      {/* Only a round or a driver has a run of their own. The owner and the
+          office hold run.execute through TENANT_ALL, and were being told their
+          login was "not linked to a driver" on every visit to the home screen. */}
+      {(session.role === "driver" || session.role === "board") && can(session.role, "run.execute") ? (
         <Suspense fallback={<SkeletonRows rows={2} />}>
           <MyRun session={session} date={date} />
         </Suspense>
@@ -230,6 +233,9 @@ async function Kpis({ date, seesMoney }: { date: string; seesMoney: boolean }) {
     seesMoney
       ? supabase.from("invoices").select("balance")
           .in("status", ["issued", "part_paid", "overdue"])
+          // Money owed to us only: a credit or a settled-to-the-cent import is
+          // not "past terms", and adding negatives in shrank the total.
+          .gt("balance", 0.005).neq("invoice_type", "credit")
           .lt("due_date", date).is("deleted_at", null)
           .returns<Array<{ balance: number }>>()
       : Promise.resolve({ data: [] as Array<{ balance: number }> }),
@@ -326,8 +332,12 @@ async function NeedsDecision({ seesMoney }: { seesMoney: boolean }) {
       ? supabase.from("invoices")
           .select("id, invoice_number, due_date, balance, customers(business_name)")
           .in("status", ["issued", "part_paid", "overdue"])
+          // A credit (negative balance) is not a debt to chase, and the ten
+          // *oldest* invoices were 2011 MYOB history worth cents. Largest first
+          // is the list somebody can act on.
+          .gt("balance", 0.005).neq("invoice_type", "credit")
           .lt("due_date", date).is("deleted_at", null)
-          .order("due_date", { ascending: true }).limit(10)
+          .order("balance", { ascending: false }).limit(10)
           .returns<OverdueInvoice[]>()
       : Promise.resolve({ data: [] as OverdueInvoice[] }),
     supabase.from("vehicles")
@@ -580,46 +590,30 @@ async function JobBoard() {
 /* ------------------------------------------------------------------ my run */
 
 async function MyRun({ session, date }: { session: Session; date: string }) {
+  // Since boards (0031) a run is found by its round, not by daily_routes.driver_id
+  // — runs are created with board_id and no driver, so the old driver lookup
+  // always answered "No run assigned". My Runs already resolves the caller's
+  // own work correctly, so this card points there rather than re-deriving it.
+  void date;
   const supabase = await createClient();
-  const { data: driver } = await supabase
-    .from("drivers").select("id, full_name").eq("user_id", session.userId).maybeSingle();
+  const { data: driver } = session.role === "driver"
+    ? await supabase.from("drivers").select("id").eq("user_id", session.userId).maybeSingle()
+    : { data: { id: "board" } };
 
   if (!driver) {
     return (
       <Card title="Today's run">
         <EmptyState
           title="Your login is not linked to a driver yet"
-          description={"Your deliveries will show here once it is. Whoever looks after the app " +
-                       "can link it under Fleet \u203a Drivers."}
-          action={<ButtonLink href="/drivers" variant="primary">Go to Drivers</ButtonLink>}
+          description="Your deliveries will show here once it is. Ask whoever looks after the app to link it under Fleet › Drivers."
         />
       </Card>
     );
   }
 
-  const [{ data: route }, { count: stops }, { count: doneStops }] = await Promise.all([
-    supabase.from("daily_routes").select("id, code, name, status")
-      .eq("driver_id", driver.id).eq("route_date", date).maybeSingle(),
-    supabase.from("jobs").select("id", { count: "exact", head: true })
-      .eq("driver_id", driver.id).eq("scheduled_date", date),
-    supabase.from("jobs").select("id", { count: "exact", head: true })
-      .eq("driver_id", driver.id).eq("scheduled_date", date).eq("status", "completed"),
-  ]);
-
   return (
-    <Card title="Today's run" description={driver.full_name}>
-      {route ? (
-        <div className="flex flex-wrap items-center gap-3 text-sm">
-          <span className="font-semibold">{route.code} · {route.name}</span>
-          <StatusBadge status={route.status} />
-          <span className="text-xs text-muted-foreground">
-            {doneStops ?? 0} / {stops ?? 0} stops
-          </span>
-          <Link href="/run" className="font-medium text-primary hover:underline">Open my run →</Link>
-        </div>
-      ) : (
-        <EmptyState title="No run assigned for today" />
-      )}
+    <Card title="Today's run" description="Your deliveries for today, in the order the office set.">
+      <ButtonLink href="/my-runs" variant="primary">Open My Runs</ButtonLink>
     </Card>
   );
 }

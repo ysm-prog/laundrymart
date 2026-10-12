@@ -78,7 +78,7 @@ export default async function InvoiceDetailPage({
   return (
     <div className="space-y-6">
       <PageHeader
-        title={`Tax invoice ${invoice.invoice_number}`}
+        title={`${documentTitle(invoice)} ${invoice.invoice_number}`}
         description={`${invoice.customers?.business_name ?? "Unknown customer"} · ${humanise(invoice.invoice_type)}`}
         actions={
           <>
@@ -219,6 +219,7 @@ export default async function InvoiceDetailPage({
             ) : null}
           </Card>
 
+          {creditable(invoice) ? (
           <Card title="Credit note" description="Always references this invoice.">
             <form action={createCreditNote} className="grid gap-3 sm:grid-cols-2">
               <input type="hidden" name="invoice_id" value={id} />
@@ -255,6 +256,7 @@ export default async function InvoiceDetailPage({
               </div>
             </form>
           </Card>
+          ) : null}
         </div>
       ) : null}
         </div>
@@ -607,15 +609,23 @@ async function Payments({ invoice, writable }: { invoice: InvoiceDetail; writabl
         ]}
       />
 
-      {writable && invoice.status !== "void" ? (
+      {paidBeforeApp(invoice, data ?? []) > 0.005 ? (
+        <p className="mt-3 text-sm text-muted-foreground">
+          {money(paidBeforeApp(invoice, data ?? []))} was recorded as paid before this invoice
+          came into the app (imported from MYOB), so it has no payment rows here.
+        </p>
+      ) : null}
+
+      {writable && payable(invoice) ? (
         <form action={recordPayment} className="mt-4 grid gap-3 border-t pt-4 sm:grid-cols-2 lg:grid-cols-5 print:hidden">
           <input type="hidden" name="invoice_id" value={invoice.id} />
           <input type="hidden" name="customer_id" value={invoice.customer_id} />
           <Field label="Paid on" name="paid_on" required>
-            <Input name="paid_on" type="date" required defaultValue={today()} />
+            <Input name="paid_on" type="date" required defaultValue={today()} max={today()} />
           </Field>
           <Field label="Amount" name="amount" required>
-            <Input name="amount" type="number" step="0.01" min={0} required
+            <Input name="amount" type="number" step="0.01" min={0.01} required
+                   max={Number(invoice.balance)}
                    defaultValue={Number(invoice.balance) > 0 ? String(invoice.balance) : undefined} />
           </Field>
           <Field label="Method" name="method">
@@ -665,4 +675,32 @@ async function CreditNotes({ invoiceId }: { invoiceId: string }) {
       />
     </Card>
   );
+}
+
+/** What the document is, for its heading — a credit is not a tax invoice. */
+function documentTitle(invoice: { invoice_type: string; status: string; total: number; tax_amount: number }): string {
+  if (invoice.invoice_type === "credit" || Number(invoice.total) < 0) return "Credit";
+  if (invoice.status === "draft") return "Draft invoice";
+  // Matches the PDF: "Tax invoice" only when GST is actually charged.
+  return Number(invoice.tax_amount) > 0 ? "Tax invoice" : "Invoice";
+}
+
+/** A payment belongs on a sent, positive, unsettled invoice (see payment-gate.ts). */
+function payable(invoice: { invoice_type: string; status: string; balance: number }): boolean {
+  return invoice.invoice_type !== "credit"
+    && ["issued", "part_paid", "overdue"].includes(invoice.status)
+    && Number(invoice.balance) > 0.005;
+}
+
+/** A credit note offsets an invoice the customer has been sent. */
+function creditable(invoice: { invoice_type: string; status: string; total: number }): boolean {
+  return invoice.invoice_type !== "credit"
+    && Number(invoice.total) > 0
+    && ["issued", "part_paid", "overdue", "paid"].includes(invoice.status);
+}
+
+/** Paid-to-date that has no payment rows behind it — MYOB's figure on an import. */
+function paidBeforeApp(invoice: { amount_paid: number }, payments: Array<{ amount: number }>): number {
+  const rows = payments.reduce((sum, p) => sum + Number(p.amount), 0);
+  return Math.round((Number(invoice.amount_paid) - rows) * 100) / 100;
 }

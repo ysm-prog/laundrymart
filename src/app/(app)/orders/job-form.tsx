@@ -770,7 +770,7 @@ export function JobForm({
                            defaultValue={order?.delivery_address_source === "custom"
                              ? order.delivery_address ?? undefined
                              : undefined}
-                           placeholder="12 Bay St, Ultimo NSW 2007" />
+                           placeholder="12 King William St, Adelaide SA 5000" />
                   </Field>
                 ) : null}
 
