@@ -3413,6 +3413,29 @@ capability or policy change.**
   and a draft PDF printed as a tax invoice. Titles now read Credit / Draft invoice / Tax
   invoice / Invoice, the last two by whether GST is charged.
 
+**Merged to `Dev` (`96f46e7`, PR #74) and `Prod` (`33e2035`, PR #75) on 2026-10-12**, on the
+owner's approval (Darshan). Both are merge commits made through pull requests, and `Prod` was never
+force-pushed. #75 also carried `Dev`'s two documentation-only catch-up commits (`6df2f15`,
+`cf72d3b`), which is why `Dev` → `Prod` was a pull request rather than a fast-forward.
+
+- **CI green on all three jobs for every run**, read off the logs rather than the statuses: 334
+  (`Dev` push), 335 (#75's own pull-request run), 336 (`Prod` push). Verify: typecheck, lint,
+  **1244 tests across 77 files** (`payment-gate.test.ts` contributing 11), the production build on
+  **Next.js 16.3.4**, `== PASSED ==`. `verify.sh` ran 01:41:55 → 01:43:03 on `Prod`, sixty-eight
+  seconds, its ordinary duration, read off the runner's step timestamps. DB: every migration on a
+  fresh Postgres 16, `pgTAP suite passed`, and the seed on top. Security: gitleaks strict plus the
+  audit.
+- **Nothing to apply.** No migration; `git diff` over `supabase/` is empty, and the live ledger's
+  last entry is still `0050_pickup_to_job`. The database was not touched in landing this.
+- **The Vercel production deploy cannot be confirmed from this session.** That is a tooling
+  limit, not a configuration one (§5); check the Vercel dashboard.
+- **Not verified behind the auth gate.** Nothing has been opened with real rows in it. Before the
+  demo: on `ats.coreit.com.au`, open an imported invoice MYOB marked part-paid, record a small
+  payment, and check the total does not move and the balance falls by exactly that amount. Then
+  open the home screen as the Owner and check *Needs a decision* leads with the largest positive
+  balance, not 2011 history.
+- **Still open:** a credit note does not reduce its invoice's balance.
+
 ### 2026-09-10 · vitest 5, and the Node 22 floor that was already overdue
 Dependabot's fifth offering of the blocked dev group (#22 → #44 → #53 → #63 → **#68**), taken in
 part. **No migration; no schema, RLS, capability, policy, route or business rule change** — `git
