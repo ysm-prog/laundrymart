@@ -719,14 +719,31 @@ billing one; `sectionFor` takes the longest match so it lands there rather than 
 Price Selected → Approve Selected → Add to Draft) ·
 `/invoices/drafts` (the open-drafts board — one card per customer's running invoice, with Issue
 now on each; the month-end question the register could not answer) ·
-`/orders[/new|/:id|/:id/edit]` ·
+`/orders[/new|/board|/:id|/:id/edit|/:id/docket]` ·
 `/items[/:id]` · `/drivers` · `/vehicles` · `/routes/templates[/:id]` ·
 `/routes/daily[/:id|/:id/sheet]` · `/routes/planner` · `/jobs[/:id]` ·
 `/operations/{pickups,deliveries,exceptions}` · `/run` · `/warehouse[/:id]` · `/inventory` ·
 `/invoices[/:id|/prices|/charge-accounts]` · `/reports` · `/search` · `/help` ·
 `/notifications` ·
-`/admin` (redirects) `[/depots|/users|/holidays|/audit|/notifications|/data|/invoicing]` ·
+`/admin` (redirects) `[/depots|/users|/holidays|/audit|/notifications|/data|/invoicing|/operations]` ·
 `/platform[/admins|/settings|/release]` (platform admin only)
+
+**The rail is five areas: Today, Laundry, Deliveries, Customers, Billing** (2026-10-18, brief 3.1).
+Everything else — Fleet, Linen, Reports, Settings, Help and Platform — is in the account menu under
+the person's initials, from the same `NAVIGATION` list (`placement: "profile"`), so a screen is
+still reachable by the same capability and the same href. `railNavigation()` splits the list;
+`nav.test.ts` asserts no role's rail carries more than five rows. The three collapsible groups and
+the `es_nav` cookie of 2026-08-24 are gone with it — five rows need no drawers.
+- **Laundry** opens on `/orders/board`, the board (§4's statuses unchanged; `laundry-board.ts` is
+  the column rule), with All jobs (`/orders`) beside it. **Deliveries** opens on My Runs and holds
+  At the depot, Run order, Due for collection, Driver visits, Problems, Collections and Delivery
+  records. **Money is called Billing**, and its own Billing tab is now **By period**.
+- `/laundry`, `/deliveries` and `/money` redirect (non-permanent, `next.config.mjs`), so a word
+  somebody types still lands.
+- **The plant is behind a switch** (brief 3.9, Settings › How you work, default **off**): the In
+  the plant tab (`feature: "plant"`), its Today tiles and its stage strip. Hidden rather than
+  linked, because `production_batches` joins a run and stock and never a laundry job — there was
+  no half-built link to finish. `/warehouse` with the switch off says so and names the setting.
 
 **Driver visits is not a rail row any more** (2026-10-18, brief 2.1). Its four screens — the
 visit list, Problems, Collections and Deliveries — are tabs under **Runs**, because since 0056 a
@@ -826,7 +843,7 @@ answer, and measuring is what showed it was needed: six columns at 320px leave e
 under §10b's 36px floor. The rule behind every state is `buildStatusTrack` in
 `lib/domain/laundry-orders.ts`, pure and tested, so the component decides nothing.
 
-**The rail is three collapsible groups** (2026-08-24): "Day to day" open, "Customers & money"
+**Superseded 2026-10-18 by the five-area rail above.** **The rail was three collapsible groups** (2026-08-24): "Day to day" open, "Customers & money"
 and "Set-up & reports" shut, Help pinned outside them — 12 flat rows down to 6 visible for an
 owner. This softens the "one flat list, no headings" rule below and does not undo it: the
 *screens* inside an area are still tabs, never rail rows. `navigationFor()` still returns one
@@ -1369,6 +1386,12 @@ produce on demand.
   roles only, so every timeline row a board or driver wrote — "delivered" included — was refused
   and `logOrderActivity` swallowed it: the job page had never shown who delivered a round's job.
   Seven self-assertions. `flow_runs_itself.test.sql` (16). **Written, NOT applied** (§11).
+- `0057_operations_settings` — **Settings › How you work.** `save_tenant_settings` rebuilt from
+  0056's body with one key added to the whitelist, `operations` (`plantStages`,
+  `defaultTurnaroundDays` — `lib/domain/operations-settings.ts` parses it, and an absent key reads
+  as plant off and two days). Adds no table, column, policy, trigger or capability; changes no row.
+  Five self-assertions, including that every earlier key is still admitted.
+  `operations_settings.test.sql` (7). **Written, NOT applied** (§11).
 - `0050_pickup_to_job` — **a collection becomes a laundry job, exactly once.**
   `laundry_orders.source_pickup_id` (`on delete set null`),
   `uq_laundry_orders_source_pickup` (partial unique) and
@@ -1653,8 +1676,8 @@ Proofs in `supabase/tests/`: `rls_isolation`, `rls_coverage`, `driver_scope`,
 `audit_log_scope`, `run_sequence`, `accounts_scope`, `open_draft_invoices`,
 `single_laundry`, `charge_accounts`, `gst_inclusive`, `collection_schedule`,
 `customer_record_scope`, `fleet_scope`, `pickup_intake`, `laundry_item_ownership`,
-`invoice_money_guards`, `invoice_issue_guard`, `billing_flow_guards`, `flow_runs_itself`
-(**686 assertions** across 37 files).
+`invoice_money_guards`, `invoice_issue_guard`, `billing_flow_guards`, `flow_runs_itself`,
+`operations_settings` (**693 assertions** across 38 files).
 
 **Count assertions, not lines starting with `ok`.** pgTAP's function is literally named `ok`, so
 psql prints a centred `ok` **column header** above each result — and `grep -c '^\s*ok '` counts
@@ -2359,6 +2382,12 @@ reports six false gaps.
   `set_records_archived`, `sync_invoice_line_account`, `tenant_members`). That is the 0042 trap
   leaving its usual trace: text typed into `apply_migration` reformatted a little against the file.
   Worth knowing before anybody reads a raw `md5(prosrc)` mismatch as drift.
+
+**`0057_operations_settings` is NOT applied to `laundrymart-syd`** (2026-10-18), written on
+`claude/relaxed-faraday-4ey58h-phase3`. **Apply it after 0056 and before Phase 3 merges**: the
+Settings › How you work screen saves the `operations` key, and without 0057 that save is refused
+with 22023 (the screen says so). Nothing else depends on it — an absent key reads as the defaults.
+It changes no row and holds no `delete`, so the connector can apply it.
 
 **`0056_flow_runs_itself` is NOT applied to `laundrymart-syd`** (2026-10-18), written on
 `claude/relaxed-faraday-4ey58h-phase2` under the same instruction. **Apply it after 0053–0055 and
@@ -3616,6 +3645,82 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-10-18 · Darshan's BA review, Phase 3: fewer screens, one next step
+Items 3.1–3.10 of the brief, on `claude/relaxed-faraday-4ey58h-phase3`, stacked on Phase 2 (#85).
+Written in one pass under the same instruction as Phases 1 and 2: no per-item proofs or browser
+checks; docs once, verify once. **One migration, 0057, written and NOT applied** (§11).
+
+**3.1 — Five areas on the rail.** Today, Laundry, Deliveries, Customers, Billing; the rest moved
+to the account menu, built from the same `NAVIGATION` entries so nothing lost its capability or its
+href (§6). Old words redirect. Help stopped naming menus that do not exist ("Stops → Problems" is
+now Deliveries › Problems) and describes the five areas.
+
+**3.2 — Today is an inbox.** Five sections — Needs a price, Needs a driver, Problems, Drafts ready
+to issue, Overdue (trusted invoices only, 1.9's filter) — each drawn only for a role that can clear
+it (`inbox.ts`) and each row carrying its one action: Assign inline, Issue inline, a link for the
+rest. Capped at eight rows with "and N more". The plant panels show only when the plant switch is
+on. The getting-started list's customer step now matches the form, and "set your prices" replaced
+the contract step.
+
+**3.3 — The Laundry board.** In the plant / Ready / Out / Delivered / Billed, live jobs plus the
+last fortnight's finished ones. The **statuses are unchanged** — the board is a rule over them
+(`boardColumn`), with `assigned` under Ready because a job on tomorrow's round has not left the
+building. Multi-select with **Mark ready** (`lib/orders/mark-ready.ts`, which runs 2.2's auto-assign
+the same way the job page does), **Assign** (the Runs screen's own bulk move) and **Approve** (the
+queue's own bulk approve), each posting only the jobs it applies to. A **scan box** marks a docket
+ready; `normaliseDocket` also reads a number typed by hand (`lj 32` → `LJ00032`).
+
+**3.4 — Intake in about four actions.** Pick the customer and the rest is filled in: their last
+job's items with −/+ steppers (counts and Rental/Own carried, notes left behind), the return date
+(the round's next visit strictly after today, else today plus the laundry's turnaround, both off
+Sundays and holidays — `defaultReturnDate`), and Received via (**counter by default**, driver
+pickup from a collection or `?via=driver_pickup`). A role that reads prices sees each row's price
+and a running total from `priceItemsForCustomer` — the pricer 1.3 uses, so the counter is shown
+what the customer will be charged. Saving offers **Print the docket**: `/orders/:id/docket`, the
+job number as a **Code 128** barcode (`code128.ts`, dependency-free, tested against the standard's
+checksum) and the items, no prices. **The turnaround is a new setting** on Settings › How you work.
+
+**3.5 — The item catalogue.** The laundry item picker shows code, name and usual price. Items can
+be made **inactive** — the status already existed (`items.status`) and every picker already filters
+on it, so this surfaced it rather than adding a column: a status chip on Items and a **Possible
+duplicates** card (`findDuplicateItems`, e.g. T22–T25 all "Towels - Black") with Make inactive
+beside each code. Charge and invoice-line descriptions now use the item's **name** and quantity
+("Towels - Black × 40"), and a merged line drops the first job's count (`chargeBaseDescription`).
+
+**3.6 — A new customer is set up in one go.** Round, collection day, billing method and payment
+terms sit beside the essentials on the add form; the edit form keeps them where they were.
+
+**3.7 — The job page has one next step.** A primary block saying what normally happens next and
+who it waits on (`nextStepFor`) above the status track; "Who is on it / Reassign" is gone, the
+board is the owner, and the office assignee went into a read-only Record card. "Assign to" offers
+office staff only. A Docket button sits in the header.
+
+**3.8 — The timeline says who and where.** Assignments name the board and the date; Start my day
+reads "confirmed the load on Board 1 for …, and it went out for delivery"; deliveries name the
+round, the driver and who received it; a board login is shown as its board's name; an older entry's
+board id is resolved to a name, never printed (`describeOrderActivity`). Moving a job between
+boards now stores the old board's name, not its id.
+
+**3.9 — The plant is hidden by default** (§6). Hidden rather than linked: nothing in the schema
+joins a batch to a laundry job.
+
+**3.10 — Copy and filters.** Help's day count is counted, not written ("Five things"); "Create
+last month's invoices" is the one wording; a draft shows **Will be dated when issued** (screen,
+register, search and PDF) rather than an issue date; the charges copy says "No rate card — priced
+from your laundry price list, then the item's own selling price"; the customer filter on Customer
+laundry and Driver visits is a **type-ahead** (`FilterCombobox`) rather than a select of several
+hundred; and the contact form's Name label now points at its own box — the site form on the same
+page also had a field called `name`, so the label had been pointing at the site's input.
+
+- **Checks:** `verify` green once at the end — **1463 unit tests across 94 files** (31 new in
+  `phase3-rules.test.ts`, six in `code128.test.ts`), typecheck, lint, build. All 61 migration files
+  on a fresh Postgres 16: **693 pgTAP assertions across 38 files**, 0 failing, no plan mismatch,
+  and `supabase/seed.sql` applying on top. `nav.test.ts` was rewritten to the five-area decision,
+  and the price-list wiring test now reads the shared `priceItemsForCustomer`.
+- **Not verified behind the auth gate**: no screen was opened with real rows; 0057 is not applied.
+  Before trusting it: take a job in for a customer on a round and check the date and items arrive
+  filled in; print its docket and scan it into the Laundry board's box.
+
 ### 2026-10-18 · Darshan's BA review, Phase 2: make the flow run itself
 Items 2.1–2.5 of the brief, on `claude/relaxed-faraday-4ey58h-phase2`, stacked on Phase 1 (#82)
 because 2.3 builds on 1.3's pricing and 2.5 on 1.1's gate. Written in one pass under Darshan's

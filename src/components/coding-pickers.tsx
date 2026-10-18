@@ -68,7 +68,10 @@ export type CodingAccount = PickableAccount;
  * the two call sites that depend on it) or making the job form fetch three
  * columns it has no use for.
  */
-export type PickerItem = PickableItem & { sell_price?: number | string | null };
+export type PickerItem = PickableItem & {
+  sell_price?: number | string | null;
+  list_price?: PriceValue | null;
+};
 
 export function ItemPicker<T extends PickerItem>({
   items, chosen, onChoose, onClear, idPrefix = "line", purpose = "coding",
@@ -92,6 +95,10 @@ export function ItemPicker<T extends PickerItem>({
    * duplication this codebase argues against everywhere — and with 252 of
    * Adelaide's 254 items carrying no sell price, "no price set" on a laundry row
    * would read as "this job will not be billed", which is false.
+   *
+   * Since brief 3.5 a laundry row shows the **usual price from the laundry
+   * price list** where the caller supplied one (`list_price`) — the one answer
+   * this app has to "what is this worth", and only for a role that may read it.
    */
   purpose?: "coding" | "laundry";
   /**
@@ -157,7 +164,13 @@ export function ItemPicker<T extends PickerItem>({
             ? (Number(match.sell_price ?? 0) > 0
                 ? `$${Number(match.sell_price).toFixed(2)}`
                 : "no price set")
-            : null,
+            // A laundry row shows the usual price from the price list (brief
+            // 3.5), and only when the caller handed one over — which it does
+            // for a role that may read prices. Never the item's own sell price,
+            // for the reason above.
+            : match.list_price
+              ? `usual price $${match.list_price.unitPrice.toFixed(2)}`
+              : null,
         ].filter(Boolean).join(" · "),
         onPick: () => { onChoose(match); setQuery(""); },
       }))}

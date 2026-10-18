@@ -303,8 +303,14 @@ export function priceJob(input: {
    * only where the rate card and both rows of the price list are silent.
    */
   itemSellPrices?: ReadonlyMap<string, LaundryListPrice> | null;
+  /**
+   * The item master's names, keyed on id (brief 3.5). A line for an item says
+   * what the item is — "Towel Ultra 70×150 White × 10" — rather than the kind of
+   * laundry it belongs to ("Towels — 10"), which is all the invoice used to say.
+   */
+  itemNames?: ReadonlyMap<string, string> | null;
 }): JobPricingResult {
-  const { items, rateLines, rateCard, priceList, itemPriceList, itemSellPrices } = input;
+  const { items, rateLines, rateCard, priceList, itemPriceList, itemSellPrices, itemNames } = input;
 
   // A rate card may carry more than one line for the same kind of laundry
   // (a wash-only rate and a rental rate for towels, say). The first wins, which
@@ -340,14 +346,17 @@ export function priceJob(input: {
   const unpriced: JobPricingResult["unpriced"] = [];
 
   for (const item of items) {
-    const label = item.item_type === "other"
+    const kind = item.item_type === "other"
       ? (item.custom_description?.trim() || "Other")
       : ITEM_TYPE_LABELS[item.item_type as ItemType] ?? item.item_type;
+    // The item's own name where the row names an item; the kind of laundry
+    // only for a row that does not (brief 3.5).
+    const label = (item.item_id ? itemNames?.get(item.item_id)?.trim() : undefined) || kind;
 
     const rate = rateFor(item);
     const measure = billableMeasure(item);
     const gap = (reason: UnpricedReason) => {
-      unpriced.push({ itemType: item.item_type, label, description: describeItem(item), reason });
+      unpriced.push({ itemType: item.item_type, label, description: describeItem(item, label), reason });
     };
 
     // Nothing to multiply by: a bulk lot recorded as a note alone. The gap is in
@@ -407,7 +416,7 @@ export function priceJob(input: {
       // line rather than sent to the reviewer as a gap.
       lines.push({
         sequence: lines.length + 1,
-        description: `${label} — ${quantity} included in the rate`,
+        description: `${label} × ${quantity}, included in the rate`,
         charge_type: asChargeType(rate.charge_type),
         quantity,
         unit_price: 0,
@@ -428,8 +437,8 @@ export function priceJob(input: {
     lines.push({
       sequence: lines.length + 1,
       description: included > 0
-        ? `${label} — ${billable} of ${quantity} (${included} included)`
-        : `${label} — ${billable}`,
+        ? `${label} × ${billable} of ${quantity} (${included} included)`
+        : `${label} × ${billable}`,
       charge_type: asChargeType(rate.charge_type),
       quantity: billable,
       unit_price: round2(rate.unit_price),
@@ -510,7 +519,7 @@ function priceFromList(
 
   const detail = useBags
     ? `${quantity} ${quantity === 1 ? "bag" : "bags"} of ${label}`
-    : `${label} — ${quantity}`;
+    : `${label} × ${quantity}`;
 
   return {
     sequence,
@@ -563,12 +572,12 @@ export type AutoPriceOutcome =
  */
 export function autoPriceSentence(outcome: AutoPriceOutcome): string {
   if (outcome.state === "priced") {
-    return ` Priced automatically at ${formatMoney(outcome.subtotal)} from ${outcome.source} — check and approve it in Money › Awaiting invoice.`;
+    return ` Priced automatically at ${formatMoney(outcome.subtotal)} from ${outcome.source} — check and approve it in Billing › Awaiting invoice.`;
   }
   if (outcome.state === "needs_price") {
     return outcome.lines > 0
-      ? ` Some of its laundry has no price, so it is on the Needs a price list in Money › Awaiting invoice.${outcome.note}`
-      : ` Nothing on it could be priced, so it is on the Needs a price list in Money › Awaiting invoice.${outcome.note}`;
+      ? ` Some of its laundry has no price, so it is on the Needs a price list in Billing › Awaiting invoice.${outcome.note}`
+      : ` Nothing on it could be priced, so it is on the Needs a price list in Billing › Awaiting invoice.${outcome.note}`;
   }
   return "";
 }

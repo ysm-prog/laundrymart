@@ -3,6 +3,7 @@
 import { billingAddressFromSite } from "@/lib/domain/customers";
 
 import { revalidatePath } from "next/cache";
+import { BILLING_METHODS } from "@/lib/domain/billing";
 import { z } from "zod";
 import { assertCapability } from "@/lib/auth/context";
 import { createClient } from "@/lib/supabase/server";
@@ -56,6 +57,12 @@ const customerSchema = z.object({
     z.coerce.number().int().min(1, "Choose a day of the week").max(7, "Choose a day of the week"),
   ),
   collection_board_id: clearable(z.string().uuid()),
+  /**
+   * How they are billed (brief 3.6). Asked on the new-customer form only; an
+   * existing customer's method is changed on their Billing & pricing card,
+   * under `billing.write`, which is why `updateCustomer` drops it.
+   */
+  billing_method: z.enum(BILLING_METHODS).optional(),
 });
 
 export async function createCustomer(formData: FormData): Promise<void> {
@@ -131,11 +138,13 @@ export async function updateCustomer(formData: FormData): Promise<void> {
 
   const parsed = customerSchema.safeParse(toObject(formData));
   if (!parsed.success) return fail(`/customers/${id.data}/edit`, firstIssue(parsed.error));
+  // The billing method is the Billing & pricing card's, not this form's.
+  const { billing_method: _billingMethod, ...changes } = parsed.data;
 
   const supabase = await createClient();
   const { error } = await supabase
     .from("customers")
-    .update(parsed.data)
+    .update(changes)
     .eq("id", id.data)
     // Belt and braces: RLS already scopes this, the filter documents the intent.
     .eq("tenant_id", session.tenantId);

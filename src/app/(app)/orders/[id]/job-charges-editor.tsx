@@ -249,7 +249,7 @@ export function JobChargesEditor({
 
         {rows.length === 0 ? (
           <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
-            No charges yet. Price this job from the customer&rsquo;s rate card, or add a line by hand.
+            No charges yet. Price this job from the customer&rsquo;s rate card or your price list, or add a line yourself.
           </p>
         ) : null}
       </div>

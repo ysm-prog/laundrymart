@@ -108,11 +108,12 @@ export async function ChargesCard({
               used to deny it existed — which was the same mistake the Price
               button made: it refused outright without a card, and every customer
               on this deployment has none. */}
-          This customer has no rate card, so pricing falls back to your{" "}
+          {/* Brief 3.10: say what *does* price it, not that somebody types it in. */}
+          No rate card — priced from your{" "}
           <Link href="/invoices/prices" className="text-primary hover:underline">
             laundry price list
           </Link>
-          . Anything neither covers is added by hand.{" "}
+          , then the item&rsquo;s own selling price.{" "}
           <Link href={`/customers/${customerId}`} className="text-primary hover:underline">
             Set a rate card
           </Link>

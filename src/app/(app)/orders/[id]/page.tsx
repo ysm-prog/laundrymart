@@ -5,29 +5,29 @@ import { requireCapability } from "@/lib/auth/context";
 import { createClient } from "@/lib/supabase/server";
 import { can } from "@/lib/roles";
 import { date as formatDate, dateTime, time as formatTime } from "@/lib/format";
-import {
-  defaultStaffId, listMembers, memberNames, staffMembers, withCurrentHolder,
-} from "@/lib/directory";
+import { defaultStaffId, listMembers, memberNames, staffMembers } from "@/lib/directory";
 import {
   DELIVERY_WINDOW_LABELS, PRIORITY_LABELS, RECEIVED_VIA_LABELS,
   actionsFor, buildStatusTrack, describeItem, isOrderStatus, ownershipLabel, isOverdue,
   type DeliveryWindow, type OrderPriority, type ReceivedVia,
 } from "@/lib/domain/laundry-orders";
-import { businessToday } from "@/lib/domain/timezone";
+import { businessToday, formatAdelaideDate } from "@/lib/domain/timezone";
+import { describeOrderActivity } from "@/lib/domain/order-activity";
+import { nextStepFor } from "@/lib/domain/job-next-step";
 import { isBillingStatus } from "@/lib/domain/billing";
-import type { LaundryOrder, LaundryOrderActivity, LaundryOrderItem } from "@/lib/db/types";
+import type { LaundryOrder, LaundryOrderItem } from "@/lib/db/types";
 import { DeliveryProof } from "@/components/delivery-proof";
 import {
-  Badge, ButtonLink, Card, DataTable, EmptyState, Eyebrow,
+  Badge, ButtonLink, Card, DataTable, EmptyState,
   Notice, PageHeader, SkeletonRows, StatusBadge, humanise,
 } from "@/components/ui";
-import { Select, SubmitButton } from "@/components/form";
+import { SubmitButton } from "@/components/form";
 import { ConfirmSubmit } from "@/components/confirm-submit";
 import { CompleteJob } from "../complete-job";
 import { ChargesCard } from "./charges-card";
 import { DispatchCard } from "./dispatch-card";
 import { StatusTrack } from "./status-track";
-import { advanceOrder, assignOrder, cancelOrder, completeOrder } from "../actions";
+import { advanceOrder, cancelOrder, completeOrder } from "../actions";
 
 export const dynamic = "force-dynamic";
 
@@ -111,7 +111,7 @@ export default async function JobDetailPage({
     board: deliveredBoardRow?.name ?? null, driver: deliveredDriverRow?.full_name ?? null,
   };
 
-  const [items, activity, members] = await Promise.all([
+  const [items, activity, members, tenantBoards, tenantDrivers] = await Promise.all([
     supabase.from("laundry_order_items")
       .select("id, order_id, item_id, item_type, custom_description, quantity_type, exact_quantity, bag_count, estimated_quantity, notes, ownership")
       .eq("order_id", id).order("created_at")
@@ -119,9 +119,23 @@ export default async function JobDetailPage({
     supabase.from("laundry_order_activity")
       .select("id, order_id, actor_id, activity_type, previous_value, new_value, note, created_at")
       .eq("order_id", id).order("created_at", { ascending: false }).limit(100)
-      .returns<LaundryOrderActivity[]>(),
+      .returns<Array<{
+        id: string; order_id: string; actor_id: string | null; activity_type: string;
+        previous_value: Record<string, unknown> | null; new_value: Record<string, unknown> | null;
+        note: string | null; created_at: string;
+      }>>(),
     listMembers(),
+    // Names for the timeline (brief 3.8): older entries stored a board or a
+    // driver as an id, and a round's login is best shown as its board.
+    supabase.from("boards").select("id, name, user_id").eq("tenant_id", order.tenant_id)
+      .returns<Array<{ id: string; name: string; user_id: string | null }>>(),
+    supabase.from("drivers").select("id, full_name").eq("tenant_id", order.tenant_id)
+      .returns<Array<{ id: string; full_name: string }>>(),
   ]);
+  const boardById = new Map((tenantBoards.data ?? []).map((board) => [board.id, board.name]));
+  const boardByLogin = new Map((tenantBoards.data ?? [])
+    .filter((board) => board.user_id).map((board) => [board.user_id as string, board.name]));
+  const driverById = new Map((tenantDrivers.data ?? []).map((driver) => [driver.id, driver.full_name]));
 
   // Two lists, on purpose. `names` covers every member, because a record has
   // to say who created it even when that person is not somebody you can
@@ -129,6 +143,8 @@ export default async function JobDetailPage({
   // platform administrators (they administer the deployment, not this
   // business).
   const names = memberNames(members);
+  /** A person by name — and a round's shared login by its board, not its address (brief 3.8). */
+  const actorName = (id: string) => boardByLogin.get(id) ?? names.get(id) ?? "Someone";
   const staff = staffMembers(members);
   // An unrecognised value reads as `pending`, never as something further along:
   // a billing state nobody knows must not render as "approved".
@@ -163,6 +179,16 @@ export default async function JobDetailPage({
   );
   const canJump = track.some((step) => step.jump);
 
+  // The one primary button (brief 3.7): what normally happens next to this job,
+  // for a role that can do it. The track stays below it for corrections.
+  const next = foreign ? null : nextStepFor({
+    status: order.status, billingStatus, deliveryRequired: delivery,
+    boardName: order.assigned_board?.name ?? null,
+    deliveryDay: order.assigned_delivery_date ? formatAdelaideDate(order.assigned_delivery_date, "medium") : null,
+    needsPrice: order.billing_hold_reason === "needs_price",
+  });
+  const nextAllowed = next && (next.kind === "wait" || can(session.role, next.capability));
+
   const customerAddress = [
     customer?.billing_address_line1, customer?.billing_suburb,
     customer?.billing_state, customer?.billing_postcode,
@@ -179,6 +205,8 @@ export default async function JobDetailPage({
             <StatusBadge status={order.status} />
             {order.priority === "urgent" ? <Badge tone="warning">Urgent</Badge> : null}
             {late ? <Badge tone="danger">Overdue</Badge> : null}
+            {/* The docket goes in the bag; its barcode is what the board scans (3.3, 3.4). */}
+            <ButtonLink href={`/orders/${order.id}/docket`} variant="secondary">Docket</ButtonLink>
             {can(session.role, "orders.write") && order.status !== "cancelled"
               ? <ButtonLink href={`/orders/${order.id}/edit`}>Edit job</ButtonLink>
               : null}
@@ -214,6 +242,25 @@ export default async function JobDetailPage({
           question is now drawn rather than listed, and the next step is not the
           only thing on offer. */}
       <Card title="Where this job is up to">
+        {next && nextAllowed ? (
+          <div className="mb-5 flex flex-wrap items-center gap-3 border-b pb-4">
+            {next.kind === "advance" ? (
+              <form action={advanceOrder}>
+                <input type="hidden" name="id" value={order.id} />
+                <input type="hidden" name="status" value={next.to} />
+                <SubmitButton size="lg" pendingLabel="Moving…">{next.label}</SubmitButton>
+              </form>
+            ) : next.kind === "assign" ? (
+              <ButtonLink href="#dispatch" variant="primary" size="lg">{next.label}</ButtonLink>
+            ) : next.kind === "charges" ? (
+              <ButtonLink href="#charges" variant="primary" size="lg">{next.label}</ButtonLink>
+            ) : next.kind === "wait" ? (
+              <p className="text-sm">{next.sentence}</p>
+            ) : (
+              <p className="text-sm font-medium">{next.label}: use the button below to record who handed it over.</p>
+            )}
+          </div>
+        ) : null}
         <StatusTrack steps={track} orderId={order.id} action={advanceOrder} />
 
         {available.length > 0 || canJump ? (
@@ -280,6 +327,7 @@ export default async function JobDetailPage({
           it can be approved at all. RLS makes this empty for anyone else, so
           the capability check is the courtesy rather than the boundary. */}
       {can(session.role, "billing.read") ? (
+        <div id="charges" className="scroll-mt-24">
         <Suspense fallback={<SkeletonRows rows={3} />}>
           <ChargesCard
             orderId={order.id}
@@ -293,14 +341,17 @@ export default async function JobDetailPage({
             approvedAt={order.billing_approved_at ?? null}
           />
         </Suspense>
+        </div>
       ) : null}
 
       <div className="grid gap-4 lg:grid-cols-3">
         {/* ------------------------------------------------------ delivery --- */}
         {/* Which board is taking it, and on what day. `routes.write` is the
             existing plan-and-assign capability — no new one is introduced. */}
-        <DispatchCard order={order} canAssign={can(session.role, "routes.write") && !foreign}
-                      foreign={foreign} />
+        <div id="dispatch" className="scroll-mt-24 lg:col-span-3">
+          <DispatchCard order={order} canAssign={can(session.role, "routes.write") && !foreign}
+                        foreign={foreign} />
+        </div>
 
         {/* ------------------------------------------------------ customer --- */}
         <Card
@@ -387,34 +438,23 @@ export default async function JobDetailPage({
           </dl>
         </Card>
 
-        {/* ---------------------------------------------------- assignment --- */}
-        <Card title="Who is on it" className="lg:col-span-1">
+        {/* --------------------------------------------------------- record --- */}
+        {/* "Who is on it" until brief 3.7. Its Reassign list mixed people with
+            the boards' shared logins, so it read as a second owner beside the
+            round. The board is the owner (the Delivery card above); this is
+            just the record of who did what. */}
+        <Card title="Record" className="lg:col-span-1">
           <dl className="space-y-2 text-sm">
             <Row label="Priority"
                  value={PRIORITY_LABELS[order.priority as OrderPriority] ?? humanise(order.priority)} />
-            <Row label="Assigned to"
-                 value={order.assigned_to ? names.get(order.assigned_to) : "Nobody yet"} />
-            <Row label="Created by" value={order.created_by ? names.get(order.created_by) : null} />
+            <Row label="Created by" value={order.created_by ? actorName(order.created_by) : null} />
             <Row label="Created" value={dateTime(order.created_at)} />
             <Row label="Last updated" value={dateTime(order.updated_at)} />
             {delivery && order.delivered_by
-              ? <Row label="Delivered by" value={names.get(order.delivered_by)} /> : null}
+              ? <Row label="Delivered by" value={actorName(order.delivered_by)} /> : null}
             {!delivery && order.collected_by
-              ? <Row label="Handed over by" value={names.get(order.collected_by)} /> : null}
+              ? <Row label="Handed over by" value={actorName(order.collected_by)} /> : null}
           </dl>
-
-          {can(session.role, "orders.write") && order.status !== "cancelled" ? (
-            <form action={assignOrder} className="mt-3 space-y-2 border-t pt-3">
-              <input type="hidden" name="id" value={order.id} />
-              <Eyebrow>Reassign</Eyebrow>
-              <Select name="assigned_to" placeholder="Nobody" defaultValue={order.assigned_to}
-                      options={withCurrentHolder(staff, members, order.assigned_to)
-                        .map((member) => ({
-                          value: member.id, label: `${member.label} · ${member.role}`,
-                        }))} />
-              <SubmitButton variant="secondary" pendingLabel="Saving…">Save</SubmitButton>
-            </form>
-          ) : null}
         </Card>
       </div>
 
@@ -468,7 +508,7 @@ export default async function JobDetailPage({
                  value={order.expected_delivery_date ? formatDate(order.expected_delivery_date) : null} />
             <Row label="Delivered" value={dateTime(order.delivered_at)} />
             <Row label="Delivered by"
-                 value={order.delivered_by ? names.get(order.delivered_by) : null} />
+                 value={order.delivered_by ? actorName(order.delivered_by) : null} />
           </dl>
         ) : (
           <dl className="grid gap-2 text-sm sm:grid-cols-2">
@@ -477,7 +517,7 @@ export default async function JobDetailPage({
                  value={order.expected_collection_date ? formatDate(order.expected_collection_date) : null} />
             <Row label="Collected" value={dateTime(order.collected_at)} />
             <Row label="Handed over by"
-                 value={order.collected_by ? names.get(order.collected_by) : null} />
+                 value={order.collected_by ? actorName(order.collected_by) : null} />
           </dl>
         )}
       </Card>
@@ -511,9 +551,12 @@ export default async function JobDetailPage({
                 <div className="min-w-0">
                   <p className="text-sm">
                     <span className="font-medium">
-                      {entry.actor_id ? names.get(entry.actor_id) ?? "Someone" : "The system"}
+                      {entry.actor_id ? actorName(entry.actor_id) : "The system"}
                     </span>
-                    {" "}{describeActivity(entry)}
+                    {" "}{describeOrderActivity(entry, {
+                      board: (boardId) => boardById.get(boardId),
+                      driver: (driverId) => driverById.get(driverId),
+                    })}
                   </p>
                   {entry.note ? (
                     <p className="mt-0.5 text-xs text-muted-foreground">“{entry.note}”</p>
@@ -535,38 +578,4 @@ function Row({ label, value }: { label: string; value: string | null | undefined
       <dd className="min-w-0 text-right font-medium break-words">{value || "—"}</dd>
     </div>
   );
-}
-
-/**
- * One timeline row, in a sentence. The stored jsonb carries whatever the change
- * touched; this reads the fields it knows and falls back to the activity type
- * rather than printing raw values at anybody.
- */
-function describeActivity(entry: LaundryOrderActivity): string {
-  const previous = entry.previous_value ?? {};
-  const next = entry.new_value ?? {};
-
-  switch (entry.activity_type) {
-    case "created": {
-      const count = typeof next.items === "number" ? next.items : null;
-      return `took this job in${count === null ? "" : ` with ${count} laundry ${count === 1 ? "item" : "items"}`}.`;
-    }
-    case "status_changed":
-      return `moved it from ${humanise(String(previous.status ?? "")).toLowerCase()} `
-        + `to ${humanise(String(next.status ?? "")).toLowerCase()}.`;
-    case "delivered":
-      return "marked it delivered and completed the job.";
-    case "collected":
-      return "handed it back to the customer and completed the job.";
-    case "cancelled":
-      return "cancelled this job.";
-    case "assigned":
-      return next.assigned_to ? "assigned this job to someone." : "took the assignment off this job.";
-    case "items_changed":
-      return "changed the laundry list.";
-    case "updated":
-      return "edited this job.";
-    default:
-      return humanise(entry.activity_type).toLowerCase();
-  }
 }

@@ -1,20 +1,18 @@
 import { Suspense } from "react";
-import Link from "next/link";
 import { requireSession, type Session } from "@/lib/auth/context";
 import { createClient } from "@/lib/supabase/server";
 import { can } from "@/lib/roles";
-import { counted, date as formatDate, money, number, relativeDays, today } from "@/lib/format";
+import { counted, date as formatDate, money, number, today } from "@/lib/format";
 import {
-  ButtonLink, Card, DataTable, EmptyState, Eyebrow, FlashMessages, PageHeader, SkeletonRows,
-  SkeletonStats, Stage, Stat, cx, humanise,
+  ButtonLink, Card, EmptyState, Eyebrow, FlashMessages, PageHeader, SkeletonRows,
+  SkeletonStats, Stage, Stat, cx,
 } from "@/components/ui";
 import { QuickActions } from "@/components/quick-actions";
-import { parseExceptionNotes } from "@/lib/exceptions";
 import { DEFAULT_AR_TRUSTED_FROM, arTrustedFrom, trustedReceivablesFilter } from "@/lib/domain/receivables";
-import { addDays, businessToday, toInstant } from "@/lib/domain/timezone";
-import {
-  PLANT_STAGES, SEVERITY_RULE, SEVERITY_TEXT, sortDecisions, type Decision,
-} from "./decisions";
+import { PLANT_STAGES } from "./plant-stages";
+import { parseOperations } from "@/lib/domain/operations-settings";
+import { inboxSectionsFor, type InboxSection } from "@/lib/domain/inbox";
+import { DraftsReady, NeedsDriver, NeedsPrice, Overdue, Problems } from "./inbox";
 
 export const metadata = { title: "Today" };
 export const dynamic = "force-dynamic";
@@ -45,6 +43,8 @@ export default async function DashboardPage({
   const date = today();
   const seesMoney = can(session.role, "invoices.read");
   const seesOperations = can(session.role, "operations.read");
+  const sections = inboxSectionsFor(session.role);
+  const plant = await plantIsOn(session.tenantId);
 
   // The person doing first-time setup needs admin.read (sites live there).
   const setup = can(session.role, "admin.read") ? await setupSteps() : null;
@@ -76,7 +76,7 @@ export default async function DashboardPage({
       <PageHeader
         eyebrow={`${session.tenantName} · ${formatDate(date)}`}
         title="Today"
-        description="What needs doing, and what needs a decision."
+        description="What is waiting on you, with the one thing to do about each."
       />
 
       {/*
@@ -95,8 +95,8 @@ export default async function DashboardPage({
 
       {setup && !setup.complete ? <GettingStarted steps={setup.steps} /> : null}
 
-      <Suspense fallback={<SkeletonStats count={seesMoney ? 5 : 4} />}>
-        <Kpis date={date} seesMoney={seesMoney} tenantId={session.tenantId} />
+      <Suspense fallback={<SkeletonStats count={4} />}>
+        <Kpis date={date} seesMoney={seesMoney} tenantId={session.tenantId} plant={plant} />
       </Suspense>
 
       {/* Only a round or a driver has a run of their own. The owner and the
@@ -108,23 +108,45 @@ export default async function DashboardPage({
         </Suspense>
       ) : null}
 
-      {seesOperations ? (
-        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_300px]">
-          <div className="space-y-4">
-            <Suspense fallback={<SkeletonRows rows={6} />}>
-              <NeedsDecision seesMoney={seesMoney} tenantId={session.tenantId} />
+      {/*
+        The inbox (brief 3.2): five sections of things waiting on a person,
+        each row with the one action that clears it. Drawn only for a role that
+        can act on the section — see `inboxSectionsFor`.
+      */}
+      {sections.length > 0 ? (
+        <div className="grid gap-4 xl:grid-cols-2">
+          {sections.map((section) => (
+            <Suspense key={section} fallback={<SkeletonRows rows={3} />}>
+              {INBOX[section]({ session })}
             </Suspense>
-            <Suspense fallback={<SkeletonRows rows={2} />}>
-              <PlantStages />
-            </Suspense>
-          </div>
-          <Suspense fallback={<SkeletonRows rows={6} />}>
-            <JobBoard />
-          </Suspense>
+          ))}
         </div>
+      ) : null}
+
+      {/* The plant only while the laundry records batches (brief 3.9). */}
+      {seesOperations && plant ? (
+        <Suspense fallback={<SkeletonRows rows={2} />}>
+          <PlantStages />
+        </Suspense>
       ) : null}
     </div>
   );
+}
+
+/** The five sections, by key. Each is a server component reading its own rows. */
+const INBOX: Record<InboxSection, (props: { session: Session }) => Promise<React.JSX.Element>> = {
+  needs_price: NeedsPrice,
+  needs_driver: NeedsDriver,
+  problems: Problems,
+  drafts_ready: DraftsReady,
+  overdue: Overdue,
+};
+
+async function plantIsOn(tenantId: string): Promise<boolean> {
+  const supabase = await createClient();
+  const { data } = await supabase.from("tenants").select("settings").eq("id", tenantId)
+    .maybeSingle<{ settings: unknown }>();
+  return parseOperations(data?.settings).plantStages;
 }
 
 /* --------------------------------------------------------- getting started */
@@ -140,10 +162,10 @@ async function setupSteps(): Promise<{ steps: SetupStep[]; complete: boolean; fr
   const supabase = await createClient();
   const head = { count: "exact" as const, head: true };
 
-  const [depots, customers, agreements, drivers, orders] = await Promise.all([
+  const [depots, customers, prices, drivers, orders] = await Promise.all([
     supabase.from("depots").select("id", head).is("deleted_at", null),
     supabase.from("customers").select("id", head).is("deleted_at", null),
-    supabase.from("service_agreements").select("id", head).is("deleted_at", null),
+    supabase.from("laundry_prices").select("id", head),
     supabase.from("drivers").select("id", head).is("deleted_at", null),
     supabase.from("laundry_orders").select("id", head),
   ]);
@@ -157,15 +179,18 @@ async function setupSteps(): Promise<{ steps: SetupStep[]; complete: boolean; fr
     },
     {
       label: "Add a customer",
-      detail: "Just a name, a phone number and where they are.",
+      // Matches the form's required fields and its round and billing questions (brief 3.6).
+      detail: "Their name, phone, invoice email and address — and which round calls and how you bill them.",
       href: "/customers/new", action: "Add a customer",
       done: (customers.count ?? 0) > 0,
     },
     {
-      label: "Create their contract",
-      detail: "Which days you collect and deliver, and what you charge.",
-      href: "/agreements/new", action: "Create a contract",
-      done: (agreements.count ?? 0) > 0,
+      // A price list rather than a contract: ATS prices from its list, and
+      // the contract model does not fit how it works (2026-09-08).
+      label: "Set your prices",
+      detail: "What each item costs. A customer with a price of their own can have it on their page.",
+      href: "/invoices/prices", action: "Set prices",
+      done: (prices.count ?? 0) > 0,
     },
     {
       // Replaces "set up the weekly run" and "plan today's runs". A driver is
@@ -230,7 +255,11 @@ async function trustedFrom(tenantId: string): Promise<string> {
   return arTrustedFrom(data?.settings);
 }
 
-async function Kpis({ date, seesMoney, tenantId }: { date: string; seesMoney: boolean; tenantId: string }) {
+async function Kpis({ date, seesMoney, tenantId, plant }: {
+  date: string; seesMoney: boolean; tenantId: string;
+  /** The plant tiles are drawn only while batches are recorded (brief 3.9). */
+  plant: boolean;
+}) {
   const supabase = await createClient();
   const head = { count: "exact" as const, head: true };
   const trusted = seesMoney ? await trustedFrom(tenantId) : DEFAULT_AR_TRUSTED_FROM;
@@ -239,10 +268,12 @@ async function Kpis({ date, seesMoney, tenantId }: { date: string; seesMoney: bo
     supabase.from("jobs").select("id", head).eq("scheduled_date", date),
     supabase.from("jobs").select("id", head).eq("scheduled_date", date).eq("status", "completed"),
     supabase.from("jobs").select("id", head).eq("status", "exception"),
-    supabase.from("inventory_pools").select("state, quantity")
-      .in("state", ["washing", "drying", "folding", "packing", "ready_for_dispatch"])
-      .gt("quantity", 0)
-      .returns<Array<{ state: string; quantity: number }>>(),
+    plant
+      ? supabase.from("inventory_pools").select("state, quantity")
+          .in("state", ["washing", "drying", "folding", "packing", "ready_for_dispatch"])
+          .gt("quantity", 0)
+          .returns<Array<{ state: string; quantity: number }>>()
+      : Promise.resolve({ data: [] as Array<{ state: string; quantity: number }> }),
     seesMoney
       ? supabase.from("invoices").select("balance")
           .in("status", ["issued", "part_paid", "overdue"])
@@ -278,8 +309,8 @@ async function Kpis({ date, seesMoney, tenantId }: { date: string; seesMoney: bo
 
   return (
     <div className={cx(
-      "grid gap-4",
-      seesMoney ? "sm:grid-cols-3 lg:grid-cols-6" : "sm:grid-cols-2 lg:grid-cols-4",
+      "grid gap-4 sm:grid-cols-2",
+      (seesMoney ? 4 : 2) + (plant ? 2 : 0) > 4 ? "lg:grid-cols-6" : "lg:grid-cols-4",
     )}>
       <Stat
         label="Stops today"
@@ -287,13 +318,17 @@ async function Kpis({ date, seesMoney, tenantId }: { date: string; seesMoney: bo
         hint={total === 0 ? "nothing scheduled" : `${remaining} remaining`}
         tone={total > 0 && remaining === 0 ? "success" : "default"}
       />
-      <Stat label="In the plant" value={number(inPlant)} hint="washing through to ready" />
-      <Stat
-        label="Ready to dispatch"
-        value={number(ready)}
-        hint={ready > 0 ? "waiting on a truck" : "nothing staged"}
-        tone={ready > 0 ? "success" : "default"}
-      />
+      {plant ? (
+        <>
+          <Stat label="In the plant" value={number(inPlant)} hint="washing through to ready" />
+          <Stat
+            label="Ready to dispatch"
+            value={number(ready)}
+            hint={ready > 0 ? "waiting on a truck" : "nothing staged"}
+            tone={ready > 0 ? "success" : "default"}
+          />
+        </>
+      ) : null}
       <Stat
         label="Problems"
         value={String(late)}
@@ -318,197 +353,6 @@ async function Kpis({ date, seesMoney, tenantId }: { date: string; seesMoney: bo
         />
       ) : null}
     </div>
-  );
-}
-
-/* -------------------------------------------------------- needs a decision */
-
-type ExceptionJob = {
-  id: string; job_number: string; scheduled_date: string;
-  exception_reason: string | null; exception_notes: string | null;
-  customers: { business_name: string } | null;
-};
-
-type MissingLine = {
-  missing_quantity: number;
-  pickups: {
-    pickup_date: string; job_id: string; customers: { business_name: string } | null;
-  } | null;
-  items: { name: string } | null;
-};
-
-type OverdueInvoice = {
-  id: string; invoice_number: string; due_date: string | null; balance: number;
-  customers: { business_name: string } | null;
-};
-
-/**
- * Merged from the places the system already records trouble — exception jobs,
- * linen short at collection, invoices past terms, vehicles off the road. No new
- * "exceptions" table: a second record of a problem is a second thing to keep
- * in step with the first.
- */
-async function NeedsDecision({ seesMoney, tenantId }: { seesMoney: boolean; tenantId: string }) {
-  const supabase = await createClient();
-  const date = today();
-  const trusted = seesMoney ? await trustedFrom(tenantId) : DEFAULT_AR_TRUSTED_FROM;
-
-  const [jobs, missing, invoices, vehicles] = await Promise.all([
-    supabase.from("jobs")
-      .select("id, job_number, scheduled_date, exception_reason, exception_notes, customers(business_name)")
-      .eq("status", "exception").order("scheduled_date", { ascending: true }).limit(15)
-      .returns<ExceptionJob[]>(),
-    supabase.from("pickup_lines")
-      .select("missing_quantity, pickups!inner(pickup_date, job_id, customers(business_name)), items(name)")
-      .gt("missing_quantity", 0).order("created_at", { ascending: false }).limit(10)
-      .returns<MissingLine[]>(),
-    seesMoney
-      ? supabase.from("invoices")
-          .select("id, invoice_number, due_date, balance, customers(business_name)")
-          .in("status", ["issued", "part_paid", "overdue"])
-          // A credit (negative balance) is not a debt to chase, and the ten
-          // *oldest* invoices were 2011 MYOB history worth cents. Largest first
-          // is the list somebody can act on.
-          .gt("balance", 0.005).neq("invoice_type", "credit")
-          .lt("due_date", date).is("deleted_at", null)
-          .eq("tenant_id", tenantId)
-          // Brief 1.9: the same trusted-from rule as the Overdue tile.
-          .or(trustedReceivablesFilter(trusted))
-          .order("balance", { ascending: false }).limit(10)
-          .returns<OverdueInvoice[]>()
-      : Promise.resolve({ data: [] as OverdueInvoice[] }),
-    supabase.from("vehicles")
-      .select("id, registration, maintenance_status")
-      .in("maintenance_status", ["out_of_service", "overdue"]).is("deleted_at", null).limit(5)
-      .returns<Array<{ id: string; registration: string; maintenance_status: string }>>(),
-  ]);
-
-  const decisions: Decision[] = [
-    ...(jobs.data ?? []).map((job): Decision => ({
-      reference: job.job_number,
-      severity: "late",
-      customer: job.customers?.business_name ?? "Unknown customer",
-      // Photo markers ride inside exception_notes; the list shows only the words.
-      summary: parseExceptionNotes(job.exception_notes).note
-        || humanise(job.exception_reason).toLowerCase(),
-      state: humanise(job.exception_reason),
-      measure: "—",
-      when: job.scheduled_date,
-      action: "Resolve",
-      href: `/jobs/${job.id}`,
-    })),
-    ...(missing.data ?? []).flatMap((line): Decision[] => {
-      const pickup = line.pickups;
-      if (!pickup) return [];
-      return [{
-        reference: "MISSING",
-        severity: "warning",
-        customer: pickup.customers?.business_name ?? "Unknown customer",
-        summary: `${line.missing_quantity} × ${line.items?.name ?? "item"} short at collection`,
-        state: "Missing",
-        measure: String(line.missing_quantity),
-        when: pickup.pickup_date,
-        action: "Investigate",
-        href: `/jobs/${pickup.job_id}`,
-      }];
-    }),
-    ...(invoices.data ?? []).map((invoice): Decision => {
-      const daysOver = relativeDays(invoice.due_date ?? date, date);
-      return {
-        reference: invoice.invoice_number,
-        severity: daysOver > 60 ? "late" : "warning",
-        customer: invoice.customers?.business_name ?? "Unknown customer",
-        summary: `${counted(daysOver, "day")} past terms`,
-        state: "Overdue",
-        measure: money(invoice.balance),
-        when: invoice.due_date ?? date,
-        action: "Chase",
-        href: `/invoices/${invoice.id}`,
-      };
-    }),
-    ...(vehicles.data ?? []).map((vehicle): Decision => ({
-      reference: vehicle.registration,
-      severity: vehicle.maintenance_status === "out_of_service" ? "late" : "warning",
-      customer: "Fleet",
-      summary: vehicle.maintenance_status === "out_of_service"
-        ? "off the road — reassign anything planned on it"
-        : "service overdue",
-      state: humanise(vehicle.maintenance_status),
-      measure: "—",
-      when: date,
-      action: "Open",
-      href: "/vehicles",
-    })),
-  ];
-
-  const rows = sortDecisions(decisions);
-
-  return (
-    <Card
-      title="Needs a decision"
-      description={rows.length === 0 ? undefined : `${rows.length} open`}
-      className="[&>div]:p-0"
-    >
-      {/* Cards need their own gutter on a phone; the table is flush to the card
-          edge on a desktop, and so is the empty state's dashed frame. */}
-      <div className={rows.length ? "p-4 sm:p-0" : "p-4"}>
-        <DataTable
-                    bare
-          rows={rows}
-          label="Things needing a decision"
-          rowClassName={(row) => cx("border-l-[3px]", SEVERITY_RULE[row.severity])}
-          empty={
-            <EmptyState
-              title="Nothing needs a decision"
-              description="No exceptions, no linen short, nothing past terms."
-            />
-          }
-          columns={[
-            {
-              header: "Customer / issue",
-              cell: (row) => (
-                <>
-                  <span className="font-semibold">{row.customer}</span>
-                  <span className="text-muted-foreground"> — {row.summary}</span>
-                </>
-              ),
-            },
-            {
-              header: "State",
-              cell: (row) => (
-                <span className={cx("whitespace-nowrap text-xs", SEVERITY_TEXT[row.severity])}>
-                  {row.state}
-                </span>
-              ),
-            },
-            { header: "Size", align: "right", cell: (row) => row.measure },
-            {
-              header: "Since", hideBelow: "md",
-              cell: (row) => (
-                <span className="whitespace-nowrap text-xs text-muted-foreground">
-                  {formatDate(row.when)}
-                </span>
-              ),
-            },
-            {
-              header: "Reference", hideBelow: "lg",
-              cell: (row) => (
-                <span className="whitespace-nowrap text-xs">{row.reference}</span>
-              ),
-            },
-            {
-              header: "",
-              align: "right",
-              cell: (row) => (
-                <Link href={row.href} className="font-medium text-primary hover:underline">
-                  {row.action}
-                </Link>
-              ),
-            },
-          ]}
-        />
-      </div>
-    </Card>
   );
 }
 
@@ -549,77 +393,6 @@ async function PlantStages() {
           );
         })}
       </div>
-    </Card>
-  );
-}
-
-/* -------------------------------------------------------------- runs today */
-
-/* ------------------------------------------------------------- job board */
-
-/**
- * Where the counter's work has got to, as counts.
- *
- * This panel used to be "Runs today" — a list of RUN-001, RUN-002 and a "Plan my
- * day" button. Runs are no longer something anybody opens or manages, so the
- * slot now answers the question the office actually has at a glance: how much
- * work is at each stage, and how much of it has a driver.
- *
- * Every figure is a head-only count against the database rather than a tally of
- * some page's rows, and every one links to the Jobs list already filtered to
- * exactly what it counted — so the number and the rows behind it cannot disagree.
- */
-async function JobBoard() {
-  const supabase = await createClient();
-  const head = { count: "exact" as const, head: true };
-  const today = businessToday();
-
-  const [fresh, working, ready, assigned, out, completedToday] = await Promise.all([
-    supabase.from("laundry_orders").select("id", head).eq("status", "new"),
-    supabase.from("laundry_orders").select("id", head).eq("status", "in_progress"),
-    supabase.from("laundry_orders").select("id", head).eq("status", "ready_for_delivery"),
-    supabase.from("laundry_orders").select("id", head).eq("status", "assigned"),
-    supabase.from("laundry_orders").select("id", head).eq("status", "out_for_delivery"),
-    supabase.from("laundry_orders").select("id", head)
-      .eq("status", "completed")
-      .gte("completed_at", toInstant(today, "00:00"))
-      .lt("completed_at", toInstant(addDays(today, 1), "00:00")),
-  ]);
-
-  const rows = [
-    { label: "New", value: fresh.count, href: "/orders?status=new" },
-    { label: "In progress", value: working.count, href: "/orders?status=in_progress" },
-    {
-      label: "Ready for delivery", value: ready.count,
-      href: "/orders?status=ready_for_delivery",
-      // The one row that is a call to action rather than a statement: ready
-      // work with no driver is the thing that quietly does not go out.
-      hint: "Needs a driver",
-    },
-    { label: "Assigned", value: assigned.count, href: "/orders?status=assigned" },
-    { label: "Out for delivery", value: out.count, href: "/orders?status=out_for_delivery" },
-    { label: "Completed today", value: completedToday.count, href: "/orders?status=completed" },
-  ];
-
-  return (
-    <Card title="Jobs" description="Where the day's laundry has got to." className="[&>div]:p-0">
-      <ul>
-        {rows.map((row) => (
-          <li key={row.label} className="border-b last:border-b-0">
-            <Link href={row.href}
-                  className="flex min-h-11 items-center justify-between gap-3 px-4 py-2.5
-                             transition hover:bg-surface-muted">
-              <span className="min-w-0">
-                <span className="block truncate text-sm font-medium">{row.label}</span>
-                {row.hint && (row.value ?? 0) > 0 ? (
-                  <span className="block text-xs text-muted-foreground">{row.hint}</span>
-                ) : null}
-              </span>
-              <span className="text-lg font-semibold tabular-nums">{row.value ?? 0}</span>
-            </Link>
-          </li>
-        ))}
-      </ul>
     </Card>
   );
 }

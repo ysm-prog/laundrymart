@@ -404,13 +404,19 @@ export const RECEIVED_VIA_OPTIONS: readonly ReceivedVia[] = ["driver_pickup", "c
 /**
  * The default on a new job, and the stored answer on an existing one.
  *
- * Most laundry is collected by a driver rather than carried in, so that is what
- * the form now opens on — the same reasoning that put the delivery fork on
- * "Deliver". An existing job answers with its own value: opening a drop-off to
- * fix a quantity must never quietly re-record how it arrived.
+ * **The default follows where the job was started from** (brief 3.4). Taken in
+ * at the counter it is a drop-off — `customer_dropoff` is the database's own
+ * column default, and the form used to override it to a driver pickup on
+ * every job typed at the desk. Taken in from a collection, or from a link that
+ * says so, it is a driver pickup. An existing job answers with its own value:
+ * opening a drop-off to fix a quantity must never quietly re-record how it
+ * arrived.
  */
-export function initialReceivedVia(order?: { received_via: string } | null): string {
-  return order?.received_via ?? "driver_pickup";
+export function initialReceivedVia(
+  order?: { received_via: string } | null,
+  entryDefault: ReceivedVia = "customer_dropoff",
+): string {
+  return order?.received_via ?? entryDefault;
 }
 
 /**

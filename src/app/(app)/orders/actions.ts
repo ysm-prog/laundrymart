@@ -414,7 +414,10 @@ export async function createOrder(formData: FormData): Promise<void> {
     // job they are about to be shown and the thing that stops it being taken in
     // a second time.
     ? `Job ${order.order_number} created from the collection.`
-    : `Job ${order.order_number} created.`);
+    : `Job ${order.order_number} created.`,
+    // The docket goes in the bag (brief 3.4): its barcode is what the Laundry
+    // board scans to mark the job ready.
+    { href: `/orders/${order.id}/docket`, label: "Print the docket" });
 }
 
 /* ----------------------------------------------------------------- update */

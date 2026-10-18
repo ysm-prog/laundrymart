@@ -1,7 +1,7 @@
 import type { createClient } from "@/lib/supabase/server";
 import type { Session } from "@/lib/auth/context";
 import { recordAudit } from "@/lib/audit";
-import { addDays } from "@/lib/domain/dates";
+import { loadHolidaySet } from "@/lib/runs/holidays";
 import { formatAdelaideDate, getAdelaideToday } from "@/lib/domain/timezone";
 import { checkAssignable } from "@/lib/domain/run-assignment";
 import {
@@ -84,14 +84,8 @@ export async function autoAssignOnReady(
     }
 
     const today = getAdelaideToday();
-    const { data: holidays } = await supabase
-      .from("public_holidays").select("holiday_date")
-      .eq("tenant_id", session.tenantId)
-      .gte("holiday_date", today).lte("holiday_date", addDays(today, 400))
-      .returns<Array<{ holiday_date: string }>>();
     const date = nextDeliveryDay(
-      order.expected_delivery_date, today,
-      new Set((holidays ?? []).map((row) => row.holiday_date)),
+      order.expected_delivery_date, today, await loadHolidaySet(supabase, session.tenantId, today),
     );
 
     const assigned = await assignOneJobToBoard(supabase, session, {

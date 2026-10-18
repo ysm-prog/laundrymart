@@ -19,10 +19,11 @@ import {
 import { Pagination, pageFrom, rangeFor } from "@/components/list-controls";
 import { CUSTOMER_LIMIT } from "./form-data";
 import { FilterChips } from "@/components/filters";
+import { FilterCombobox } from "@/components/filter-combobox";
 import { filterHref } from "@/lib/filters";
 import { listActiveBoards } from "@/lib/runs/my-runs";
 
-export const metadata = { title: "Customer laundry" };
+export const metadata = { title: "Laundry" };
 export const dynamic = "force-dynamic";
 
 type Search = {
@@ -86,7 +87,7 @@ export default async function JobsPage({ searchParams }: { searchParams: Promise
   return (
     <div>
       <PageHeader
-        title="Customer laundry"
+        title="Laundry"
         description="Laundry people have left with us, from the counter through to getting it back to them."
         actions={can(session.role, "orders.write")
           ? <ButtonLink href="/orders/new" variant="primary">Take in laundry</ButtonLink>
@@ -314,16 +315,9 @@ async function Filters({ params }: { params: Search }) {
         </select>
       </div>
 
-      <div>
-        <label htmlFor="customer" className="sr-only">Customer</label>
-        <select id="customer" name="customer" defaultValue={params.customer ?? ""}
-                className={cx(CONTROL_AUTO, "max-w-[14rem]")}>
-          <option value="">Any customer</option>
-          {options.map((customer) => (
-            <option key={customer.id} value={customer.id}>{customer.business_name}</option>
-          ))}
-        </select>
-      </div>
+      <FilterCombobox name="customer" label="Customer" value={params.customer}
+                      options={options.map((customer) => ({ value: customer.id, label: customer.business_name }))}
+                      className="w-full sm:w-64" />
 
       <div>
         <label htmlFor="board" className="sr-only">Assigned board</label>

@@ -154,12 +154,15 @@ export async function priceSelectedJobs(formData: FormData): Promise<void> {
 export async function approveSelectedJobs(formData: FormData): Promise<void> {
   const session = await assertCapability("invoices.bulk");
   await assertCapability("invoices.approve");
+  // The Laundry board's bulk Approve posts here too (brief 3.3) and wants to
+  // land back on the board; the queue stays the default.
+  const back = returnTo(formData, QUEUE);
 
   const ids = selectedIds(formData);
-  if (!ids) return fail(QUEUE, "That selection could not be read. Please try again.");
-  if (ids.length === 0) return fail(QUEUE, "Select at least one job to approve.");
+  if (!ids) return fail(back, "That selection could not be read. Please try again.");
+  if (ids.length === 0) return fail(back, "Select at least one job to approve.");
   if (ids.length > MAX_SELECTION) {
-    return fail(QUEUE, `Select ${MAX_SELECTION} jobs or fewer at a time.`);
+    return fail(back, `Select ${MAX_SELECTION} jobs or fewer at a time.`);
   }
 
   const supabase = await createClient();
@@ -210,7 +213,7 @@ export async function approveSelectedJobs(formData: FormData): Promise<void> {
   revalidatePath(DRAFTS);
 
   if (approved.length === 0) {
-    return fail(QUEUE, refused[0] ?? "None of those jobs could be approved.");
+    return fail(back, refused[0] ?? "None of those jobs could be approved.");
   }
 
   // Counted in *invoices*, because that is the number the owner is checking: a
@@ -233,7 +236,7 @@ export async function approveSelectedJobs(formData: FormData): Promise<void> {
   // An unplaced job is reported as a failure even though its approval stood: it
   // has left the review list either way, and a draft that was never started
   // looks exactly like one that was.
-  return unplaced > 0 ? fail(QUEUE, summary) : done(QUEUE, summary,
+  return unplaced > 0 ? fail(back, summary) : done(back, summary,
     placedOn.size > 0 ? { href: DRAFTS, label: "Open drafts" } : undefined);
 }
 

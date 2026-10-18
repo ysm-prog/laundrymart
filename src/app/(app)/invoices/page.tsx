@@ -1,4 +1,5 @@
 import { canTakePayment } from "@/lib/domain/payment-gate";
+import { DRAFT_DATE_TEXT, issueDateText } from "@/lib/domain/billing";
 import { Suspense } from "react";
 import Link from "next/link";
 import { requireCapability } from "@/lib/auth/context";
@@ -327,9 +328,12 @@ async function Register({ params, tenantId }: { params: Search; tenantId: string
                       "text-xs",
                       chasing ? "text-warning" : "text-muted-foreground",
                     )}>
-                      {row.due_date
-                        ? chasing ? `${counted(overdueDays, "day")} past terms` : `due ${date(row.due_date)}`
-                        : `issued ${date(row.issue_date)}`}
+                      {row.status === "draft"
+                        // A draft's dates are re-stamped when it is issued (brief 3.10).
+                        ? DRAFT_DATE_TEXT.toLowerCase()
+                        : row.due_date
+                          ? chasing ? `${counted(overdueDays, "day")} past terms` : `due ${date(row.due_date)}`
+                          : `issued ${date(row.issue_date)}`}
                     </span>
                   </div>
                 </Link>
@@ -469,7 +473,7 @@ async function InvoicePane({
         </div>
 
         <dl className="grid grid-cols-2 gap-x-3 gap-y-2">
-          <PaneMeta label="Issued" value={date(invoice.issue_date)} />
+          <PaneMeta label="Issued" value={issueDateText(invoice.status, invoice.issue_date, date)} />
           <PaneMeta label="Due" value={date(invoice.due_date)} />
           <PaneMeta label="Type" value={humanise(invoice.invoice_type)} />
           <PaneMeta label="Terms" value={`${invoice.payment_terms_days} days`} />
@@ -697,7 +701,7 @@ async function IssueTool({
       {drafts.length === 0 ? (
         <EmptyState
           title="No drafts waiting"
-          description="Generate this month's invoices, or approve a job in the billing queue, and the drafts appear here."
+          description="Create last month's invoices, or approve a job in the billing queue, and the drafts appear here."
           action={
             <ButtonLink href={hrefWith(params, { tool: "recurring" })}>
               Create last month&apos;s invoices

@@ -17,7 +17,7 @@ import { loadInvoiceBreakdown } from "@/lib/invoices/breakdown";
 import { describePeriod } from "@/lib/domain/billing-period";
 import { loadInvoiceSourceJobs } from "@/lib/invoices/open-draft";
 import { voidRebillQuestion } from "@/lib/domain/confirmations";
-import { jobStatusOnInvoice } from "@/lib/domain/billing";
+import { jobStatusOnInvoice, issueDateText } from "@/lib/domain/billing";
 import type { Invoice, InvoiceLine, Payment } from "@/lib/db/types";
 import {
   Button, ButtonLink, Card, DataTable, EmptyState, Notice,
@@ -236,8 +236,8 @@ export default async function InvoiceDetailPage({
             <dl className="grid gap-3 text-sm sm:grid-cols-2 xl:grid-cols-1">
               <Meta label="Bill to" value={invoice.customers?.business_name ?? "—"} />
               <Meta label="ABN" value={invoice.customers?.abn ?? "—"} />
-              <Meta label="Issued" value={date(invoice.issue_date)} />
-              <Meta label="Due" value={date(invoice.due_date)} />
+              <Meta label="Issued" value={issueDateText(invoice.status, invoice.issue_date, date)} />
+              <Meta label="Due" value={invoice.status === "draft" ? "Set from the terms when issued" : date(invoice.due_date)} />
               <Meta label="Period" value={period
                 ?? (invoice.period_start
                   ? `${date(invoice.period_start)} – ${date(invoice.period_end)}` : "—")} />
@@ -673,7 +673,7 @@ async function loadItemCatalogue(
     .limit(500)
     .returns<LineFormItem[]>();
   // The laundry price list in front of `items.sell_price`, so re-rating a code
-  // on Money › Laundry prices changes what the next line composed for it costs.
+  // on Billing › Laundry prices changes what the next line composed for it costs.
   return attachListPrices(supabase, tenantId, customerId, data ?? []);
 }
 

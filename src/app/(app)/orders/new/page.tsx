@@ -10,6 +10,8 @@ import { collectionToTakeIn, type CollectionToTakeIn } from "@/lib/runs/pickup-i
 import { createOrder } from "../actions";
 import { CUSTOMER_LIMIT, loadJobFormData } from "../form-data";
 import { JobForm } from "../job-form";
+import { loadIntakeDefaults, quoteIntake } from "../intake-actions";
+import { intakeDefaultsFor } from "@/lib/orders/intake";
 
 export const metadata = { title: "New job" };
 export const dynamic = "force-dynamic";
@@ -35,7 +37,7 @@ export const dynamic = "force-dynamic";
 export default async function NewJobPage({
   searchParams,
 }: {
-  searchParams: Promise<{ customer?: string; pickup?: string }>;
+  searchParams: Promise<{ customer?: string; pickup?: string; via?: string }>;
 }) {
   const params = await searchParams;
   const session = await requireCapability("orders.write");
@@ -89,6 +91,13 @@ export default async function NewJobPage({
   // is coming back with, otherwise the collection's own.
   const chosenCustomer = params.customer ?? collection?.customerId;
   const { customers, catalogue, drivers, staff, truncated } = await loadJobFormData(chosenCustomer);
+
+  // Brief 3.4: a customer the page opened with gets their defaults here, on the
+  // server, so the form arrives filled rather than filling a moment later. A
+  // collection already carries its own laundry, so it is not prefilled.
+  const initialDefaults = chosenCustomer && !collection
+    ? await intakeDefaultsFor(session.tenantId, chosenCustomer)
+    : null;
 
   // Back to *this* form, seed and all. A rejection redirects, so the browser's
   // copy is gone either way; coming back to the seeded address at least restores
@@ -147,6 +156,15 @@ export default async function NewJobPage({
         defaultCustomerId={chosenCustomer}
         canBackdate={can(session.role, "orders.manage")}
         returnPath={returnPath}
+        // The counter's own screen is a drop-off (the column's default); a
+        // collection or a `?via=driver_pickup` link is a driver pickup.
+        entryReceivedVia={collection || params.via === "driver_pickup" ? "driver_pickup" : "customer_dropoff"}
+        intake={{
+          load: loadIntakeDefaults,
+          // Prices only for a role that may read them; the action checks again.
+          quote: can(session.role, "pricing.read") ? quoteIntake : null,
+          initial: initialDefaults,
+        }}
       />
     </PageContainer>
   );

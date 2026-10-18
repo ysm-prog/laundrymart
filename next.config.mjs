@@ -8,6 +8,16 @@ const nextConfig = {
   // @react-pdf/renderer resolves fonts and streams at runtime; bundling it
   // breaks both. It only ever runs on the server (invoice rendering).
   serverExternalPackages: ["@react-pdf/renderer"],
+  // The five area names (brief 3.1) as addresses somebody might type or have
+  // been told. Every real screen kept its path, so these are aliases and not
+  // moves; `permanent: false` so a later rename does not fight a cached 308.
+  async redirects() {
+    return [
+      { source: "/laundry", destination: "/orders/board", permanent: false },
+      { source: "/deliveries", destination: "/my-runs", permanent: false },
+      { source: "/money", destination: "/invoices", permanent: false },
+    ];
+  },
   // Security headers baked in (matches SECURITY.md posture)
   async headers() {
     return [{

@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  NAVIGATION, NAV_GROUP_LABELS, groupIsOpenByDefault, groupNavigation, isActive,
-  navigationFor, sectionFor,
+  NAVIGATION, activeTab, isActive, navigationFor, railNavigation, sectionFor,
 } from "@/lib/nav";
 import { MEMBERSHIP_ROLES, ROLES, can, type Role } from "@/lib/roles";
 import { readFileSync } from "node:fs";
@@ -53,7 +52,7 @@ describe("navigationFor", () => {
 
   it("hides an area entirely when no screen inside it is reachable", () => {
     const driver = navigationFor("driver");
-    expect(driver.map((item) => item.label)).not.toContain("Money");
+    expect(driver.map((item) => item.label)).not.toContain("Billing");
     expect(driver.map((item) => item.label)).not.toContain("Settings");
   });
 
@@ -66,18 +65,12 @@ describe("navigationFor", () => {
     expect(navigationFor("dispatcher").map((item) => item.label)).not.toContain("Settings");
   });
 
-  // Ten when the redesign landed; eleven since the laundry-jobs module added an
-  // area of its own. The number is not sacred — the promise it stands for is
-  // that the rail lists areas of work rather than tables, and that a role only
-  // ever sees the ones it can open.
-  it("stays inside the twelve rows the rail promises", () => {
-    // Eleven when the redesign landed; twelve since Runs came back as an
-    // *ordering* screen rather than the run-management area that was removed.
-    // `platform_admin` is checked separately below: it gets a thirteenth row
-    // none of these can see, and folding it in here would have quietly raised
-    // the ceiling for all of them.
-    for (const role of MEMBERSHIP_ROLES) {
-      expect(navigationFor(role).length, role).toBeLessThanOrEqual(12);
+  // Twelve rows until brief 3.1. The rail is five areas now and everything
+  // else is in the account menu, so the honest ceiling is on the rail itself:
+  // nobody, platform admin included, opens a column of more than five.
+  it("draws at most five areas on the rail, for every role", () => {
+    for (const role of ROLES) {
+      expect(railNavigation(navigationFor(role)).main.length, role).toBeLessThanOrEqual(5);
     }
   });
 
@@ -88,7 +81,7 @@ describe("navigationFor", () => {
     //
     // A dispatcher now holds neither half, so the row is gone entirely rather
     // than pointing at a screen the auth gate would bounce them from.
-    expect(navigationFor("dispatcher").map((item) => item.label)).not.toContain("Money");
+    expect(navigationFor("dispatcher").map((item) => item.label)).not.toContain("Billing");
 
     // Finance keeps the payable side and loses the receivable one, so the area
     // survives with the payable tabs and starts at Bills.
@@ -97,16 +90,16 @@ describe("navigationFor", () => {
     // than cosmetic: `navigationFor` resolves a row to the first child the role
     // can open, so putting a `purchases.read` configuration screen at the top of
     // the list would silently make it finance's landing page for the whole area.
-    const finance = navigationFor("finance").find((item) => item.label === "Money");
+    const finance = navigationFor("finance").find((item) => item.label === "Billing");
     expect(finance?.href).toBe("/bills");
     expect(finance?.children?.map((child) => child.label)).toEqual([
       "Bills", "Suppliers", "Accounts", "Charge accounts",
     ]);
 
     // The Office manager keeps both sides.
-    const office = navigationFor("operations_manager").find((item) => item.label === "Money");
+    const office = navigationFor("operations_manager").find((item) => item.label === "Billing");
     expect(office?.children?.map((child) => child.label)).toEqual([
-      "Invoices", "Billing", "Awaiting invoice", "Open drafts", "Laundry prices", "Xero",
+      "Invoices", "By period", "Awaiting invoice", "Open drafts", "Laundry prices", "Xero",
       "Bills", "Suppliers", "Accounts", "Charge accounts",
     ]);
 
@@ -126,7 +119,9 @@ describe("navigationFor", () => {
     }
 
     const rows = navigationFor("platform_admin");
-    expect(rows).toHaveLength(12);
+    // Five on the rail and six in the account menu, Platform among them.
+    expect(rows).toHaveLength(11);
+    expect(railNavigation(rows).profile.map((item) => item.label)).toContain("Platform");
     const platform = rows.find((item) => item.label === "Platform");
     expect(platform?.href).toBe("/platform");
     expect(platform?.children?.map((child) => child.href)).toEqual([
@@ -134,35 +129,37 @@ describe("navigationFor", () => {
     ]);
   });
 
-  it("gives the driver My Runs, and both screens inside it", () => {
-    const area = navigationFor("driver").find((item) => item.label === "My Runs");
+  it("gives the driver Deliveries, opening on My Runs with the depot screen beside it", () => {
+    const area = navigationFor("driver").find((item) => item.label === "Deliveries");
     expect(area).toBeDefined();
     expect(area?.href).toBe("/my-runs");
     // `/run` is kept, not replaced: it owns the offline outbox and the service
     // worker, and it is the one screen that has to work with no signal.
-    expect(area?.children?.map((child) => child.href)).toEqual(["/my-runs", "/run"]);
+    expect(area?.children?.map((child) => child.href).slice(0, 2)).toEqual(["/my-runs", "/run"]);
   });
 
-  it("gives a dispatcher My Runs without the driver's capture screen", () => {
-    const area = navigationFor("dispatcher").find((item) => item.label === "My Runs");
+  it("gives a dispatcher Deliveries without the driver's capture screen", () => {
+    const area = navigationFor("dispatcher").find((item) => item.label === "Deliveries");
     expect(area?.href).toBe("/my-runs");
     // `run.execute` is the driver's; a dispatcher gets the overview only.
-    expect(area?.children?.map((child) => child.href)).toEqual(["/my-runs"]);
+    expect(area?.children?.map((child) => child.href)).not.toContain("/run");
+    expect(area?.children?.map((child) => child.href)).toContain("/runs");
   });
 
-  it("never shows My run and My runs as two separate rows", () => {
-    // §6: the old single-run screen was evolved into this area rather than
-    // left beside it. Two rail rows a letter apart is the confusion the brief
-    // is guarding against.
+  it("never shows My Runs and Runs as two separate rail rows", () => {
+    // Brief 3.1 folded both into Deliveries. Two rows a letter apart is the
+    // confusion §6 has guarded against since the single-run screen grew up.
     for (const role of ROLES) {
-      const rows = navigationFor(role).filter((item) => /^my runs?$/i.test(item.label));
-      expect(rows.length, role).toBeLessThanOrEqual(1);
+      const rows = navigationFor(role).filter((item) => /^(my )?runs?$/i.test(item.label));
+      expect(rows.length, role).toBe(0);
     }
   });
 
-  it("keeps My runs away from roles that do not drive", () => {
-    for (const role of ["finance", "warehouse_operator", "sales"] as const) {
-      expect(navigationFor(role).map((item) => item.label), role).not.toContain("My Runs");
+  it("keeps Deliveries away from roles that do not drive or plan", () => {
+    // The plant floor keeps it, for Collections: what came off the van is what
+    // the floor is about to wash. Finance and sales have nothing in it.
+    for (const role of ["finance", "sales"] as const) {
+      expect(navigationFor(role).map((item) => item.label), role).not.toContain("Deliveries");
     }
   });
 
@@ -180,14 +177,14 @@ describe("navigationFor", () => {
     }
   });
 
-  it("shows Runs to the office and to a board, and lets only the office change it", () => {
+  it("shows Run order to the office and to a board, under Deliveries", () => {
     // The client's rule as capabilities: a board reads the sequence the office
-    // set. `routes.write` is what the reorder screen guards on, and a board
-    // does not hold it.
+    // set. Changing it needs `routes.sequence`, which a board does not hold.
     for (const role of ["super_admin", "operations_manager", "dispatcher", "board"] as const) {
-      expect(navigationFor(role).map((item) => item.label), role).toContain("Runs");
+      const area = navigationFor(role).find((item) => item.label === "Deliveries");
+      expect(area?.children?.map((child) => child.label), role).toContain("Run order");
     }
-    expect(navigationFor("finance").map((item) => item.label)).not.toContain("Runs");
+    expect(navigationFor("finance").map((item) => item.label)).not.toContain("Deliveries");
   });
 
   it("keeps drivers and vehicles reachable after the Runs area went", () => {
@@ -203,27 +200,31 @@ describe("navigationFor", () => {
     expect(fleet?.href).toBe("/boards");
   });
 
-  it("orders the rail the way the day runs", () => {
-    expect(navigationFor("super_admin").map((item) => item.label)).toEqual([
-      "Today", "My Runs", "Runs", "Fleet", "Customer laundry", "Customers",
-      "Money", "Linen", "Reports", "Settings", "Help",
+  it("orders the rail the way the day runs, with the rest in the account menu", () => {
+    const { main, profile } = railNavigation(navigationFor("super_admin"));
+    // Brief 3.1, word for word.
+    expect(main.map((item) => item.label)).toEqual([
+      "Today", "Laundry", "Deliveries", "Customers", "Billing",
+    ]);
+    expect(profile.map((item) => item.label)).toEqual([
+      "Fleet", "Linen", "Reports", "Settings", "Help",
     ]);
   });
 
-  it("shows Customer laundry to the Owner, the Office manager and the counter", () => {
+  it("shows Laundry to the Owner, the Office manager and the counter", () => {
     // The rail follows the capability. `orders.*` returned to `customer_service`
     // on 2026-08-24 — the counter's whole job — so the row is theirs again;
     // billing did not move, and the rest still cannot open one.
     for (const role of [
       "super_admin", "operations_manager", "platform_admin", "customer_service",
     ] as const) {
-      expect(navigationFor(role).map((item) => item.label), role).toContain("Customer laundry");
+      expect(navigationFor(role).map((item) => item.label), role).toContain("Laundry");
     }
     for (const role of [
       "warehouse_operator", "dispatcher", "driver",
       "finance", "auditor", "branch_manager", "regional_manager", "sales",
     ] as const) {
-      expect(navigationFor(role).map((item) => item.label), role).not.toContain("Customer laundry");
+      expect(navigationFor(role).map((item) => item.label), role).not.toContain("Laundry");
     }
   });
 
@@ -304,15 +305,15 @@ describe("navigationFor", () => {
     expect(can("auditor", "inventory.read")).toBe(true);
   });
 
-  it("puts the awaiting-invoice queue under Money, for the two roles that bill", () => {
+  it("puts the awaiting-invoice queue under Billing, for the two roles that bill", () => {
     for (const role of ["super_admin", "operations_manager"] as const) {
-      const money = navigationFor(role).find((item) => item.label === "Money");
+      const money = navigationFor(role).find((item) => item.label === "Billing");
       expect(money?.children?.map((child) => child.href), role)
         .toContain("/invoices/awaiting");
     }
     // And nowhere at all for a role that holds no `billing.read` — finance
     // still has a Money row, for the payable tabs, and the queue is not in it.
-    const finance = navigationFor("finance").find((item) => item.label === "Money");
+    const finance = navigationFor("finance").find((item) => item.label === "Billing");
     expect(finance?.children?.map((child) => child.href))
       .not.toContain("/invoices/awaiting");
   });
@@ -325,34 +326,40 @@ describe("sectionFor", () => {
   it("puts a detail route in its own area", () => {
     expect(label("/customers/abc-123")).toBe("Customers");
     expect(label("/customers/abc-123/edit")).toBe("Customers");
-    expect(label("/invoices/inv-1")).toBe("Money");
+    expect(label("/invoices/inv-1")).toBe("Billing");
   });
 
   it("resolves a child that is not under the area's own path", () => {
     expect(label("/agreements")).toBe("Customers");
-    expect(label("/operations/exceptions")).toBe("Runs");
-    expect(label("/warehouse/batch-1")).toBe("Linen");
+    expect(label("/operations/exceptions")).toBe("Deliveries");
+    // The plant is behind a tenant switch (brief 3.9), so with it off the
+    // batch screens belong to no area at all.
+    expect(label("/warehouse/batch-1")).toBeUndefined();
+    expect(sectionFor("/warehouse/batch-1", navigationFor("super_admin", { plantStages: true }))?.label)
+      .toBe("Linen");
     expect(label("/vehicles")).toBe("Fleet");
-    expect(label("/bills")).toBe("Money");
-    expect(label("/billing")).toBe("Money");
+    expect(label("/bills")).toBe("Billing");
+    expect(label("/billing")).toBe("Billing");
     // The customer's period, which is a detail route of the billing screen and
-    // must not fall out of Money onto the customer record.
-    expect(label("/billing/cust-1")).toBe("Money");
-    expect(label("/suppliers")).toBe("Money");
-    expect(label("/accounts")).toBe("Money");
+    // must not fall out of Billing onto the customer record.
+    expect(label("/billing/cust-1")).toBe("Billing");
+    expect(label("/suppliers")).toBe("Billing");
+    expect(label("/accounts")).toBe("Billing");
   });
 
   it("prefers the longest matching destination", () => {
     // /orders (Customer laundry) and /operations/* (tabs under Runs since 2.1)
     // both exist; the tab strip must not flip areas on the deeper path.
-    expect(label("/orders/abc-123/edit")).toBe("Customer laundry");
-    expect(label("/operations/pickups")).toBe("Runs");
+    expect(label("/orders/abc-123/edit")).toBe("Laundry");
+    expect(label("/orders/board")).toBe("Laundry");
+    expect(label("/operations/pickups")).toBe("Deliveries");
   });
 
-  it("puts every My Runs path in the one area, and leaves /routes off the map", () => {
-    expect(label("/my-runs")).toBe("My Runs");
-    expect(label("/my-runs/jobs/abc-123")).toBe("My Runs");
-    expect(label("/run")).toBe("My Runs");
+  it("puts every delivery path in the one area, and leaves /routes off the map", () => {
+    expect(label("/my-runs")).toBe("Deliveries");
+    expect(label("/my-runs/jobs/abc-123")).toBe("Deliveries");
+    expect(label("/run")).toBe("Deliveries");
+    expect(label("/runs")).toBe("Deliveries");
     // The run-management screens are still reachable by URL but belong to no
     // rail area, so opening one highlights nothing rather than resurrecting
     // "Runs" in the sidebar.
@@ -423,7 +430,7 @@ describe("the rail and the page it opens agree", () => {
   const APP = join(process.cwd(), "src/app/(app)");
 
   it.each([
-    ["orders/page.tsx", "Customer laundry"],
+    ["orders/page.tsx", "Laundry"],
     ["jobs/page.tsx", "Driver visits"],
   ])("%s is titled %s", (file, label) => {
     const source = readFileSync(join(APP, file), "utf8");
@@ -443,69 +450,49 @@ describe("the rail and the page it opens agree", () => {
 });
 
 /**
- * The rail's three collapsible groups.
+ * The rail and the account menu (brief 3.1).
  *
- * This softens §6's "one flat list, no headings" — see the note over `GROUPS`
- * in `nav.ts`. The property that has to hold is that grouping is only a way of
- * *drawing* the rail: every area a role can reach must still appear exactly
- * once, and none may go missing because nobody remembered to name it.
+ * The property that has to hold is that the split is only a way of *drawing*
+ * the map: every area a role can reach must still appear exactly once, and
+ * none may go missing because nobody remembered to give it a placement.
  */
-describe("rail grouping", () => {
+describe("rail and account menu", () => {
   it("shows every area a role can reach, exactly once", () => {
     for (const role of ROLES) {
       const items = navigationFor(role);
-      const { groups, rest } = groupNavigation(items);
-      const drawn = [...groups.flatMap((g) => g.items), ...rest].map((i) => i.href);
-      expect(new Set(drawn).size, role).toBe(drawn.length);          // no duplicates
-      expect(drawn.sort()).toEqual(items.map((i) => i.href).sort()); // and none lost
+      const { main, profile } = railNavigation(items);
+      const drawn = [...main, ...profile].map((i) => i.href);
+      expect(new Set(drawn).size, role).toBe(drawn.length);
+      expect(drawn.sort()).toEqual(items.map((i) => i.href).sort());
     }
   });
 
-  // The failure that matters: an area added to NAVIGATION and not named in a
-  // group must still be drawn. Silently vanishing from the rail is far worse
-  // than landing in the wrong drawer.
-  it("falls an unnamed area through to the ungrouped rows rather than dropping it", () => {
+  // The failure that matters: an area added to NAVIGATION with no placement
+  // must still be drawn, on the rail where it will be noticed.
+  it("draws an area with no placement on the rail rather than dropping it", () => {
     const invented = { label: "Brand new", href: "/brand-new", icon: "today" } as const;
-    const { groups, rest } = groupNavigation([...navigationFor("super_admin"), invented]);
-    expect(groups.flatMap((g) => g.items).map((i) => i.href)).not.toContain("/brand-new");
-    expect(rest.map((i) => i.href)).toContain("/brand-new");
+    const { main } = railNavigation([...navigationFor("super_admin"), invented]);
+    expect(main.map((i) => i.href)).toContain("/brand-new");
   });
 
-  it("keeps Help out of every drawer, pinned last", () => {
+  it("keeps Help in the account menu for every role", () => {
     for (const role of ROLES) {
-      const { groups, rest } = groupNavigation(navigationFor(role));
-      expect(groups.flatMap((g) => g.items).map((i) => i.href)).not.toContain("/help");
-      // It is the one row with no capability, so every role has it — and the
-      // moment somebody is lost is the wrong moment for it to be behind a
-      // closed drawer.
-      expect(rest[0]?.href, role).toBe("/help");
+      const { profile } = railNavigation(navigationFor(role));
+      expect(profile.map((i) => i.href), role).toContain("/help");
     }
   });
 
-  it("renders no heading for a group a role cannot see into", () => {
-    // A driver holds no billing or admin capability, so those groups are empty
-    // for them and must not draw an empty drawer.
-    const { groups } = groupNavigation(navigationFor("driver"));
-    for (const group of groups) expect(group.items.length).toBeGreaterThan(0);
+  it("gives a round a two-row rail: its day, and Today", () => {
+    expect(railNavigation(navigationFor("board")).main.map((i) => i.label))
+      .toEqual(["Today", "Deliveries"]);
   });
+});
 
-  it("opens the day-to-day group and leaves the others shut", () => {
-    expect(groupIsOpenByDefault("Day to day")).toBe(true);
-    expect(groupIsOpenByDefault("Customers & money")).toBe(false);
-    expect(groupIsOpenByDefault("Set-up & reports")).toBe(false);
-  });
-
-  it("names the groups in plain words, not in trade terms", () => {
-    const jargon = /\b(depot|board|agreement|levy|tenant|manifest|dispatch|plant|inventory)/i;
-    for (const label of NAV_GROUP_LABELS) expect(label).not.toMatch(jargon);
-  });
-
-  // The rail is the thing being tidied, so the shape it collapses to is the
-  // point: a short open list plus two closed drawers plus Help.
-  it("leaves an owner a short rail with both drawers shut", () => {
-    const { groups, rest } = groupNavigation(navigationFor("super_admin"));
-    const visible = groups.filter((g) => groupIsOpenByDefault(g.label))
-      .flatMap((g) => g.items).length + groups.length + rest.length;
-    expect(visible).toBeLessThanOrEqual(9); // was 12 flat rows
+describe("activeTab", () => {
+  const laundry = navigationFor("super_admin").find((item) => item.label === "Laundry")!;
+  it("lights one tab by longest match, not both a path and its prefix", () => {
+    expect(activeTab("/orders/board", laundry.children!)?.label).toBe("Board");
+    expect(activeTab("/orders", laundry.children!)?.label).toBe("All jobs");
+    expect(activeTab("/orders/abc-123", laundry.children!)?.label).toBe("All jobs");
   });
 });

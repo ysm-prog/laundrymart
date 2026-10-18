@@ -199,9 +199,19 @@ export type PricedJob = {
 export async function priceJobFromRateCard(
   supabase: Client, tenantId: string, job: Pick<JobForBilling, "id" | "customer_id">,
 ): Promise<PricedJob> {
-  const [items, rateCard, priceRows] = await Promise.all([
-    loadJobItems(supabase, job.id),
-    loadRateCard(supabase, job.customer_id),
+  return priceItemsForCustomer(supabase, tenantId, job.customer_id, await loadJobItems(supabase, job.id));
+}
+
+/**
+ * The pricer over laundry that need not be saved yet — the job form's running
+ * total (brief 3.4) uses exactly this, so what the counter is shown while
+ * taking a job in is what the job will be priced at when it is finished.
+ */
+export async function priceItemsForCustomer(
+  supabase: Client, tenantId: string, customerId: string, items: readonly OrderItemInput[],
+): Promise<PricedJob> {
+  const [rateCard, priceRows] = await Promise.all([
+    loadRateCard(supabase, customerId),
     // The tier beneath the card (0018). Read unconditionally rather than only
     // when the card is missing, because a card that covers towels and says
     // nothing about sheets is the ordinary case — the fallback is per kind of
@@ -224,13 +234,14 @@ export async function priceJobFromRateCard(
   // The last tier (brief 1.3): the item master's own selling price, for the
   // items actually on this job. Named by tenant like the list above — this read
   // feeds the same write — and with the laundry's own GST rate, because an
-  // exclusive selling price is grossed up before it becomes a line.
+  // exclusive selling price is grossed up before it becomes a line. The name
+  // rides along so a line says what the item is (brief 3.5).
   const itemIds = [...new Set(items.map((item) => item.item_id).filter((id): id is string => Boolean(id)))];
   const [{ data: sellRows }, { data: tenant }] = itemIds.length === 0
     ? [{ data: [] as SellRow[] }, { data: null }]
     : await Promise.all([
         supabase.from("items")
-          .select("id, sell_price, sell_price_basis, tax_code")
+          .select("id, name, sell_price, sell_price_basis, tax_code")
           .eq("tenant_id", tenantId)
           .in("id", itemIds)
           .returns<SellRow[]>(),
@@ -242,17 +253,20 @@ export async function priceJobFromRateCard(
     items,
     rateLines: rateCard.lines,
     rateCard: rateCard.card ? { id: rateCard.card.id, fuel_levy_pct: rateCard.card.fuel_levy_pct } : null,
-    priceList: priceListFor(job.customer_id, priceRows.data ?? []),
+    priceList: priceListFor(customerId, priceRows.data ?? []),
     // The same list keyed on the item, which is the more specific answer within
     // this tier — a price written against TOW001 is a price for TOW001.
-    itemPriceList: itemPriceListFor(job.customer_id, priceRows.data ?? []),
+    itemPriceList: itemPriceListFor(customerId, priceRows.data ?? []),
     itemSellPrices: itemSellPriceList(sellRows ?? [], Number(tenant?.gst_rate ?? GST_RATE_FALLBACK)),
+    itemNames: new Map((sellRows ?? []).map((row) => [row.id, row.name])),
   });
 
   return { lines, unpriced, card: rateCard.card };
 }
 
-type SellRow = { id: string; sell_price: number | null; sell_price_basis: string | null; tax_code: string | null };
+type SellRow = {
+  id: string; name: string; sell_price: number | null; sell_price_basis: string | null; tax_code: string | null;
+};
 
 /** Set or clear the `needs_price` mark. Never fails the work it rides on. */
 export async function setBillingHold(

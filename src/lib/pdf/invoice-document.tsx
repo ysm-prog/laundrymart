@@ -108,7 +108,7 @@ export function InvoiceDocument({ data }: { data: InvoicePdfData }) {
 
         <TitleRow title={title} columns={[
           { label: "Invoice number", value: invoice.invoice_number, strong: true },
-          { label: "Issue date", value: auDate(invoice.issue_date) },
+          { label: "Issue date", value: invoice.status === "draft" ? "Not issued yet" : auDate(invoice.issue_date) },
           ...(invoice.due_date && !isCredit ? [{ label: "Due date", value: auDate(invoice.due_date) }] : []),
         ]} />
 

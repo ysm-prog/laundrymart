@@ -431,11 +431,19 @@ export async function startMyDay(formData: FormData): Promise<void> {
 
   await stampDayStarted(supabase, session, parsed.data, at, driverId);
 
+  // The board by name and the day (brief 3.8), so the timeline reads "confirmed
+  // the load on Board 1 for Sat 18 Oct" rather than a status move.
+  const { data: boardRow } = await supabase.from("boards").select("name")
+    .eq("tenant_id", session.tenantId).eq("id", parsed.data.board_id).maybeSingle<{ name: string }>();
+
   for (const job of startable.jobs) {
     await logOrderActivity(supabase, session, job.id, {
       activity_type: "status_changed",
       previous: { status: "assigned", load_confirmed_at: job.load_confirmed_at ?? null },
-      next: { status: "out_for_delivery", load_confirmed_at: job.load_confirmed_at ?? at, driver: driverId },
+      next: {
+        status: "out_for_delivery", load_confirmed_at: job.load_confirmed_at ?? at, driver: driverId,
+        board: boardRow?.name ?? null, date: parsed.data.date,
+      },
       note: "Loaded and out for delivery (Start my day).",
     });
   }
