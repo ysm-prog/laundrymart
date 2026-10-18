@@ -52,6 +52,8 @@ export type RunBoard = {
 };
 
 export type RunJobItem = {
+  /** The row's own id — the Delivered sheet counts each row back (brief 2.4). */
+  id?: string;
   item_type: string;
   custom_description: string | null;
   quantity_type: string;
@@ -304,7 +306,7 @@ export async function loadJobsForStops(
       "id, order_number, status, priority, delivery_required, due_date, delivery_window, " +
       "expected_delivery_time, delivery_address, delivery_instructions, special_instructions, " +
       "customer_id, stop_id, " +
-      "laundry_order_items(item_type, custom_description, quantity_type, exact_quantity, " +
+      "laundry_order_items(id, item_type, custom_description, quantity_type, exact_quantity, " +
       "bag_count, estimated_quantity, notes, ownership)",
     )
     .eq("tenant_id", tenantId)
@@ -366,6 +368,18 @@ export type DayJob = {
    */
   stop_id: string | null;
   jobs: { sequence: number } | null;
+  /** What the delivery recorded (0056, brief 2.4). Null until it is delivered. */
+  delivery_received_by?: string | null;
+  delivery_signature_path?: string | null;
+  delivery_photo_paths?: string[] | null;
+  delivery_short?: boolean | null;
+  delivery_quantities?: DeliveryQuantity[] | null;
+  delivered_board_id?: string | null;
+  delivered_driver_id?: string | null;
+};
+
+export type DeliveryQuantity = {
+  item_row_id: string; description: string; taken_in: number | null; delivered: number | null;
 };
 
 const DAY_JOB_COLUMNS =
@@ -373,12 +387,14 @@ const DAY_JOB_COLUMNS =
   "assigned_delivery_date, assigned_board_id, load_confirmed_at, completed_at, " +
   "delivery_window, expected_delivery_time, delivery_address, delivery_instructions, " +
   "special_instructions, customer_id, stop_id, " +
+  "delivery_received_by, delivery_signature_path, delivery_photo_paths, delivery_short, " +
+  "delivery_quantities, delivered_board_id, delivered_driver_id, " +
   "customers(id, business_name, phone, special_instructions), " +
   // Named by constraint: `laundry_orders` has more than one path to `jobs` in
   // PostgREST's eyes, and a bare embed is rejected at request time — the defect
   // class this repo has already shipped once.
   "jobs!laundry_orders_stop_id_fkey(sequence), " +
-  "laundry_order_items(item_type, custom_description, quantity_type, exact_quantity, " +
+  "laundry_order_items(id, item_type, custom_description, quantity_type, exact_quantity, " +
   "bag_count, estimated_quantity, notes, ownership)";
 
 /**

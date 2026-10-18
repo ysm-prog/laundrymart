@@ -219,3 +219,37 @@ export async function archiveItem(formData: FormData): Promise<void> {
   revalidatePath("/items");
   return done("/items", "Item archived.");
 }
+
+/**
+ * Retire an item, or bring one back (brief 3.5). **Soft**: an inactive item
+ * stays on every job, charge and invoice that names it and drops out of the
+ * pickers. Deleting is a different act, with its own guard
+ * (`guard_item_soft_delete`); this is the one the duplicates list offers.
+ */
+export async function setItemActive(formData: FormData): Promise<void> {
+  const session = await assertCapability("items.write");
+  const parsed = z.object({
+    id: z.string().uuid(),
+    status: z.enum(["active", "inactive"]),
+  }).safeParse(toObject(formData));
+  if (!parsed.success) return fail("/items", "That item could not be found.");
+
+  const supabase = await createClient();
+  const { data, error } = await supabase.from("items")
+    .update({ status: parsed.data.status })
+    .eq("tenant_id", session.tenantId).eq("id", parsed.data.id).is("deleted_at", null)
+    .select("item_code, name");
+  if (error) return fail("/items", describeDbError(error));
+  // 0040's gate refuses with zero rows rather than an error, so say it.
+  if (!data?.length) return fail("/items", "That item could not be changed. Only the Owner or the Office can change the item list.");
+
+  const item = data[0] as { item_code: string | null; name: string };
+  await recordAudit(session, {
+    entity: "item", entityId: parsed.data.id, action: "update",
+    summary: `${item.item_code ?? item.name} ${parsed.data.status}`,
+  });
+  revalidatePath("/items");
+  return done("/items", parsed.data.status === "inactive"
+    ? `${item.item_code ?? item.name} is inactive. It stays on old jobs and is no longer offered.`
+    : `${item.item_code ?? item.name} is active again.`);
+}

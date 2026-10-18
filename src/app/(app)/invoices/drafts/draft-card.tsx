@@ -4,7 +4,7 @@ import { describePeriod } from "@/lib/domain/billing-period";
 import { formatIso } from "@/lib/domain/dates";
 import type { DraftSummary } from "@/lib/invoices/open-draft";
 import { Badge, Card, Eyebrow } from "@/components/ui";
-import { SubmitButton } from "@/components/form";
+import { IssueControl } from "../issue-control";
 
 /**
  * One customer's running invoice, as a card on the open-drafts board.
@@ -26,13 +26,17 @@ import { SubmitButton } from "@/components/form";
  * because billing on the 9th is the thing the owner asked to be able to do.
  */
 export function DraftCard({
-  draft, stage, mayIssue, issueAction, returnTo,
+  draft, stage, mayIssue, issueAction, returnTo, issueBlocked = null, settingsHref = null,
 }: {
   draft: DraftSummary;
   stage: "ready" | "collecting" | "none";
   mayIssue: boolean;
   issueAction: (formData: FormData) => void | Promise<void>;
   returnTo: string;
+  /** Why this laundry cannot issue yet — its ABN, address or bank details (brief 1.1). */
+  issueBlocked?: string | null;
+  /** Settings › Invoicing, for the one role that can open it. */
+  settingsHref?: string | null;
 }) {
   const period = draft.periodStart && draft.periodEnd
     ? describePeriod({ start: draft.periodStart, end: draft.periodEnd })
@@ -85,13 +89,15 @@ export function DraftCard({
         </Link>
         {/* Withheld rather than disabled when there is nothing on it: a button
             whose only possible outcome is a refusal is a dead end dressed as a
-            choice, and the sentence above already says why. */}
+            choice, and the sentence above already says why. A laundry that is
+            missing its invoice details is different — that is not about this
+            draft, so the button is drawn disabled with the reason (brief 1.1). */}
         {mayIssue && draft.lineCount > 0 ? (
-          <form action={issueAction} className="ml-auto">
-            <input type="hidden" name="id" value={draft.id} />
-            <input type="hidden" name="return_to" value={returnTo} />
-            <SubmitButton size="md" pendingLabel="Issuing…">Issue now</SubmitButton>
-          </form>
+          <div className="w-full">
+            <IssueControl invoiceId={draft.id} invoiceNumber={draft.invoiceNumber}
+                          total={draft.total} action={issueAction} returnTo={returnTo}
+                          blocked={issueBlocked} settingsHref={settingsHref} label="Issue now" />
+          </div>
         ) : null}
       </div>
     </Card>

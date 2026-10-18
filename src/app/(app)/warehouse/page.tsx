@@ -6,7 +6,7 @@ import { can } from "@/lib/roles";
 import { date, dateTime } from "@/lib/format";
 import type { Depot } from "@/lib/db/types";
 import {
-  ButtonLink, Card, DataTable, EmptyState, PageHeader, SkeletonRows,
+  ButtonLink, Card, DataTable, EmptyState, Notice, PageHeader, SkeletonRows,
   SkeletonStats, Stat, StatusBadge,
 } from "@/components/ui";
 import { Field, Input, Select, SubmitButton } from "@/components/form";
@@ -15,6 +15,7 @@ import { ToggleChips, FilterSummary } from "@/components/filters";
 import { isFiltered, parseMulti } from "@/lib/filters";
 import { BATCH_FLOW, BATCH_STAGES, BATCH_STAGE_LABELS, type BatchStage } from "./stages";
 import { uncountedRuns } from "./returns";
+import { parseOperations } from "@/lib/domain/operations-settings";
 import { createBatch } from "./actions";
 
 export const metadata = { title: "In the plant" };
@@ -42,6 +43,26 @@ export default async function WarehousePage({
 }) {
   const session = await requireCapability("warehouse.read");
   const params = await searchParams;
+
+  // Brief 3.9: the plant is behind a tenant switch, off until batches are used.
+  // A bookmark still lands here, and is told why the screen is empty and where
+  // the switch is rather than shown a wall of zeros.
+  const { data: tenant } = await (await createClient())
+    .from("tenants").select("settings").eq("id", session.tenantId)
+    .maybeSingle<{ settings: unknown }>();
+  if (!parseOperations(tenant?.settings).plantStages) {
+    return (
+      <div className="space-y-6">
+        <PageHeader title="In the plant" description="Batches through washing, drying, folding and packing." />
+        <Notice tone="info" title="The plant screens are turned off">
+          This laundry does not record production batches yet, so these screens are hidden.
+          {can(session.role, "admin.write") ? (
+            <> Turn them on in <Link href="/admin/operations" className="font-medium text-primary underline">Settings › How you work</Link>.</>
+          ) : " The owner can turn them on in Settings."}
+        </Notice>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">

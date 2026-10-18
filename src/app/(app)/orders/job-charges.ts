@@ -154,8 +154,10 @@ export function parseJobCharges(raw: FormDataEntryValue | null): ParsedJobCharge
  */
 export function chargeSourceLabel(row: {
   source_agreement_line_id?: string | null; pricing_model?: string | null;
-}): "From the rate card" | "From the price list" | "Added by hand" {
+}): "From the rate card" | "From the price list" | "From the item's selling price" | "Added by hand" {
   if (row.source_agreement_line_id) return "From the rate card";
+  // The last pricing tier (brief 1.3): the item master's own selling price.
+  if (row.pricing_model === "item_price") return "From the item's selling price";
   if (row.pricing_model) return "From the price list";
   return "Added by hand";
 }

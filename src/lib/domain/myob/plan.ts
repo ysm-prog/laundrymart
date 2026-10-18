@@ -376,6 +376,8 @@ export function buildPlan(
       issue_date: credit.issueDate, purchase_order_number: credit.po,
       subtotal: credit.amount, total: credit.amount, amount_paid: credit.paid,
       notes: "Imported from the MYOB sale returns and credits export.",
+      // Never sent to Xero (brief 1.2, 0055) — MYOB's history went in separately.
+      source: "import",
     }];
   });
   const credit = dedupe(creditRows, (row) => String(row.invoice_number));
@@ -428,6 +430,7 @@ export function buildPlan(
       purchase_order_number: invoice.po,
       subtotal: invoice.amount, total: invoice.amount, amount_paid: invoice.paid,
       notes: "Imported from the MYOB invoices export.",
+      source: "import",
     }];
   });
   if (droppedInvoiceDues > 0) {

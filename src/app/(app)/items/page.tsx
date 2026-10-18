@@ -15,12 +15,13 @@ import { ITEM_TYPES, ITEM_TYPE_LABELS } from "@/lib/domain/laundry-orders";
 import { PRICE_BASIS_OPTIONS, sellPriceLabel } from "@/lib/domain/items";
 import { ITEM_CATEGORIES } from "./categories";
 import { ITEM_COLUMNS } from "./columns";
-import { createItem } from "./actions";
+import { createItem, setItemActive } from "./actions";
+import { findDuplicateItems } from "@/lib/domain/item-duplicates";
 
 export const metadata = { title: "Items" };
 export const dynamic = "force-dynamic";
 
-type Search = { q?: string; category?: string; error?: string; ok?: string };
+type Search = { q?: string; category?: string; status?: string; error?: string; ok?: string };
 
 export default async function ItemsPage({ searchParams }: { searchParams: Promise<Search> }) {
   const params = await searchParams;
@@ -37,19 +38,32 @@ export default async function ItemsPage({ searchParams }: { searchParams: Promis
         action="/items"
         q={params.q}
         params={params}
-        filterKeys={["q", "category"]}
+        filterKeys={["q", "category", "status"]}
         placeholder="Item code, name or description…"
         chips={
-          <FilterChips
-            basePath="/items" params={params} name="category" label="Item category"
-            allLabel="All items"
-            options={ITEM_CATEGORIES.map((value) => ({ value, label: humanise(value) }))}
-          />
+          <>
+            {/* Brief 3.5: inactive items are hidden from every picker; this is
+                where they can still be found and brought back. */}
+            <FilterChips
+              basePath="/items" params={params} name="status" label="Status"
+              allLabel="Any status"
+              options={[{ value: "active", label: "Active" }, { value: "inactive", label: "Inactive" }]}
+            />
+            <FilterChips
+              basePath="/items" params={params} name="category" label="Item category"
+              allLabel="All items"
+              options={ITEM_CATEGORIES.map((value) => ({ value, label: humanise(value) }))}
+            />
+          </>
         }
       />
 
+      <Suspense fallback={<SkeletonRows rows={2} />}>
+        <Duplicates tenantId={session.tenantId} writable={writable} />
+      </Suspense>
+
       <Suspense key={JSON.stringify(params)} fallback={<SkeletonRows rows={6} />}>
-        <ItemList params={params} />
+        <ItemList params={params} tenantId={session.tenantId} />
       </Suspense>
 
       {writable ? <NewItemForm tenantId={session.tenantId} /> : null}
@@ -57,11 +71,61 @@ export default async function ItemsPage({ searchParams }: { searchParams: Promis
   );
 }
 
-async function ItemList({ params }: { params: Search }) {
+/**
+ * Possible duplicates (brief 3.5): two or more active items under one name.
+ * Each can be made inactive here — soft, so every old job and invoice keeps it.
+ */
+async function Duplicates({ tenantId, writable }: { tenantId: string; writable: boolean }) {
+  const supabase = await createClient();
+  const { data } = await supabase.from("items")
+    .select("id, item_code, name, status, sell_price")
+    .eq("tenant_id", tenantId).is("deleted_at", null)
+    .returns<Array<{ id: string; item_code: string | null; name: string; status: string; sell_price: number | null }>>();
+  const groups = findDuplicateItems(data ?? []);
+  if (groups.length === 0) return null;
+
+  return (
+    <Card title="Possible duplicates"
+          description={`${groups.length} name${groups.length === 1 ? " is" : "s are"} used by more than one active code. Keep the one you price on and make the others inactive — they stay on old jobs and invoices.`}>
+      <ul className="space-y-4">
+        {groups.slice(0, 12).map((group) => (
+          <li key={group[0]!.id}>
+            <p className="text-sm font-semibold">{group[0]!.name}</p>
+            <ul className="mt-1 divide-y rounded-lg border">
+              {group.map((item) => (
+                <li key={item.id} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 text-sm">
+                  <span>
+                    <a href={`/items/${item.id}`} className="font-mono font-medium text-primary hover:underline">
+                      {item.item_code ?? "no code"}
+                    </a>
+                    <span className="text-muted-foreground"> · {money(item.sell_price)} · </span>
+                    <StatusBadge status={item.status} />
+                  </span>
+                  {writable ? (
+                    <form action={setItemActive}>
+                      <input type="hidden" name="id" value={item.id} />
+                      <input type="hidden" name="status" value={item.status === "active" ? "inactive" : "active"} />
+                      <SubmitButton size="md" variant="secondary" pendingLabel="Saving…">
+                        {item.status === "active" ? "Make inactive" : "Make active"}
+                      </SubmitButton>
+                    </form>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          </li>
+        ))}
+      </ul>
+    </Card>
+  );
+}
+
+async function ItemList({ params, tenantId }: { params: Search; tenantId: string }) {
   const supabase = await createClient();
   let query = supabase
     .from("items")
     .select(ITEM_COLUMNS)
+    .eq("tenant_id", tenantId)
     .is("deleted_at", null)
     // By code, because that is what the list is scanned by. Staff look for
     // TOW001 and read down; alphabetical by name puts the towels in three places.
@@ -69,6 +133,7 @@ async function ItemList({ params }: { params: Search }) {
     .order("name");
 
   if (params.category) query = query.eq("category", params.category);
+  if (params.status === "active" || params.status === "inactive") query = query.eq("status", params.status);
   if (params.q) {
     const term = `%${params.q}%`;
     // The code first, because typing `TOW` is how staff search.

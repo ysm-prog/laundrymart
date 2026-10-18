@@ -1,0 +1,39 @@
+name: E2E (golden path)
+# Darshan's BA review, section 5. Runs the golden path against a Vercel preview
+# whose Supabase project is a seeded branch. Never against production: the
+# preview URL is an input, and the logins are the seeded branch's own.
+on:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: "Vercel preview URL (backed by a seeded Supabase branch, never production)"
+        required: true
+jobs:
+  golden-path:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      E2E_BASE_URL: ${{ inputs.base_url }}
+      E2E_OWNER_EMAIL: ${{ secrets.E2E_OWNER_EMAIL }}
+      E2E_OWNER_PASSWORD: ${{ secrets.E2E_OWNER_PASSWORD }}
+      E2E_BOARD_EMAIL: ${{ secrets.E2E_BOARD_EMAIL }}
+      E2E_BOARD_PASSWORD: ${{ secrets.E2E_BOARD_PASSWORD }}
+      E2E_BOARD_NAME: ${{ vars.E2E_BOARD_NAME || 'Board 1' }}
+      E2E_ITEM_CODES: ${{ vars.E2E_ITEM_CODES }}
+      # Optional: the seeded branch's own invoice details, for the second half of
+      # step 6 (Issue passes once they are set). Never ATS's real ones.
+      E2E_INVOICE_ABN: ${{ secrets.E2E_INVOICE_ABN }}
+      E2E_INVOICE_ADDRESS: ${{ secrets.E2E_INVOICE_ADDRESS }}
+      E2E_INVOICE_ACCOUNT_NAME: ${{ secrets.E2E_INVOICE_ACCOUNT_NAME }}
+      E2E_INVOICE_BSB: ${{ secrets.E2E_INVOICE_BSB }}
+      E2E_INVOICE_ACCOUNT_NUMBER: ${{ secrets.E2E_INVOICE_ACCOUNT_NUMBER }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with: { node-version: "22", cache: "npm" }
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npx playwright test
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with: { name: playwright-report, path: playwright-report, retention-days: 14 }

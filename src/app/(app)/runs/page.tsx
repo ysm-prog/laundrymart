@@ -13,6 +13,8 @@ import {
 import { SequenceBoard } from "./sequence-board";
 import { MoveToBoard } from "./move-to-board";
 
+const MOVABLE_STATUSES = new Set(["assigned", "out_for_delivery"]);
+
 export const dynamic = "force-dynamic";
 
 export const metadata = { title: "Runs" };
@@ -209,8 +211,12 @@ async function BoardDay({
       {canWrite && boards.length > 1 ? (
         <MoveToBoard
           date={date} fromBoard={board} boards={boards}
+          // Only work still to deliver (brief 2.1): a delivered job is history, and
+          // offering to move it produced a refusal the round could not explain.
           jobs={sequenceStops.flatMap((stop) =>
-            stop.jobs.map((job) => ({ ...job, customerName: stop.customerName })))}
+            stop.jobs
+              .filter((job) => MOVABLE_STATUSES.has(job.status ?? ""))
+              .map((job) => ({ ...job, customerName: stop.customerName })))}
         />
       ) : null}
     </div>

@@ -9,7 +9,74 @@ where that is genuinely what it is. The multi-tenancy architecture stays: one op
 fact about today's data, not a reason to drop `tenant_id`, RLS, or §23's rule that a read feeding a
 write names its tenant.
 
-## Latest: #77 and #78 merged and on Prod (2026-10-12)
+## Latest: Xero and email mocked (2026-10-18), `claude/relaxed-faraday-4ey58h-mocks`
+Tests only, stacked on Phase 3. The brief's rule 5 ("mock both") and section 5's mocked Xero payload:
+`push-mocked`, `push-payment-mocked`, `email/send-mocked`, `invoices/send-mocked`, over a recording
+fake client in `src/test-support/`. First `vi.mock` in the suite. The void push and the token
+refresh followed on `claude/relaxed-faraday-4ey58h-mocks2` (`push-void-mocked`, `tokens-mocked`),
+so every Xero call the app makes is now driven against a stubbed `fetch`.
+
+## Previously: Darshan's BA review, Phase 3 (2026-10-18), `claude/relaxed-faraday-4ey58h-phase3`
+Items 3.1–3.10, **stacked on Phase 2** (#85), which is stacked on #82. Same one-pass instruction.
+CLAUDE.md's Phase 3 changelog entry and §6 have the detail.
+- **0057 written, NOT applied.** Apply after 0056 and before Phase 3 merges — it only adds the
+  `operations` key to `save_tenant_settings`; without it Settings › How you work refuses to save
+  (22023, said in words). Changes no row.
+- Rail is five areas (Today, Laundry, Deliveries, Customers, Billing); the rest is in the account
+  menu. Money is "Billing", its old Billing tab "By period". `/laundry`, `/deliveries`, `/money`
+  redirect.
+- Today is an inbox of five sections; Laundry opens on a five-column board with bulk Mark ready /
+  Assign / Approve and a docket scan box; intake prefills from the last job, sets the return date
+  from the round or the turnaround, shows prices to a role that may read them, and prints a Code
+  128 docket.
+- **Plant hidden by default** (Settings › How you work) — hidden, not linked: no join from a batch
+  to a laundry job exists.
+- **Section 5's E2E spec is updated for Phase 3** (repeat intake held to ≤4 actions, docket scan,
+  Issue blocked then passing via `E2E_INVOICE_*` secrets) and **still never run** — it needs a
+  seeded Supabase branch + preview + login secrets, which only Darshan can set up.
+- Found on the way: the customer page's contact Name label pointed at the *site* form's input
+  (two fields called `name`); merged invoice lines kept the first job's count in the description;
+  moving a job between boards logged the old board's id.
+
+## Previously: Darshan's BA review, Phase 2 (2026-10-18), `claude/relaxed-faraday-4ey58h-phase2`
+Items 2.1–2.5, **stacked on Phase 1** (#82), so its PR waits for #82. Written in one pass under the
+same instruction. CLAUDE.md's Phase 2 changelog entry has the detail.
+- **0056 written, NOT applied.** Apply after 0053–0055 and **before** Phase 2 merges — My Runs and
+  both job pages select the proof columns. **It changes rows** (completes open stops whose jobs are
+  done — `JOB00025` at least — and moves emptied `in_progress` runs to `returning`).
+- What runs itself now: a delivery finishes its stop and run (trigger); Ready puts a job on the
+  customer's round; a cleanly priced job approves itself onto the draft; Start my day is one press;
+  Delivered is on each card with signature/photo/counts; Month end issues every ready draft.
+  Switches: Settings › Invoicing › Automation (assign and approve on; issue-per-job and email off).
+- **Found on the way:** 0034's restrictive insert on `laundry_order_activity` refused every
+  timeline row a board or driver wrote — silently. 0056 lets a round write its own job's timeline.
+- **The E2E spec has never run** (`e2e/golden-path.spec.ts`, `workflow_dispatch`): it needs a
+  seeded Supabase branch, a preview URL and secrets. The 4-action intake target is Phase 3.4.
+- **Not done:** any screen opened behind the auth gate; `npm audit`'s 9 advisories (pre-existing).
+
+## Previously: Darshan's BA review, Phase 1 (2026-10-18), `claude/relaxed-faraday-4ey58h`
+Items 1.1–1.10 except 1.7 (dropped — "Electro Services" is the product name), one PR into `Dev`.
+CLAUDE.md's 2026-10-18 entry has the detail. **Darshan's instruction mid-session: write it in one
+pass, no per-item tests or browser checks, docs once, verify once.**
+- **Three migrations, all written and NOT applied.** 0053 (issue guard) can follow the merge; **0054
+  (logo bucket) and 0055 (`billing_hold_reason`, received-at guard, `invoices.source` + backfill,
+  `receivables` settings key) must go on before it** — the queue, the register, Today and the Xero
+  gate select the new columns. 0055's backfill changes rows (marks the MYOB imports `import`).
+- **The side-by-side PDF screenshot is done** (`docs/screenshots/2026-10-18-invoice-pdf-vs-myob.png`,
+  embedded in the PR). Comparing the renders caught what measuring the template alone had missed —
+  hyphenated words ("Ex-ample"), the bank line's spacing (`BSB:…` / `No.…`, no space) and a set of
+  1.5–6pt offsets — all fixed; everything now sits within half a point vertically. **The repo is
+  public**: the template's customer, phone, email and bank details are blacked out in the image.
+- **Not done, and to say so:** a mocked end-to-end Xero push; any screen opened behind the auth
+  gate. The test-data clean-up has **not been run** — Darshan confirms the customer list (Test1,
+  Jay, ZZ TEST Demo Laundry, ZZ TEST – Claude BA, Core IT) first.
+- **Open for Darshan:** whether new invoices continue MYOB's 8-digit numbering (`next_number()`
+  untouched); whether an adjustment note's total should print **negative** as MYOB's does (ours
+  prints the credit positive); bank details, phone and email are his to enter in Settings › Invoicing.
+- Completion now prices the job on the **service-role** client (rounds and drivers read no price);
+  every read there names the tenant, and a test reads the source to keep it so.
+
+## Previously: #77 and #78 merged and on Prod (2026-10-12)
 `Dev` is at `426cb5a` and `Prod` at `26fb2a1` (#79). The trees are identical. 0051 and 0052 are
 **live** (Darshan applied them through the SQL editor). The ledger has 57 entries, verified over the
 connector, and advisors are at 30. CI is green on Dev (run 342) and on Prod. CLAUDE.md's merge

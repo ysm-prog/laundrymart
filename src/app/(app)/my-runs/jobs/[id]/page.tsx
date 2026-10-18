@@ -6,7 +6,6 @@ import { can } from "@/lib/roles";
 import {
   Badge, ButtonLink, Card, Notice, PageContainer, PageHeader, cx, humanise,
 } from "@/components/ui";
-import { SubmitButton } from "@/components/form";
 import {
   ORDER_STATUS_LABELS, describeItemWithOwnership, type OrderStatus,
 } from "@/lib/domain/laundry-orders";
@@ -15,7 +14,9 @@ import {
 } from "@/lib/domain/timezone";
 import { boardById, loadBoardJob } from "@/lib/runs/my-runs";
 import { DriverInstructions } from "@/components/driver-instructions";
-import { markJobDelivered } from "../../actions";
+import { DeliverButton } from "../../deliver-sheet";
+import { deliverableLines } from "../../run-view";
+import { DeliveryProof } from "@/components/delivery-proof";
 
 export const metadata = { title: "Job" };
 export const dynamic = "force-dynamic";
@@ -73,6 +74,14 @@ export default async function BoardJobPage({
   const board = job.assigned_board_id
     ? await boardById(supabase, session.tenantId, job.assigned_board_id)
     : null;
+  const deliveredBoard = job.delivered_board_id && job.delivered_board_id !== job.assigned_board_id
+    ? await boardById(supabase, session.tenantId, job.delivered_board_id)
+    : job.delivered_board_id ? board : null;
+  const { data: deliveredDriver } = job.delivered_driver_id
+    ? await supabase.from("drivers").select("full_name")
+        .eq("tenant_id", session.tenantId).eq("id", job.delivered_driver_id)
+        .maybeSingle<{ full_name: string }>()
+    : { data: null };
 
   const finished = job.status === "completed" || job.status === "cancelled";
   const deliverable = job.status === "assigned" || job.status === "out_for_delivery";
@@ -178,6 +187,18 @@ export default async function BoardJobPage({
 
         </Card>
 
+        <DeliveryProof
+          tenantId={session.tenantId}
+          deliveredAt={job.status === "completed" ? job.completed_at : null}
+          receivedBy={job.delivery_received_by ?? null}
+          signaturePath={job.delivery_signature_path ?? null}
+          photoPaths={job.delivery_photo_paths ?? null}
+          short={job.delivery_short ?? null}
+          quantities={job.delivery_quantities ?? null}
+          boardName={deliveredBoard?.name ?? null}
+          driverName={deliveredDriver?.full_name ?? null}
+        />
+
         {finished ? (
           <Notice tone="success" title="Nothing left to do">
             This job is {ORDER_STATUS_LABELS[job.status as OrderStatus]?.toLowerCase()}.
@@ -187,30 +208,13 @@ export default async function BoardJobPage({
             It is handed over at the counter, so it never goes out on a run.
           </Notice>
         ) : canDeliver && deliverable ? (
-          <Card title="At the door">
-            <form action={markJobDelivered} className="space-y-3">
-              <input type="hidden" name="order_id" value={job.id} />
-              <input type="hidden" name="return_to" value={backTo} />
-              <label htmlFor="delivery-note" className="block text-sm font-medium">
-                Delivery notes (optional)
-              </label>
-              <textarea
-                id="delivery-note"
-                name="note"
-                rows={2}
-                placeholder="Left with reception"
-                className="min-h-11 w-full rounded-lg border border-strong bg-surface px-3 py-2
-                           text-sm shadow-xs focus:border-primary
-                           focus:ring-2 focus:ring-primary/25"
-              />
-              {/* The date and the time are the system's to record, not the
-                  round's to type: it is happening now, at the door. */}
-              <p className="text-sm text-muted-foreground">
-                Delivered today, {formatAdelaideDate(getAdelaideToday(), "medium")}. The time and
-                your name are recorded automatically.
-              </p>
-              <SubmitButton size="lg" pendingLabel="Recording…">Mark Delivered</SubmitButton>
-            </form>
+          <Card title="At the door"
+                description="Take a signature, a photo if it helps, and check the counts. The time, the round and the driver are recorded for you.">
+            <DeliverButton
+              orderId={job.id} orderNumber={job.order_number}
+              customerName={job.customers?.business_name ?? "Unknown customer"}
+              lines={deliverableLines(job)} returnTo={backTo} size="lg"
+            />
           </Card>
         ) : canDeliver ? (
           <Notice tone="info">

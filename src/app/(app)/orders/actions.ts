@@ -14,12 +14,15 @@ import { parseOrderItems } from "./order-items";
 import {
   DELIVERY_WINDOWS, ORDER_PRIORITIES, ORDER_STATUS_LABELS, RECEIVED_VIA,
   STAGE_CONTROLS, capabilitiesForMove, checkTransition, isOrderStatus,
-  leavesTheRound, receivedInstant, validateItem,
+  leavesTheRound, receivedInstant, receivedInFuture, RECEIVED_IN_FUTURE_MESSAGE, validateItem,
   type OrderItemInput, type OrderStatus,
 } from "@/lib/domain/laundry-orders";
 import { businessToday, isClockTime, toInstant } from "@/lib/domain/timezone";
 import { logOrderActivity } from "@/lib/orders/activity";
+import { autoAssignOnReady, autoAssignSentence } from "@/lib/runs/auto-assign";
 import { completeLaundryOrder } from "@/lib/orders/complete";
+import { autoPriceSentence } from "@/lib/domain/job-pricing";
+import { autoApproveSentence } from "@/lib/orders/auto-approve";
 import { retireStopIfEmpty } from "@/lib/runs/assign";
 
 /**
@@ -318,6 +321,11 @@ export async function createOrder(formData: FormData): Promise<void> {
       && !can(session.role, "orders.manage")) {
     return fail(backToForm, "Only a manager can record a job as received on an earlier day.");
   }
+  // And never on a later one, for anybody (brief 1.5). 0055's trigger is the
+  // boundary; this is the sentence in front of it.
+  if (receivedInFuture(receivedInstant(parsed.data.received_date))) {
+    return fail(backToForm, RECEIVED_IN_FUTURE_MESSAGE);
+  }
 
   const { data: customer, error: customerError } = await supabase
     .from("customers")
@@ -406,7 +414,10 @@ export async function createOrder(formData: FormData): Promise<void> {
     // job they are about to be shown and the thing that stops it being taken in
     // a second time.
     ? `Job ${order.order_number} created from the collection.`
-    : `Job ${order.order_number} created.`);
+    : `Job ${order.order_number} created.`,
+    // The docket goes in the bag (brief 3.4): its barcode is what the Laundry
+    // board scans to mark the job ready.
+    { href: `/orders/${order.id}/docket`, label: "Print the docket" });
 }
 
 /* ----------------------------------------------------------------- update */
@@ -466,13 +477,24 @@ export async function updateOrder(formData: FormData): Promise<void> {
       "That customer could not be found — please select one from the list.");
   }
 
-  const deliveryAddress = await resolveDeliveryAddress(supabase, session.tenantId, parsed.data);
   // The stored time of day is carried over, so correcting the received *date*
   // does not move an 8am drop-off to whenever the correction was made.
-  const row = toRow(
-    parsed.data, deliveryAddress,
-    receivedInstant(parsed.data.received_date, existing.received_at),
-  );
+  const composed = receivedInstant(parsed.data.received_date, existing.received_at);
+  // The form carries the date and the time to the minute, so an edit that left
+  // the date alone writes back the stored instant exactly — seconds and all —
+  // rather than a value a few seconds off that would read as a change.
+  const unchanged = Math.floor(Date.parse(composed) / 60_000)
+    === Math.floor(Date.parse(existing.received_at) / 60_000);
+  const received = unchanged ? existing.received_at : composed;
+  // A *change* to a future day is refused (brief 1.5); a job that already
+  // carries one (LJ00031) can still be edited without touching it, which is
+  // what 0055's trigger allows too — it is reported, not rewritten.
+  if (!unchanged && receivedInFuture(received)) {
+    return fail(backTo, RECEIVED_IN_FUTURE_MESSAGE);
+  }
+
+  const deliveryAddress = await resolveDeliveryAddress(supabase, session.tenantId, parsed.data);
+  const row = toRow(parsed.data, deliveryAddress, received);
 
   const { data: before } = await supabase
     .from("laundry_orders")
@@ -615,17 +637,25 @@ export async function advanceOrder(formData: FormData): Promise<void> {
     summary: `${existing.order_number}: ${existing.status} → ${target}`,
   });
 
+  // Ready means assigned (brief 2.2): a delivery job whose customer has a round
+  // goes onto it now, through the same assignment routine a person would use.
+  // Never fails the move — the job is Ready whatever this makes of it.
+  const autoAssigned = target === "ready_for_delivery"
+    ? await autoAssignOnReady(supabase, session, parsed.data.id)
+    : null;
+
   revalidatePath(LIST);
   revalidatePath(detail);
   // A status move can now take a job off a round, so the round's own day and the
   // driver's copy of the job are stale as well. Same set `removeJobAssignment`
   // refreshes, for the same reason.
-  if (offTheRound) {
+  if (offTheRound || autoAssigned?.state === "assigned") {
     revalidatePath("/my-runs");
     revalidatePath(`/my-runs/jobs/${parsed.data.id}`);
   }
   return done(detail,
-    `Job ${existing.order_number} is now ${ORDER_STATUS_LABELS[target].toLowerCase()}.`);
+    `Job ${existing.order_number} is now ${ORDER_STATUS_LABELS[target].toLowerCase()}.`
+    + (autoAssigned ? autoAssignSentence(autoAssigned) : ""));
 }
 
 /* ------------------------------------------------------------- completion */
@@ -677,8 +707,17 @@ export async function completeOrder(formData: FormData): Promise<void> {
 
   revalidatePath(LIST);
   revalidatePath(detail);
+  revalidatePath("/invoices/awaiting");
+  // What the automatic pricing made of it (brief 1.3) — said only to somebody
+  // who may read a price. The counter's own role does not hold `billing.read`.
+  // Auto-approved (brief 2.3) replaces "check and approve it", which would then be untrue.
+  const priced = !can(session.role, "billing.read") || !result.pricing
+    ? ""
+    : result.approval?.state === "approved"
+      ? autoApproveSentence(result.approval)
+      : autoPriceSentence(result.pricing);
   return done(detail,
-    `Job ${existing.order_number} ${delivered ? "delivered" : "collected"} and completed.`);
+    `Job ${existing.order_number} ${delivered ? "delivered" : "collected"} and completed.${priced}`);
 }
 
 /* ---------------------------------------------------------------- cancel */

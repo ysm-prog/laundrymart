@@ -23,8 +23,10 @@
  * linen rental, not the bag in front of you.
  */
 
-import { lineAmount, round2, type ChargeType } from "@/lib/domain/pricing";
+import { formatMoney, lineAmount, round2, type ChargeType } from "@/lib/domain/pricing";
 import { ITEM_TYPE_LABELS, describeItem, type ItemType, type OrderItemInput } from "@/lib/domain/laundry-orders";
+import { taxableFromTaxCode } from "@/lib/domain/accounts";
+import { lineRateFromItem } from "@/lib/domain/items";
 
 /** A priced line on the customer's rate card, as this module needs it. */
 export type RateLine = {
@@ -58,8 +60,44 @@ export type LaundryListPrice = {
   unitPrice: number;
   bagPrice: number | null;
   taxable: boolean;
-  source: "customer" | "default";
+  /**
+   * `customer` and `default` are the two rows of the laundry price list (0018);
+   * `item` is the item master's own selling price, the last tier (brief 1.3).
+   */
+  source: "customer" | "default" | "item";
 };
+
+/**
+ * The item master's selling prices as the last pricing tier (brief 1.3): rate
+ * card, then the customer's laundry price, then the house laundry price, then
+ * **the item's own selling price** — the same order a person working the
+ * Charges card already gets from `liveItemRate`, so "Price this job" and a
+ * hand-picked item cannot price one code two ways.
+ *
+ * A selling price is converted the way every item price becomes money here
+ * (`lineRateFromItem`): a GST-exclusive price is grossed up, because a line
+ * amount is GST-inclusive (0043). The item's tax code answers whether it is
+ * taxable, and an item with no code is taxable — the app's default. A zero or
+ * missing price is no price at all, never a free line.
+ */
+export function itemSellPriceList(
+  rows: readonly {
+    id: string; sell_price: number | string | null;
+    sell_price_basis?: string | null; tax_code?: string | null;
+  }[],
+  gstRate: number,
+): Map<string, LaundryListPrice> {
+  const prices = new Map<string, LaundryListPrice>();
+  for (const row of rows) {
+    const listed = Number(row.sell_price ?? 0);
+    if (!Number.isFinite(listed) || listed <= 0) continue;
+    const taxable = taxableFromTaxCode(row.tax_code) ?? true;
+    const unitPrice = lineRateFromItem(listed, row.sell_price_basis ?? null, taxable, gstRate);
+    if (unitPrice <= 0) continue;
+    prices.set(row.id, { unitPrice, bagPrice: null, taxable, source: "item" });
+  }
+  return prices;
+}
 
 /** One line as it will be written to `job_charge_snapshots`. */
 export type JobChargeLine = {
@@ -260,8 +298,19 @@ export function priceJob(input: {
    * kind of towel.
    */
   itemPriceList?: ReadonlyMap<string, LaundryListPrice> | null;
+  /**
+   * The item master's own selling prices (`itemSellPriceList`), consulted last —
+   * only where the rate card and both rows of the price list are silent.
+   */
+  itemSellPrices?: ReadonlyMap<string, LaundryListPrice> | null;
+  /**
+   * The item master's names, keyed on id (brief 3.5). A line for an item says
+   * what the item is — "Towel Ultra 70×150 White × 10" — rather than the kind of
+   * laundry it belongs to ("Towels — 10"), which is all the invoice used to say.
+   */
+  itemNames?: ReadonlyMap<string, string> | null;
 }): JobPricingResult {
-  const { items, rateLines, rateCard, priceList, itemPriceList } = input;
+  const { items, rateLines, rateCard, priceList, itemPriceList, itemSellPrices, itemNames } = input;
 
   // A rate card may carry more than one line for the same kind of laundry
   // (a wash-only rate and a rental rate for towels, say). The first wins, which
@@ -297,14 +346,17 @@ export function priceJob(input: {
   const unpriced: JobPricingResult["unpriced"] = [];
 
   for (const item of items) {
-    const label = item.item_type === "other"
+    const kind = item.item_type === "other"
       ? (item.custom_description?.trim() || "Other")
       : ITEM_TYPE_LABELS[item.item_type as ItemType] ?? item.item_type;
+    // The item's own name where the row names an item; the kind of laundry
+    // only for a row that does not (brief 3.5).
+    const label = (item.item_id ? itemNames?.get(item.item_id)?.trim() : undefined) || kind;
 
     const rate = rateFor(item);
     const measure = billableMeasure(item);
     const gap = (reason: UnpricedReason) => {
-      unpriced.push({ itemType: item.item_type, label, description: describeItem(item), reason });
+      unpriced.push({ itemType: item.item_type, label, description: describeItem(item, label), reason });
     };
 
     // Nothing to multiply by: a bulk lot recorded as a note alone. The gap is in
@@ -318,7 +370,9 @@ export function priceJob(input: {
       // Same specificity rule one tier down: this item's own listed price, then
       // the price for its kind of laundry.
       const listed = (item.item_id ? itemPriceList?.get(item.item_id) : undefined)
-        ?? priceList?.get(item.item_type);
+        ?? priceList?.get(item.item_type)
+        // The last tier: what the item master says the item sells for.
+        ?? (item.item_id ? itemSellPrices?.get(item.item_id) : undefined);
       if (!listed) {
         // Which of the two gaps it is depends on whether there was a code to
         // look up at all. A row naming an item that nobody has priced wants a
@@ -362,7 +416,7 @@ export function priceJob(input: {
       // line rather than sent to the reviewer as a gap.
       lines.push({
         sequence: lines.length + 1,
-        description: `${label} — ${quantity} included in the rate`,
+        description: `${label} × ${quantity}, included in the rate`,
         charge_type: asChargeType(rate.charge_type),
         quantity,
         unit_price: 0,
@@ -383,8 +437,8 @@ export function priceJob(input: {
     lines.push({
       sequence: lines.length + 1,
       description: included > 0
-        ? `${label} — ${billable} of ${quantity} (${included} included)`
-        : `${label} — ${billable}`,
+        ? `${label} × ${billable} of ${quantity} (${included} included)`
+        : `${label} × ${billable}`,
       charge_type: asChargeType(rate.charge_type),
       quantity: billable,
       unit_price: round2(rate.unit_price),
@@ -465,7 +519,7 @@ function priceFromList(
 
   const detail = useBags
     ? `${quantity} ${quantity === 1 ? "bag" : "bags"} of ${label}`
-    : `${label} — ${quantity}`;
+    : `${label} × ${quantity}`;
 
   return {
     sequence,
@@ -485,9 +539,47 @@ function priceFromList(
     // billed" is a different question from "which agreement priced it".
     source_item_id: item.item_id ?? null,
     source_laundry_item_type: item.item_type,
-    pricing_model: useBags ? "per_bag" : "per_item",
+    // `item_price` tells a reviewer the item's own selling price answered, not
+    // the list (`chargeSourceLabel`, `pricingSourceLabel`).
+    pricing_model: price.source === "item" ? "item_price" : useBags ? "per_bag" : "per_item",
     gl_account_id: null,
   };
+}
+
+/**
+ * Whether a job still needs a person to finish its price (brief 1.3): anything
+ * left unpriced, or nothing priced at all. Stored on the job as
+ * `billing_hold_reason = 'needs_price'` (0055), which is what the billing
+ * queue's **Needs a price** list reads.
+ */
+export function needsPrice(priced: { lines: readonly unknown[]; unpriced: readonly unknown[] }): boolean {
+  return priced.lines.length === 0 || priced.unpriced.length > 0;
+}
+
+/** What automatic pricing at completion did (brief 1.3) — see `autoPriceCompletedJob`. */
+export type AutoPriceOutcome =
+  /** Priced in full; the job is ready to check and approve. */
+  | { state: "priced"; orderNumber: string; lines: number; subtotal: number; source: string }
+  /** Some or all of it could not be priced; it is on the Needs a price list. */
+  | { state: "needs_price"; orderNumber: string; lines: number; unpriced: number; note: string }
+  /** Not touched: already priced, not awaiting review, or not found. */
+  | { state: "skipped" };
+
+/**
+ * The sentence the counter reads after finishing a job, appended to "completed".
+ * Empty when nothing was priced — and for a role that cannot see money the
+ * caller does not ask, because a price is not theirs to read.
+ */
+export function autoPriceSentence(outcome: AutoPriceOutcome): string {
+  if (outcome.state === "priced") {
+    return ` Priced automatically at ${formatMoney(outcome.subtotal)} from ${outcome.source} — check and approve it in Billing › Awaiting invoice.`;
+  }
+  if (outcome.state === "needs_price") {
+    return outcome.lines > 0
+      ? ` Some of its laundry has no price, so it is on the Needs a price list in Billing › Awaiting invoice.${outcome.note}`
+      : ` Nothing on it could be priced, so it is on the Needs a price list in Billing › Awaiting invoice.${outcome.note}`;
+  }
+  return "";
 }
 
 /** What the priced lines add up to, GST included (a line amount is inclusive since 0043). */
@@ -526,15 +618,22 @@ function asChargeType(value: string): ChargeType {
  * cannot be described differently from one.
  */
 export function pricingSourceLabel(
-  lines: readonly Pick<JobChargeLine, "source_agreement_id">[],
+  lines: readonly (Pick<JobChargeLine, "source_agreement_id"> & { pricing_model?: string | null })[],
   card: { agreement_number: string; version: number } | null,
 ): string {
   const list = "the laundry price list";
-  if (!card) return list;
+  const itemPrice = "the item's selling price";
 
-  const named = `${card.agreement_number} v${card.version}`;
-  const fromCard = lines.some((line) => line.source_agreement_id);
-  const fromList = lines.some((line) => !line.source_agreement_id);
-  if (fromCard && fromList) return `${named} and ${list}`;
-  return fromCard ? named : list;
+  const fromCard = Boolean(card) && lines.some((line) => line.source_agreement_id);
+  const fromItem = lines.some((line) => !line.source_agreement_id && line.pricing_model === "item_price");
+  const fromList = lines.some((line) => !line.source_agreement_id && line.pricing_model !== "item_price");
+
+  const parts = [
+    ...(fromCard && card ? [`${card.agreement_number} v${card.version}`] : []),
+    ...(fromList ? [list] : []),
+    ...(fromItem ? [itemPrice] : []),
+  ];
+  if (parts.length === 0) return list;
+  if (parts.length === 1) return parts[0]!;
+  return `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
 }

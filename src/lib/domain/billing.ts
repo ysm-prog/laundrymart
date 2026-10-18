@@ -304,3 +304,55 @@ export function jobStatusOnInvoice(jobStatus: string, invoiceStatus: string): st
   if (jobStatus === "invoice_sent") return BILLING_STATUS_LABELS.invoice_sent;
   return "Invoice issued";
 }
+
+/**
+ * Where a customer's period stands on Billing › By period (brief 1.4, gap G4) —
+ * read from the **invoices' own status**, not from the jobs'. A job on a draft
+ * carries `invoice_generated` exactly as one on an issued invoice does, so
+ * INV00004 and INV00005, still drafts from September, read "Invoiced" on that
+ * screen. A draft is not an invoice the customer has: it is "Draft – not
+ * issued", and nothing issues it on its own.
+ */
+export type PeriodInvoiceState = "not_invoiced" | "draft" | "part_invoiced" | "invoiced";
+
+export const PERIOD_INVOICE_STATE_LABELS: Record<PeriodInvoiceState, string> = {
+  not_invoiced: "Not invoiced",
+  draft: "Draft – not issued",
+  part_invoiced: "Part invoiced",
+  invoiced: "Invoiced",
+};
+
+export function periodInvoiceState(counts: {
+  jobCount: number;
+  /** Jobs on an invoice that has been issued (any status but draft or void). */
+  issuedCount: number;
+  /** Jobs on a draft that has not been issued yet. */
+  draftCount: number;
+}): PeriodInvoiceState {
+  if (counts.jobCount > 0 && counts.issuedCount >= counts.jobCount) return "invoiced";
+  if (counts.issuedCount > 0) return "part_invoiced";
+  if (counts.draftCount > 0) return "draft";
+  return "not_invoiced";
+}
+
+/** Whether an invoice in this status has been issued to the customer. */
+export function invoiceIsIssued(status: string | null | undefined): boolean {
+  return Boolean(status) && status !== "draft" && status !== "void";
+}
+
+/**
+ * What an invoice says for its date (brief 3.10, G22).
+ *
+ * A draft's `issue_date` is the day it was *opened*, and it is re-stamped the
+ * moment it is issued (§30) — so printing "Issued 3 Oct" on a draft is a date
+ * that is about to be wrong and was never true. A draft says when it will be
+ * dated instead; everything else says the day it was issued.
+ */
+export const DRAFT_DATE_TEXT = "Will be dated when issued";
+
+export function issueDateText(
+  status: string, issueDate: string | null | undefined, format: (date: string) => string,
+): string {
+  if (status === "draft") return DRAFT_DATE_TEXT;
+  return issueDate ? format(issueDate) : "—";
+}

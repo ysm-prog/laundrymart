@@ -122,7 +122,7 @@ async function remove(clientRefs: string[]): Promise<void> {
   });
 }
 
-function dataUrlToBlob(dataUrl: string): Blob | null {
+export function dataUrlToBlob(dataUrl: string): Blob | null {
   const match = /^data:([^;,]+)(;base64)?,(.*)$/s.exec(dataUrl);
   if (!match) return null;
   const [, contentType = "application/octet-stream", isBase64, payload = ""] = match;

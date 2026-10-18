@@ -320,3 +320,42 @@ describe("resolveAccountCode", () => {
     expect(resolveAccountCode({ line: "  200  " })).toBe("200");
   });
 });
+
+// Brief 1.2 (18 October 2026): app prices are GST-inclusive, so an invoice of
+// $25.08 is $25.08 in Xero with $2.28 of GST inside it — not $27.59.
+describe("the brief's worked example: $25.08 with $2.28 GST", () => {
+  const payload = buildInvoicePayload({
+    invoice: INVOICE,
+    lines: [
+      { description: "Towels - Black", quantity: 10, unit_price: 2.2, taxable: true },
+      { description: "Delivery", quantity: 1, unit_price: 3.08, taxable: true },
+    ],
+    customer: CUSTOMER,
+  });
+
+  it("says the line amounts already include the tax", () => {
+    expect(payload.LineAmountTypes).toBe("Inclusive");
+  });
+
+  it("totals $25.08 in Xero, with $2.28 of GST inside it", () => {
+    expect(payloadTotal(payload)).toBe(25.08);
+    expect(Math.round(25.08 * (0.1 / 1.1) * 100) / 100).toBe(2.28);
+  });
+
+  it("would have been $27.59 under the exclusive basis — the defect this pins", () => {
+    expect(payloadTotal({ ...payload, LineAmountTypes: "Exclusive" })).toBe(27.59);
+  });
+});
+
+describe("an imported MYOB invoice is never pushed (brief 1.2)", () => {
+  it("refuses an import whatever its status", () => {
+    for (const status of ["issued", "overdue", "part_paid", "paid"]) {
+      expect(canPushToXero(status, "import"), status).toBe(false);
+      expect(canPushToXero(status, "app"), status).toBe(true);
+    }
+  });
+  it("keeps refusing a draft or a void from the app", () => {
+    expect(canPushToXero("draft", "app")).toBe(false);
+    expect(canPushToXero("void", "app")).toBe(false);
+  });
+});

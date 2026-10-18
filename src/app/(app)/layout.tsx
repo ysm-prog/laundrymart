@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import { requireSession, switchableTenants, type Session } from "@/lib/auth/context";
-import { NAV_GROUP_LABELS, navigationFor } from "@/lib/nav";
+import { navigationFor, railNavigation } from "@/lib/nav";
+import { parseOperations } from "@/lib/domain/operations-settings";
 import { ROLE_LABELS } from "@/lib/roles";
 import { createClient } from "@/lib/supabase/server";
 import { today } from "@/lib/format";
@@ -14,7 +15,7 @@ import { unreadNotificationCount } from "@/lib/notifications/query";
 /**
  * Counts for the sidebar badges.
  *
- * Five head-only counts, issued together — no rows come back, just the numbers,
+ * Six head-only counts, issued together — no rows come back, just the numbers,
  * and each is served by an existing index. They are the reason the rail is worth
  * looking at, so they run inline rather than streaming in afterwards; a badge
  * that appears a second late is a badge nobody trusts.
@@ -22,6 +23,17 @@ import { unreadNotificationCount } from "@/lib/notifications/query";
  * Any failure yields no badges at all rather than a wrong one: an empty rail is
  * honest, a stale count is not.
  */
+async function tenantOperations(tenantId: string) {
+  try {
+    const supabase = await createClient();
+    const { data } = await supabase.from("tenants").select("settings").eq("id", tenantId)
+      .maybeSingle<{ settings: unknown }>();
+    return parseOperations(data?.settings);
+  } catch {
+    return parseOperations(null);
+  }
+}
+
 async function navCounts(): Promise<NavCounts> {
   try {
     const supabase = await createClient();
@@ -30,12 +42,11 @@ async function navCounts(): Promise<NavCounts> {
     // No runs-today count: the rail no longer has a Runs row to hang it on, and
     // querying for a badge nothing renders is a request every page load pays for.
     const [
-      exceptions, batches, unpaid, overdueJobs, bills, awaitingInvoice, openDrafts,
+      exceptions, unpaid, overdueJobs, bills, awaitingInvoice, openDrafts,
     ] = await Promise.all([
       supabase.from("jobs").select("id", head).eq("status", "exception"),
-      supabase.from("production_batches").select("id", head)
-        .in("stage", ["received", "washing", "drying", "folding", "packing", "ready_for_dispatch"])
-        .is("deleted_at", null),
+      // No batch count since brief 3.9: the plant is behind a tenant switch
+      // and Linen moved to the account menu, so no rail row carries it.
       supabase.from("invoices").select("id", head)
         .in("status", ["issued", "part_paid", "overdue"]).is("deleted_at", null),
       // Late jobs. Computed, never stored — `due_date` is the generated column
@@ -65,7 +76,6 @@ async function navCounts(): Promise<NavCounts> {
 
     return {
       exceptions: exceptions.count ?? undefined,
-      batches: batches.count ?? undefined,
       unpaidInvoices: unpaid.count ?? undefined,
       overdueJobs: overdueJobs.count ?? undefined,
       unpaidBills: bills.count ?? undefined,
@@ -80,10 +90,10 @@ async function navCounts(): Promise<NavCounts> {
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   // Gate the whole group once; child pages reuse the memoised session.
   const session = await requireSession();
-  const items = navigationFor(session.role);
   // Both resolve to head-only counts; issued together so the bell is no slower
   // than the rail it sits beside.
-  const [counts, unread, cookieStore, tenants] = await Promise.all([
+  const [operations, counts, unread, cookieStore, tenants] = await Promise.all([
+    tenantOperations(session.tenantId),
     navCounts(),
     unreadNotificationCount(session),
     cookies(),
@@ -92,20 +102,18 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     switchableTenants(),
   ]);
 
+  // The plant screens are behind a tenant switch (brief 3.9).
+  const items = navigationFor(session.role, { plantStages: operations.plantStages });
+
   // Read here rather than in the browser so the rail paints at the right width
   // on the very first frame instead of snapping after hydration.
   const collapsed = cookieStore.get("es_rail")?.value === "collapsed";
 
-  // Which rail groups the person has shut, same reasoning and same lifetime.
-  // Stored as the *shut* ones so the default — everything the group data says —
-  // survives a release that adds a group, rather than a missing name reading as
-  // "closed".
-  const shut = new Set(
-    (cookieStore.get("es_nav")?.value ?? "").split("|").map(decodeURIComponent).filter(Boolean),
-  );
-  const openGroups = Object.fromEntries(
-    NAV_GROUP_LABELS.map((label) => [label, !shut.has(label)]),
-  );
+  // The areas set up once and visited occasionally live in the account menu
+  // (brief 3.1). Icons are resolved in the client menu, so only the label, the
+  // href and the icon name cross.
+  const { profile } = railNavigation(items);
+  const profileLinks = profile.map((item) => ({ href: item.href, label: item.label, icon: item.icon }));
 
   return (
     <AppShell
@@ -113,7 +121,6 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       counts={counts}
       tenantName={session.tenantName}
       defaultCollapsed={collapsed}
-      openGroups={openGroups}
       sectionSlot={<SectionNav items={items} />}
       headerSlot={
         <>
@@ -134,6 +141,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
               initials={initials(session)}
               tenantName={session.tenantName}
               tenants={tenants}
+              links={profileLinks}
             />
           </div>
         </>

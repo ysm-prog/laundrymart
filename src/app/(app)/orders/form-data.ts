@@ -2,6 +2,9 @@ import { requireSession } from "@/lib/auth/context";
 import { createClient } from "@/lib/supabase/server";
 import { listMembers, listStaff, withCurrentHolder } from "@/lib/directory";
 import type { JobCustomer, JobDriver, JobStaff } from "./job-form";
+import { can } from "@/lib/roles";
+import { attachListPrices } from "@/lib/items/list-prices";
+import type { PriceValue } from "@/lib/domain/laundry-prices";
 
 /**
  * Everything the create and edit forms need to render, loaded once.
@@ -53,6 +56,12 @@ export type JobCatalogueItem = {
   laundry_category: string | null;
   /** Read only to default the Rental / Own toggle (0051) — never to price. */
   rental_price: number | string | null;
+  /**
+   * The usual price on the laundry price list (brief 3.5) — shown in the item
+   * picker to a role that may read prices, absent for everybody else. The job
+   * form's running total is what prices the row for *this* customer.
+   */
+  list_price?: PriceValue | null;
 };
 
 /**
@@ -132,7 +141,11 @@ export async function loadJobFormData(
       .returns<JobCatalogueItem[]>(),
     listStaff(),
   ]);
-  const pickableStaff = withCurrentHolder(staff, await listMembers(), ensureStaffId);
+  // The office person looking after a job, never a round (brief 3.7): a
+  // board's shared login is the job's *round*, set on the Delivery card, and
+  // offering it here as well is what made the job page read as two owners.
+  const office = staff.filter((member) => member.roleValue !== "board" && member.roleValue !== "driver");
+  const pickableStaff = withCurrentHolder(office, await listMembers(), ensureStaffId);
 
   // First delivery site per customer wins; the query already sorts primaries up.
   const deliveryAddress = new Map<string, string>();
@@ -182,7 +195,11 @@ export async function loadJobFormData(
 
   return {
     customers,
-    catalogue: catalogueResult.data ?? [],
+    // Prices beside the codes (brief 3.5), only for a role that may read them —
+    // the usual price, since the customer is not chosen yet when the list loads.
+    catalogue: can(session.role, "pricing.read")
+      ? await attachListPrices(supabase, session.tenantId, null, catalogueResult.data ?? [])
+      : catalogueResult.data ?? [],
     drivers: driversResult.data ?? [],
     staff: pickableStaff,
     // Measured against what the search box actually covers, not against

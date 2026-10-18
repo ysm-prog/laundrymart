@@ -404,13 +404,19 @@ export const RECEIVED_VIA_OPTIONS: readonly ReceivedVia[] = ["driver_pickup", "c
 /**
  * The default on a new job, and the stored answer on an existing one.
  *
- * Most laundry is collected by a driver rather than carried in, so that is what
- * the form now opens on — the same reasoning that put the delivery fork on
- * "Deliver". An existing job answers with its own value: opening a drop-off to
- * fix a quantity must never quietly re-record how it arrived.
+ * **The default follows where the job was started from** (brief 3.4). Taken in
+ * at the counter it is a drop-off — `customer_dropoff` is the database's own
+ * column default, and the form used to override it to a driver pickup on
+ * every job typed at the desk. Taken in from a collection, or from a link that
+ * says so, it is a driver pickup. An existing job answers with its own value:
+ * opening a drop-off to fix a quantity must never quietly re-record how it
+ * arrived.
  */
-export function initialReceivedVia(order?: { received_via: string } | null): string {
-  return order?.received_via ?? "driver_pickup";
+export function initialReceivedVia(
+  order?: { received_via: string } | null,
+  entryDefault: ReceivedVia = "customer_dropoff",
+): string {
+  return order?.received_via ?? entryDefault;
 }
 
 /**
@@ -459,6 +465,32 @@ export function receivedInstant(date: string, existing?: string | null): string 
   const time = (existing ? toZonedTime(existing) : "") || businessNowTime();
   return toInstant(date, time);
 }
+
+/**
+ * How far ahead of now a receipt may be (brief 1.5): fifteen minutes, the
+ * drift allowed between a counter tablet's clock and the server's.
+ * `guard_laundry_order_received_at` (0055) is the boundary and uses the same
+ * figure.
+ */
+export const RECEIVED_FUTURE_TOLERANCE_MINUTES = 15;
+
+/**
+ * Whether a receipt is dated in the future — `LJ00031`, created on 17 October
+ * as received on the 19th. Compares instants, so the business timezone only
+ * matters to whoever composed the instant (`receivedInstant`, in Adelaide).
+ */
+export function receivedInFuture(instant: string, now: Date = new Date()): boolean {
+  const at = Date.parse(instant);
+  return Number.isFinite(at) && at > now.getTime() + RECEIVED_FUTURE_TOLERANCE_MINUTES * 60_000;
+}
+
+/** The instant past which a receipt is in the future — what the Data checks report filters on. */
+export function futureReceiptCutoff(now: Date = new Date()): string {
+  return new Date(now.getTime() + RECEIVED_FUTURE_TOLERANCE_MINUTES * 60_000).toISOString();
+}
+
+export const RECEIVED_IN_FUTURE_MESSAGE =
+  "The received date is in the future. Laundry can only be recorded as received today or earlier.";
 
 export const DELIVERY_WINDOWS = ["morning", "afternoon", "specific_time", "no_specific_time"] as const;
 export type DeliveryWindow = (typeof DELIVERY_WINDOWS)[number];

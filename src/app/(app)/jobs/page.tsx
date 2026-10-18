@@ -94,6 +94,7 @@ export default async function JobsPage({ searchParams }: { searchParams: Promise
         filters={customers.length > 0 ? [{
           name: "customer",
           label: "Customer",
+          searchable: true,
           value: params.customer,
           options: customers.map((customer) => ({
             value: customer.id, label: customer.business_name,

@@ -21,7 +21,7 @@ import type { NavItem } from "@/lib/nav";
  * renders at the right width on the first paint instead of snapping after it.
  */
 export function AppShell({
-  items, counts, tenantName, headerSlot, sectionSlot, defaultCollapsed, openGroups, children,
+  items, counts, tenantName, headerSlot, sectionSlot, defaultCollapsed, children,
 }: {
   items: NavItem[];
   counts?: NavCounts;
@@ -29,8 +29,6 @@ export function AppShell({
   headerSlot: ReactNode;
   sectionSlot: ReactNode;
   defaultCollapsed: boolean;
-  /** Which rail groups are open, read from a cookie in the layout. */
-  openGroups?: Record<string, boolean>;
   children: ReactNode;
 }) {
   const [collapsed, setCollapsed] = useState(defaultCollapsed);
@@ -92,7 +90,7 @@ export function AppShell({
       collapsed ? "lg:grid-cols-[4.5rem_1fr]" : "lg:grid-cols-[16rem_1fr]",
     )}>
       {/* ------------------------------------------------ desktop rail --- */}
-      <aside className="sticky top-0 hidden h-dvh flex-col border-r bg-sidebar lg:flex">
+      <aside className="sticky top-0 hidden h-dvh flex-col border-r bg-sidebar lg:flex print:hidden">
         <div className={cx(
           "flex h-16 flex-none items-center border-b border-sidebar-border",
           collapsed ? "justify-center px-2" : "px-4",
@@ -113,7 +111,7 @@ export function AppShell({
         </div>
 
         <div className="flex-1 overflow-y-auto px-2 py-3">
-          <AppNav items={items} counts={counts} collapsed={collapsed} openGroups={openGroups} />
+          <AppNav items={items} counts={counts} collapsed={collapsed} />
         </div>
 
         <div className="flex-none border-t border-sidebar-border p-2">
@@ -161,7 +159,7 @@ export function AppShell({
               </button>
             </div>
             <div className="flex-1 overflow-y-auto px-2 py-3">
-              <AppNav items={items} counts={counts} openGroups={openGroups}
+              <AppNav items={items} counts={counts}
                       onNavigate={() => setDrawerOpen(false)} />
             </div>
           </div>

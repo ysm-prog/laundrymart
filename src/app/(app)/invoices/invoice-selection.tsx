@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { formatMoney } from "@/lib/domain/pricing";
 import { Badge, Button } from "@/components/ui";
 import { SubmitButton } from "@/components/form";
@@ -37,6 +38,7 @@ export type SelectableInvoice = {
 
 export function InvoiceSelection({
   invoices, returnTo, action, verb, pendingLabel, selectAllLabel,
+  confirmIssue = false, blocked = null, settingsHref = null,
 }: {
   invoices: SelectableInvoice[];
   returnTo: string;
@@ -44,12 +46,28 @@ export function InvoiceSelection({
   verb: string;
   pendingLabel: string;
   selectAllLabel: string;
+  /**
+   * Issuing cannot be undone (brief 1.6), so the first press asks — naming how
+   * many and for how much — and only the second submits. Sending is left to post
+   * on one press: re-sending an invoice is legitimate and harmless.
+   */
+  confirmIssue?: boolean;
+  /**
+   * Why nothing on this list can be acted on yet — for issuing, the laundry's
+   * missing ABN, address or bank details (brief 1.1). The list still shows, so
+   * the operator can see what is waiting; the button does not post.
+   */
+  blocked?: string | null;
+  /** Where to fix `blocked`, for the one role that can open it. */
+  settingsHref?: string | null;
 }) {
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
+  const [confirming, setConfirming] = useState(false);
 
   const allSelected = invoices.length > 0 && invoices.every((row) => selected.has(row.id));
   const chosen = invoices.filter((row) => selected.has(row.id));
   const chosenValue = chosen.reduce((sum, row) => sum + row.total, 0);
+  const chosenSummary = `${chosen.length} ${chosen.length === 1 ? "invoice" : "invoices"} totalling ${formatMoney(chosenValue)}`;
 
   return (
     <form action={action} className="space-y-4">
@@ -106,7 +124,8 @@ export function InvoiceSelection({
 
       <div className="flex flex-wrap items-center gap-3 border-t pt-4">
         <Button type="button" variant="secondary" size="sm"
-                onClick={() => setSelected(new Set())} disabled={selected.size === 0}>
+                onClick={() => { setSelected(new Set()); setConfirming(false); }}
+                disabled={selected.size === 0}>
           Clear
         </Button>
         <span className="text-sm text-muted-foreground">
@@ -115,11 +134,60 @@ export function InvoiceSelection({
             : `${selected.size} selected · ${formatMoney(chosenValue)}`}
         </span>
         <div className="ml-auto">
-          <SubmitButton size="md" pendingLabel={pendingLabel}>
-            {verb}{selected.size ? ` (${selected.size})` : ""}
-          </SubmitButton>
+          {blocked ? (
+            <Button type="button" size="md" disabled>{verb}</Button>
+          ) : confirmIssue && !confirming ? (
+            // First press asks; nothing posts until the confirm below.
+            <Button type="button" size="md" disabled={selected.size === 0}
+                    onClick={() => setConfirming(true)}>
+              {verb}{selected.size ? ` (${selected.size})` : ""}
+            </Button>
+          ) : confirmIssue ? null : (
+            <SubmitButton size="md" pendingLabel={pendingLabel}>
+              {verb}{selected.size ? ` (${selected.size})` : ""}
+            </SubmitButton>
+          )}
         </div>
       </div>
+
+      {blocked ? (
+        <p className="text-sm text-muted-foreground">
+          {blocked}
+          {settingsHref ? (
+            <>
+              {" "}
+              <Link href={settingsHref} className="font-medium text-primary underline">
+                Open Settings › Invoicing
+              </Link>
+            </>
+          ) : null}
+        </p>
+      ) : null}
+
+      {/* The confirm step for issuing (brief 1.6): the count and the total, the
+          consequence, and the real submit beside a way out. Inline, like
+          `ConfirmSubmit`, so it sits next to the list it is about. */}
+      {confirmIssue && confirming && !blocked ? (
+        <div role="group" aria-label="Confirm issuing"
+             className="rounded-xl border border-danger/30 bg-danger/5 p-4">
+          <p className="text-sm font-semibold text-danger">This can&apos;t be undone</p>
+          <p className="mt-1 text-sm">
+            {chosen.length === 0
+              ? "Select at least one draft to issue."
+              : `Issue ${chosenSummary}? Each is dated today, its lines are frozen, and it becomes the tax invoice the customer is sent.`}
+          </p>
+          <div className="mt-4 flex flex-wrap items-center gap-2">
+            {chosen.length > 0 ? (
+              <SubmitButton size="md" pendingLabel={pendingLabel}>
+                Issue {chosen.length === 1 ? "1 invoice" : `${chosen.length} invoices`}
+              </SubmitButton>
+            ) : null}
+            <Button type="button" variant="secondary" size="md" onClick={() => setConfirming(false)}>
+              Keep them as drafts
+            </Button>
+          </div>
+        </div>
+      ) : null}
     </form>
   );
 }

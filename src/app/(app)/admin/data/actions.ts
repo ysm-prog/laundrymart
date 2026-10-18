@@ -5,6 +5,10 @@ import { assertCapability } from "@/lib/auth/context";
 import { createClient } from "@/lib/supabase/server";
 import { recordAudit } from "@/lib/audit";
 import { describeDbError, done, fail } from "@/lib/actions";
+import { counted } from "@/lib/format";
+import { parseCustomerList } from "@/lib/domain/test-data";
+import { planTestDataCleanup, runPricingBackfill, runTestDataCleanup } from "@/lib/admin/tidy";
+import { DEFAULT_LATE_CUTOFF } from "@/lib/admin/tidy-defaults";
 
 const BACK = "/admin/data";
 
@@ -66,4 +70,66 @@ export async function archiveRecords(): Promise<void> {
 
 export async function restoreRecords(): Promise<void> {
   await setArchived(false);
+}
+
+/* ---------------------------------------------- tidy-up tools (brief 1.3, 1.8) */
+
+/**
+ * Price the finished jobs still waiting for a price (brief 1.3). The page's dry
+ * run is what offers this button; the work itself re-plans rather than trusting
+ * the page. Never approves anything.
+ */
+export async function priceFinishedJobs(): Promise<void> {
+  const session = await assertCapability("admin.write");
+  const supabase = await createClient();
+  const { priced, needsPrice, failed } = await runPricingBackfill(supabase, session);
+  revalidatePath("/invoices/awaiting");
+  revalidatePath(BACK);
+
+  const parts = [
+    priced > 0 ? `Priced ${counted(priced, "job")}.` : "No job could be priced in full.",
+    needsPrice === 1 ? "1 job still needs a price — it is on the Needs a price list." : "",
+    needsPrice > 1 ? `${needsPrice} jobs still need a price — they are on the Needs a price list.` : "",
+    "Nothing was approved.",
+  ].filter(Boolean).join(" ");
+  if (failed.length > 0) {
+    return fail(`${BACK}?check=pricing`, `${parts} ${failed.length} could not be priced: ${failed.slice(0, 2).join("; ")}`);
+  }
+  return done(BACK, parts, { href: "/invoices/awaiting", label: "Open Awaiting invoice" });
+}
+
+/**
+ * Clear out test data (brief 1.8): archive the named customers, void (never
+ * delete) their invoices with the reason "Test data", write off and cancel their
+ * jobs — and, only when ticked, close the jobs still waiting on a round from
+ * before the cutoff. The list is the one the person typed; the plan is rebuilt
+ * from it here, inside this laundry, so a posted id can name nothing else.
+ */
+export async function clearTestData(formData: FormData): Promise<void> {
+  const session = await assertCapability("admin.write");
+  const entries = parseCustomerList(String(formData.get("customers") ?? ""));
+  const cutoffRaw = String(formData.get("cutoff") ?? "");
+  const cutoff = /^\d{4}-\d{2}-\d{2}$/.test(cutoffRaw) ? cutoffRaw : DEFAULT_LATE_CUTOFF;
+  const closeLate = formData.get("close_late") === "1";
+  if (entries.length === 0 && !closeLate) {
+    return fail(`${BACK}?check=testdata`, "Type the customers to clear first, one per line.");
+  }
+
+  const supabase = await createClient();
+  const plan = await planTestDataCleanup(supabase, session.tenantId, entries, cutoff);
+  if (plan.customers.length === 0 && !(closeLate && plan.lateAssigned.length > 0)) {
+    return fail(`${BACK}?check=testdata`, "None of those names matched a customer, so nothing was changed.");
+  }
+
+  const result = await runTestDataCleanup(supabase, session, plan, { closeLate });
+  revalidatePath("/", "layout");
+
+  const summary = `Archived ${counted(result.archived, "customer")}, voided ${counted(result.voided, "invoice")}, `
+    + `cancelled ${counted(result.cancelled, "job")} and took ${counted(result.writtenOff, "job")} out of billing`
+    + (closeLate ? `, and closed ${counted(result.closed, "late job")}` : "") + ". Nothing was deleted.";
+  if (result.problems.length > 0) {
+    return fail(BACK, `${summary} Not everything could be done: ${result.problems.slice(0, 3).join("; ")}`
+      + (result.problems.length > 3 ? ` and ${result.problems.length - 3} more.` : ""));
+  }
+  return done(BACK, summary);
 }
