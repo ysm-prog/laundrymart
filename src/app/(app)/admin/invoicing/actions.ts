@@ -5,6 +5,7 @@ import { z } from "zod";
 import { assertCapability } from "@/lib/auth/context";
 import { createClient } from "@/lib/supabase/server";
 import { recordAudit } from "@/lib/audit";
+import { AUTOMATION_KEYS } from "@/lib/domain/automation";
 import { describeDbError, done, fail, firstIssue, toObject } from "@/lib/actions";
 import {
   normaliseAbn, normaliseBsb, normaliseWebsite, parseInvoiceProfile, type InvoiceProfile,
@@ -197,4 +198,34 @@ export async function saveReceivablesSettings(formData: FormData): Promise<void>
   revalidatePath(BACK);
   revalidatePath("/dashboard");
   return done(BACK, "Saved. Today counts imported invoices from that date on.");
+}
+
+/**
+ * What the app does on its own (Darshan's BA review, Phase 2). Four switches
+ * under the `automation` key, which 0056 adds to `save_tenant_settings`. The
+ * form always renders all four, so an absent box means unticked. Defaults —
+ * what an unset key reads as — are in `DEFAULT_AUTOMATION`.
+ */
+export async function saveAutomationSettings(formData: FormData): Promise<void> {
+  const session = await assertCapability("admin.write");
+  const value = Object.fromEntries(
+    AUTOMATION_KEYS.map((key) => [key, formData.get(key) === "on"]),
+  ) as Record<(typeof AUTOMATION_KEYS)[number], boolean>;
+
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("save_tenant_settings", {
+    t: session.tenantId, p_key: "automation", p_value: value,
+  });
+  if (error) {
+    return fail(BACK, error.code === "22023"
+      ? "This setting cannot be saved until the latest database update has been applied."
+      : describeDbError(error));
+  }
+
+  await recordAudit(session, {
+    entity: "tenant_settings", entityId: session.tenantId, action: "update",
+    summary: "automation settings changed", metadata: value,
+  });
+  revalidatePath(BACK);
+  return done(BACK, "Saved. These apply from the next job.");
 }

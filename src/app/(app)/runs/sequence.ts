@@ -326,5 +326,9 @@ export function buildSequenceAudit(input: {
 export type SequenceStop = OrderableStop & {
   customerName: string;
   address: string | null;
-  jobs: Array<{ id: string; orderNumber: string; itemCount: number }>;
+  jobs: Array<{
+    id: string; orderNumber: string; itemCount: number;
+    /** The laundry job's own status — a finished one is never offered for moving (brief 2.1). */
+    status?: string;
+  }>;
 };

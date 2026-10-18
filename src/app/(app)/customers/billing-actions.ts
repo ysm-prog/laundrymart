@@ -6,7 +6,7 @@ import { assertCapability } from "@/lib/auth/context";
 import { createClient } from "@/lib/supabase/server";
 import { recordAudit } from "@/lib/audit";
 import {
-  count, describeDbError, done, fail, firstIssue, optionalText, optionalUuid, toObject,
+  checkbox, count, describeDbError, done, fail, firstIssue, optionalText, optionalUuid, toObject,
 } from "@/lib/actions";
 import { BILLING_METHODS, BILLING_METHOD_LABELS } from "@/lib/domain/billing";
 
@@ -39,6 +39,8 @@ export async function updateCustomerBilling(formData: FormData): Promise<void> {
     payment_terms_days: count,
     xero_contact_id: optionalText,
     xero_contact_name: optionalText,
+    // Brief 2.3. The form always renders the box, so absent means unticked.
+    auto_approve: checkbox,
   }).safeParse(toObject(formData));
   if (!parsed.success) {
     const id = formData.get("id");
@@ -71,6 +73,7 @@ export async function updateCustomerBilling(formData: FormData): Promise<void> {
       payment_terms_days: parsed.data.payment_terms_days,
       xero_contact_id: parsed.data.xero_contact_id ?? null,
       xero_contact_name: parsed.data.xero_contact_name ?? null,
+      auto_approve: parsed.data.auto_approve,
     })
     .eq("id", parsed.data.id)
     .eq("tenant_id", session.tenantId);

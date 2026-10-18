@@ -14,7 +14,9 @@ import { ListControls } from "@/components/list-controls";
 import { FilterChips, FilterSummary } from "@/components/filters";
 import { InvoiceSelection } from "../invoice-selection";
 import { issueInvoice } from "../actions";
-import { issueSelectedInvoices } from "../bulk-actions";
+import { issueAndSendAllReady, issueSelectedInvoices } from "../bulk-actions";
+import { isReadyDraft, parseAutomation } from "@/lib/domain/automation";
+import { ConfirmSubmit } from "@/components/confirm-submit";
 
 export const dynamic = "force-dynamic";
 
@@ -71,6 +73,17 @@ export default async function OpenDraftsPage({
     ? await loadIssueReadiness(supabase, session.tenantId, mayEditSettings)
     : null;
   const settingsHref = mayEditSettings ? "/admin/invoicing" : null;
+
+  // Month end in one press (brief 2.5): the drafts whose period has finished and
+  // that carry something to issue. The action re-reads them; this is the count
+  // and total the confirm states.
+  const monthEnd = drafts.filter((draft) => isReadyDraft(draft, today));
+  const monthEndTotal = monthEnd.reduce((sum, draft) => sum + draft.total, 0);
+  const { data: tenantRow } = mayBulk && monthEnd.length > 0
+    ? await supabase.from("tenants").select("settings").eq("id", session.tenantId)
+        .maybeSingle<{ settings: unknown }>()
+    : { data: null };
+  const emailing = parseAutomation(tenantRow?.settings).emailOnIssue && can(session.role, "invoices.send");
 
   /**
    * Which stage a draft is in.
@@ -214,6 +227,35 @@ export default async function OpenDraftsPage({
                   from a job to an invoice that does not pass through a draft.</li>
             </ul>
           </Card>
+
+          {mayBulk && monthEnd.length > 0 ? (
+            <Card title="Month end"
+                  description={`${counted(monthEnd.length, "draft")} from a finished period, ${money(monthEndTotal)} in all.`}>
+              {readiness?.blocked ? (
+                <Notice tone="warning">{readiness.blocked}</Notice>
+              ) : (
+                <form action={issueAndSendAllReady}>
+                  <input type="hidden" name="return_to" value={BASE} />
+                  <ConfirmSubmit
+                    label="Issue and send all ready"
+                    variant="primary"
+                    eyebrow="Month end"
+                    consequence={
+                      `This issues ${counted(monthEnd.length, "invoice")} totalling ${money(monthEndTotal)}`
+                      + (emailing ? ", emails each one to the customer's invoice address" : "")
+                      + " and sends each to Xero. An issued invoice cannot go back to being a draft."
+                    }
+                    pendingLabel="Issuing…"
+                  />
+                  <p className="mt-2 text-sm text-muted-foreground">
+                    {emailing
+                      ? "Each invoice is emailed as it is issued."
+                      : "Emailing is off in Settings › Automation, so nothing is emailed — send them from the register when you are ready."}
+                  </p>
+                </form>
+              )}
+            </Card>
+          ) : null}
 
           {mayBulk && selectable.length > 0 ? (
             <Card title="Issue several at once"

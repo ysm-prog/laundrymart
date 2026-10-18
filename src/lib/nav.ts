@@ -113,6 +113,7 @@ export const NAVIGATION: NavItem[] = [
     href: "/runs",
     icon: "runs",
     capability: "routes.read",
+    count: "exceptions",
     blurb: "A board's day, in the order it drives.",
     children: [
       {
@@ -128,6 +129,30 @@ export const NAVIGATION: NavItem[] = [
         // resolving an area to the first screen the role can actually open.
         label: "Due for collection", href: "/runs/collections", capability: "routes.write",
         blurb: "Customers collected on this weekday, and whether they are on a round yet.",
+      },
+      // The four tabs that were the "Driver visits" rail row until Phase 2 of
+      // Darshan's review (brief 2.1). A visit is the internal stop record a
+      // laundry job is delivered through, and since 0056 it finishes itself when
+      // the job does — so it stopped being a separate place anybody has to go.
+      // The screens survive as tabs here, under the area they are about, so a
+      // problem stop, the collections list and its Take in press are still one
+      // click away.
+      {
+        label: "Driver visits", href: "/jobs", capability: "routes.read",
+        blurb: "Every visit, filtered by day, delivery round or customer.",
+      },
+      {
+        label: "Problems", href: "/operations/exceptions", capability: "operations.read",
+        count: "exceptions",
+        blurb: "Stops a driver could not finish. Clearing one puts it back in the queue.",
+      },
+      {
+        label: "Collections", href: "/operations/pickups", capability: "operations.read",
+        blurb: "Linen picked up, with anything damaged or short.",
+      },
+      {
+        label: "Deliveries", href: "/operations/deliveries", capability: "operations.read",
+        blurb: "Clean linen handed over, with the signature taken at the door.",
       },
     ],
   },
@@ -154,33 +179,6 @@ export const NAVIGATION: NavItem[] = [
       {
         label: "Vehicles", href: "/vehicles", capability: "fleet.read",
         blurb: "Your trucks and trailers, and which are off the road.",
-      },
-    ],
-  },
-  {
-    label: "Driver visits",
-    href: "/jobs",
-    icon: "stops",
-    capability: "routes.read",
-    count: "exceptions",
-    blurb: "Every time a driver called on a customer: what was collected, what was dropped off.",
-    children: [
-      {
-        label: "All visits", href: "/jobs", capability: "routes.read",
-        blurb: "Every visit, filtered by day, delivery round or customer.",
-      },
-      {
-        label: "Problems", href: "/operations/exceptions", capability: "operations.read",
-        count: "exceptions",
-        blurb: "Stops a driver could not finish. Clearing one puts it back in the queue.",
-      },
-      {
-        label: "Collections", href: "/operations/pickups", capability: "operations.read",
-        blurb: "Linen picked up, with anything damaged or short.",
-      },
-      {
-        label: "Deliveries", href: "/operations/deliveries", capability: "operations.read",
-        blurb: "Clean linen handed over, with the signature taken at the door.",
       },
     ],
   },
@@ -507,7 +505,7 @@ const GROUPS: Array<{ label: string; hrefs: string[]; openByDefault: boolean }> 
     // The work of a day, for every role that has one. Open, because this is
     // what somebody signed in to do.
     label: "Day to day",
-    hrefs: ["/dashboard", "/my-runs", "/runs", "/orders", "/jobs"],
+    hrefs: ["/dashboard", "/my-runs", "/runs", "/orders"],
     openByDefault: true,
   },
   {

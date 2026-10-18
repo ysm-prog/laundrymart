@@ -9,7 +9,23 @@ where that is genuinely what it is. The multi-tenancy architecture stays: one op
 fact about today's data, not a reason to drop `tenant_id`, RLS, or §23's rule that a read feeding a
 write names its tenant.
 
-## Latest: Darshan's BA review, Phase 1 (2026-10-18), `claude/relaxed-faraday-4ey58h`
+## Latest: Darshan's BA review, Phase 2 (2026-10-18), `claude/relaxed-faraday-4ey58h-phase2`
+Items 2.1–2.5, **stacked on Phase 1** (#82), so its PR waits for #82. Written in one pass under the
+same instruction. CLAUDE.md's Phase 2 changelog entry has the detail.
+- **0056 written, NOT applied.** Apply after 0053–0055 and **before** Phase 2 merges — My Runs and
+  both job pages select the proof columns. **It changes rows** (completes open stops whose jobs are
+  done — `JOB00025` at least — and moves emptied `in_progress` runs to `returning`).
+- What runs itself now: a delivery finishes its stop and run (trigger); Ready puts a job on the
+  customer's round; a cleanly priced job approves itself onto the draft; Start my day is one press;
+  Delivered is on each card with signature/photo/counts; Month end issues every ready draft.
+  Switches: Settings › Invoicing › Automation (assign and approve on; issue-per-job and email off).
+- **Found on the way:** 0034's restrictive insert on `laundry_order_activity` refused every
+  timeline row a board or driver wrote — silently. 0056 lets a round write its own job's timeline.
+- **The E2E spec has never run** (`e2e/golden-path.spec.ts`, `workflow_dispatch`): it needs a
+  seeded Supabase branch, a preview URL and secrets. The 4-action intake target is Phase 3.4.
+- **Not done:** any screen opened behind the auth gate; `npm audit`'s 9 advisories (pre-existing).
+
+## Previously: Darshan's BA review, Phase 1 (2026-10-18), `claude/relaxed-faraday-4ey58h`
 Items 1.1–1.10 except 1.7 (dropped — "Electro Services" is the product name), one PR into `Dev`.
 CLAUDE.md's 2026-10-18 entry has the detail. **Darshan's instruction mid-session: write it in one
 pass, no per-item tests or browser checks, docs once, verify once.**

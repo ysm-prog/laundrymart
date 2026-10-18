@@ -616,6 +616,16 @@ export type LaundryOrder = {
    * list. Optional in the type because rows read before 0055 do not carry it.
    */
   billing_hold_reason?: string | null;
+  /** 0056 — what the delivery proved (brief 2.4). All null until it is delivered. */
+  delivery_received_by?: string | null;
+  delivery_signature_path?: string | null;
+  delivery_photo_paths?: string[] | null;
+  delivery_short?: boolean | null;
+  delivery_quantities?: Array<{
+    item_row_id: string; description: string; taken_in: number | null; delivered: number | null;
+  }> | null;
+  delivered_board_id?: Uuid | null;
+  delivered_driver_id?: Uuid | null;
 
   /**
    * The collection this job was taken in from (0050).

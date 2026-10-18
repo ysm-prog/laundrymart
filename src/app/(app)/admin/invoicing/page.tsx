@@ -4,11 +4,13 @@ import {
   formatAbn, invoiceProfileGaps, parseInvoiceProfile,
 } from "@/lib/domain/invoice-profile";
 import { CONTROL, Card, FormSection, Notice, PageHeader, cx } from "@/components/ui";
-import { Field, FormActions, Input, SubmitButton } from "@/components/form";
+import { Checkbox, Field, FormActions, Input, SubmitButton } from "@/components/form";
 import { BRANDING_BUCKET, isTenantLogoPath } from "@/lib/branding";
 import { arTrustedFrom } from "@/lib/domain/receivables";
+import { parseAutomation } from "@/lib/domain/automation";
 import {
-  removeInvoiceLogo, saveInvoiceProfile, saveReceivablesSettings, uploadInvoiceLogo,
+  removeInvoiceLogo, saveAutomationSettings, saveInvoiceProfile, saveReceivablesSettings,
+  uploadInvoiceLogo,
 } from "./actions";
 
 export const metadata = { title: "Invoicing" };
@@ -26,6 +28,7 @@ export default async function InvoicingSettingsPage() {
     .maybeSingle<{ name: string; abn: string | null; settings: unknown }>();
   const profile = parseInvoiceProfile(tenant?.settings);
   const gaps = invoiceProfileGaps(tenant?.abn ?? null, profile);
+  const automation = parseAutomation(tenant?.settings);
 
   // The logo is private (0054), so the preview is a short-lived signed URL.
   // A failure — the bucket not set up yet, the file gone — shows no preview,
@@ -127,6 +130,26 @@ export default async function InvoicingSettingsPage() {
               <Input name="ar_trusted_from" type="date" defaultValue={arTrustedFrom(tenant?.settings)} />
             </Field>
             <SubmitButton variant="secondary" size="md" pendingLabel="Saving…">Save</SubmitButton>
+          </FormSection>
+        </form>
+      </Card>
+      <Card>
+        <form action={saveAutomationSettings}>
+          <FormSection title="Automation"
+                       description="What the app does by itself, so a job goes from the counter to the invoice without anybody having to remember a step.">
+            <Checkbox name="autoAssignOnReady" defaultChecked={automation.autoAssignOnReady}
+                      label="When a delivery job is ready, put it on the customer's round for the next delivery day" />
+            <Checkbox name="autoApproveCleanJobs" defaultChecked={automation.autoApproveCleanJobs}
+                      label="Approve a finished job automatically when every line comes from a rate card or the price list" />
+            <Checkbox name="autoIssuePerJob" defaultChecked={automation.autoIssuePerJob}
+                      label="Issue a per-job customer's invoice as soon as the job is approved (and send it to Xero)" />
+            <Checkbox name="emailOnIssue" defaultChecked={automation.emailOnIssue}
+                      label="Email those invoices, and the ones Issue and send all issues, to the customer's invoice email" />
+            <p className="text-sm text-muted-foreground">
+              A customer can be kept out of automatic approval on their Billing &amp; pricing card.
+              Issuing stays blocked until your invoice details above are complete.
+            </p>
+            <SubmitButton variant="secondary" size="md" pendingLabel="Saving…">Save automation</SubmitButton>
           </FormSection>
         </form>
       </Card>

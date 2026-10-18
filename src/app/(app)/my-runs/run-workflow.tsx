@@ -1,31 +1,30 @@
-import { Notice } from "@/components/ui";
+import { Notice, CONTROL, SELECT_CHEVRON, cx } from "@/components/ui";
 import { ConfirmSubmit } from "@/components/confirm-submit";
-import { formatAdelaideDate, formatAdelaideDateTime } from "@/lib/domain/timezone";
-import { dispatchableJobs, loadableJobs } from "@/lib/domain/run-assignment";
+import { formatAdelaideDate } from "@/lib/domain/timezone";
+import { startableJobs } from "@/lib/domain/run-assignment";
 import type { DayJob } from "@/lib/runs/my-runs";
-import { confirmDayLoad, startDayRoute } from "./actions";
+import { startMyDay } from "./actions";
 
 /**
- * The round's two buttons for a day: Confirm Load, then Start Route.
+ * The round's one button before it drives: **Start my day** (brief 2.4, G8).
  *
- * This replaces the six-stage run workflow that used to sit here, and with it
- * the vehicle inspection that used to be stage one. **Confirm Load is not an
- * inspection** — there is no checklist, no pass or fail, no defect capture and
- * no vehicle status. It records one fact: the laundry assigned for this day is
- * on the van. That is what Start Route then needs to be true.
+ * It replaces Confirm Load and Start Route, which were two presses with two
+ * confirms minutes apart. The two facts are still recorded separately — the
+ * load is confirmed and the route started in the same press, on the jobs and
+ * on the day's internal runs — because the depot screen, the unload sweep and
+ * `guard_route_transition` read them separately. What went is the second press.
  *
- * Exactly one control is offered at a time. A row of buttons of which most are
- * refused is a row of ways to be told no, and this screen is read at arm's
- * length in a vehicle.
+ * Still not an inspection: no checklist, no pass or fail, no vehicle status.
  *
- * The two are separate on purpose rather than folded into one "I'm off". Loading
- * and leaving are minutes apart and the gap is where late work arrives: a job
- * assigned after the load is confirmed stays Assigned and is deliberately *not*
- * swept out by Start Route, because it is not on the van. Confirming again picks
- * it up, which is the honest way to say "I went back for it".
+ * **Who is driving today** rides the same form. A board is a shared login; the
+ * person operating it is what answers "who had that parcel?", so it is asked
+ * once, here, defaulting to whoever drove this round last.
+ *
+ * Late work — a job assigned after the van left — is not on it, so the same
+ * press is offered again as "Load and take", and covers exactly those jobs.
  */
 export function DayWorkflow({
-  jobs, boardId, date, returnTo, assignee = "you",
+  jobs, boardId, date, returnTo, assignee = "you", drivers = [], defaultDriverId = null,
 }: {
   jobs: DayJob[];
   boardId: string;
@@ -33,95 +32,61 @@ export function DayWorkflow({
   returnTo: string;
   /**
    * Who the work is assigned to, in the sentence. "you" for the round's own
-   * login; the board's name when a manager is looking at somebody else's day —
-   * "assigned to you" on Board 3's day was simply untrue (2026-10-12).
+   * login; the board's name when a manager is looking at somebody else's day.
    */
   assignee?: string;
+  drivers?: Array<{ id: string; full_name: string }>;
+  defaultDriverId?: string | null;
 }) {
-  const loadable = loadableJobs(jobs);
-  const dispatchable = dispatchableJobs(jobs);
+  const startable = startableJobs(jobs);
   const outForDelivery = jobs.filter((job) => job.status === "out_for_delivery");
-  const assigned = jobs.filter((job) => job.status === "assigned");
-
   const row = "flex flex-wrap items-center gap-3 rounded-xl border bg-surface-sunken px-4 py-3";
-  const fields = (
-    <>
+
+  if (startable.length === 0) {
+    return outForDelivery.length > 0 ? (
+      <Notice tone="info" title="On the road">
+        {outForDelivery.length} {outForDelivery.length === 1 ? "job is" : "jobs are"} out for
+        delivery. Press Delivered on each one as you hand it over.
+      </Notice>
+    ) : null;
+  }
+
+  const late = outForDelivery.length > 0;
+  const what = `${startable.length} ${startable.length === 1 ? "job" : "jobs"}`;
+
+  return (
+    <form action={startMyDay} className={row}>
       <input type="hidden" name="board_id" value={boardId} />
       <input type="hidden" name="date" value={date} />
       <input type="hidden" name="return_to" value={returnTo} />
-    </>
+      <p className="min-w-0 flex-1 basis-60 text-sm">
+        <span className="font-semibold">{late ? "More work for today." : "Next: start your day."}</span>{" "}
+        {what} assigned to {assignee} for {formatAdelaideDate(date, "medium")}
+        {late ? " came in after you left." : "."}
+      </p>
+      {drivers.length > 0 ? (
+        <div className="min-w-44">
+          <label htmlFor={`driver-${boardId}`} className="mb-1 block text-sm font-medium">Who is driving</label>
+          <select id={`driver-${boardId}`} name="driver_id" defaultValue={defaultDriverId ?? ""}
+                  className={cx(CONTROL, SELECT_CHEVRON)}>
+            <option value="">Not recorded</option>
+            {drivers.map((driver) => (
+              <option key={driver.id} value={driver.id}>{driver.full_name}</option>
+            ))}
+          </select>
+        </div>
+      ) : null}
+      <ConfirmSubmit
+        label={late ? `Load and take ${startable.length} more` : "Start my day"}
+        variant="primary"
+        eyebrow="Before you set off"
+        consequence={
+          `You are confirming that the ${what} for ${formatAdelaideDate(date, "medium")} `
+          + "are on the van, and taking them out for delivery. Press Delivered on each one "
+          + "as you hand it over."
+        }
+        pendingLabel="Starting…"
+      />
+    </form>
   );
-
-  // Nothing assigned at all, or everything already finished: no controls, and
-  // the page's own empty state or completed list says the rest.
-  if (assigned.length === 0 && outForDelivery.length === 0) return null;
-
-  if (loadable.length > 0) {
-    const confirmedAlready = jobs.filter((job) => job.load_confirmed_at).length;
-    return (
-      <div className={row}>
-        <p className="min-w-0 flex-1 text-sm">
-          <span className="font-semibold">Next: confirm the load.</span>{" "}
-          {loadable.length} {loadable.length === 1 ? "job is" : "jobs are"} assigned to {assignee} for{" "}
-          {formatAdelaideDate(date, "medium")}
-          {confirmedAlready > 0
-            ? ` (${confirmedAlready} already confirmed — this covers the rest).`
-            : "."}
-        </p>
-        <form action={confirmDayLoad}>
-          {fields}
-          <ConfirmSubmit
-            label="Confirm Load"
-            variant="primary"
-            eyebrow="Before you set off"
-            consequence={
-              `You are confirming that the ${loadable.length} `
-              + `${loadable.length === 1 ? "job" : "jobs"} assigned to ${assignee} for `
-              + `${formatAdelaideDate(date, "medium")} are loaded and ready for delivery.`
-            }
-            pendingLabel="Confirming…"
-          />
-        </form>
-      </div>
-    );
-  }
-
-  if (dispatchable.length > 0) {
-    const confirmedAt = jobs.find((job) => job.load_confirmed_at)?.load_confirmed_at ?? null;
-    return (
-      <div className={row}>
-        <p className="min-w-0 flex-1 text-sm">
-          <span className="font-semibold">Next: start the route.</span>{" "}
-          {dispatchable.length} loaded {dispatchable.length === 1 ? "job" : "jobs"} will go out
-          for delivery
-          {confirmedAt ? `. Load confirmed ${formatAdelaideDateTime(confirmedAt)}.` : "."}
-        </p>
-        <form action={startDayRoute}>
-          {fields}
-          <ConfirmSubmit
-            label="Start Route"
-            variant="primary"
-            eyebrow="On the road"
-            consequence={
-              `This marks the ${dispatchable.length} loaded `
-              + `${dispatchable.length === 1 ? "job" : "jobs"} as out for delivery. `
-              + "Mark each one delivered as you hand it over."
-            }
-            pendingLabel="Starting…"
-          />
-        </form>
-      </div>
-    );
-  }
-
-  if (outForDelivery.length > 0) {
-    return (
-      <Notice tone="info" title="On the road">
-        {outForDelivery.length} {outForDelivery.length === 1 ? "job is" : "jobs are"} out for
-        delivery. Open each one and mark it delivered as you hand it over.
-      </Notice>
-    );
-  }
-
-  return null;
 }
