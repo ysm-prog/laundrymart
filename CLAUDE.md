@@ -114,10 +114,17 @@ The master spec names a .NET 9 Web API; this build follows the supplied skeleton
   right-aligned, Bill-to in a grey panel, **Item ID | Description | Qty | Unit price | Tax |
   Amount** with "including tax" under the money headers, Notes with MYOB's one-line banking
   details, a boxed Total amount, and `Page n of N` / `Invoice no … Total amount …` on every page.
+  **Checked against the template side by side**
+  (`docs/screenshots/2026-10-18-invoice-pdf-vs-myob.png`): every rule, box and line of text sits
+  within half a point of it vertically; text widths differ slightly because Helvetica is not MYOB's
+  Arial. Two rules came out of that comparison: **words never hyphenate** (react-pdf splits them by
+  default, and printed the account name as "Ex-ample"), and the payment line is MYOB's character
+  for character — `BSB:062-000 Account No.12345678`, no space after either label.
   `pdfLineCells` is the rule for a line (item code, the item's name on a job line, the tax code);
   the job number now lives only in the service breakdown, which prints for any job-billed
   invoice. **The logo is the tenant's data**: uploaded on Settings › Invoicing into the private
-  `tenant-branding` bucket (0054) and embedded at render time — nothing is committed here.
+  `tenant-branding` bucket (0054) and embedded at render time — no logo file is in the code (the
+  screenshot shows ATS's, taken out of the template PDF to test with, as the brief asked).
 - **A person is shown by name, and the directory is one read** (`src/lib/directory.ts` over
   `tenant_members()`, 0030). Every `assigned_to`, `created_by`, `actor_id` and `delivered_by`
   column holds an `auth.users` id; the screens used to resolve those through the GoTrue admin
@@ -3551,6 +3558,65 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-10-18 · The PDFs beside the MYOB template, and what that caught
+Brief 1.10's own bar: *"an invoice and a credit note … match the template's layout. Put a
+side-by-side screenshot in the PR."* The Phase 1 pass below skipped it on Darshan's instruction (one
+pass, no per-item checks); this is it, on the same branch and in the same PR. **No migration; no
+schema, RLS, capability or business rule change.** Two source files and one test file.
+
+- **The screenshot is `docs/screenshots/2026-10-18-invoice-pdf-vs-myob.png`**: the MYOB template,
+  our tax invoice and our credit note, each at 144 DPI with the blank middle of the page cut out.
+  **The repository is public**, so the template's customer, phone number, accounts email and bank
+  details are covered with solid bars sized from `pdftotext -bbox`, leaving their labels and their
+  positions visible. Our two pages are sample data with placeholder phone, email and bank details.
+  The ATS logo appears in the image's pixels, taken out of the template PDF to test with as the
+  brief says; it is still not a file the code reads.
+- **How it was made**: the two documents rendered through `renderInvoicePdf` and
+  `renderCreditNotePdf` themselves (a throwaway test, not committed), rasterised with `pdftoppm`,
+  then every word box read with `pdftotext -bbox` and every fill found by pixel scan, against the
+  template's own. Measurement off the template alone had been the method in the Phase 1 pass, and
+  it had missed what follows — reading two renders against each other is what found it.
+
+**What it caught, all now fixed:**
+- **Words were hyphenated.** react-pdf splits words by default, and the payment line printed the
+  account name as *"Ex-ample"*. MYOB never does, and a hyphenated account or customer name reads
+  as a typo on a document somebody pays from. `Font.registerHyphenationCallback` keeps words whole;
+  a test reads the renderer's registered callback, and was confirmed to fail with the line removed.
+- **The payment line's spacing was not MYOB's.** The brief writes it `BSB:… Account No.…` and the
+  template prints the digits straight after both labels; ours had a space after each. Now exact,
+  and the test asserts the spacing. The email keeps its own multi-line wording.
+- **The Total amount box sat 6pt low**, and the "including tax" under it was 9pt where MYOB's is 8.
+- **The header sat up to 3pt low**, the title 1.5pt low and the number/date labels 1.5pt high.
+- **The number/date columns were 100pt apart, not MYOB's 86.6.**
+- **The Bill-to lines were 10.8–11.7pt apart, not 10.35**, without MYOB's extra 1.5pt between the
+  italic names and the address, and the panel was 1.5pt short.
+- **The table's money headings start 3pt higher than the others in MYOB**, with their "including
+  tax" at two different depths and the Tax heading 1.5pt left of its column's text; ours sat level.
+- **The table sat 1.5–2pt high on the page while the text inside its band and row sat ~1.7pt low**,
+  and the logo was drawn 1pt small.
+
+After: every rule, box and line of text sits within half a point of the template's vertically,
+read back from the renders rather than reasoned about. Horizontally, right-aligned text can sit up
+to 3pt off — the template's font is Arial, ours is Helvetica, and react-pdf kerns `e T` in
+"Adelaide Towel" where MYOB does not.
+
+**Different from the template on purpose, and shown as such in the image**: the **Due date**
+column (the brief allows it); the customer number, period and terms beside the Bill-to panel;
+*"Please quote INV… as the payment reference."* under the bank line; the service breakdown under a
+job-billed invoice (gap G15 — the line no longer carries the job number); and the credit note's
+**Against invoice** column. A credit-note line's **Item ID is blank** because a credit-note line
+names no item: `credit_note_lines.invoice_line_id` has existed since 0006 and nothing writes it.
+
+**Open for Darshan, not decided:** the template prints an adjustment note's total as **negative**
+(`-$5.00`, in the box and the footer) and ours prints the credit as a positive `$35.00` under the
+heading "Adjustment note". The template's own figures do not settle it — its one line is +100 at
+$0.35 = $35.00 with $3.18 tax, yet the total reads −$5.00 — so it is a question about how ATS wants
+a credit to read, not a layout fix to make quietly.
+
+- **Checks:** `verify` green — **1404 unit tests across 91 files** (one new: the hyphenation rule),
+  typecheck, lint and the production build. The pgTAP suite was not re-run: nothing under
+  `supabase/` changed.
+
 ### 2026-10-18 · Darshan's BA review, Phase 1: stop the leaks
 From Darshan's BA review and end-to-end test of `ats.coreit.com.au` on 18 October (test customer
 CUST00515 *ZZ TEST – Claude BA*, job LJ00032, INV00008 issued then voided). Branch
@@ -3587,17 +3653,18 @@ Settings › Invoicing was empty and nothing checked.
 **1.10 — The PDFs are drawn to ATS's own MYOB invoice.** Both documents now share
 `myob-layout.tsx` — §2 has the layout. What it changed for the customer: the line reads
 **`T35 | Towels - Black`** rather than *"LJ00032 — Towels — 10"* (`pdfLineCells`; a typed line keeps
-its own words), the Tax column carries the code, the payment line is MYOB's *"Banking Details: BSB:
-… Account No. … Account Name: …"* built from the profile (`bankingDetailsLine`), and the service
+its own words), the Tax column carries the code, the payment line is MYOB's *"Banking Details:
+BSB:… Account No.… Account Name: …"* built from the profile (`bankingDetailsLine`), and the service
 breakdown prints for every job-billed invoice, one job included, because it is now the only place
 the job number appears (gap G15). The credit note is MYOB's **Adjustment note**. Settings ›
 Invoicing gains **Website** (`normaliseWebsite`) and a **Logo** upload into the private
 `tenant-branding` bucket (0054), read back as bytes and embedded, so no URL in an inbox can
 expire. Saving the text fields keeps the logo, because `save_tenant_settings` replaces the whole
 profile key. **Nothing about the laundry is in code**: a test reads the three PDF sources and fails
-on a BSB, an email, a phone number or ATS's ABN. **Not done: the side-by-side screenshot** — the
-instruction was to write Phase 1 in one pass with no per-item browser checks, so the layout is
-proved by render tests and by measurement off the template, not yet by eye. **Open for Darshan,
+on a BSB, an email, a phone number or ATS's ABN. **The side-by-side screenshot was not made in
+this pass** — the instruction was one pass with no per-item browser checks — and was made
+afterwards the same day; the entry above records it and what it caught that measuring the
+template alone had not. **Open for Darshan,
 not decided:** whether new invoices continue MYOB's 8-digit series (`00321043`, last migrated
 `00413618`) — `next_number()` is untouched.
 

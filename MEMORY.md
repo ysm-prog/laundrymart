@@ -17,11 +17,17 @@ pass, no per-item tests or browser checks, docs once, verify once.**
   (logo bucket) and 0055 (`billing_hold_reason`, received-at guard, `invoices.source` + backfill,
   `receivables` settings key) must go on before it** — the queue, the register, Today and the Xero
   gate select the new columns. 0055's backfill changes rows (marks the MYOB imports `import`).
-- **Not done, and to say so:** the side-by-side PDF screenshot; a mocked end-to-end Xero push; any
-  screen opened behind the auth gate. The test-data clean-up has **not been run** — Darshan confirms
-  the customer list (Test1, Jay, ZZ TEST Demo Laundry, ZZ TEST – Claude BA, Core IT) first.
+- **The side-by-side PDF screenshot is done** (`docs/screenshots/2026-10-18-invoice-pdf-vs-myob.png`,
+  embedded in the PR). Comparing the renders caught what measuring the template alone had missed —
+  hyphenated words ("Ex-ample"), the bank line's spacing (`BSB:…` / `No.…`, no space) and a set of
+  1.5–6pt offsets — all fixed; everything now sits within half a point vertically. **The repo is
+  public**: the template's customer, phone, email and bank details are blacked out in the image.
+- **Not done, and to say so:** a mocked end-to-end Xero push; any screen opened behind the auth
+  gate. The test-data clean-up has **not been run** — Darshan confirms the customer list (Test1,
+  Jay, ZZ TEST Demo Laundry, ZZ TEST – Claude BA, Core IT) first.
 - **Open for Darshan:** whether new invoices continue MYOB's 8-digit numbering (`next_number()`
-  untouched); bank details, phone and email are his to enter in Settings › Invoicing.
+  untouched); whether an adjustment note's total should print **negative** as MYOB's does (ours
+  prints the credit positive); bank details, phone and email are his to enter in Settings › Invoicing.
 - Completion now prices the job on the **service-role** client (rounds and drivers read no price);
   every read there names the tenant, and a test reads the source to keep it so.
 

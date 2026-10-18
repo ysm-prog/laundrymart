@@ -71,9 +71,11 @@ export function normaliseWebsite(raw: string): string | null {
 
 /**
  * The one-line payment instruction the PDF prints under **Notes**, in the
- * format of the laundry's own MYOB invoice (brief 1.10):
+ * format of the laundry's own MYOB invoice (brief 1.10), character for
+ * character — no space after `BSB:` or `No.`, because that is the line ATS's
+ * customers already read on every MYOB invoice:
  *
- *     Banking Details: BSB: 062-000 Account No. 12345678 Account Name: Example Laundry
+ *     Banking Details: BSB:062-000 Account No.12345678 Account Name: Example Laundry
  *
  * Built from the profile and gated by `paymentInstructions` — all three bank
  * details or nothing — so the PDF and the email cannot disagree about whether
@@ -82,7 +84,7 @@ export function normaliseWebsite(raw: string): string | null {
  */
 export function bankingDetailsLine(profile: InvoiceProfile): string | null {
   if (paymentInstructions(profile, "X").length === 0) return null;
-  return `Banking Details: BSB: ${profile.bsb} Account No. ${profile.accountNumber} `
+  return `Banking Details: BSB:${profile.bsb} Account No.${profile.accountNumber} `
     + `Account Name: ${profile.bankAccountName}`;
 }
 

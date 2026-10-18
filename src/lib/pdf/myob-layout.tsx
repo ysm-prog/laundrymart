@@ -21,7 +21,7 @@
  */
 
 import type { ReactNode } from "react";
-import { Image, StyleSheet, Text, View } from "@react-pdf/renderer";
+import { Font, Image, StyleSheet, Text, View } from "@react-pdf/renderer";
 import { formatAbn } from "@/lib/domain/invoice-profile";
 import type { PdfLogo } from "./logo";
 
@@ -30,6 +30,13 @@ const FOOTER_INK = "#404040";
 const BAND = "#EEEEEE";
 const PANEL = "#ECECEC";
 const RULE = "#E3E3E3";
+
+// MYOB never breaks a word across two lines, and react-pdf does by default —
+// the first sample render printed the bank account name as "Ex-ample". A
+// hyphenated BSB, account name or customer name reads as a typo on a document
+// somebody pays from, so words wrap whole. Global to the renderer, which only
+// ever draws these two documents.
+Font.registerHyphenationCallback((word) => [word]);
 
 /** Column edges of the line table, in points from the page's left edge (template). */
 const COL = {
@@ -47,18 +54,20 @@ export const s = StyleSheet.create({
     paddingTop: 20, paddingBottom: 46, paddingHorizontal: 20,
   },
   header: { flexDirection: "row", justifyContent: "space-between", minHeight: 92 },
-  logo: { width: 96, height: 90, objectFit: "contain", objectPosition: "left top" },
-  business: { alignItems: "flex-end", maxWidth: 320, paddingTop: 2 },
-  businessName: { fontFamily: "Helvetica-Bold", fontSize: 14, marginBottom: 6, textAlign: "right" },
+  logo: { width: 97, height: 90.4, objectFit: "contain", objectPosition: "left top" },
+  business: { alignItems: "flex-end", maxWidth: 320, paddingTop: 0.25 },
+  businessName: { fontFamily: "Helvetica-Bold", fontSize: 14, marginBottom: 4.85, textAlign: "right" },
   businessLine: { fontSize: 9, lineHeight: 1.15, textAlign: "right" },
 
-  titleRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", marginTop: 20 },
+  titleRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", marginTop: 18.5 },
   title: { fontFamily: "Helvetica-Bold", fontSize: 14 },
-  metaColumns: { flexDirection: "row" },
-  metaColumn: { width: 88, marginLeft: 12, alignItems: "flex-end" },
+  // The labels sit ~2pt below the title's cap height, and the columns are 86.6pt
+  // apart (the template's Invoice number → Issue date pitch).
+  metaColumns: { flexDirection: "row", paddingTop: 2.95 },
+  metaColumn: { width: 86.6, alignItems: "flex-end" },
   metaLabel: { fontFamily: "Helvetica-Bold", fontSize: 10, textAlign: "right" },
-  metaValue: { fontSize: 10, marginTop: 5, textAlign: "right" },
-  metaValueStrong: { fontSize: 11.5, marginTop: 4, textAlign: "right" },
+  metaValue: { fontSize: 10, marginTop: 4.7, textAlign: "right" },
+  metaValueStrong: { fontSize: 11.4, marginTop: 4, textAlign: "right" },
 
   banner: {
     marginTop: 8, paddingVertical: 4, paddingHorizontal: 8, backgroundColor: "#FDECEC",
@@ -67,24 +76,30 @@ export const s = StyleSheet.create({
 
   billRow: { flexDirection: "row", justifyContent: "space-between", marginTop: 8 },
   billPanel: {
-    marginLeft: 46.5, width: 268, minHeight: 78, backgroundColor: PANEL, borderRadius: 6,
-    paddingTop: 6, paddingBottom: 8, paddingLeft: 16, paddingRight: 12,
+    marginLeft: 46.5, width: 268, minHeight: 79.5, backgroundColor: PANEL, borderRadius: 6,
+    paddingTop: 4.9, paddingBottom: 8, paddingLeft: 16, paddingRight: 12,
   },
-  billItalic: { fontFamily: "Helvetica-Oblique", fontSize: 9, lineHeight: 1.2 },
-  billLine: { fontSize: 9, lineHeight: 1.3 },
+  billItalic: { fontFamily: "Helvetica-Oblique", fontSize: 9, lineHeight: 1.15 },
+  billLine: { fontSize: 9, lineHeight: 1.15 },
+  // MYOB leaves a little more air between the italic names and the address.
+  billFirstLine: { marginTop: 1.5 },
   details: { width: 200, paddingTop: 4 },
   detailRow: { flexDirection: "row", justifyContent: "flex-end", marginBottom: 2 },
   detailLabel: { fontSize: 8.5, color: FOOTER_INK, marginRight: 6 },
   detailValue: { fontSize: 8.5, textAlign: "right" },
 
-  thickRule: { marginTop: 9, height: 4, backgroundColor: INK },
+  thickRule: { marginTop: 8, height: 4, backgroundColor: INK },
   band: {
-    flexDirection: "row", marginTop: 8.5, minHeight: 39, backgroundColor: BAND, paddingTop: 4.5,
+    flexDirection: "row", marginTop: 8.5, minHeight: 39.5, backgroundColor: BAND, paddingTop: 2.85,
   },
   head: { fontFamily: "Helvetica-Bold", fontSize: 9 },
+  // The two money headings start 3pt higher than the single-line ones, and their
+  // "including tax" sits at different depths: MYOB's own arrangement.
+  headMoney: { marginTop: -3 },
+  headTight: { lineHeight: 1.15 },
   headNote: { fontFamily: "Helvetica-Oblique", fontSize: 8, marginTop: 3 },
   row: {
-    flexDirection: "row", paddingTop: 12.5, paddingBottom: 9.5,
+    flexDirection: "row", paddingTop: 10.65, paddingBottom: 10.35,
     borderBottomWidth: 1, borderBottomColor: RULE,
   },
   cell: { fontSize: 9 },
@@ -96,21 +111,21 @@ export const s = StyleSheet.create({
   colTax: { width: COL.tax, paddingLeft: 9.8 },
   colAmount: { width: COL.amount, textAlign: "right" },
 
-  lower: { flexDirection: "row", justifyContent: "space-between", marginTop: 8.5 },
+  lower: { flexDirection: "row", justifyContent: "space-between", marginTop: 6.5 },
   notes: { width: 300 },
   notesHead: { fontFamily: "Helvetica-Bold", fontSize: 9 },
-  notesText: { fontSize: 9, lineHeight: 1.15, marginTop: 9 },
-  totals: { width: 215 },
+  notesText: { fontSize: 9, lineHeight: 1.15, marginTop: 8.1 },
+  totals: { width: 215, marginTop: -0.5 },
   totalRow: { flexDirection: "row", alignItems: "center" },
   totalLabel: { width: 88.4, textAlign: "right", fontSize: 9 },
   totalValue: { width: 126.6, textAlign: "right", fontSize: 9, paddingRight: 8 },
   grandLabel: { width: 88.4, textAlign: "right", fontFamily: "Helvetica-Bold", fontSize: 14 },
   grandBox: {
-    marginLeft: 8.6, width: 118, minHeight: 23.5, backgroundColor: BAND,
+    marginLeft: 8.6, width: 118, minHeight: 24, backgroundColor: BAND,
     justifyContent: "center", paddingRight: 8,
   },
   grandValue: { textAlign: "right", fontFamily: "Helvetica-Bold", fontSize: 14 },
-  grandNote: { width: 88.4, textAlign: "right", fontFamily: "Helvetica-Oblique", fontSize: 9, marginTop: 1 },
+  grandNote: { width: 88.4, textAlign: "right", fontFamily: "Helvetica-Oblique", fontSize: 8, marginTop: -2.3 },
 
   footer: {
     position: "absolute", bottom: 20, left: 20, right: 20,
@@ -184,7 +199,9 @@ export function BillToRow({ billTo, details }: { billTo: BillTo; details: Detail
         {billTo.contact ? <Text style={s.billItalic}>{billTo.contact}</Text> : null}
         <Text style={s.billItalic}>{billTo.business}</Text>
         {billTo.lines.map((line, index) => (
-          <Text key={`${line}-${index}`} style={s.billLine}>{line}</Text>
+          <Text key={`${line}-${index}`} style={index === 0 ? [s.billLine, s.billFirstLine] : s.billLine}>
+            {line}
+          </Text>
         ))}
       </View>
       <View style={s.details}>
@@ -212,15 +229,15 @@ export function LineTable({ lines, empty }: { lines: TableLine[]; empty: string 
         <View style={s.colItemId}><Text style={s.head}>Item ID</Text></View>
         <View style={s.colDescription}><Text style={s.head}>Description</Text></View>
         <View style={s.colQty}><Text style={[s.head, { textAlign: "right" }]}>Qty</Text></View>
-        <View style={s.colUnit}>
-          <Text style={[s.head, { textAlign: "right" }]}>Unit price</Text>
-          <Text style={[s.head, { textAlign: "right" }]}>($)</Text>
-          <Text style={[s.headNote, { textAlign: "right", marginTop: 1 }]}>including tax</Text>
+        <View style={[s.colUnit, s.headMoney]}>
+          <Text style={[s.head, s.headTight, { textAlign: "right" }]}>Unit price</Text>
+          <Text style={[s.head, s.headTight, { textAlign: "right" }]}>($)</Text>
+          <Text style={[s.headNote, { textAlign: "right", marginTop: 1.5 }]}>including tax</Text>
         </View>
-        <View style={s.colTax}><Text style={s.head}>Tax</Text></View>
-        <View style={s.colAmount}>
-          <Text style={[s.head, { textAlign: "right" }]}>Amount ($)</Text>
-          <Text style={[s.headNote, { textAlign: "right" }]}>including tax</Text>
+        <View style={s.colTax}><Text style={[s.head, { marginLeft: -1.5 }]}>Tax</Text></View>
+        <View style={[s.colAmount, s.headMoney]}>
+          <Text style={[s.head, s.headTight, { textAlign: "right" }]}>Amount ($)</Text>
+          <Text style={[s.headNote, { textAlign: "right", marginTop: 7.65 }]}>including tax</Text>
         </View>
       </View>
       {lines.length === 0 ? (
@@ -230,7 +247,7 @@ export function LineTable({ lines, empty }: { lines: TableLine[]; empty: string 
       ) : lines.map((line, index) => (
         <View key={`${line.itemId}-${line.description}-${index}`} style={s.row} wrap={false}>
           <Text style={[s.cell, s.colItemId]}>{line.itemId}</Text>
-          <Text style={[s.cell, s.colDescription]}>{line.description}</Text>
+          <Text style={[s.cell, s.colDescription, { paddingLeft: 2.35 }]}>{line.description}</Text>
           <Text style={[s.cell, s.colQty]}>{line.qty}</Text>
           <Text style={[s.cell, s.colUnit]}>{line.unitPrice}</Text>
           <Text style={[s.cell, s.colTax]}>{line.tax}</Text>
@@ -269,7 +286,7 @@ export function NotesAndTotals({
           <Text style={s.totalLabel}>Tax</Text>
           <Text style={s.totalValue}>{tax}</Text>
         </View>
-        <View style={[s.totalRow, { marginTop: 9 }]}>
+        <View style={[s.totalRow, { marginTop: 4.05 }]}>
           <Text style={s.grandLabel}>Total amount</Text>
           <View style={s.grandBox}><Text style={s.grandValue}>{total}</Text></View>
         </View>

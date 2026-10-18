@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { Font } from "@react-pdf/renderer";
 import { auDate, imageFormat, invoiceDocumentTitle, pdfLineCells } from "../line-display";
 import { formatAmount, formatQty } from "../myob-layout";
 import { renderCreditNotePdf } from "../render";
@@ -74,9 +75,9 @@ describe("the table's number formats", () => {
 
 describe("the payment line is built from Settings › Invoicing, never written in code", () => {
   const profile = { ...EMPTY_PROFILE, bankAccountName: "Example Laundry", bsb: "062-000", accountNumber: "12345678" };
-  it("prints MYOB's one-line format", () => {
+  it("prints MYOB's one-line format, spacing included", () => {
     expect(bankingDetailsLine(profile))
-      .toBe("Banking Details: BSB: 062-000 Account No. 12345678 Account Name: Example Laundry");
+      .toBe("Banking Details: BSB:062-000 Account No.12345678 Account Name: Example Laundry");
   });
   it("prints nothing unless all three details are there", () => {
     expect(bankingDetailsLine({ ...profile, bsb: null })).toBeNull();
@@ -121,6 +122,18 @@ describe("the logo is the tenant's data (0054)", () => {
     expect(isTenantLogoPath(TENANT, `${TENANT}/../other/logo.png`)).toBe(false);
     expect(isTenantLogoPath(TENANT, null)).toBe(false);
     expect(BRANDING_BUCKET).toBe("tenant-branding");
+  });
+});
+
+describe("words wrap whole, as they do on the MYOB invoice", () => {
+  // The first side-by-side render printed the bank account name as "Ex-ample":
+  // react-pdf hyphenates by default, and a hyphenated account or customer name
+  // reads as a typo on a document somebody pays from. Importing the layout is
+  // what registers the rule, so this reads the renderer's own state.
+  it("never splits a word across two lines", () => {
+    const hyphenate = Font.getHyphenationCallback();
+    expect(hyphenate?.("Example")).toEqual(["Example"]);
+    expect(hyphenate?.("Catering")).toEqual(["Catering"]);
   });
 });
 
