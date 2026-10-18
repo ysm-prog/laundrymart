@@ -1357,14 +1357,14 @@ produce on demand.
   guards. `invoice_issue_guard.test.sql` (16) — confirmed to fail on a database without 0053.
   **Three existing proofs issue drafts** (`charge_accounts`, `gst_inclusive`,
   `open_draft_invoices`) and now give their laundry a complete invoice profile first, with a
-  comment saying why. **Written, NOT applied** (§11).
+  comment saying why. **Applied 2026-10-18** (§11).
 - `0054_invoice_logo_storage` — **the laundry's logo, as the laundry's data** (brief 1.10). One
   private bucket, `tenant-branding` (PNG and JPEG, 1 MB), keyed by tenant the way 0007's
   `run-media` is, with four policies on `storage.objects`: read by any **member** (every role that
   opens an invoice renders a PDF that embeds it) and written, replaced and removed by the **Owner**
   alone (`has_role(…, super_admin)`) — unlike `run-media`, which any member writes. Four
   self-assertions (bucket private, four policies, writes limited to the owner, no `for all`).
-  Adds no table, column or function. **Written, NOT applied** (§11).
+  Adds no table, column or function. **Applied 2026-10-18** (§11).
 - `0055_billing_flow_guards` — **the four database halves of the review's Phase 1.**
   `laundry_orders.billing_hold_reason` (`needs_price` or null, brief 1.3);
   `guard_laundry_order_received_at` and its trigger (brief 1.5); `invoices.source` (`app`/`import`,
@@ -1373,7 +1373,7 @@ produce on demand.
   import, which only ever narrows what may be pushed; and `save_tenant_settings` rebuilt from
   0052's body to accept the `receivables` key (brief 1.9). Eight self-assertions, including that
   the backfill left no import marked `app`. `billing_flow_guards.test.sql` (15) proves all of it
-  and 0054's policies. **Written, NOT applied** (§11).
+  and 0054's policies. **Applied 2026-10-18** (§11).
 - `0056_flow_runs_itself` — **the database halves of Phase 2.** Proof-of-delivery columns on
   `laundry_orders` (received by, signature and photo keys under the job's own folder — a check
   constraint — the counts as jsonb, a short flag, `delivered_board_id`, `delivered_driver_id`);
@@ -1385,13 +1385,13 @@ produce on demand.
   rewritten so a round can write **its own** job's timeline. 0034 had restated that insert as office
   roles only, so every timeline row a board or driver wrote — "delivered" included — was refused
   and `logOrderActivity` swallowed it: the job page had never shown who delivered a round's job.
-  Seven self-assertions. `flow_runs_itself.test.sql` (16). **Written, NOT applied** (§11).
+  Seven self-assertions. `flow_runs_itself.test.sql` (16). **Applied 2026-10-18** (§11).
 - `0057_operations_settings` — **Settings › How you work.** `save_tenant_settings` rebuilt from
   0056's body with one key added to the whitelist, `operations` (`plantStages`,
   `defaultTurnaroundDays` — `lib/domain/operations-settings.ts` parses it, and an absent key reads
   as plant off and two days). Adds no table, column, policy, trigger or capability; changes no row.
   Five self-assertions, including that every earlier key is still admitted.
-  `operations_settings.test.sql` (7). **Written, NOT applied** (§11).
+  `operations_settings.test.sql` (7). **Applied 2026-10-18** (§11).
 - `0050_pickup_to_job` — **a collection becomes a laundry job, exactly once.**
   `laundry_orders.source_pickup_id` (`on delete set null`),
   `uq_laundry_orders_source_pickup` (partial unique) and
@@ -1885,7 +1885,7 @@ part company:
 - **Taken instead:** `eslint-config-next` `^16.3.4`, `@types/node` `^26.4.0` (resolving 26.5.0) and
   `lefthook` `^2.1.12`, all green on TypeScript 6 + ESLint 9. #63 stays closed.
 
-**An advisory is not a build failure here, and both of the ones that existed are now gone.**
+**Since 2026-10-18 a high advisory in a runtime dependency fails CI** (`npm audit --omit=dev`, blocking; the whole tree is advisory at `critical`, because `braces` has no fixed release and only the linter uses it). What follows is the history of why. **An advisory was not a build failure here, and both of the ones that existed then were cleared.**
 CI's audit step carries `continue-on-error: true`, so `npm audit --audit-level=high` has never
 failed a run — which is why two high-severity transitive advisories could sit there unnoticed
 through green CI. Both were cleared on 2026-09-09 **without reaching past an existing range**:
@@ -2387,48 +2387,44 @@ reports six false gaps.
   leaving its usual trace: text typed into `apply_migration` reformatted a little against the file.
   Worth knowing before anybody reads a raw `md5(prosrc)` mismatch as drift.
 
-**`0057_operations_settings` is NOT applied to `laundrymart-syd`** (2026-10-18), written on
-`claude/relaxed-faraday-4ey58h-phase3`. **Apply it after 0056 and before Phase 3 merges**: the
-Settings › How you work screen saves the `operations` key, and without 0057 that save is refused
-with 22023 (the screen says so). Nothing else depends on it — an absent key reads as the defaults.
-It changes no row and holds no `delete`, so the connector can apply it.
+**`0053`–`0057` were applied on 2026-10-18** (`20261018105300` … `20261018105700`) — by Darshan,
+pasted into the Supabase SQL editor as one transaction (`apply-0053-0057.sql`: the five files
+verbatim, then the five ledger rows, then `commit`). The connector's `apply_migration` was tried
+twice for 0053 and came back `cancelled` both times with nothing written, the same confirmation
+prompt that timed out 0051/0052. The ledger is **62** entries. Applied **before** #82 merged, the
+order this file requires: the billing queue, the register, Today, the Xero gate, My Runs and both
+job pages select columns these add.
 
-**`0056_flow_runs_itself` is NOT applied to `laundrymart-syd`** (2026-10-18), written on
-`claude/relaxed-faraday-4ey58h-phase2` under the same instruction. **Apply it after 0053–0055 and
-before Phase 2 merges**: My Runs and both job pages select the proof columns, the billing card
-writes `customers.auto_approve`, and Settings › Invoicing › Automation calls the widened writer.
-**It changes rows**: the backfill completes every open stop whose jobs are all finished and moves
-every `in_progress` run with no open stop to `returning` — expected on live: `JOB00025` (LJ00032's
-stop) at least. Its policy rewrite and trigger function carry no `delete`, but the backfill is an
-`update`; the SQL editor is the safe route, as for 0051/0052.
-
-**`0054_invoice_logo_storage` and `0055_billing_flow_guards` are NOT applied to
-`laundrymart-syd`** (2026-10-18), written on the same branch under the same instruction. **Unlike
-0053, the code depends on both — apply them before the merge, after 0053:** the billing queue and
-the job page select `laundry_orders.billing_hold_reason`, the Xero gate, the register and Today
-select `invoices.source`, Settings › Invoicing saves the `receivables` key, and the logo upload
-writes to `tenant-branding`. PostgREST answers a missing column with an error, not a null, so
-merging first would break Awaiting invoice, the register and Today. **0055 changes rows**: its
-backfill marks the imported MYOB invoices (`notes` from the importer or a non-`INV` number) as
-`import` — expected on live: the ~646 MYOB headers, leaving the handful of `INV` invoices as
-`app`. Neither carries a `delete`, so the connector can apply them; the SQL editor works too.
-
-**`0053_tax_invoice_issue_guard` is NOT applied to `laundrymart-syd`** (2026-10-18), written on
-`claude/relaxed-faraday-4ey58h` under Darshan's instruction not to touch the live database. Unlike
-0051/0052 the code does not *depend* on it — `issueOneInvoice` refuses first — so merging before
-it is applied is safe; what is missing until then is the boundary under a direct
-`update invoices set status = 'issued'`. **Apply it with the SQL editor** (its probe block holds a
-`delete`, which is what times the connector out). Live, the probe is skipped because 0041's
-single-laundry switch is on, and the structural assertions stand alone. After applying, the
-expected live behaviour is the brief's: **every Issue is refused with "add your bank details"**
-until they are entered, because the ABN (`69 892 278 164`, which passes the checksum) and the
-address are set and the bank details are not.
+- **Verified over the connector afterwards, not taken on trust.** `guard_invoice_issue`,
+  `guard_laundry_order_received_at`, `save_tenant_settings` and `sync_stop_on_order_finish` are
+  **identical to a local Postgres 16 rehearsal once `--` comments and whitespace are stripped**
+  (`cc84a2db…`, `bc2b60a2…`, `78c1ec01…`, `57137cc1…`); the raw `md5(prosrc)` differs and each live
+  body is 10–67 bytes longer, which is the paste's line endings — the cosmetic trace the
+  2026-08-27 and 2026-10-12 checks record. `laundry_order_activity_main_flow_insert`'s
+  `with check` is **byte-identical** (`d9fdbd1b…`).
+- **Triggers attached** under their own names: `guard_invoice_issue@invoices`,
+  `guard_laundry_orders_received_at@laundry_orders`, `sync_laundry_orders_stop@laundry_orders` —
+  the trigger names differ from the function names, so a probe looking for the function name in
+  `pg_trigger` reports one missing and is wrong.
+- **Privileges as designed:** `authenticated` cannot execute `guard_invoice_issue` or
+  `sync_stop_on_order_finish`; `save_tenant_settings` is callable by `authenticated` and not
+  `anon`. **0** `anon` table grants and **0** tables in `public` without RLS. `tenant-branding`
+  exists with its 4 policies on `storage.objects`.
+- **The backfills did what the pre-flight said they would.** 0055: **646** invoices marked
+  `import`, the other **7** `app`. 0056: the 11 open stops whose jobs were all finished —
+  `JOB00007`, `08`, `11`, `13`, `17`, `18`, `21`, `22`, `23`, `24`, `25` — are `completed`, and the
+  runs of 2026-10-14 and 2026-10-18 are `returning`. 653 invoices and 26 laundry jobs, unchanged.
+- **`LJ00031` still carries its future `received_at`**, exactly as 0055 intends: the trigger judges
+  only an insert or a change, and the row is listed on Reports › Data checks.
+- **Expected live behaviour now:** every Issue is refused with "add your bank details" until they
+  are entered in Settings › Invoicing — the ABN (`69 892 278 164`) and address are set, the bank
+  details are not.
 
 **`0051_laundry_item_ownership` and `0052_invoice_money_guards` were applied on 2026-10-12**
 (`20261012033302`, `20261012033303`) — by Darshan, pasted into the Supabase SQL editor, because
 the connector's `apply_migration` timed out five times waiting on a confirmation prompt that never
 reached the chat (it gates any SQL containing `delete`, and 0051's rebuilt writer has one). Both
-went on **before** #77 and #78 merged, the order this file requires. The ledger is **57** entries.
+went on **before** #77 and #78 merged, the order this file requires. The ledger was **57** entries.
 
 - **Verified over the connector afterwards, not taken on trust.** The column, its check
   constraint and `invoices.amount_credited` are present; the triggers `guard_invoice_void` and
@@ -3649,6 +3645,57 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-10-18 · A critical Next.js advisory, and the audit step that hid it
+`npm audit --audit-level=high` reported **9** (8 high, 1 critical) on `Prod` — the critical one
+`next` 16.0.0–16.3.7: RCE in `next/og` `ImageResponse`, cache poisoning of SSG/ISR pages, SSRF in
+image optimisation, and four more. Plus `sharp` < 0.35.5 (librsvg), `source-map-js` 1.0–1.2.1 and
+`brace-expansion`. **No schema, RLS, capability or source change** — `git diff` over `src/` and
+`supabase/` is empty.
+
+- **Taken, inside the existing ranges:** `next` 16.3.4 → **16.4.2**, `sharp` → 0.35.5,
+  `source-map-js` → 1.2.2, `brace-expansion` → 1.1.21 / 5.0.12, via `npm audit fix`. The floors
+  in `package.json` were raised to `next ^16.4.2` and `eslint-config-next ^16.4.2`, so a fresh
+  resolve cannot land back on a vulnerable version.
+- **Also taken from Dependabot's #97, the safe six of its eight:** `@playwright/test` 1.64.1
+  (still pinned exactly), `@types/node` 26.6.5, `lefthook` 2.2.2, `postcss` 8.5.30, `vitest` 5.0.5,
+  and `eslint-config-next` (already 16.4.2). **TypeScript 7 and ESLint 10 are not**, and #97's red
+  lint (`typescript-eslint does not support TS 7.0`) is that pair failing for the **fifth** time
+  (#22 → #44 → #53 → #63 → #68 → #97). `typescript-eslint@latest` is 8.71.2 and still declares
+  `typescript: >=4.8.4 <6.1.0` — §10a's rule: read the peer range first.
+- **Package sets, per §10a:** 573 → 571 (88 in, 90 out, `siginfo` and `stackback` gone with
+  vitest's patch, one optional Android lefthook binding added).
+- **`braces` stays, and it cannot be fixed by a version.** Every release is affected and 3.0.3 is
+  the latest; it reaches the tree only through `eslint-config-next → @next/eslint-plugin-next →
+  fast-glob → micromatch`, so it never ships, and the only input it sees is this repo's own lint
+  globs. `npm audit fix --force` would "fix" it by downgrading `eslint-config-next` to 14.
+- **The CI step was the real defect.** It audited the whole tree with `continue-on-error`, so a
+  red result failed nothing — which is how a critical runtime advisory sat under a green CI run. It is now two steps: **`npm audit --omit=dev --audit-level=high`, blocking**
+  (0 today), and the full tree at `--audit-level=critical`, advisory (0 today; `braces` is high).
+  Both exit codes were read locally before pushing: 0, 0, and the old command still 1.
+- `verify` green: typecheck, lint, **1507 tests across 101 files**, and the production build on
+  Next.js 16.4.2.
+
+### 2026-10-18 · Released: Phases 1–3 of Darshan's review on Prod
+**0053–0057 went on first, then the code.** Darshan pasted `apply-0053-0057.sql` into the Supabase
+SQL editor (the connector's `apply_migration` came back `cancelled` twice on 0053, with nothing
+written); §11 has the verification. Then #82 merged into `Dev` (`e02f7e5`) and **#95 carried `Dev`
+into `Prod` (`5847b2e`)**, both through pull requests, and `Prod` was never force-pushed. #95 was
+merged by Darshan once its CI had finished green.
+
+- **CI on #95's head was green on all three jobs before the merge** (run 39127863840): Verify
+  12:34:46 → 12:36:11, DB and Security 12:34:46 → 12:35:18. The same tree had already passed as
+  #82's head (`fcb0c48`). Prod's own push run is 373.
+- **`Prod` carried five commits `Dev` lacked, and all five were earlier Dev → Prod merge commits**
+  with no file changes, so nothing had to be reconciled.
+- **What a person should see on `ats.coreit.com.au` now:** the five-area rail; Issue disabled with
+  "Add your bank details in Settings › Invoicing"; Awaiting invoice with a Needs a price chip; the
+  invoice register marking the 646 MYOB invoices "Imported – not reconciled"; the Laundry board;
+  and Start my day on My Runs. **Nothing behind the login has been opened with real rows yet.**
+- **The Vercel production deploy is not confirmable from this session** (§5).
+- **Still Darshan's:** the bank details, phone and accounts email; the invoice numbering series;
+  whether an adjustment note's total prints negative; and the test-data list before the clean-up
+  tool is run.
+
 ### 2026-10-18 · The Xero void and the token refresh, mocked too
 The two gaps the entry below left open, closed on `claude/relaxed-faraday-4ey58h-mocks2`. **Tests
 only: no migration, and no change to `src/` outside two test files.**
