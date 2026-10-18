@@ -20,6 +20,13 @@ jobs:
       E2E_BOARD_PASSWORD: ${{ secrets.E2E_BOARD_PASSWORD }}
       E2E_BOARD_NAME: ${{ vars.E2E_BOARD_NAME || 'Board 1' }}
       E2E_ITEM_CODES: ${{ vars.E2E_ITEM_CODES }}
+      # Optional: the seeded branch's own invoice details, for the second half of
+      # step 6 (Issue passes once they are set). Never ATS's real ones.
+      E2E_INVOICE_ABN: ${{ secrets.E2E_INVOICE_ABN }}
+      E2E_INVOICE_ADDRESS: ${{ secrets.E2E_INVOICE_ADDRESS }}
+      E2E_INVOICE_ACCOUNT_NAME: ${{ secrets.E2E_INVOICE_ACCOUNT_NAME }}
+      E2E_INVOICE_BSB: ${{ secrets.E2E_INVOICE_BSB }}
+      E2E_INVOICE_ACCOUNT_NUMBER: ${{ secrets.E2E_INVOICE_ACCOUNT_NUMBER }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7

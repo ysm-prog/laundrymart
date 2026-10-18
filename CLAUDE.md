@@ -3720,6 +3720,18 @@ page also had a field called `name`, so the label had been pointing at the site'
 - **Not verified behind the auth gate**: no screen was opened with real rows; 0057 is not applied.
   Before trusting it: take a job in for a customer on a round and check the date and items arrive
   filled in; print its docket and scan it into the Laundry board's box.
+- **Section 5's golden path now runs end to end over Phase 3's screens** (`e2e/golden-path.spec.ts`).
+  It creates the customer with a round and billing method in one form, takes a first job in
+  (measured), then holds the customer's **second** job to the brief's **≤ 4 actions** with the
+  items, the return date and the running total already filled in — a first job has nothing to
+  prefill from, so that is the only honest place to measure it. It marks the job ready **by
+  scanning its docket**, runs the round's two taps, checks the timeline names the round, and checks
+  Issue is **disabled with the Settings › Invoicing sentence** while the details are empty. When the
+  seeded branch's own details are given as `E2E_INVOICE_*` secrets it sets them and issues the draft
+  **through its confirm** (1.6); without them that half is skipped with an annotation — no invoice
+  details live in the file. Month end is not pressed: it issues only drafts from a finished period,
+  which a fresh branch has none of. **Still never run**, for the reason the Phase 2 entry gives: it
+  needs a seeded Supabase branch, a preview and the logins as secrets.
 
 ### 2026-10-18 · Darshan's BA review, Phase 2: make the flow run itself
 Items 2.1–2.5 of the brief, on `claude/relaxed-faraday-4ey58h-phase2`, stacked on Phase 1 (#82)

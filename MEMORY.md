@@ -24,6 +24,9 @@ CLAUDE.md's Phase 3 changelog entry and §6 have the detail.
   128 docket.
 - **Plant hidden by default** (Settings › How you work) — hidden, not linked: no join from a batch
   to a laundry job exists.
+- **Section 5's E2E spec is updated for Phase 3** (repeat intake held to ≤4 actions, docket scan,
+  Issue blocked then passing via `E2E_INVOICE_*` secrets) and **still never run** — it needs a
+  seeded Supabase branch + preview + login secrets, which only Darshan can set up.
 - Found on the way: the customer page's contact Name label pointed at the *site* form's input
   (two fields called `name`); merged invoice lines kept the first job's count in the description;
   moving a job between boards logged the old board's id.
