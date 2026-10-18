@@ -24,6 +24,9 @@ const schema = z.object({
   // which treats a partial set as "not configured" rather than half-working.
   XERO_CLIENT_ID: z.string().min(10).optional(),
   XERO_CLIENT_SECRET: z.string().min(10).optional(),
+  // Signs Xero webhook deliveries (Xero app > Webhooks). Without it the
+  // webhook answers 401 to everything, which is safe but delivers nothing.
+  XERO_WEBHOOK_KEY: z.string().min(10).optional(),
   // Shared secret for the notification sweep, which runs without a session.
   // Optional for the same reason the mail provider is: a deployment with no
   // cron configured should boot and work, minus the swept notifications. The
