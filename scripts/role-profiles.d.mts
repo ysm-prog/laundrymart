@@ -26,7 +26,11 @@ export interface RoleProfile {
 }
 
 export declare const DEFAULT_EMAIL_DOMAIN: string;
-export declare const DEFAULT_PASSWORD: string;
+export declare const MIN_PROFILE_PASSWORD_LENGTH: number;
+export declare const PUBLISHED_PASSWORD_DIGESTS: readonly string[];
+export declare function profilePasswordProblem(
+  password: string | undefined | null,
+): string | null;
 export declare const DEFAULT_TENANT: string;
 export declare const ROLE_PROFILES: readonly RoleProfile[];
 

@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 /**
  * The test login for each role — the data half, with no I/O in it.
  *
@@ -16,18 +18,52 @@
 export const DEFAULT_EMAIL_DOMAIN = "roles.example.com";
 
 /**
- * Shared password, printed on every run.
+ * The shared password has no default, and that is the point.
  *
- * **This stopped being "a test password on a test tenant" on 2026-08-26.** The
- * demo laundry was deleted and these twelve profiles were moved into
- * `Adelaide Towel Service`, which is a real business with 508 customers, 646
- * invoices and a 268-line chart of accounts. A profile signed in as here reads
- * whatever its role is allowed to read of *that*, so the shared password is now
- * a credential on live data rather than on a sandbox. Reset it, or give each
- * profile its own from People > Email sign-in link, before handing any of these
- * to somebody outside the business.
+ * It used to be a constant in this file, which is committed to a **public**
+ * repository — so the published string opened every test login, and on
+ * 2026-08-26 those logins were moved into `Adelaide Towel Service`, a real
+ * business. `owner@roles.example.com` held `super_admin` there under it until
+ * 2026-08-27 (CLAUDE.md §3a). A password anybody can read in the source is not
+ * a credential, so the runner now refuses to provision without one supplied:
+ * `--password` or `ROLE_PROFILE_PASSWORD`. Removing a profile and a dry run
+ * need none, because neither sets a password.
  */
-export const DEFAULT_PASSWORD = "RoleTest!2026";
+export const MIN_PROFILE_PASSWORD_LENGTH = 10;
+
+/**
+ * The strings that have been public, refused so a rerun cannot quietly put
+ * one back. Kept as a SHA-256 digest rather than the text, so this file stops
+ * publishing the password it is refusing.
+ */
+export const PUBLISHED_PASSWORD_DIGESTS = Object.freeze([
+  "4536e7d7047c661f172f60e6fd17cd0aa5f0d9650800ed4e0f3558f182e61c1d",
+]);
+
+/**
+ * Why a supplied profile password cannot be used, or null. The runner and the
+ * vitest suite ask the same question; both run on Node, so the digest is
+ * computed here with `node:crypto` rather than passed in.
+ *
+ * Ten characters is the app's own floor (`MIN_PASSWORD_LENGTH` in
+ * `src/lib/auth/passwords.ts`); `role-profiles.test.ts` pins the two together,
+ * because this file cannot import TypeScript.
+ */
+export function profilePasswordProblem(password) {
+  if (password === undefined || password === null || password === "") {
+    return "No password was given. Pass --password or set ROLE_PROFILE_PASSWORD; there is no default.";
+  }
+  if (password.length < MIN_PROFILE_PASSWORD_LENGTH) {
+    return `The password must be at least ${MIN_PROFILE_PASSWORD_LENGTH} characters.`;
+  }
+  if (password !== password.trim()) {
+    return "The password starts or ends with a space, which is almost always a paste mistake.";
+  }
+  if (PUBLISHED_PASSWORD_DIGESTS.includes(createHash("sha256").update(password).digest("hex"))) {
+    return "That password has been published in this repository and cannot be used again.";
+  }
+  return null;
+}
 
 /**
  * The laundry the memberships go in, resolved by name.
