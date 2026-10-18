@@ -3645,6 +3645,27 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-10-18 · Released: Phases 1–3 of Darshan's review on Prod
+**0053–0057 went on first, then the code.** Darshan pasted `apply-0053-0057.sql` into the Supabase
+SQL editor (the connector's `apply_migration` came back `cancelled` twice on 0053, with nothing
+written); §11 has the verification. Then #82 merged into `Dev` (`e02f7e5`) and **#95 carried `Dev`
+into `Prod` (`5847b2e`)**, both through pull requests, and `Prod` was never force-pushed. #95 was
+merged by Darshan once its CI had finished green.
+
+- **CI on #95's head was green on all three jobs before the merge** (run 39127863840): Verify
+  12:34:46 → 12:36:11, DB and Security 12:34:46 → 12:35:18. The same tree had already passed as
+  #82's head (`fcb0c48`). Prod's own push run is 373.
+- **`Prod` carried five commits `Dev` lacked, and all five were earlier Dev → Prod merge commits**
+  with no file changes, so nothing had to be reconciled.
+- **What a person should see on `ats.coreit.com.au` now:** the five-area rail; Issue disabled with
+  "Add your bank details in Settings › Invoicing"; Awaiting invoice with a Needs a price chip; the
+  invoice register marking the 646 MYOB invoices "Imported – not reconciled"; the Laundry board;
+  and Start my day on My Runs. **Nothing behind the login has been opened with real rows yet.**
+- **The Vercel production deploy is not confirmable from this session** (§5).
+- **Still Darshan's:** the bank details, phone and accounts email; the invoice numbering series;
+  whether an adjustment note's total prints negative; and the test-data list before the clean-up
+  tool is run.
+
 ### 2026-10-18 · The Xero void and the token refresh, mocked too
 The two gaps the entry below left open, closed on `claude/relaxed-faraday-4ey58h-mocks2`. **Tests
 only: no migration, and no change to `src/` outside two test files.**
