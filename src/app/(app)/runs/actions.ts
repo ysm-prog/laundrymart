@@ -158,8 +158,10 @@ export async function reassignJobsToBoard(formData: FormData): Promise<void> {
   const orderIds = formData.getAll("selected")
     .filter((value): value is string => typeof value === "string" && value.length > 0);
 
-  const back = `${RUNS}?date=${parsed.data.return_date ?? parsed.data.date}`
-    + (parsed.data.return_board ? `&board=${parsed.data.return_board}` : "");
+  // The Laundry board's bulk Assign posts here too (brief 3.3) with its own
+  // `return_to`; the Runs screen's day and board are the default.
+  const back = returnTo(formData, `${RUNS}?date=${parsed.data.return_date ?? parsed.data.date}`
+    + (parsed.data.return_board ? `&board=${parsed.data.return_board}` : ""));
 
   if (orderIds.length === 0) return fail(back, "Select at least one job to move.");
   // Blank does **not** clear here: this form shows no one job's instruction, so
@@ -273,9 +275,15 @@ async function moveOneJob(
   });
   if (!result.ok) return { ok: false, orderNumber: order.order_number, reason: result.error };
 
+  // The board by **name** on both sides (brief 3.8): this used to log the
+  // previous board's id, so the timeline read "moved it from 3f2a… to Board 2".
+  const previousBoard = order.assigned_board_id
+    ? (await supabase.from("boards").select("name").eq("tenant_id", session.tenantId)
+        .eq("id", order.assigned_board_id).maybeSingle<{ name: string }>()).data?.name ?? null
+    : null;
   await logOrderActivity(supabase, session, order.id, {
     activity_type: order.assigned_board_id ? "run_reassigned" : "run_assigned",
-    previous: { board: order.assigned_board_id, assigned_delivery_date: order.assigned_delivery_date },
+    previous: { board: previousBoard, assigned_delivery_date: order.assigned_delivery_date },
     next: { board: board.name, assigned_delivery_date: date },
   });
 

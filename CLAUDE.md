@@ -108,7 +108,23 @@ The master spec names a .NET 9 Web API; this build follows the supplied skeleton
     currently needs it is a constant somebody has to re-derive later.
 - Invoice PDFs render server-side with `@react-pdf/renderer` (`src/lib/pdf/`), streamed from
   `/api/invoices/:id/pdf` and attached to the Resend email. `serverExternalPackages` keeps the
-  renderer out of the client bundle.
+  renderer out of the client bundle. **Since 2026-10-18 both the tax invoice and the credit note
+  (MYOB's "Adjustment note") are drawn to the laundry's own MYOB invoice** (brief 1.10, template
+  `Invoice-00321043.pdf`) from one set of blocks in `myob-layout.tsx`: logo top-left, the business
+  right-aligned, Bill-to in a grey panel, **Item ID | Description | Qty | Unit price | Tax |
+  Amount** with "including tax" under the money headers, Notes with MYOB's one-line banking
+  details, a boxed Total amount, and `Page n of N` / `Invoice no … Total amount …` on every page.
+  **Checked against the template side by side**
+  (`docs/screenshots/2026-10-18-invoice-pdf-vs-myob.png`): every rule, box and line of text sits
+  within half a point of it vertically; text widths differ slightly because Helvetica is not MYOB's
+  Arial. Two rules came out of that comparison: **words never hyphenate** (react-pdf splits them by
+  default, and printed the account name as "Ex-ample"), and the payment line is MYOB's character
+  for character — `BSB:062-000 Account No.12345678`, no space after either label.
+  `pdfLineCells` is the rule for a line (item code, the item's name on a job line, the tax code);
+  the job number now lives only in the service breakdown, which prints for any job-billed
+  invoice. **The logo is the tenant's data**: uploaded on Settings › Invoicing into the private
+  `tenant-branding` bucket (0054) and embedded at render time — no logo file is in the code (the
+  screenshot shows ATS's, taken out of the template PDF to test with, as the brief asked).
 - **A person is shown by name, and the directory is one read** (`src/lib/directory.ts` over
   `tenant_members()`, 0030). Every `assigned_to`, `created_by`, `actor_id` and `delivered_by`
   column holds an `auth.users` id; the screens used to resolve those through the GoTrue admin
@@ -280,6 +296,9 @@ Resource-scoped beyond tenancy:
   `archivable_tables()`, so the 0028 trap does not apply — asserted rather than
   assumed, because a later migration archiving one of them would silently
   un-hide an archived row through these policies.
+- **A round writes its own job's timeline** (0056). `laundry_order_activity`'s restrictive insert
+  admits the three office roles *or* a job assigned to the caller's own board or driver record.
+  Before it, 0034's office-only restatement refused every row a round wrote, silently.
 - `audit_logs` is **read by four roles and written by everybody** (0035). SELECT needs
   `super_admin`/`operations_manager`/`regional_manager`/`auditor` — the four that hold
   `admin.read`, the auditor being why it is a role list and not `admin.write`. INSERT stays open
@@ -602,6 +621,63 @@ key remains the way to reset or re-assert them through the Auth API, but nothing
   `ready_for_dispatch`, and cannot be reopened once finished (`guard_batch_transition`). Its
   manifest freezes when it leaves receiving — only `rejected_quantity` and notes stay writable
   (`guard_batch_line_change`), because everything else drove a stock movement.
+- **A draft becomes a tax invoice only once the laundry's invoice details are complete**
+  (`guard_invoice_issue`, 0053; brief 1.1). Moving an invoice out of `draft` into anything but
+  `void` needs an ABN that passes the **ATO checksum** (not just eleven digits), a line of
+  business address and **all three** bank details — read from `tenants.abn` and
+  `tenants.settings.invoiceProfile`. INV00008 was issued on 18 October with all of them empty and
+  printed "TAX INVOICE" anyway. `issueGaps` in `lib/domain/invoice-profile.ts` is the same rule in
+  TypeScript, `issueOneInvoice` applies it before it reads or writes anything, and every Issue
+  button is drawn disabled with the remedy beside it, so the trigger is the boundary rather than
+  the message. **An INSERT is not guarded**, deliberately: the MYOB import writes its history
+  straight in as `issued`/`paid`, and every invoice this app raises is opened as a draft. Voiding
+  a draft stays open whatever the settings say.
+- **No laundry is received in the future** (`guard_laundry_order_received_at`, 0055; brief 1.5).
+  A receipt more than **fifteen minutes** ahead of now is refused on INSERT and on any UPDATE that
+  *changes* it — so `LJ00031` (recorded on 17 October as received on the 19th) is not re-judged by
+  an unrelated edit, and is listed on Reports › Data checks instead of being rewritten. The job
+  form caps the date at today for every role, and `receivedInFuture` refuses it in both actions.
+- **A finished job is priced the moment it is finished** (brief 1.3). `completeLaundryOrder` runs
+  `autoPriceCompletedJob` after the completion write — the same pricer as Price this job (rate
+  card → the customer's price → the house price → **the item's own selling price**, the new last
+  tier) — and **never approves**. On the service-role client, tenant named on every read, because
+  a round or a driver finishing a job can read no price. Anything it cannot price leaves the job
+  in review with `billing_hold_reason = 'needs_price'` (0055), which is the billing queue's
+  **Needs a price** list; pricing it fully, saving charges by hand, approving or excluding clears it.
+- **Voiding asks whether the work is billed again** (brief 1.6). Yes is what voiding always did —
+  the jobs go back to `approved`. No writes them off: `not_billable` with the void's reason,
+  reached **through** `approved`, because 0017's guard has no edge from an invoiced state to
+  `not_billable` and the two steps it does have are the ones a person would take. `voidOneInvoice`
+  (`lib/invoices/void.ts`) is the one implementation, shared with the test-data clean-up.
+- **An invoice says where it came from** (`invoices.source`, `app`/`import`, 0055; brief 1.2).
+  Imported MYOB invoices are marked `import` — backfilled by the importer's note or by a number
+  outside the app's `INV` sequence — and are **never pushed to Xero**, whose copy of that history
+  was imported separately.
+- **A delivered job finishes its stop, and a run with every stop done is on its way back**
+  (`sync_stop_on_order_finish`, 0056; brief 2.1). An AFTER UPDATE trigger on `laundry_orders`, so
+  it is the same transaction as the delivery **whichever screen wrote it**. A stop completes when
+  every live job on it is finished and one was delivered; a `both` stop with no collection captured
+  is only `delivery_completed`, because half a visit is not a visit; an `in_progress` run with no
+  open stop moves to `returning`. Nothing **closes** a run: that still needs the unload
+  (`guard_route_transition`), which is what sweeps rental linen back into stock.
+- **Ready means assigned** (brief 2.2). A delivery job moved to `ready_for_delivery` whose customer
+  has a round (`collection_board_id`, 0047) goes onto it, for the first day on or after
+  `max(expected, today)` that is not a Sunday or a row in `public_holidays` (`nextDeliveryDay` —
+  no per-board delivery-day model exists, so that is the brief's own fallback). Through
+  `assignOneJobToBoard`, so `guard_laundry_order_assignment` still judges it, on the caller's own
+  client. `settings.automation.autoAssignOnReady`, default on. No round: it waits under Needs a
+  driver, as before.
+- **Delivered means billed** (brief 2.3). After 1.3 prices a finished job in full, it is approved
+  when every line came from a rate card or the price list (not `item_price`, not $0.00) and both
+  `settings.automation.autoApproveCleanJobs` and `customers.auto_approve` (0056) are on. Through
+  `approveAndPlaceJob` — the Approve button's own routine — and "Auto-approved" on the timeline.
+  `autoIssuePerJob` (**default off**) issues a per-job customer's draft on approval; emailing it is
+  `emailOnIssue`, also off.
+- **A delivery proves itself** (0056; brief 2.4). Received-by, the signature and photo keys (the
+  private `run-media` bucket, under `<tenant>/delivery/<order>/`, refused anywhere else by a check
+  constraint), the count per row, a short flag, and **which board and which driver** — not only
+  the shared board login. On `laundry_orders`, not `deliveries`: every `deliveries` row is a
+  `move_inventory()` record against rental stock, and a customer's own linen going home is not one.
 
 ## 5. Branch & deploy
 Feature branch → `Dev` → `Prod`. CI (`Prod`/`Dev`) runs verify, gitleaks and the DB job
@@ -643,14 +719,36 @@ billing one; `sectionFor` takes the longest match so it lands there rather than 
 Price Selected → Approve Selected → Add to Draft) ·
 `/invoices/drafts` (the open-drafts board — one card per customer's running invoice, with Issue
 now on each; the month-end question the register could not answer) ·
-`/orders[/new|/:id|/:id/edit]` ·
+`/orders[/new|/board|/:id|/:id/edit|/:id/docket]` ·
 `/items[/:id]` · `/drivers` · `/vehicles` · `/routes/templates[/:id]` ·
 `/routes/daily[/:id|/:id/sheet]` · `/routes/planner` · `/jobs[/:id]` ·
 `/operations/{pickups,deliveries,exceptions}` · `/run` · `/warehouse[/:id]` · `/inventory` ·
 `/invoices[/:id|/prices|/charge-accounts]` · `/reports` · `/search` · `/help` ·
 `/notifications` ·
-`/admin` (redirects) `[/depots|/users|/holidays|/audit|/notifications|/data]` ·
+`/admin` (redirects) `[/depots|/users|/holidays|/audit|/notifications|/data|/invoicing|/operations]` ·
 `/platform[/admins|/settings|/release]` (platform admin only)
+
+**The rail is five areas: Today, Laundry, Deliveries, Customers, Billing** (2026-10-18, brief 3.1).
+Everything else — Fleet, Linen, Reports, Settings, Help and Platform — is in the account menu under
+the person's initials, from the same `NAVIGATION` list (`placement: "profile"`), so a screen is
+still reachable by the same capability and the same href. `railNavigation()` splits the list;
+`nav.test.ts` asserts no role's rail carries more than five rows. The three collapsible groups and
+the `es_nav` cookie of 2026-08-24 are gone with it — five rows need no drawers.
+- **Laundry** opens on `/orders/board`, the board (§4's statuses unchanged; `laundry-board.ts` is
+  the column rule), with All jobs (`/orders`) beside it. **Deliveries** opens on My Runs and holds
+  At the depot, Run order, Due for collection, Driver visits, Problems, Collections and Delivery
+  records. **Money is called Billing**, and its own Billing tab is now **By period**.
+- `/laundry`, `/deliveries` and `/money` redirect (non-permanent, `next.config.mjs`), so a word
+  somebody types still lands.
+- **The plant is behind a switch** (brief 3.9, Settings › How you work, default **off**): the In
+  the plant tab (`feature: "plant"`), its Today tiles and its stage strip. Hidden rather than
+  linked, because `production_batches` joins a run and stock and never a laundry job — there was
+  no half-built link to finish. `/warehouse` with the switch off says so and names the setting.
+
+**Driver visits is not a rail row any more** (2026-10-18, brief 2.1). Its four screens — the
+visit list, Problems, Collections and Deliveries — are tabs under **Runs**, because since 0056 a
+stop finishes itself with its job and stopped being a place anybody has to go to. The routes are
+unchanged.
 
 **There is no user-facing Runs module.** `/routes/daily`, `/routes/planner` and
 `/routes/templates` still exist, still work and still hold their history, but **no rail row
@@ -687,8 +785,12 @@ so the two sets parting company fails a test rather than offering a link that ca
 
 **"My Runs" (`/my-runs`) is a board's whole workspace**: the jobs assigned to that round for a
 date it chooses, grouped To deliver / Out for delivery / Completed, in the order the office set
-and with each stop's position printed on the card, with Confirm Load and Start Route in front of
-them. Gated on `routes.read` so a manager can open it for a board.
+and with each stop's position printed on the card, with **Start my day** in front of them — one
+button and one confirm since 2026-10-18 (brief 2.4), replacing Confirm Load and Start Route; it
+still stamps `load_confirmed_at` and `started_at` separately and asks **who is driving** for
+`operated_by_driver_id`. Each card carries **Delivered**, which opens the proof sheet (signature,
+photo, received by, counts, short flag): two taps per stop. Gated on `routes.read` so a manager can
+open it for a board.
 **Since 2026-08-26 it also carries Adjust Run**, in a "Run order" card between the day's workflow
 and its job groups — the same `SequenceBoard` the Runs screen draws, so there is one answer to
 "how is a run ordered" rather than two. It renders **only** for a holder of `routes.sequence`
@@ -741,7 +843,7 @@ answer, and measuring is what showed it was needed: six columns at 320px leave e
 under §10b's 36px floor. The rule behind every state is `buildStatusTrack` in
 `lib/domain/laundry-orders.ts`, pure and tested, so the component decides nothing.
 
-**The rail is three collapsible groups** (2026-08-24): "Day to day" open, "Customers & money"
+**Superseded 2026-10-18 by the five-area rail above.** **The rail was three collapsible groups** (2026-08-24): "Day to day" open, "Customers & money"
 and "Set-up & reports" shut, Help pinned outside them — 12 flat rows down to 6 visible for an
 owner. This softens the "one flat list, no headings" rule below and does not undo it: the
 *screens* inside an area are still tabs, never rail rows. `navigationFor()` still returns one
@@ -1218,7 +1320,7 @@ produce on demand.
   the column *and* 0032's `item_id`, still INVOKER, `anon`/`authenticated` EXECUTE, RLS on and
   no `anon` grant, 0025's restrictive layer present). `laundry_item_ownership.test.sql` (7)
   proves the round trip and was confirmed to fail on a database without 0051.
-  **Written, not applied** (§11).
+  Applied on 2026-10-12 (§11).
 - `0052_invoice_money_guards` — **a credit note counts, and a paid invoice stays paid.**
   From the 2026-10-12 end-to-end test (INV00006, CN00001/CN00002).
   `invoices.amount_credited` (sum of issued/applied credit notes, kept by the
@@ -1238,7 +1340,58 @@ produce on demand.
   admin's**, so Settings › Notifications had been writing zero rows for an Owner and saying
   "saved". **Backfills `amount_credited` from existing credit notes; on the live project that
   is INV00006 alone.** Seven self-assertions; `invoice_money_guards.test.sql` (20).
-  **Written, not applied** (§11).
+  Applied on 2026-10-12 (§11).
+- `0053_tax_invoice_issue_guard` — **a draft becomes a tax invoice only when the laundry's
+  invoice details are complete** (brief 1.1, gap G1). `guard_invoice_issue()` and its BEFORE
+  UPDATE OF status trigger on `invoices`: `draft` → anything but `draft`/`void` is refused unless
+  `tenants.abn` passes the ATO weighted checksum (computed in SQL, nested so no character is cast
+  before the eleven-digit check), `invoiceProfile.addressLines` has a non-blank line and
+  `bankAccountName`, `bsb` and `accountNumber` are all set. Raises **P0001** naming only what is
+  missing, so the toast reads *"INV00008 cannot be issued until the laundry's invoice details are
+  complete: add your bank details in Settings › Invoicing"*. Malformed JSON reads as missing,
+  never as an error. SECURITY DEFINER (reads the tenant row whatever the caller's RLS shows),
+  revoked from `public, anon` **and `authenticated`**. **Adds one function and one trigger; no
+  table, column, policy or capability; changes no row.** Five structural self-assertions plus a
+  behavioural one against a probe laundry where the database can be given one (skipped where
+  0041's single-laundry switch is on, i.e. live), each confirmed to fire by breaking what it
+  guards. `invoice_issue_guard.test.sql` (16) — confirmed to fail on a database without 0053.
+  **Three existing proofs issue drafts** (`charge_accounts`, `gst_inclusive`,
+  `open_draft_invoices`) and now give their laundry a complete invoice profile first, with a
+  comment saying why. **Written, NOT applied** (§11).
+- `0054_invoice_logo_storage` — **the laundry's logo, as the laundry's data** (brief 1.10). One
+  private bucket, `tenant-branding` (PNG and JPEG, 1 MB), keyed by tenant the way 0007's
+  `run-media` is, with four policies on `storage.objects`: read by any **member** (every role that
+  opens an invoice renders a PDF that embeds it) and written, replaced and removed by the **Owner**
+  alone (`has_role(…, super_admin)`) — unlike `run-media`, which any member writes. Four
+  self-assertions (bucket private, four policies, writes limited to the owner, no `for all`).
+  Adds no table, column or function. **Written, NOT applied** (§11).
+- `0055_billing_flow_guards` — **the four database halves of the review's Phase 1.**
+  `laundry_orders.billing_hold_reason` (`needs_price` or null, brief 1.3);
+  `guard_laundry_order_received_at` and its trigger (brief 1.5); `invoices.source` (`app`/`import`,
+  not null default `app`, brief 1.2) **with a backfill** — the one statement that changes rows,
+  marking every invoice carrying the importer's note or a number outside `^INV[0-9]+$` as an
+  import, which only ever narrows what may be pushed; and `save_tenant_settings` rebuilt from
+  0052's body to accept the `receivables` key (brief 1.9). Eight self-assertions, including that
+  the backfill left no import marked `app`. `billing_flow_guards.test.sql` (15) proves all of it
+  and 0054's policies. **Written, NOT applied** (§11).
+- `0056_flow_runs_itself` — **the database halves of Phase 2.** Proof-of-delivery columns on
+  `laundry_orders` (received by, signature and photo keys under the job's own folder — a check
+  constraint — the counts as jsonb, a short flag, `delivered_board_id`, `delivered_driver_id`);
+  `customers.auto_approve` (default true); `save_tenant_settings` rebuilt from 0055's body with the
+  `automation` key; `sync_stop_on_order_finish()` (SECURITY DEFINER, revoked from `authenticated`)
+  and its AFTER UPDATE OF status trigger; **a backfill that changes rows** — every open stop whose
+  jobs are all finished is completed, and every `in_progress` run left with no open stop moves to
+  `returning` (on live, at least `JOB00025`); and `laundry_order_activity_main_flow_insert`
+  rewritten so a round can write **its own** job's timeline. 0034 had restated that insert as office
+  roles only, so every timeline row a board or driver wrote — "delivered" included — was refused
+  and `logOrderActivity` swallowed it: the job page had never shown who delivered a round's job.
+  Seven self-assertions. `flow_runs_itself.test.sql` (16). **Written, NOT applied** (§11).
+- `0057_operations_settings` — **Settings › How you work.** `save_tenant_settings` rebuilt from
+  0056's body with one key added to the whitelist, `operations` (`plantStages`,
+  `defaultTurnaroundDays` — `lib/domain/operations-settings.ts` parses it, and an absent key reads
+  as plant off and two days). Adds no table, column, policy, trigger or capability; changes no row.
+  Five self-assertions, including that every earlier key is still admitted.
+  `operations_settings.test.sql` (7). **Written, NOT applied** (§11).
 - `0050_pickup_to_job` — **a collection becomes a laundry job, exactly once.**
   `laundry_orders.source_pickup_id` (`on delete set null`),
   `uq_laundry_orders_source_pickup` (partial unique) and
@@ -1523,7 +1676,8 @@ Proofs in `supabase/tests/`: `rls_isolation`, `rls_coverage`, `driver_scope`,
 `audit_log_scope`, `run_sequence`, `accounts_scope`, `open_draft_invoices`,
 `single_laundry`, `charge_accounts`, `gst_inclusive`, `collection_schedule`,
 `customer_record_scope`, `fleet_scope`, `pickup_intake`, `laundry_item_ownership`,
-`invoice_money_guards` (**639 assertions** across 34 files).
+`invoice_money_guards`, `invoice_issue_guard`, `billing_flow_guards`, `flow_runs_itself`,
+`operations_settings` (**693 assertions** across 38 files).
 
 **Count assertions, not lines starting with `ok`.** pgTAP's function is literally named `ok`, so
 psql prints a centred `ok` **column header** above each result — and `grep -c '^\s*ok '` counts
@@ -1646,6 +1800,10 @@ saying the gate had stopped running.
   `vi.mock`, `vi.fn` or `vi.spyOn` at all** — 0 files, because every test is over a pure rule; and
   it drops the `sequential` option, which `vitest.config.mts` never set. The one file that touches
   the test runtime at all is `adelaide.test.ts` with `vi.useFakeTimers()`, and it passes.
+  **No longer true of the mocks since 2026-10-18**: six `*-mocked.test.ts` files now use `vi.mock`
+  for the Xero and email boundaries (§18, Phase 3 follow-up). Each calls `vi.clearAllMocks()` in
+  its own `afterEach` and re-arms what it needs in `beforeEach`, so vitest 5's clearing default is
+  what they assume rather than something they trip over.
 - **It is a smaller install, not a larger one.** **576 → 569** packages, measured as package sets
   per the rule below: vitest 5 absorbs `@vitest/expect`, `@vitest/runner`, `@vitest/snapshot`,
   `@vitest/utils` and `@vitest/pretty-format` into itself. `vite` did not move (8.2.2, already
@@ -2228,6 +2386,43 @@ reports six false gaps.
   `set_records_archived`, `sync_invoice_line_account`, `tenant_members`). That is the 0042 trap
   leaving its usual trace: text typed into `apply_migration` reformatted a little against the file.
   Worth knowing before anybody reads a raw `md5(prosrc)` mismatch as drift.
+
+**`0057_operations_settings` is NOT applied to `laundrymart-syd`** (2026-10-18), written on
+`claude/relaxed-faraday-4ey58h-phase3`. **Apply it after 0056 and before Phase 3 merges**: the
+Settings › How you work screen saves the `operations` key, and without 0057 that save is refused
+with 22023 (the screen says so). Nothing else depends on it — an absent key reads as the defaults.
+It changes no row and holds no `delete`, so the connector can apply it.
+
+**`0056_flow_runs_itself` is NOT applied to `laundrymart-syd`** (2026-10-18), written on
+`claude/relaxed-faraday-4ey58h-phase2` under the same instruction. **Apply it after 0053–0055 and
+before Phase 2 merges**: My Runs and both job pages select the proof columns, the billing card
+writes `customers.auto_approve`, and Settings › Invoicing › Automation calls the widened writer.
+**It changes rows**: the backfill completes every open stop whose jobs are all finished and moves
+every `in_progress` run with no open stop to `returning` — expected on live: `JOB00025` (LJ00032's
+stop) at least. Its policy rewrite and trigger function carry no `delete`, but the backfill is an
+`update`; the SQL editor is the safe route, as for 0051/0052.
+
+**`0054_invoice_logo_storage` and `0055_billing_flow_guards` are NOT applied to
+`laundrymart-syd`** (2026-10-18), written on the same branch under the same instruction. **Unlike
+0053, the code depends on both — apply them before the merge, after 0053:** the billing queue and
+the job page select `laundry_orders.billing_hold_reason`, the Xero gate, the register and Today
+select `invoices.source`, Settings › Invoicing saves the `receivables` key, and the logo upload
+writes to `tenant-branding`. PostgREST answers a missing column with an error, not a null, so
+merging first would break Awaiting invoice, the register and Today. **0055 changes rows**: its
+backfill marks the imported MYOB invoices (`notes` from the importer or a non-`INV` number) as
+`import` — expected on live: the ~646 MYOB headers, leaving the handful of `INV` invoices as
+`app`. Neither carries a `delete`, so the connector can apply them; the SQL editor works too.
+
+**`0053_tax_invoice_issue_guard` is NOT applied to `laundrymart-syd`** (2026-10-18), written on
+`claude/relaxed-faraday-4ey58h` under Darshan's instruction not to touch the live database. Unlike
+0051/0052 the code does not *depend* on it — `issueOneInvoice` refuses first — so merging before
+it is applied is safe; what is missing until then is the boundary under a direct
+`update invoices set status = 'issued'`. **Apply it with the SQL editor** (its probe block holds a
+`delete`, which is what times the connector out). Live, the probe is skipped because 0041's
+single-laundry switch is on, and the structural assertions stand alone. After applying, the
+expected live behaviour is the brief's: **every Issue is refused with "add your bank details"**
+until they are entered, because the ABN (`69 892 278 164`, which passes the checksum) and the
+address are set and the bank details are not.
 
 **`0051_laundry_item_ownership` and `0052_invoice_money_guards` were applied on 2026-10-12**
 (`20261012033302`, `20261012033303`) — by Darshan, pasted into the Supabase SQL editor, because
@@ -3434,6 +3629,18 @@ invoice goes, because this app has no counter-cash concept.
     sit a cent from its own quantity times its own unit price. Closing it means sending
     `LineAmount` explicitly, which Xero validates against the other two fields — worth doing on
     the first real connection, not blind.
+- **Nothing is sent while an account in use has no Xero code** (brief 1.2). A line coded to an
+  account with no `xero_account_code` does not fail — it falls through to the default sales
+  account and lands in the wrong place, silently. So `pushInvoiceToXero` refuses while any account
+  the app's invoices use (app invoice lines, sold items' income accounts, charge-type defaults, job
+  charges) is unmapped, and writes the refusal to `xero_push_error`. **Money › Xero** carries the
+  pre-flight — every account in use, its Xero code, and whether the connected chart carries it —
+  and a **Xero problems** list of every invoice Xero refused, with Retry; the invoice page shows
+  its own refusal with Retry too. The used-account set is read on the **service-role** client,
+  tenant named: a gate read through a caller who cannot see the chart would read nothing and pass.
+- **An imported MYOB invoice is never pushed** (`xeroPushRefusal`, `invoices.source`, 0055).
+- **`LineAmountTypes` stays `Inclusive`**, now pinned with the review's own example: $25.08 with
+  $2.28 GST inside it, which would have been $27.59 under `Exclusive`.
 - `summariseXeroError` in `lib/xero/errors.ts` is shared by all three pushes. It was a private
   copy in two of them and the void path would have made three, at which point they drift and the
   least-used one stops parsing the shape Xero actually sends.
@@ -3442,6 +3649,384 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-10-18 · The Xero void and the token refresh, mocked too
+The two gaps the entry below left open, closed on `claude/relaxed-faraday-4ey58h-mocks2`. **Tests
+only: no migration, and no change to `src/` outside two test files.**
+
+- **`xero/push-void-mocked.test.ts` (6).** A void posts `VOIDED` to the invoice's own URL with the
+  bearer token and the Xero org header, and is recorded only once Xero answers `VOIDED`; a 200 that
+  left the invoice `AUTHORISED` is written as a failure naming that state, never as a success; a
+  400's validation text is written to `xero_push_error`. And three ways **nothing is sent**: an
+  invoice that never reached Xero or is already void there (a skip, recorded nowhere), a payment
+  already in Xero (refused before asking, with "a credit note" named), and no connection.
+- **`xero/tokens-mocked.test.ts` (6).** A token with more than a minute left is used without a
+  request; one with less is refreshed with Basic client credentials, and **Xero's rotated refresh
+  token is what gets stored** — or the old one when Xero sends none. A refused refresh answers null
+  and stores nothing; an unconnected laundry and a deployment with no Xero credentials touch
+  nothing at all.
+- **Each guard was broken on purpose and exactly one test failed:** the `VOIDED` check after a 200,
+  the refresh-token fallback, the one-minute skew, and recording skips as errors.
+
+### 2026-10-18 · Xero and email, mocked: the last of the brief's test rules
+Ground rule 5 of Darshan's brief — *"No email and no Xero calls from tests. Mock both"* — and
+section 5's *"the mocked Xero payload has `LineAmountTypes = Inclusive` and the right account
+codes"*. Phase 1 recorded this as not done, because the suite had no fetch mocking. Branch
+`claude/relaxed-faraday-4ey58h-mocks`, stacked on Phase 3. **Tests only: no migration, and no
+change to `src/` outside `src/test-support/` and four test files.**
+
+- **`src/test-support/fake-supabase.ts`** answers each table from a function and records every
+  write and every filter, so a test can assert what the flow stored *and* that each read named its
+  tenant (§23). It does not evaluate filters; it is a recorder, not a database.
+- **`xero/push-mocked.test.ts` (10).** The request `pushInvoiceToXero` really sends, `fetch`
+  stubbed: one ACCREC to `/Invoices` with the bearer token and the Xero org header,
+  `LineAmountTypes: Inclusive`, and each line coded **its own account, then its item's, then the
+  laundry's default** through the real embed shapes (object *and* single-element array). The Xero
+  id and the contact are written back; a retry carries `InvoiceID`; a 400's validation message is
+  written to `xero_push_error`. And four ways **nothing is sent**: an import, a draft or void, no
+  connection (recorded nowhere, because it is not a failure), and an account in use with no Xero
+  code (recorded, because it is).
+- **`xero/push-payment-mocked.test.ts` (3).** A payment posts against the Xero invoice into the
+  chosen bank account with **its own id as the `Idempotency-Key`**; one already in Xero, one whose
+  invoice is not there, and one with no bank account chosen send nothing.
+- **`email/send-mocked.test.ts` (4).** Resend replaced at the module: an unconfigured deployment
+  never constructs the client; a configured one hands it the laundry's name, the reply-to and the
+  PDF; a refusal and a thrown network error both come back as a sentence, not a throw.
+- **`invoices/send-mocked.test.ts` (5).** `sendInvoice` with the transport, PDF and audit
+  mocked: a draft and a void are never emailed; a sent invoice stamps `emailed_to` under its tenant
+  and **only then** moves its jobs to `invoice_sent`, filtered to `invoice_generated` so a paid job
+  is never dragged back; a bounce is audited as `send_failed` and moves nothing.
+- **Each guard was broken on purpose and the right test failed:** `LineAmountTypes` flipped to
+  Exclusive, the import refusal removed, the draft refusal removed, the idempotency key removed.
+- **Still not covered:** a real Xero, which no test should reach. The void push and the token
+  refresh were the two gaps left here; the entry above closes them.
+
+### 2026-10-18 · Darshan's BA review, Phase 3: fewer screens, one next step
+Items 3.1–3.10 of the brief, on `claude/relaxed-faraday-4ey58h-phase3`, stacked on Phase 2 (#85).
+Written in one pass under the same instruction as Phases 1 and 2: no per-item proofs or browser
+checks; docs once, verify once. **One migration, 0057, written and NOT applied** (§11).
+
+**3.1 — Five areas on the rail.** Today, Laundry, Deliveries, Customers, Billing; the rest moved
+to the account menu, built from the same `NAVIGATION` entries so nothing lost its capability or its
+href (§6). Old words redirect. Help stopped naming menus that do not exist ("Stops → Problems" is
+now Deliveries › Problems) and describes the five areas.
+
+**3.2 — Today is an inbox.** Five sections — Needs a price, Needs a driver, Problems, Drafts ready
+to issue, Overdue (trusted invoices only, 1.9's filter) — each drawn only for a role that can clear
+it (`inbox.ts`) and each row carrying its one action: Assign inline, Issue inline, a link for the
+rest. Capped at eight rows with "and N more". The plant panels show only when the plant switch is
+on. The getting-started list's customer step now matches the form, and "set your prices" replaced
+the contract step.
+
+**3.3 — The Laundry board.** In the plant / Ready / Out / Delivered / Billed, live jobs plus the
+last fortnight's finished ones. The **statuses are unchanged** — the board is a rule over them
+(`boardColumn`), with `assigned` under Ready because a job on tomorrow's round has not left the
+building. Multi-select with **Mark ready** (`lib/orders/mark-ready.ts`, which runs 2.2's auto-assign
+the same way the job page does), **Assign** (the Runs screen's own bulk move) and **Approve** (the
+queue's own bulk approve), each posting only the jobs it applies to. A **scan box** marks a docket
+ready; `normaliseDocket` also reads a number typed by hand (`lj 32` → `LJ00032`).
+
+**3.4 — Intake in about four actions.** Pick the customer and the rest is filled in: their last
+job's items with −/+ steppers (counts and Rental/Own carried, notes left behind), the return date
+(the round's next visit strictly after today, else today plus the laundry's turnaround, both off
+Sundays and holidays — `defaultReturnDate`), and Received via (**counter by default**, driver
+pickup from a collection or `?via=driver_pickup`). A role that reads prices sees each row's price
+and a running total from `priceItemsForCustomer` — the pricer 1.3 uses, so the counter is shown
+what the customer will be charged. Saving offers **Print the docket**: `/orders/:id/docket`, the
+job number as a **Code 128** barcode (`code128.ts`, dependency-free, tested against the standard's
+checksum) and the items, no prices. **The turnaround is a new setting** on Settings › How you work.
+
+**3.5 — The item catalogue.** The laundry item picker shows code, name and usual price. Items can
+be made **inactive** — the status already existed (`items.status`) and every picker already filters
+on it, so this surfaced it rather than adding a column: a status chip on Items and a **Possible
+duplicates** card (`findDuplicateItems`, e.g. T22–T25 all "Towels - Black") with Make inactive
+beside each code. Charge and invoice-line descriptions now use the item's **name** and quantity
+("Towels - Black × 40"), and a merged line drops the first job's count (`chargeBaseDescription`).
+
+**3.6 — A new customer is set up in one go.** Round, collection day, billing method and payment
+terms sit beside the essentials on the add form; the edit form keeps them where they were.
+
+**3.7 — The job page has one next step.** A primary block saying what normally happens next and
+who it waits on (`nextStepFor`) above the status track; "Who is on it / Reassign" is gone, the
+board is the owner, and the office assignee went into a read-only Record card. "Assign to" offers
+office staff only. A Docket button sits in the header.
+
+**3.8 — The timeline says who and where.** Assignments name the board and the date; Start my day
+reads "confirmed the load on Board 1 for …, and it went out for delivery"; deliveries name the
+round, the driver and who received it; a board login is shown as its board's name; an older entry's
+board id is resolved to a name, never printed (`describeOrderActivity`). Moving a job between
+boards now stores the old board's name, not its id.
+
+**3.9 — The plant is hidden by default** (§6). Hidden rather than linked: nothing in the schema
+joins a batch to a laundry job.
+
+**3.10 — Copy and filters.** Help's day count is counted, not written ("Five things"); "Create
+last month's invoices" is the one wording; a draft shows **Will be dated when issued** (screen,
+register, search and PDF) rather than an issue date; the charges copy says "No rate card — priced
+from your laundry price list, then the item's own selling price"; the customer filter on Customer
+laundry and Driver visits is a **type-ahead** (`FilterCombobox`) rather than a select of several
+hundred; and the contact form's Name label now points at its own box — the site form on the same
+page also had a field called `name`, so the label had been pointing at the site's input.
+
+- **Checks:** `verify` green once at the end — **1463 unit tests across 94 files** (31 new in
+  `phase3-rules.test.ts`, six in `code128.test.ts`), typecheck, lint, build. All 61 migration files
+  on a fresh Postgres 16: **693 pgTAP assertions across 38 files**, 0 failing, no plan mismatch,
+  and `supabase/seed.sql` applying on top. `nav.test.ts` was rewritten to the five-area decision,
+  and the price-list wiring test now reads the shared `priceItemsForCustomer`.
+- **Not verified behind the auth gate**: no screen was opened with real rows; 0057 is not applied.
+  Before trusting it: take a job in for a customer on a round and check the date and items arrive
+  filled in; print its docket and scan it into the Laundry board's box.
+- **Section 5's golden path now runs end to end over Phase 3's screens** (`e2e/golden-path.spec.ts`).
+  It creates the customer with a round and billing method in one form, takes a first job in
+  (measured), then holds the customer's **second** job to the brief's **≤ 4 actions** with the
+  items, the return date and the running total already filled in — a first job has nothing to
+  prefill from, so that is the only honest place to measure it. It marks the job ready **by
+  scanning its docket**, runs the round's two taps, checks the timeline names the round, and checks
+  Issue is **disabled with the Settings › Invoicing sentence** while the details are empty. When the
+  seeded branch's own details are given as `E2E_INVOICE_*` secrets it sets them and issues the draft
+  **through its confirm** (1.6); without them that half is skipped with an annotation — no invoice
+  details live in the file. Month end is not pressed: it issues only drafts from a finished period,
+  which a fresh branch has none of. **Still never run**, for the reason the Phase 2 entry gives: it
+  needs a seeded Supabase branch, a preview and the logins as secrets.
+
+### 2026-10-18 · Darshan's BA review, Phase 2: make the flow run itself
+Items 2.1–2.5 of the brief, on `claude/relaxed-faraday-4ey58h-phase2`, stacked on Phase 1 (#82)
+because 2.3 builds on 1.3's pricing and 2.5 on 1.1's gate. Written in one pass under Darshan's
+instruction from Phase 1 — no per-item proofs or browser checks; docs once, verify once. **One
+migration, 0056, written and NOT applied** (§11).
+
+**2.1 — One delivery closes the job and its stop (G6, G7).** After LJ00032 was delivered, Today
+read "Stops 0/1, 1 remaining", Runs read "Already worked 0" and offered to move it, and `JOB00025`
+stayed `assigned`. `sync_stop_on_order_finish` (§4) now finishes the stop in the delivery's own
+transaction and moves an emptied run to `returning`; 0056 backfills the open ones. Runs no longer
+offers a finished job to Move to another board (`MOVABLE_STATUSES`). **Driver visits left the
+rail**: its four screens are tabs under Runs (§6), the routes unchanged.
+
+**2.2 — Ready means assigned.** §4 has the rule (`autoAssignOnReady`, `nextDeliveryDay`,
+`lib/runs/auto-assign.ts`). `advanceOrder` calls it after a move to Ready and the toast says where
+the job went — or that the customer has no round, so it waits under Needs a driver. **Customers
+gained a "Round" column, a No round / On a round filter, and a Set the round panel** that sets the
+round and weekday for every customer ticked on the page in one request (`setCustomersRound`,
+`customers.write`, capped at 200). Only 2 of 513 customers have a round, so this is what makes 2.2
+reach anybody.
+
+**2.3 — Delivered means billed.** `autoApproveIfClean` (`lib/orders/auto-approve.ts`) runs from
+`completeLaundryOrder` after a full price, through `approveAndPlaceJob`; §4 has the rule. The
+customer's Billing & pricing card gains "Approve this customer's jobs automatically…" and
+**Settings › Invoicing gains an Automation card** with the four switches (`settings.automation`).
+The completion toast says it was approved and which draft it is on, instead of "check and approve
+it". A job left for a person says why on its timeline.
+
+**2.4 — Start my day, one tap per stop, proof of delivery (G8, G23).** **Start my day** replaces
+Confirm Load and Start Route: one button, one confirm, "Who is driving" beside it (defaulting to
+whoever operated the round last), stamping the load and the start on the jobs and the day's runs in
+statements that never rewrite a first confirmation or departure. Late work gets "Load and take N
+more". **Delivered** is on every card in My Runs and on the round's job page: a sheet with a
+signature pad (PNG), an optional photo, received-by, notes, the counts prefilled from what was
+taken in (a lower count marks it short), and Confirm — two taps. Files upload through `/api/media`
+first and the action accepts only keys under this job's own folder (`isDeliveryProofPath`); the
+board and the operating driver are recorded beside the signed-in login. **Proof of delivery** shows
+on `/orders/:id` and `/my-runs/jobs/:id`. And because 0034 had been refusing every timeline row a
+round wrote, 0056 widens that insert (§3) — the round's "delivered" now actually reaches the job.
+
+**2.5 — Month-end: Issue and send all ready (G4).** On Open drafts, a **Month end** card states
+the count and total of drafts whose period has ended and that carry lines, and **Issue and send
+all ready** (`issueAndSendAllReady`) confirms first. It re-reads what is ready, refuses the lot once
+while 1.1's invoice details are missing, issues each through `issueOneInvoice` (so the Xero push is
+the single button's), emails only when `emailOnIssue` is on and the caller may send, and reports one
+line per invoice. A second press finds nothing ready and says so; an email goes only for an invoice
+this press issued.
+
+**The end-to-end test (section 5)** is `e2e/golden-path.spec.ts` with `playwright.config.ts` and a
+`workflow_dispatch` workflow (`.github/workflows/e2e.yml`) that takes a Vercel preview URL and the
+seeded branch's logins from secrets. `@playwright/test` 1.56.1 is a new dev dependency. **It has
+never been run**: there is no seeded Supabase branch yet and this container cannot reach one. Two
+things it deliberately does not assert: the intake target of 4 actions (prefilled items and return
+dates are Phase 3.4, so it is measured and annotated instead), and the Xero payload (a test must
+never push to a real Xero; `buildInvoicePayload`'s unit tests prove `Inclusive` and the codes).
+
+- **Checks:** `verify` green once at the end — **1428 unit tests across 92 files**, typecheck,
+  lint, build. All 60 migration files on a fresh Postgres 16: **686 pgTAP assertions across 37
+  files**, 0 failing, no plan mismatch, and `supabase/seed.sql` applying on top. Two existing tests
+  were rewritten to the decision: the platform admin's rail is 12 rows (Driver visits left it), and
+  the pricing wiring test now pins the shared admin client and that approval follows a full price.
+- `npm audit` reports 9 advisories (8 high, 1 critical); **they are there without this branch's
+  dependency change** — checked by stashing it — and are not addressed here.
+- **Not verified behind the auth gate**: no screen was opened with real rows; 0056 is not applied.
+
+### 2026-10-18 · The PDFs beside the MYOB template, and what that caught
+Brief 1.10's own bar: *"an invoice and a credit note … match the template's layout. Put a
+side-by-side screenshot in the PR."* The Phase 1 pass below skipped it on Darshan's instruction (one
+pass, no per-item checks); this is it, on the same branch and in the same PR. **No migration; no
+schema, RLS, capability or business rule change.** Two source files and one test file.
+
+- **The screenshot is `docs/screenshots/2026-10-18-invoice-pdf-vs-myob.png`**: the MYOB template,
+  our tax invoice and our credit note, each at 144 DPI with the blank middle of the page cut out.
+  **The repository is public**, so the template's customer, phone number, accounts email and bank
+  details are covered with solid bars sized from `pdftotext -bbox`, leaving their labels and their
+  positions visible. Our two pages are sample data with placeholder phone, email and bank details.
+  The ATS logo appears in the image's pixels, taken out of the template PDF to test with as the
+  brief says; it is still not a file the code reads.
+- **How it was made**: the two documents rendered through `renderInvoicePdf` and
+  `renderCreditNotePdf` themselves (a throwaway test, not committed), rasterised with `pdftoppm`,
+  then every word box read with `pdftotext -bbox` and every fill found by pixel scan, against the
+  template's own. Measurement off the template alone had been the method in the Phase 1 pass, and
+  it had missed what follows — reading two renders against each other is what found it.
+
+**What it caught, all now fixed:**
+- **Words were hyphenated.** react-pdf splits words by default, and the payment line printed the
+  account name as *"Ex-ample"*. MYOB never does, and a hyphenated account or customer name reads
+  as a typo on a document somebody pays from. `Font.registerHyphenationCallback` keeps words whole;
+  a test reads the renderer's registered callback, and was confirmed to fail with the line removed.
+- **The payment line's spacing was not MYOB's.** The brief writes it `BSB:… Account No.…` and the
+  template prints the digits straight after both labels; ours had a space after each. Now exact,
+  and the test asserts the spacing. The email keeps its own multi-line wording.
+- **The Total amount box sat 6pt low**, and the "including tax" under it was 9pt where MYOB's is 8.
+- **The header sat up to 3pt low**, the title 1.5pt low and the number/date labels 1.5pt high.
+- **The number/date columns were 100pt apart, not MYOB's 86.6.**
+- **The Bill-to lines were 10.8–11.7pt apart, not 10.35**, without MYOB's extra 1.5pt between the
+  italic names and the address, and the panel was 1.5pt short.
+- **The table's money headings start 3pt higher than the others in MYOB**, with their "including
+  tax" at two different depths and the Tax heading 1.5pt left of its column's text; ours sat level.
+- **The table sat 1.5–2pt high on the page while the text inside its band and row sat ~1.7pt low**,
+  and the logo was drawn 1pt small.
+
+After: every rule, box and line of text sits within half a point of the template's vertically,
+read back from the renders rather than reasoned about. Horizontally, right-aligned text can sit up
+to 3pt off — the template's font is Arial, ours is Helvetica, and react-pdf kerns `e T` in
+"Adelaide Towel" where MYOB does not.
+
+**Different from the template on purpose, and shown as such in the image**: the **Due date**
+column (the brief allows it); the customer number, period and terms beside the Bill-to panel;
+*"Please quote INV… as the payment reference."* under the bank line; the service breakdown under a
+job-billed invoice (gap G15 — the line no longer carries the job number); and the credit note's
+**Against invoice** column. A credit-note line's **Item ID is blank** because a credit-note line
+names no item: `credit_note_lines.invoice_line_id` has existed since 0006 and nothing writes it.
+
+**Open for Darshan, not decided:** the template prints an adjustment note's total as **negative**
+(`-$5.00`, in the box and the footer) and ours prints the credit as a positive `$35.00` under the
+heading "Adjustment note". The template's own figures do not settle it — its one line is +100 at
+$0.35 = $35.00 with $3.18 tax, yet the total reads −$5.00 — so it is a question about how ATS wants
+a credit to read, not a layout fix to make quietly.
+
+- **Checks:** `verify` green — **1404 unit tests across 91 files** (one new: the hyphenation rule),
+  typecheck, lint and the production build. The pgTAP suite was not re-run: nothing under
+  `supabase/` changed.
+
+### 2026-10-18 · Darshan's BA review, Phase 1: stop the leaks
+From Darshan's BA review and end-to-end test of `ats.coreit.com.au` on 18 October (test customer
+CUST00515 *ZZ TEST – Claude BA*, job LJ00032, INV00008 issued then voided). Branch
+`claude/relaxed-faraday-4ey58h`, off `Dev`. Gap numbers are the review's. Items 1.1–1.10 except
+1.7, which is dropped: "Electro Services" is the deliberate product name. **Three migrations,
+0053–0055, all written and NOT applied** — 0054 and 0055 must go on before the merge (§11).
+
+**1.1 — Issue is blocked until the invoice is a valid tax invoice (G1).** INV00008 was issued and
+its PDF printed "TAX INVOICE" with no ABN, no business address and no bank details, because
+Settings › Invoicing was empty and nothing checked.
+- **One rule, `issueGaps`** (`lib/domain/invoice-profile.ts`): an ABN that passes the **ATO
+  checksum** (the save action now refuses a failing one too — eleven digits was all it checked),
+  an address line, and all three bank details. `issueBlockedReason` is the sentence — *"Add your
+  bank details in Settings › Invoicing before issuing."* — and tells a role that cannot open
+  Settings who can.
+- **Every issue path goes through it.** `issueOneInvoice` checks before it reads or writes
+  anything, so the single Issue, Issue now on the drafts board, Issue Selected and the drafts
+  board's bulk list all refuse; the bulk action checks once, before its loop, rather than
+  reporting forty identical refusals. `issue-gate.test.ts` reads the source and fails if a second
+  module writes an invoice to `issued` or the check moves after the write (both confirmed by
+  mutation).
+- **The buttons are disabled with the reason**, not removed: `IssueControl` on the invoice page,
+  the register's pane and each drafts card; `InvoiceSelection` on both bulk lists. A missing
+  button reads as "this invoice cannot be issued"; a disabled one with the sentence reads as "the
+  laundry is not set up yet", which is the truth. The Owner gets a link to Settings › Invoicing.
+- **`guard_invoice_issue` (0053) is the boundary underneath**, for a direct
+  `update invoices set status = 'issued'` — §4 and §7 have the rule. **Written, NOT applied.**
+- **Issuing now asks first (1.6, done here because it is the same button).** The single control
+  is a `ConfirmSubmit` naming the number and the total — *"Issue INV00008 for $25.08? It can't be
+  undone…"* — and the bulk lists confirm with the count and the total before posting.
+- With today's live settings (ABN and address set, no bank details) every Issue will read *"Add
+  your bank details in Settings › Invoicing before issuing."* — the brief's expected state.
+
+**1.10 — The PDFs are drawn to ATS's own MYOB invoice.** Both documents now share
+`myob-layout.tsx` — §2 has the layout. What it changed for the customer: the line reads
+**`T35 | Towels - Black`** rather than *"LJ00032 — Towels — 10"* (`pdfLineCells`; a typed line keeps
+its own words), the Tax column carries the code, the payment line is MYOB's *"Banking Details:
+BSB:… Account No.… Account Name: …"* built from the profile (`bankingDetailsLine`), and the service
+breakdown prints for every job-billed invoice, one job included, because it is now the only place
+the job number appears (gap G15). The credit note is MYOB's **Adjustment note**. Settings ›
+Invoicing gains **Website** (`normaliseWebsite`) and a **Logo** upload into the private
+`tenant-branding` bucket (0054), read back as bytes and embedded, so no URL in an inbox can
+expire. Saving the text fields keeps the logo, because `save_tenant_settings` replaces the whole
+profile key. **Nothing about the laundry is in code**: a test reads the three PDF sources and fails
+on a BSB, an email, a phone number or ATS's ABN. **The side-by-side screenshot was not made in
+this pass** — the instruction was one pass with no per-item browser checks — and was made
+afterwards the same day; the entry above records it and what it caught that measuring the
+template alone had not. **Open for Darshan,
+not decided:** whether new invoices continue MYOB's 8-digit series (`00321043`, last migrated
+`00413618`) — `next_number()` is untouched.
+
+**1.3 — A job is priced the moment it is finished (G3).** §4 and §21 have the rule; in short,
+`completeLaundryOrder` prices through the same tiers as Price this job, with the item's own
+selling price as the new last tier, and never approves. The counter's completion toast says what
+it made of it (`autoPriceSentence`) to a role that may read money. Unpriceable laundry marks the
+job `needs_price` (0055) — the new **Needs a price** chip on Awaiting invoice, a badge on the row
+and a notice on the job's Charges card. **Price finished jobs** on Settings › Your records prices
+the backlog: a dry run first listing what each job would become, then the button, never approving.
+
+**1.4 — Billing reads the invoices' own status (G4).** A job on a draft carries
+`invoice_generated` exactly as one on an issued invoice does, so INV00004 and INV00005 — drafts
+since September — read "Invoiced". `periodBillingSummary` now reads each job's invoice status
+through `invoice_source_jobs`, and a period is **"Draft – not issued"** until something is issued
+(`periodInvoiceState`); one customer's period badges each job the same way. Today gains **Drafts
+from a finished period**, linking to the drafts board. Nothing issues anything on its own.
+
+**1.5 — No receipt from the future (G14, part).** §4 has the rule. The form, both actions and 0055
+refuse it; an edit that leaves an existing future date alone still saves (the instant is written
+back exactly, seconds and all, so it is not mistaken for a change). **Reports › Data checks** lists
+the existing rows — LJ00031 — and changes none of them.
+
+**1.6 — The irreversible steps confirm, and a void asks about the work (G9, G17).** Approve on the
+job page (*"Approve $X for LJ…? Prices freeze and go onto the draft."*) and Approve Selected on the
+queue (count and total) are now a second press; Issue already was (1.1); Email invoice confirms
+too, because the Help page said it did. **Void** asks *"Put LJ… back in the billing queue to bill
+again?"* — Yes keeps today's behaviour, No writes the jobs off with the void's reason (§4). The
+sentences live in `lib/domain/confirmations.ts`; `ConfirmSubmit` gained a required `choice` and a
+`cancelLabel`. The Help page's two claims about completion and voiding now match.
+
+**1.2 — Xero readiness (G2, G11).** §20 has it: a pre-flight on Money › Xero listing every account
+in use against the connected chart, **pushes refused while any is unmapped**, imported MYOB
+invoices never pushed (`invoices.source`, 0055 — the importer now writes `import` too), the push
+error on the invoice and on a **Xero problems** list with Retry, and `LineAmountTypes = Inclusive`
+pinned with $25.08 / $2.28. **Not done: a mocked end-to-end push test** — this suite has no fetch
+mocking, so the payload, the gate and the import rule are tested as pure rules and the request
+itself is not. *(Done on 2026-10-18 — see "Xero and email, mocked" above.)*
+
+**1.8 — A test-data clean-up, dry run first (G10).** On Settings › Your records. The person types
+the customers (exact name or customer number; a hyphen matches an en dash); the dry run lists, per
+customer, the invoices it would **void** with the reason "Test data" (never delete), those it
+cannot (payments or credit notes — named), the jobs it would cancel or take out of billing, and
+the archive; jobs still assigned to a round from before a cutoff (default 1 October) are listed
+separately and closed only if ticked. Customers whose names look like test data are *suggested*,
+never chosen: **nothing in the repo names a customer**, and Darshan confirms the list before it
+runs on the real laundry — the brief's candidates are Test1, Jay, ZZ TEST Demo Laundry, ZZ TEST –
+Claude BA and Core IT. **It has not been run anywhere.**
+
+**1.9 — Today counts only trusted receivables (G5).** `ar_trusted_from` lives in
+`tenants.settings.receivables` (0055 widens the writer), defaults to **1 October 2026** with
+nothing written, and is editable on Settings › Invoicing. Imported invoices dated before it are
+left out of Today's Overdue tile and Needs a decision (one PostgREST filter, shared), and badged
+**"Imported – not reconciled"** in the register. Moving the date back is how the owner says the
+history has been reconciled.
+
+- **Checks:** `verify` and the DB suite were run **once, at the end**, as Darshan asked — not per
+  item (the first run caught a missing `empty` prop and a `Date.now()` in render; both fixed and
+  re-run). **1403 unit tests across 91 files**; typecheck, lint and the production build green; all
+  59 migration files applied to a fresh Postgres 16 with **670 pgTAP assertions across 36 files, 0
+  failing, no plan mismatch**, and `supabase/seed.sql` applying on top. The new proofs are
+  `billing_flow_guards.test.sql` (15) and unit tests for every pure rule above. The mutation
+  checks the earlier entries describe were **not** repeated for these items, per the same
+  instruction.
+- **Not verified behind the auth gate**, for the standing reason: no screen was opened with real
+  rows, and no migration is applied.
+
 ### 2026-10-12 · Merged and deployed: Jay's ATS changes and the end-to-end gap fixes
 Approved by Darshan. **#77** (`claude/ats-jay-changes`) and **#78** (`claude/e2e-gap-fixes`) were
 merged into `Dev`, and `Dev` was then promoted to `Prod` through #79. Both entries below this one
@@ -11149,6 +11734,15 @@ appears — the behaviour itself is unreachable from a unit test (`lib/invoices/
   the one implementation, shared by the job page's Price button and the queue's **Price Selected**,
   and it refuses on *nothing came back priced* rather than on the absence of a card.
   `pricingSourceLabel` names which tier actually answered, because both can price parts of one job.
+- **Finishing a job prices it, and the item's selling price is the last tier** (brief 1.3,
+  2026-10-18). `LJ00032` read "No charges yet" after delivery until somebody pressed Price this
+  job, and four of the five jobs in review were unpriced. `autoPriceCompletedJob` now runs from
+  the one completion path with the same pricer, whose tiers are **rate card → the customer's
+  laundry price → the house price → `items.sell_price`** (`itemSellPriceList`, grossed up through
+  `lineRateFromItem` exactly as the Charges card already did, `pricing_model = 'item_price'` so the
+  label can say so). It never approves. What it cannot price is `needs_price` (0055) and listed
+  under **Needs a price** in Money › Awaiting invoice; Settings › Your records' **Price finished
+  jobs** prices the backlog from before this, dry run first, fifty at a time, never approving.
 - **A completed job is a billable source**, and `customers.billing_method` decides the shape at
   generation time: `invoice_per_job` → one invoice each; `*_consolidated` → one invoice carrying
   all of them; `manual` → only ever by explicit selection. Whether August is fifteen invoices or one

@@ -1,4 +1,5 @@
 import { canTakePayment } from "@/lib/domain/payment-gate";
+import { DRAFT_DATE_TEXT, issueDateText } from "@/lib/domain/billing";
 import { Suspense } from "react";
 import Link from "next/link";
 import { requireCapability } from "@/lib/auth/context";
@@ -8,7 +9,7 @@ import { counted, date, money, relativeDays, today } from "@/lib/format";
 import { previousMonth } from "@/lib/domain/dates";
 import { CHARGE_TYPE_LABELS, type ChargeType } from "@/lib/domain/pricing";
 import {
-  Button, ButtonLink, Card, EmptyState, Eyebrow, Notice, PageHeader,
+  Badge, ButtonLink, Card, EmptyState, Eyebrow, Notice, PageHeader,
   SkeletonRows, SkeletonStats, StatusBadge, cx, humanise,
 } from "@/components/ui";
 import { Field, Input, Select, SubmitButton } from "@/components/form";
@@ -21,7 +22,10 @@ import {
   createManualInvoice, emailInvoice, generateInvoices, issueInvoice, recordPayment,
 } from "./actions";
 import { InvoiceSelection } from "./invoice-selection";
+import { IssueControl } from "./issue-control";
 import { issueSelectedInvoices, sendSelectedInvoices } from "./bulk-actions";
+import { loadIssueReadiness } from "@/lib/invoices/issue";
+import { arTrustedFrom, isUnreconciledImport } from "@/lib/domain/receivables";
 
 export const metadata = { title: "Invoices" };
 export const dynamic = "force-dynamic";
@@ -138,7 +142,7 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
             }
           />
           <Suspense key={JSON.stringify(params)} fallback={<SkeletonRows rows={10} />}>
-            <Register params={params} />
+            <Register params={params} tenantId={session.tenantId} />
           </Suspense>
         </div>
 
@@ -147,7 +151,8 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
         <div className="lg:sticky lg:top-4">
           <Suspense key={`${params.selected ?? ""}-${params.tool ?? ""}`} fallback={<SkeletonRows rows={6} />}>
             <WorkPane params={params} writable={writable} tenantId={session.tenantId}
-                    canSendBulk={canSendBulk} canIssueBulk={canIssueBulk} />
+                    canSendBulk={canSendBulk} canIssueBulk={canIssueBulk}
+                    mayEditSettings={can(session.role, "admin.write")} />
           </Suspense>
         </div>
       </div>
@@ -229,6 +234,8 @@ type RegisterRow = {
   invoice_number: string;
   invoice_type: string;
   status: string;
+  /** `app` or `import` (0055). */
+  source: string | null;
   issue_date: string;
   due_date: string | null;
   total: number;
@@ -236,15 +243,19 @@ type RegisterRow = {
   customers: { business_name: string } | null;
 };
 
-async function Register({ params }: { params: Search }) {
+async function Register({ params, tenantId }: { params: Search; tenantId: string }) {
   const supabase = await createClient();
   const page = pageFrom(params.page);
   const [from, to] = rangeFor(page);
   const now = today();
+  // Brief 1.9: MYOB history from before the trusted day is shown, and badged.
+  const { data: tenantRow } = await supabase.from("tenants").select("settings").eq("id", tenantId)
+    .maybeSingle<{ settings: unknown }>();
+  const trusted = arTrustedFrom(tenantRow?.settings);
 
   let query = supabase
     .from("invoices")
-    .select("id, invoice_number, invoice_type, status, issue_date, due_date, total, balance, " +
+    .select("id, invoice_number, invoice_type, status, source, issue_date, due_date, total, balance, " +
             "customers(business_name)", { count: "exact" })
     .is("deleted_at", null)
     .order("issue_date", { ascending: false })
@@ -311,13 +322,18 @@ async function Register({ params }: { params: Search }) {
                   </div>
                   <div className="mt-1 flex flex-wrap items-center gap-2">
                     <StatusBadge status={row.status} />
+                    {isUnreconciledImport(row, trusted)
+                      ? <Badge tone="neutral">Imported – not reconciled</Badge> : null}
                     <span className={cx(
                       "text-xs",
                       chasing ? "text-warning" : "text-muted-foreground",
                     )}>
-                      {row.due_date
-                        ? chasing ? `${counted(overdueDays, "day")} past terms` : `due ${date(row.due_date)}`
-                        : `issued ${date(row.issue_date)}`}
+                      {row.status === "draft"
+                        // A draft's dates are re-stamped when it is issued (brief 3.10).
+                        ? DRAFT_DATE_TEXT.toLowerCase()
+                        : row.due_date
+                          ? chasing ? `${counted(overdueDays, "day")} past terms` : `due ${date(row.due_date)}`
+                          : `issued ${date(row.issue_date)}`}
                     </span>
                   </div>
                 </Link>
@@ -334,15 +350,21 @@ async function Register({ params }: { params: Search }) {
 /* ---------------------------------------------------------------- the pane */
 
 async function WorkPane({
-  params, writable, canSendBulk, canIssueBulk, tenantId,
+  params, writable, canSendBulk, canIssueBulk, tenantId, mayEditSettings,
 }: {
   params: Search; writable: boolean; canSendBulk: boolean; canIssueBulk: boolean; tenantId: string;
+  mayEditSettings: boolean;
 }) {
   if (writable && params.tool === "recurring") return <GenerateTool params={params} />;
   if (writable && params.tool === "manual") return <ManualTool params={params} />;
-  if (canIssueBulk && params.tool === "issue") return <IssueTool params={params} tenantId={tenantId} />;
+  if (canIssueBulk && params.tool === "issue") {
+    return <IssueTool params={params} tenantId={tenantId} mayEditSettings={mayEditSettings} />;
+  }
   if (canSendBulk && params.tool === "send") return <SendTool params={params} tenantId={tenantId} />;
-  if (params.selected) return <InvoicePane params={params} writable={writable} />;
+  if (params.selected) {
+    return <InvoicePane params={params} writable={writable} tenantId={tenantId}
+                       mayEditSettings={mayEditSettings} />;
+  }
 
   return (
     <Card title="Nothing selected">
@@ -374,7 +396,9 @@ type PaneInvoice = {
   customers: { business_name: string; customer_number: string; billing_email: string | null } | null;
 };
 
-async function InvoicePane({ params, writable }: { params: Search; writable: boolean }) {
+async function InvoicePane({
+  params, writable, tenantId, mayEditSettings,
+}: { params: Search; writable: boolean; tenantId: string; mayEditSettings: boolean }) {
   const supabase = await createClient();
   const { data: invoice } = await supabase
     .from("invoices")
@@ -396,7 +420,7 @@ async function InvoicePane({ params, writable }: { params: Search; writable: boo
     );
   }
 
-  const [{ data: lines }, { data: payments }] = await Promise.all([
+  const [{ data: lines }, { data: payments }, readiness] = await Promise.all([
     supabase.from("invoice_lines")
       .select("id, description, charge_type, quantity, unit_price, amount")
       .eq("invoice_id", invoice.id).order("sequence")
@@ -410,6 +434,10 @@ async function InvoicePane({ params, writable }: { params: Search; writable: boo
       .returns<Array<{
         id: string; paid_on: string; amount: number; method: string; reference: string | null;
       }>>(),
+    // Only a draft has an Issue button to gate (brief 1.1).
+    invoice.status === "draft"
+      ? loadIssueReadiness(supabase, tenantId, mayEditSettings)
+      : Promise.resolve(null),
   ]);
 
   // Every action in the pane comes back to the pane, filters and page intact.
@@ -445,7 +473,7 @@ async function InvoicePane({ params, writable }: { params: Search; writable: boo
         </div>
 
         <dl className="grid grid-cols-2 gap-x-3 gap-y-2">
-          <PaneMeta label="Issued" value={date(invoice.issue_date)} />
+          <PaneMeta label="Issued" value={issueDateText(invoice.status, invoice.issue_date, date)} />
           <PaneMeta label="Due" value={date(invoice.due_date)} />
           <PaneMeta label="Type" value={humanise(invoice.invoice_type)} />
           <PaneMeta label="Terms" value={`${invoice.payment_terms_days} days`} />
@@ -511,14 +539,10 @@ async function InvoicePane({ params, writable }: { params: Search; writable: boo
         <PaneSection title="Do next">
           <div className="space-y-3 px-4 py-3">
             {invoice.status === "draft" ? (
-              <form action={issueInvoice} className="flex items-center gap-2">
-                <input type="hidden" name="id" value={invoice.id} />
-                <input type="hidden" name="return_to" value={backHere} />
-                <Button variant="primary">Issue invoice</Button>
-                <span className="text-xs text-muted-foreground">
-                  Lines are frozen once issued.
-                </span>
-              </form>
+              <IssueControl invoiceId={invoice.id} invoiceNumber={invoice.invoice_number}
+                            total={Number(invoice.total)} action={issueInvoice} returnTo={backHere}
+                            blocked={readiness?.blocked ?? null}
+                            settingsHref={mayEditSettings ? "/admin/invoicing" : null} />
             ) : emailIsConfigured() ? (
               <form action={emailInvoice}>
                 <input type="hidden" name="id" value={invoice.id} />
@@ -643,8 +667,11 @@ function PaneSection({ title, children }: { title: string; children: React.React
  * it is legitimate (a nil invoice is still a document), and hiding it would
  * leave the operator hunting for the invoice that did not appear.
  */
-async function IssueTool({ params, tenantId }: { params: Search; tenantId: string }) {
+async function IssueTool({
+  params, tenantId, mayEditSettings,
+}: { params: Search; tenantId: string; mayEditSettings: boolean }) {
   const supabase = await createClient();
+  const readiness = await loadIssueReadiness(supabase, tenantId, mayEditSettings);
   const { data } = await supabase
     .from("invoices")
     .select("id, invoice_number, status, total, customers(business_name)")
@@ -674,7 +701,7 @@ async function IssueTool({ params, tenantId }: { params: Search; tenantId: strin
       {drafts.length === 0 ? (
         <EmptyState
           title="No drafts waiting"
-          description="Generate this month's invoices, or approve a job in the billing queue, and the drafts appear here."
+          description="Create last month's invoices, or approve a job in the billing queue, and the drafts appear here."
           action={
             <ButtonLink href={hrefWith(params, { tool: "recurring" })}>
               Create last month&apos;s invoices
@@ -687,6 +714,9 @@ async function IssueTool({ params, tenantId }: { params: Search; tenantId: strin
           verb="Issue selected"
           pendingLabel="Issuing…"
           selectAllLabel="Select every draft listed"
+          confirmIssue
+          blocked={readiness.blocked}
+          settingsHref={mayEditSettings ? "/admin/invoicing" : null}
           returnTo={hrefWith(params, { tool: "issue" })}
           invoices={drafts.map((row) => ({
             id: row.id,

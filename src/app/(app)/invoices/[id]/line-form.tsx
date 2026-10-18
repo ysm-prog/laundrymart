@@ -134,7 +134,7 @@ export function InvoiceLineForm({
      * item's own selling price only where the list is silent.**
      *
      * That order is the whole of "an owner's edit reflects live wherever an item
-     * code is linked": re-rate `T40` on Money › Laundry prices and the next line
+     * code is linked": re-rate `T40` on Billing › Laundry prices and the next line
      * anybody composes for it carries the new rate, with nothing to re-key.
      *
      * Where the list did not answer, `liveItemRate` falls through to

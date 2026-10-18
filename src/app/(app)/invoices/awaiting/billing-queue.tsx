@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { counted, money } from "@/lib/format";
 import { formatMoney } from "@/lib/domain/pricing";
+import { approveSelectionConfirmation } from "@/lib/domain/confirmations";
 import { Badge, Button } from "@/components/ui";
 import { SubmitButton } from "@/components/form";
 import { approveSelectedJobs, placeSelectedJobs, priceSelectedJobs } from "../bulk-actions";
@@ -48,6 +49,11 @@ export type QueueRow = {
   chargeCount: number;
   subtotal: number;
   hasRateCard: boolean;
+  /**
+   * The automatic pricing at completion could not price all of it
+   * (`billing_hold_reason = 'needs_price'`, 0055) — the Needs a price list.
+   */
+  needsPrice?: boolean;
 };
 
 export function BillingQueue({
@@ -60,6 +66,9 @@ export function BillingQueue({
   canPrice?: boolean;
 }) {
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
+  // Approving is the freeze (brief 1.6), so it is a second press: the first
+  // says how many jobs and how much, and that the prices stop being editable.
+  const [confirming, setConfirming] = useState(false);
 
   const allSelected = rows.length > 0 && rows.every((row) => selected.has(row.id));
 
@@ -142,13 +151,16 @@ export function BillingQueue({
                     {row.billingMethod}
                   </td>
                   <td className="hidden py-2 pr-3 sm:table-cell">
-                    {priced ? (
-                      <span className="text-muted-foreground">{counted(row.chargeCount, "line")}</span>
-                    ) : (
-                      <Badge tone="warning">
-                        {row.hasRateCard ? "Not priced" : "No rate card"}
-                      </Badge>
-                    )}
+                    <span className="flex flex-wrap items-center gap-1.5">
+                      {priced ? (
+                        <span className="text-muted-foreground">{counted(row.chargeCount, "line")}</span>
+                      ) : !row.needsPrice ? (
+                        <Badge tone="warning">
+                          {row.hasRateCard ? "Not priced" : "No rate card"}
+                        </Badge>
+                      ) : null}
+                      {row.needsPrice ? <Badge tone="warning">Needs a price</Badge> : null}
+                    </span>
                   </td>
                   <td className="py-2 pl-3 text-right tabular-nums">
                     {priced ? money(row.subtotal) : "—"}
@@ -185,7 +197,12 @@ export function BillingQueue({
               Price selected{selected.size ? ` (${selected.size})` : ""}
             </SubmitButton>
           ) : null}
-          {canAct ? (
+          {canAct && mode === "approve" && !confirming ? (
+            <Button type="button" size="md" disabled={selected.size === 0}
+                    onClick={() => setConfirming(true)}>
+              Approve selected{selected.size ? ` (${selected.size})` : ""}
+            </Button>
+          ) : canAct ? (
             <SubmitButton
               size="md"
               pendingLabel={mode === "approve" ? "Approving…" : "Adding…"}
@@ -203,6 +220,25 @@ export function BillingQueue({
           )}
         </div>
       </div>
+
+      {mode === "approve" && confirming ? (
+        <div className="mt-4 rounded-xl border border-danger/30 bg-danger/5 p-4" role="group"
+             aria-label="Confirm approval">
+          <p className="text-sm font-semibold text-danger">Prices freeze when you approve</p>
+          <p className="mt-1 text-sm">
+            {approveSelectionConfirmation(chosen.length, chosenValue)}
+          </p>
+          <div className="mt-4 flex flex-wrap items-center gap-2">
+            <SubmitButton size="md" pendingLabel="Approving…">
+              Approve {chosen.length === 1 ? "this job" : `these ${chosen.length} jobs`}
+            </SubmitButton>
+            <Button type="button" variant="secondary" size="md" onClick={() => setConfirming(false)}>
+              Keep reviewing
+            </Button>
+          </div>
+        </div>
+      ) : null}
     </form>
   );
 }
+

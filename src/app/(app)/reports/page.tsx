@@ -3,7 +3,8 @@ import Link from "next/link";
 import { requireCapability } from "@/lib/auth/context";
 import { can } from "@/lib/roles";
 import { createClient } from "@/lib/supabase/server";
-import { date, money, number, relativeDays, today } from "@/lib/format";
+import { date, dateTime, money, number, relativeDays, today } from "@/lib/format";
+import { futureReceiptCutoff } from "@/lib/domain/laundry-orders";
 import { addDays } from "@/lib/domain/dates";
 import { getAdelaideDayRange } from "@/lib/domain/timezone";
 import {
@@ -36,6 +37,7 @@ const REPORTS = [
   { key: "vehicles", label: "Vehicle utilisation" },
   { key: "inventory", label: "Inventory position" },
   { key: "compliance", label: "Contract compliance" },
+  { key: "checks", label: "Data checks" },
 ] as const;
 
 type ReportKey = (typeof REPORTS)[number]["key"];
@@ -103,6 +105,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
         {report === "vehicles" ? <VehicleUtilisation from={from} to={to} /> : null}
         {report === "inventory" ? <InventoryPosition /> : null}
         {report === "compliance" ? <Compliance from={from} to={to} /> : null}
+        {report === "checks" ? <DataChecks tenantId={session.tenantId} /> : null}
       </Suspense>
     </div>
   );
@@ -560,5 +563,58 @@ async function Compliance({ from, to }: { from: string; to: string }) {
         ]}
       />
     </Card>
+  );
+}
+
+/**
+ * Records that say something impossible, listed so a person can correct them
+ * (brief 1.5). Nothing here changes a row: `LJ00031` was recorded on 17 October
+ * as received on the 19th, and the fix is for whoever knows the real date.
+ *
+ * Not bounded by the From/To dates on purpose — a receipt dated next week is
+ * wrong whichever week the report is looking at. Named by tenant (§23).
+ */
+async function DataChecks({ tenantId }: { tenantId: string }) {
+  const supabase = await createClient();
+  const ahead = futureReceiptCutoff();
+  const { data } = await supabase
+    .from("laundry_orders")
+    .select("id, order_number, received_at, created_at, status, customers(business_name)")
+    .eq("tenant_id", tenantId)
+    .gt("received_at", ahead)
+    .order("received_at", { ascending: true })
+    .limit(200)
+    .returns<Array<{
+      id: string; order_number: string; received_at: string; created_at: string; status: string;
+      customers: { business_name: string } | null;
+    }>>();
+  const rows = data ?? [];
+
+  return (
+    <div className="space-y-4">
+      <Card
+        title="Jobs received in the future"
+        description="Laundry recorded as received on a day that has not happened yet. New jobs can no longer be saved this way; these were recorded before that check existed. Open each one and correct its received date."
+      >
+        <DataTable
+          rows={rows}
+          empty={<EmptyState title="Nothing to correct" description="No job is dated after today." />}
+          columns={[
+            {
+              header: "Job",
+              cell: (row) => (
+                <Link href={`/orders/${row.id}`} className="font-medium text-primary hover:underline">
+                  {row.order_number}
+                </Link>
+              ),
+            },
+            { header: "Customer", cell: (row) => row.customers?.business_name ?? "—" },
+            { header: "Received", cell: (row) => dateTime(row.received_at) },
+            { header: "Recorded", cell: (row) => dateTime(row.created_at), hideBelow: "sm" },
+            { header: "Status", cell: (row) => humanise(row.status), hideBelow: "md" },
+          ]}
+        />
+      </Card>
+    </div>
   );
 }

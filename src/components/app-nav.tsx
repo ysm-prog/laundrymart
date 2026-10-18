@@ -2,14 +2,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState, useSyncExternalStore, type ComponentType } from "react";
+import { useSyncExternalStore, type ComponentType } from "react";
 import {
-  ChartColumn, ChevronRight, CircleQuestionMark, ClipboardList, LayoutDashboard, MapPin, Moon,
+  ChartColumn, CircleQuestionMark, ClipboardList, LayoutDashboard, MapPin, Moon,
   Receipt, Route, Server, Settings, Shirt, Sun, Truck, Users,
 } from "lucide-react";
 import { cx } from "./ui";
 import {
-  groupIsOpenByDefault, groupNavigation, isActive, sectionFor,
+  activeTab, isActive, railNavigation, sectionFor,
   type NavCountKey, type NavIcon, type NavItem,
 } from "@/lib/nav";
 import {
@@ -26,7 +26,7 @@ export type NavCounts = Partial<Record<NavCountKey, number>>;
  * one set, one weight, one size, and every row has one so the column of labels
  * stays aligned.
  */
-const NAV_ICONS: Record<NavIcon, ComponentType<{ className?: string }>> = {
+export const NAV_ICONS: Record<NavIcon, ComponentType<{ className?: string }>> = {
   today: LayoutDashboard,
   myRun: Truck,
   runs: Route,
@@ -66,50 +66,35 @@ export function BrandMark({ className }: { className?: string }) {
 /**
  * The sidebar rail.
  *
- * One flat list of areas — no headings, no nesting, no expanding tree. The
- * screens inside an area are tabs (`SectionNav`) rather than rail rows, because
- * a rail that lists every screen in the product is a table of contents for the
- * database, not a way to get to work.
- *
- * The rail used to be a near-black console with literal hex colours. It is now
- * an ordinary light surface driven by the `--sidebar-*` tokens, so it reads as
- * part of the application rather than as a terminal bolted to the side of it.
+ * Five areas of a working day — Today, Laundry, Deliveries, Customers, Billing
+ * (brief 3.1) — and nothing else. The screens inside an area are tabs
+ * (`SectionNav`) rather than rail rows, because a rail that lists every screen
+ * in the product is a table of contents for the database, not a way to get to
+ * work. Everything set up once and visited occasionally is in the account menu.
  *
  * Counts sit right-aligned per item. A zero is not rendered at all — a badge
  * showing "0" is noise, and the point of the badge is to pull attention.
  */
 export function AppNav({
-  items, counts, onNavigate, collapsed = false, openGroups,
+  items, counts, onNavigate, collapsed = false,
 }: {
   items: NavItem[];
   counts?: NavCounts;
   onNavigate?: () => void;
   /** Icon-only rail. The label becomes the tooltip and the accessible name. */
   collapsed?: boolean;
-  /**
-   * Which groups are open, read from a cookie in the layout so the rail paints
-   * at the right height on the first frame — the same reason `defaultCollapsed`
-   * travels that way rather than being discovered in an effect.
-   */
-  openGroups?: Record<string, boolean>;
 }) {
   const pathname = usePathname();
+  // `sectionFor` over every area, not only the rail's, so standing on a
+  // profile-menu screen (Settings, say) lights no rail row rather than the
+  // nearest prefix.
   const current = sectionFor(pathname, items);
-  const { groups, rest } = groupNavigation(items);
-  const [open, setOpen] = useState<Record<string, boolean>>(() =>
-    Object.fromEntries(groups.map((g) => [
-      g.label, openGroups?.[g.label] ?? groupIsOpenByDefault(g.label),
-    ])));
+  const { main } = railNavigation(items);
 
-  function toggle(label: string) {
-    const next = { ...open, [label]: !open[label] };
-    setOpen(next);
-    rememberShutGroups(Object.entries(next).filter(([, v]) => !v).map(([k]) => k));
-  }
-
-  /** One row. Shared by the grouped rows and the ungrouped ones below them. */
-  function row(item: NavItem) {
-    // The area owning the current path highlights, so a detail route still
+  return (
+    <nav aria-label="Main" className="flex flex-col gap-0.5">
+      {main.map((item) => {
+        // The area owning the current path highlights, so a detail route still
         // says where you are — `isActive` alone would unlight the whole rail on
         // `/customers/abc`.
         const active = current ? current.href === item.href : isActive(pathname, item.href);
@@ -158,59 +143,8 @@ export function AppNav({
               </span>
             ) : null}
           </Link>
-    );
-  }
-
-  /*
-   * Collapsed, the rail is a column of icons with no room for a heading, so it
-   * stays flat — the grouping is a way to shorten a *labelled* list, and there
-   * is nothing to shorten when every row is one glyph.
-   */
-  if (collapsed) {
-    return (
-      <nav aria-label="Main" className="flex flex-col gap-0.5">
-        {items.map(row)}
-      </nav>
-    );
-  }
-
-  return (
-    <nav aria-label="Main" className="flex flex-col gap-0.5">
-      {groups.map((group) => {
-        const isOpen = open[group.label] ?? true;
-        // A group holding the area you are currently in always draws open,
-        // whatever the cookie says: a shut drawer with the active row inside it
-        // would leave the rail showing nowhere as "here".
-        const holdsCurrent = current
-          ? group.items.some((item) => item.href === current.href)
-          : false;
-        const shown = isOpen || holdsCurrent;
-        const id = `nav-group-${group.label.replace(/[^a-z]+/gi, "-").toLowerCase()}`;
-
-        return (
-          <div key={group.label} className="mb-1">
-            <button
-              type="button"
-              onClick={() => toggle(group.label)}
-              aria-expanded={shown}
-              aria-controls={id}
-              className="flex min-h-9 w-full items-center gap-1.5 rounded-lg px-3 text-2xs
-                         font-semibold text-sidebar-muted transition
-                         hover:bg-sidebar-hover hover:text-sidebar-foreground"
-            >
-              <ChevronRight
-                aria-hidden
-                className={cx("size-3.5 shrink-0 transition-transform", shown && "rotate-90")}
-              />
-              <span className="truncate">{group.label}</span>
-            </button>
-            {shown ? (
-              <div id={id} className="mt-0.5 flex flex-col gap-0.5">{group.items.map(row)}</div>
-            ) : null}
-          </div>
         );
       })}
-      {rest.map(row)}
     </nav>
   );
 }
@@ -228,13 +162,16 @@ export function SectionNav({ items }: { items: NavItem[] }) {
   const section = sectionFor(pathname, items);
   const tabs = section?.children ?? [];
   if (tabs.length < 2) return null;
+  // One lit tab, by longest match: `/orders/board` sits under `/orders`, so
+  // a plain prefix test would light Board and All jobs together.
+  const lit = activeTab(pathname, tabs);
 
   return (
     <div className="flex-none border-b bg-surface print:hidden">
       <nav aria-label={section?.label ?? "Section"}
            className="flex gap-1 overflow-x-auto px-3 sm:px-5">
         {tabs.map((tab) => {
-          const active = isActive(pathname, tab.href);
+          const active = lit?.href === tab.href;
           return (
             <Link
               key={tab.href}
@@ -301,23 +238,6 @@ export function ThemeToggle() {
 }
 
 /* ------------------------------------------------------- reading comfort --- */
-
-/**
- * Remember which rail groups are shut, for the layout to read back.
- *
- * A year, path-wide, lax: a layout preference, not a credential — the same
- * shape and lifetime as `es_rail`. Written at module scope rather than inside
- * the component because the React Compiler's immutability rule rightly objects
- * to a DOM write sitting in a render body.
- *
- * The *shut* groups are stored rather than the open ones, so a release that
- * adds a group gets that group's own default instead of a missing name reading
- * as "closed".
- */
-function rememberShutGroups(shut: string[]) {
-  document.cookie =
-    `es_nav=${encodeURIComponent(shut.join("|"))};path=/;max-age=31536000;samesite=lax`;
-}
 
 /**
  * Watches the root element's text-size attribute, the same way

@@ -2,7 +2,9 @@ import type { createClient } from "@/lib/supabase/server";
 import { addDays, type IsoDate } from "@/lib/domain/dates";
 import { toInstant, toZonedDate } from "@/lib/domain/timezone";
 import { billableQuantity } from "@/lib/domain/job-pricing";
-import { isBillingStatus, type BillingStatus } from "@/lib/domain/billing";
+import {
+  invoiceIsIssued, isBillingStatus, periodInvoiceState, type BillingStatus, type PeriodInvoiceState,
+} from "@/lib/domain/billing";
 import { describeItem, type OrderItemInput } from "@/lib/domain/laundry-orders";
 import { loadChargesForJobs, type StoredCharge } from "@/lib/orders/job-billing";
 import {
@@ -57,7 +59,7 @@ export function periodInstants(range: PeriodRange): { from: string; to: string }
  * answer — a customer billed on the 15th who has handed in more laundry since.
  * Reporting that as "invoiced" is how the rest quietly never gets billed.
  */
-export type PeriodInvoiceState = "not_invoiced" | "part_invoiced" | "invoiced";
+export type { PeriodInvoiceState } from "@/lib/domain/billing";
 
 export type PeriodCustomerRow = {
   customerId: string;
@@ -73,7 +75,10 @@ export type PeriodCustomerRow = {
   awaitingReview: number;
   /** Approved and not yet on an invoice — what a Generate would pick up. */
   readyToInvoice: number;
+  /** Jobs on an invoice that has been **issued** (brief 1.4) — not merely on a draft. */
   invoicedCount: number;
+  /** Jobs sitting on a draft nobody has issued yet. */
+  draftCount: number;
   state: PeriodInvoiceState;
 };
 
@@ -113,6 +118,30 @@ async function loadPeriodJobs(
   if (customerId) query = query.eq("customer_id", customerId);
   const { data } = await query.returns<JobRow[]>();
   return data ?? [];
+}
+
+/**
+ * The status of the invoice each job is on (brief 1.4), one read. A job is on at
+ * most one live invoice (`uq_invoice_source_jobs_once`), so the map is one
+ * status per job. `invoice_source_jobs` has exactly one FK to `invoices`, so the
+ * embed is unambiguous.
+ */
+async function loadInvoiceStatusForJobs(
+  supabase: Client, tenantId: string, jobIds: readonly string[],
+): Promise<Map<string, string>> {
+  const byJob = new Map<string, string>();
+  if (jobIds.length === 0) return byJob;
+  const { data } = await supabase
+    .from("invoice_source_jobs")
+    .select("order_id, invoices(status)")
+    .eq("tenant_id", tenantId)
+    .in("order_id", [...jobIds])
+    .returns<Array<{ order_id: string; invoices: { status: string } | Array<{ status: string }> | null }>>();
+  for (const row of data ?? []) {
+    const invoice = Array.isArray(row.invoices) ? row.invoices[0] ?? null : row.invoices;
+    if (invoice?.status) byJob.set(row.order_id, invoice.status);
+  }
+  return byJob;
 }
 
 /** The laundry on a set of jobs, one read rather than one per job. */
@@ -158,9 +187,11 @@ export async function periodBillingSummary(
   if (jobs.length === 0) return [];
 
   const jobIds = jobs.map((job) => job.id);
-  const [itemsByJob, chargesByJob] = await Promise.all([
+  const [itemsByJob, chargesByJob, invoiceStatusByJob] = await Promise.all([
     loadItemsForJobs(supabase, tenantId, jobIds),
     loadChargesForJobs(supabase, jobIds),
+    loadInvoiceStatusForJobs(supabase, tenantId,
+      jobs.filter((job) => INVOICED.includes(job.billing_status as BillingStatus)).map((job) => job.id)),
   ]);
 
   const rows = new Map<string, PeriodCustomerRow>();
@@ -171,7 +202,7 @@ export async function periodBillingSummary(
       businessName: job.customers?.business_name ?? "Unknown customer",
       billingMethod: job.customers?.billing_method ?? "",
       jobCount: 0, itemQuantity: 0, value: 0,
-      awaitingReview: 0, readyToInvoice: 0, invoicedCount: 0,
+      awaitingReview: 0, readyToInvoice: 0, invoicedCount: 0, draftCount: 0,
       state: "not_invoiced" as PeriodInvoiceState,
     };
 
@@ -180,7 +211,13 @@ export async function periodBillingSummary(
     row.value += chargeSubtotal(chargesByJob.get(job.id) ?? []);
     if (status === "awaiting_review" || status === "pending") row.awaitingReview += 1;
     if (status === "approved") row.readyToInvoice += 1;
-    if (INVOICED.includes(status)) row.invoicedCount += 1;
+    if (INVOICED.includes(status)) {
+      // A paid job is billed whatever its invoice says; otherwise the invoice's
+      // own status answers, and a draft is not an invoice the customer has.
+      const invoiceStatus = invoiceStatusByJob.get(job.id);
+      if (status === "paid" || invoiceIsIssued(invoiceStatus)) row.invoicedCount += 1;
+      else if (invoiceStatus === "draft") row.draftCount += 1;
+    }
 
     rows.set(job.customer_id, row);
   }
@@ -189,9 +226,9 @@ export async function periodBillingSummary(
     .map((row) => ({
       ...row,
       value: Math.round(row.value * 100) / 100,
-      state: (row.invoicedCount === 0
-        ? "not_invoiced"
-        : row.invoicedCount === row.jobCount ? "invoiced" : "part_invoiced") as PeriodInvoiceState,
+      state: periodInvoiceState({
+        jobCount: row.jobCount, issuedCount: row.invoicedCount, draftCount: row.draftCount,
+      }),
     }))
     .sort((a, b) => b.value - a.value || a.businessName.localeCompare(b.businessName));
 }
@@ -207,6 +244,8 @@ export type PeriodJob = {
   billingStatus: BillingStatus;
   /** True once the job is on an invoice — it takes no further part in a Generate. */
   invoiced: boolean;
+  /** On an invoice that is still a draft nobody has issued (brief 1.4). */
+  onDraft: boolean;
   itemQuantity: number;
   /** What the counter wrote down, for the job history. */
   itemLines: Array<{ label: string; quantity: number | null }>;
@@ -264,9 +303,11 @@ export async function customerPeriodDetail(
   if (!customer) return null;
 
   const jobIds = rows.map((row) => row.id);
-  const [itemsByJob, chargesByJob] = await Promise.all([
+  const [itemsByJob, chargesByJob, invoiceStatusByJob] = await Promise.all([
     loadItemsForJobs(supabase, tenantId, jobIds),
     loadChargesForJobs(supabase, jobIds),
+    loadInvoiceStatusForJobs(supabase, tenantId,
+      rows.filter((row) => INVOICED.includes(row.billing_status as BillingStatus)).map((row) => row.id)),
   ]);
 
   const jobs: PeriodJob[] = rows.map((row) => {
@@ -280,6 +321,7 @@ export async function customerPeriodDetail(
       completedAt: row.completed_at,
       billingStatus: status,
       invoiced: INVOICED.includes(status),
+      onDraft: status !== "paid" && invoiceStatusByJob.get(row.id) === "draft",
       itemQuantity: jobItemQuantity(items),
       itemLines: items.map((item) => ({
         label: describeItem(item),
@@ -314,6 +356,6 @@ export async function customerPeriodDetail(
     awaitingReview: billable.filter((job) =>
       job.billingStatus === "awaiting_review" || job.billingStatus === "pending").length,
     unpriced: billable.filter((job) => job.charges.length === 0).length,
-    invoicedCount: jobs.filter((job) => job.invoiced).length,
+    invoicedCount: jobs.filter((job) => job.invoiced && !job.onDraft).length,
   };
 }

@@ -1,11 +1,15 @@
+import Link from "next/link";
 import { requireCapability } from "@/lib/auth/context";
 import { createClient } from "@/lib/supabase/server";
-import { dateTime } from "@/lib/format";
+import { can } from "@/lib/roles";
+import { date, dateTime, money } from "@/lib/format";
 import { xeroConfig } from "@/lib/xero/config";
 import { listXeroBankAccounts, listXeroSalesAccounts } from "@/lib/xero/accounts";
-import { Badge, ButtonLink, Card, Notice, PageHeader, Stat } from "@/components/ui";
+import { xeroReadiness } from "@/lib/xero/readiness";
+import { Badge, ButtonLink, Card, DataTable, EmptyState, Notice, PageHeader, Stat } from "@/components/ui";
 import { ConfirmSubmit } from "@/components/confirm-submit";
 import { Field, Select, SubmitButton } from "@/components/form";
+import { retryXeroPush } from "../actions";
 import { disconnectXero, setXeroPaymentAccount, setXeroSalesAccount } from "./actions";
 
 export const metadata = { title: "Xero" };
@@ -93,7 +97,128 @@ export default async function XeroPage() {
           </div>
         )}
       </Card>
+
+      <AccountPreflight tenantId={session.tenantId} connected={Boolean(status)}
+                        canEditAccounts={can(session.role, "purchases.write")} />
+
+      <XeroProblems tenantId={session.tenantId} />
     </div>
+  );
+}
+
+/**
+ * The pre-flight (brief 1.2): every account the app's invoices use, checked
+ * against the connected Xero chart. **Nothing is sent while one is missing** —
+ * the push refuses with the same rule — because such a line would land in the
+ * default sales account with nothing to say so. The fix is a Xero code on the
+ * account, which is set on the account's own page.
+ */
+async function AccountPreflight({
+  tenantId, connected, canEditAccounts,
+}: { tenantId: string; connected: boolean; canEditAccounts: boolean }) {
+  const { used, problems, chartRead } = await xeroReadiness(tenantId, { checkChart: connected });
+  const missing = new Map(problems.map((entry) => [entry.account.id, entry.problem]));
+
+  return (
+    <Card
+      title="Before invoices are sent"
+      description="Every account your invoices are coded to has to exist in Xero, or the line lands in the wrong place. Nothing is sent while one is missing."
+      actions={problems.length > 0
+        ? <Badge tone="warning">{problems.length} to map</Badge>
+        : used.length > 0 ? <Badge tone="success">All mapped</Badge> : null}
+    >
+      {connected && !chartRead ? (
+        <Notice tone="warning">
+          Xero&apos;s chart of accounts could not be read just now, so only the codes you have
+          entered are checked here — not whether Xero carries them.
+        </Notice>
+      ) : null}
+      <DataTable
+        rows={used}
+        empty={<EmptyState title="No accounts in use yet"
+                           description="Once items, charge types or invoice lines are coded to an account, they are checked here." />}
+        columns={[
+          {
+            header: "Account",
+            cell: (row) => canEditAccounts
+              ? <Link href={`/accounts/${row.id}`} className="font-medium text-primary hover:underline">{row.code}</Link>
+              : <span className="font-medium">{row.code}</span>,
+          },
+          { header: "Name", cell: (row) => row.name },
+          { header: "Used on", cell: (row) => row.usedBy.join(", "), hideBelow: "md" },
+          { header: "Xero code", cell: (row) => row.xeroAccountCode ?? "—" },
+          {
+            header: "",
+            cell: (row) => missing.get(row.id) === "unmapped"
+              ? <Badge tone="warning">No Xero code</Badge>
+              : missing.get(row.id) === "not_in_xero"
+                ? <Badge tone="danger">Not in Xero</Badge>
+                : <Badge tone="success">Ready</Badge>,
+          },
+        ]}
+      />
+      {problems.length > 0 ? (
+        <p className="mt-3 text-sm text-muted-foreground">
+          Open each account and enter the code it has in Xero.
+          {canEditAccounts ? "" : " Ask somebody who looks after the chart of accounts to do it."}
+        </p>
+      ) : null}
+    </Card>
+  );
+}
+
+/**
+ * Invoices Xero did not accept (brief 1.2): the error written on each one, and
+ * a Retry beside it. Issuing never waits on Xero, so this list is where a
+ * refusal is found rather than in a toast that has gone.
+ */
+async function XeroProblems({ tenantId }: { tenantId: string }) {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("invoices")
+    .select("id, invoice_number, status, total, issue_date, xero_push_error, customers(business_name)")
+    .eq("tenant_id", tenantId)
+    .not("xero_push_error", "is", null)
+    .order("issue_date", { ascending: false })
+    .limit(100)
+    .returns<Array<{
+      id: string; invoice_number: string; status: string; total: number; issue_date: string;
+      xero_push_error: string; customers: { business_name: string } | null;
+    }>>();
+  const rows = data ?? [];
+
+  return (
+    <Card title="Xero problems"
+          description="Invoices Xero did not accept. Each one is issued here as normal; retry once the problem is fixed.">
+      <DataTable
+        rows={rows}
+        empty={<EmptyState title="No problems" description="Every invoice sent to Xero was accepted." />}
+        columns={[
+          {
+            header: "Invoice",
+            cell: (row) => (
+              <Link href={`/invoices/${row.id}`} className="font-medium text-primary hover:underline">
+                {row.invoice_number}
+              </Link>
+            ),
+          },
+          { header: "Customer", cell: (row) => row.customers?.business_name ?? "—", hideBelow: "sm" },
+          { header: "Issued", cell: (row) => date(row.issue_date), hideBelow: "md" },
+          { header: "Total", cell: (row) => money(row.total), align: "right", hideBelow: "sm" },
+          { header: "What Xero said", cell: (row) => row.xero_push_error },
+          {
+            header: "",
+            cell: (row) => (
+              <form action={retryXeroPush}>
+                <input type="hidden" name="id" value={row.id} />
+                <input type="hidden" name="return_to" value="/invoices/xero" />
+                <SubmitButton variant="secondary" size="md" pendingLabel="Retrying…">Retry</SubmitButton>
+              </form>
+            ),
+          },
+        ]}
+      />
+    </Card>
   );
 }
 

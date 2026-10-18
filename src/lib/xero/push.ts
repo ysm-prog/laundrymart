@@ -5,9 +5,11 @@ import { summariseXeroError } from "./errors";
 import { getXeroTokens } from "./tokens";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
-  buildInvoicePayload, canPushToXero,
+  buildInvoicePayload,
   type PayloadCustomer, type PayloadInvoice, type PayloadLine,
 } from "./invoice-payload";
+import { pushBlockedReason, xeroAccountProblems, xeroPushRefusal } from "@/lib/domain/xero-readiness";
+import { loadUsedAccounts } from "./readiness";
 
 /**
  * Send one issued invoice to Xero.
@@ -30,6 +32,8 @@ type InvoiceRow = PayloadInvoice & {
   id: string;
   tenant_id: string;
   status: string;
+  /** `app` or `import` (0055). An import is never pushed (brief 1.2). */
+  source: string | null;
   customer_id: string;
   xero_invoice_id: string | null;
 };
@@ -128,15 +132,14 @@ export async function pushInvoiceToXero(
 ): Promise<PushOutcome> {
   const { data: invoice } = await supabase
     .from("invoices")
-    .select("id, tenant_id, status, customer_id, invoice_number, issue_date, due_date, " +
+    .select("id, tenant_id, status, source, customer_id, invoice_number, issue_date, due_date, " +
             "purchase_order_number, notes, xero_invoice_id")
     .eq("id", invoiceId).eq("tenant_id", tenantId)
     .maybeSingle<InvoiceRow>();
 
   if (!invoice) return { ok: false, reason: "That invoice could not be found.", skipped: true };
-  if (!canPushToXero(invoice.status)) {
-    return { ok: false, reason: `A ${invoice.status} invoice is not sent to Xero.`, skipped: true };
-  }
+  const refusal = xeroPushRefusal(invoice);
+  if (refusal) return { ok: false, reason: refusal, skipped: true };
 
   const tokens = await getXeroTokens(tenantId);
   if (!tokens) {
@@ -145,6 +148,14 @@ export async function pushInvoiceToXero(
       reason: "This laundry is not connected to Xero, so nothing was sent.",
     };
   }
+
+  // The pre-flight (brief 1.2): while any account the app's invoices use has no
+  // Xero code, nothing is sent — such a line would fall through to the default
+  // sales account and land in the wrong place in the books, silently. Written
+  // to the invoice as a push error, so it is on the Xero problems list with a
+  // Retry for once the accounts are mapped.
+  const blocked = pushBlockedReason(xeroAccountProblems(await loadUsedAccounts(tenantId), null));
+  if (blocked) return await record(supabase, invoice.id, tenantId, { ok: false, reason: blocked });
 
   const [{ data: customer }, { data: lines }] = await Promise.all([
     supabase.from("customers")

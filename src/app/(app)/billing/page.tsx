@@ -6,7 +6,7 @@ import {
   BILLING_PERIOD_PRESETS, PERIOD_PRESET_LABELS, formatIso, resolvePeriod, periodParams,
 } from "@/lib/domain/dates";
 import { businessToday } from "@/lib/domain/timezone";
-import { BILLING_METHOD_LABELS, isBillingMethod } from "@/lib/domain/billing";
+import { BILLING_METHOD_LABELS, PERIOD_INVOICE_STATE_LABELS, isBillingMethod } from "@/lib/domain/billing";
 import { periodBillingSummary, type PeriodCustomerRow } from "@/lib/invoices/period";
 import { Badge, ButtonLink, Card, DataTable, EmptyState, PageHeader, Stat } from "@/components/ui";
 import { PeriodFilter } from "@/components/filters";
@@ -143,9 +143,12 @@ export default async function BillingPage({
                 // Never colour alone: every badge carries its words.
                 cell: (row: PeriodCustomerRow) => (
                   <div className="flex flex-wrap items-center gap-1.5">
-                    {row.state === "invoiced" ? <Badge tone="success">Invoiced</Badge> : null}
-                    {row.state === "part_invoiced" ? <Badge tone="warning">Part invoiced</Badge> : null}
-                    {row.state === "not_invoiced" ? <Badge tone="neutral">Not invoiced</Badge> : null}
+                    {/* Read from the invoices' own status (brief 1.4): a draft is not
+                        an invoice the customer has, so it never reads "Invoiced". */}
+                    {row.state === "invoiced" ? <Badge tone="success">{PERIOD_INVOICE_STATE_LABELS.invoiced}</Badge> : null}
+                    {row.state === "part_invoiced" ? <Badge tone="warning">{PERIOD_INVOICE_STATE_LABELS.part_invoiced}</Badge> : null}
+                    {row.state === "draft" ? <Badge tone="warning">{PERIOD_INVOICE_STATE_LABELS.draft}</Badge> : null}
+                    {row.state === "not_invoiced" ? <Badge tone="neutral">{PERIOD_INVOICE_STATE_LABELS.not_invoiced}</Badge> : null}
                     {row.awaitingReview > 0
                       ? <Badge tone="warning">{row.awaitingReview} to review</Badge> : null}
                     {row.readyToInvoice > 0

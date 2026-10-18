@@ -27,6 +27,8 @@ export function ConfirmSubmit({
   reasonRequired = true,
   pendingLabel,
   variant = "danger",
+  choice,
+  cancelLabel = "Keep it",
 }: {
   /** The button text, e.g. "Void invoice". */
   label: string;
@@ -46,6 +48,19 @@ export function ConfirmSubmit({
   reasonRequired?: boolean;
   pendingLabel?: string;
   variant?: "danger" | "primary";
+  /**
+   * A question that must be answered before the action goes ahead, posted as
+   * `name` with the chosen option's value. Brief 1.6's void asks one: put the
+   * jobs back in the billing queue, or not. No option is pre-selected — the
+   * answer is the point, and a default would be an answer nobody gave.
+   */
+  choice?: {
+    name: string;
+    legend: string;
+    options: ReadonlyArray<{ value: string; label: string }>;
+  };
+  /** The way out, in the words of what is kept — "Keep it as a draft". */
+  cancelLabel?: string;
 }) {
   const [open, setOpen] = useState(false);
 
@@ -90,6 +105,20 @@ export function ConfirmSubmit({
               />
             </label>
           ) : null}
+          {choice ? (
+            <fieldset className="mt-3">
+              <legend className="text-sm font-medium">{choice.legend}</legend>
+              <div className="mt-1.5 space-y-1">
+                {choice.options.map((option) => (
+                  <label key={option.value} className="flex min-h-11 cursor-pointer items-center gap-2.5 text-sm">
+                    <input type="radio" name={choice.name} value={option.value} required
+                           className="size-[1.15rem] shrink-0 accent-primary" />
+                    {option.label}
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+          ) : null}
           <div className="mt-4 flex flex-wrap items-center gap-2">
             <SubmitButton variant={variant === "danger" ? "danger" : "primary"}
                           pendingLabel={pendingLabel ?? "Working…"}>
@@ -101,7 +130,7 @@ export function ConfirmSubmit({
               className="inline-flex min-h-11 items-center rounded-lg border border-strong bg-surface
                          px-4 text-sm font-medium shadow-xs transition hover:bg-surface-muted"
             >
-              Keep it
+              {cancelLabel}
             </button>
           </div>
         </div>

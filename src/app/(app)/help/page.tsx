@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { requireSession } from "@/lib/auth/context";
 import { navigationFor } from "@/lib/nav";
+import { counted } from "@/lib/format";
 import { Card, Eyebrow, PageHeader } from "@/components/ui";
 
 export const metadata = { title: "Help" };
@@ -22,28 +23,28 @@ export const metadata = { title: "Help" };
 const DAY = [
   {
     title: "Take the laundry in",
-    body: "Create a Job for the customer: what they brought, when they want it back, and whether you are delivering it or they are collecting. It moves New \u2192 In progress \u2192 Ready for delivery as the plant works on it \u2014 press any stage on the job's own page to move it there, including back a stage if it was moved on by mistake.",
+    body: "Create a job for the customer: what they brought, when they want it back, and whether you are delivering it or they are collecting. Their last job's items are filled in for you. It moves New \u2192 In progress \u2192 Ready as the plant works on it \u2014 on Laundry \u203a Board you can scan the docket to mark it Ready.",
     href: "/orders/new", link: "Create a job",
   },
   {
-    title: "Give it to a driver",
-    body: "Once a job is Ready for delivery, choose a driver and a delivery date. That is the whole handover \u2014 there is no run to create and no run to open. The job becomes Assigned and appears in that driver's My Runs for that day.",
-    href: "/orders?run=ready-unassigned", link: "See what needs a driver",
+    title: "It goes onto a round",
+    body: "When a delivery job is marked Ready, it goes onto its customer's round for the next delivery day by itself. A customer with no round waits under Needs a driver on Today, where you pick the board and the day. There is no run to create and no run to open.",
+    href: "/dashboard", link: "See what needs a driver",
   },
   {
-    title: "The driver delivers",
-    body: "The driver opens My Runs on their phone, confirms the load, starts the route, and marks each job delivered at the door. Dates and times on it are Adelaide dates and times.",
+    title: "The round delivers",
+    body: "The round opens My Runs on its phone, presses Start my day, and taps Delivered at each door with a signature. Dates and times on it are Adelaide dates and times.",
     href: "/my-runs", link: "Open My Runs",
   },
   {
     title: "Deal with problems",
-    body: "If a driver cannot finish a stop they flag it without leaving their run. It appears on Today, and under Stops → Problems, until somebody clears it.",
+    body: "If a round cannot finish a stop it flags it without leaving its run. It appears on Today, and under Deliveries \u203a Problems, until somebody clears it.",
     href: "/operations/exceptions", link: "See problems",
   },
   {
     title: "Bill the work",
-    body: "At the end of the month, Create this month's invoices makes one draft invoice per customer: every item of every job you finished for them, at their price, plus anything their contract charges. You check them, issue them, and email them out.",
-    href: "/invoices", link: "Go to invoices",
+    body: "A delivered job is priced by itself, and if every line came from your rates it is approved onto the customer's draft invoice as well. Anything that needs a person is on Today. At month end, Issue and send all ready on Billing \u203a Open drafts issues every finished month's draft at once; Create last month's invoices adds anything a contract charges.",
+    href: "/invoices/drafts", link: "Go to open drafts",
   },
 ];
 
@@ -158,11 +159,11 @@ const GLOSSARY: Array<{ term: string; also?: string; meaning: string }> = [
   },
   {
     term: "Laundry price", also: "price list, rate",
-    meaning: "What you charge for each item code when a customer has no rate card \u2014 per piece, and optionally per bag for bulk lots. Money \u203a Laundry prices holds your usual prices; a customer who has agreed something different has their own list on their page. A rate card beats both. Change a price and it is used by every job you price or approve from then on, and wherever you pick that item on a charge or an invoice line \u2014 but a job you have already approved keeps the price it was approved at, even on a draft invoice. An item code with no price anywhere falls back to the item's own selling price, and one with neither is left off and reported rather than billed at nothing.",
+    meaning: "What you charge for each item code when a customer has no rate card \u2014 per piece, and optionally per bag for bulk lots. Billing \u203a Laundry prices holds your usual prices; a customer who has agreed something different has their own list on their page. A rate card beats both. Change a price and it is used by every job you price or approve from then on, and wherever you pick that item on a charge or an invoice line \u2014 but a job you have already approved keeps the price it was approved at, even on a draft invoice. An item code with no price anywhere falls back to the item's own selling price, and one with neither is left off and reported rather than billed at nothing.",
   },
   {
     term: "Billing method",
-    meaning: "How many draft invoices a customer's finished work collects on: a draft per job, or everything rolled onto one weekly, fortnightly or monthly draft. Set on the customer. \"Manual\" is the same, except that Create this month's invoices leaves them out \u2014 you issue theirs yourself.",
+    meaning: "How many draft invoices a customer's finished work collects on: a draft per job, or everything rolled onto one weekly, fortnightly or monthly draft. Set on the customer. \"Manual\" is the same, except that Create last month's invoices leaves them out \u2014 you issue theirs yourself.",
   },
   {
     term: "Awaiting review",
@@ -204,17 +205,17 @@ const SAFE = [
   "Archiving a customer. They drop out of lists; their history, stops and invoices are all kept.",
   "Creating a job and moving it along. Press any stage on the job's page to move it there — forwards, backwards, or skipping one it does not need. Every move is recorded on the job with your name and the time, so a correction is part of the history rather than a hidden edit.",
   "Inviting somebody, or changing what they can see. Settings › People, and you can change your mind at any time.",
-  "Completing a job. It never bills anybody — it only puts the job in front of whoever checks the charges.",
+  "Completing a job. It never bills anybody — it prices the job and puts it in front of whoever checks the charges. Anything that could not be priced is listed under Needs a price.",
   "Pricing a job, re-pricing it, and editing its charges — right up until you approve them.",
   "Changing a laundry price, a customer's rate card or their billing method. No invoice already raised moves, and no job already approved is re-priced.",
-  "Creating this month's invoices. They arrive as drafts: you can add and remove lines, and nothing goes to a customer until you issue and email it.",
+  "Creating last month's invoices. They arrive as drafts: you can add and remove lines, and nothing goes to a customer until you issue and email it.",
 ];
 
 const FINAL = [
   "Approving a job's charges. That is the moment the price freezes — after it, nobody can change what that job cost, and a mistake is fixed with a credit note rather than by editing history.",
   "Issuing an invoice. After that it can only be voided with a reason, or corrected with a credit note.",
   "Emailing an invoice. The email leaves immediately.",
-  "Voiding an invoice. The number is kept forever so your books have no gaps.",
+  "Voiding an invoice. The number is kept forever so your books have no gaps, and you are asked whether the jobs on it go back in the billing queue to be billed again.",
   "Completing a job — marking it delivered or collected. A finished job cannot be moved again.",
   "Cancelling a job. It stops appearing in the day's work. Nothing is deleted, but it cannot be reopened.",
   "Removing somebody's access. They can no longer sign in, and their work stays exactly as it was. You can invite them back, but they will need a new invitation.",
@@ -231,7 +232,7 @@ export default async function HelpPage() {
         description="What the words mean, how a normal day runs, and which buttons you cannot take back."
       />
 
-      <Card title="How a normal day runs" description="Four things happen, in this order.">
+      <Card title="How a normal day runs" description={`${counted(DAY.length, "thing")} happen, in this order.`}>
         <ol className="space-y-3">
           {DAY.map((step, index) => (
             <li key={step.title} className="rounded-lg flex items-start gap-3 border p-3">
@@ -253,7 +254,7 @@ export default async function HelpPage() {
         </ol>
       </Card>
 
-      <Card title="Where everything lives" description="The menu on the left, in one place.">
+      <Card title="Where everything lives" description="The five areas on the left, and the rest under your initials at the top right.">
         <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
           {areas.map((area) => (
             <div key={area.href}>

@@ -185,6 +185,10 @@ export function consolidateChargeLines(entries: readonly ChargeEntry[]): Consoli
         existing.quantity = round2(existing.quantity + charge.quantity);
         existing.amount = round2(existing.amount + charge.amount);
         existing.contributions.push(contribution);
+        // The first charge's words carried *its* count — "Towels × 100" — and
+        // that count is no longer the line's once a second job is folded in.
+        // A merged line names the item; the quantity column says how many.
+        existing.description = chargeBaseDescription(existing.description);
         existing.merged = true;
         return;
       }
@@ -440,4 +444,27 @@ export function jobInvoiceLines(
     // constraint is `invoice_source_jobs`, not this column.
     jobId: line.contributions.length === 1 ? line.contributions[0]!.jobId : null,
   }));
+}
+
+/**
+ * A charge's description without the count it was written with (brief 3.5).
+ *
+ * A charge reads "Towel Ultra 70×150 White × 10", or "4 bags of Sheets", or —
+ * written before 2026-10-18 — "Towels — 10". Folded into a line carrying 150
+ * from several jobs, the first job's "× 10" is wrong, so a merged line keeps
+ * the name and lets the quantity column say how many. Anything not in one of
+ * those shapes is a description somebody typed and is left exactly as it is.
+ */
+export function chargeBaseDescription(description: string): string {
+  const text = description.trim();
+  const patterns: RegExp[] = [
+    /^(.+?) × [\d.,]+(?: of [\d.,]+ \([\d.,]+ included\))?(?:, included in the rate)?$/,
+    /^(.+?) — [\d.,]+(?: of [\d.,]+ \([\d.,]+ included\))?(?: included in the rate)?$/,
+    /^[\d.,]+ bags? of (.+)$/,
+  ];
+  for (const pattern of patterns) {
+    const match = pattern.exec(text);
+    if (match?.[1]) return match[1];
+  }
+  return text;
 }

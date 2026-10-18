@@ -244,6 +244,30 @@ export function checkStartRoute<T extends RunDayJob>(
   return { ok: true, jobs: dispatchable };
 }
 
+/**
+ * What Start my day would load and send out (brief 2.4): every job still at
+ * `assigned`, confirmed or not. One press replaces Confirm Load and Start Route;
+ * the two facts are still recorded separately, by the action.
+ */
+export function startableJobs<T extends RunDayJob>(jobs: readonly T[]): T[] {
+  return jobs.filter((job) => job.status === "assigned");
+}
+
+export function checkStartMyDay<T extends RunDayJob>(
+  jobs: readonly T[],
+): { ok: true; jobs: T[] } | { ok: false; reason: string } {
+  const startable = startableJobs(jobs);
+  if (startable.length === 0) {
+    return {
+      ok: false,
+      reason: jobs.some((job) => job.status === "out_for_delivery")
+        ? "Everything for this day is already out for delivery."
+        : "There is nothing assigned to take out for this day.",
+    };
+  }
+  return { ok: true, jobs: startable };
+}
+
 /* ----------------------------------------------------------- run status --- */
 
 /**

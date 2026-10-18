@@ -12,6 +12,7 @@ import { createClient } from "@/lib/supabase/server";
 import type { ChargeType } from "@/lib/domain/pricing";
 import { loadInvoiceBreakdown, type InvoiceBreakdown } from "@/lib/invoices/breakdown";
 import { parseInvoiceProfile, type InvoiceProfile } from "@/lib/domain/invoice-profile";
+import { loadTenantLogo, type PdfLogo } from "./logo";
 
 export type InvoicePdfLine = {
   description: string;
@@ -26,16 +27,29 @@ export type InvoicePdfLine = {
   unit_price: number;
   amount: number;
   taxable: boolean;
+  /** `job`, `contract` or `manual` (0040) — decides whether the item's name prints (`pdfLineCells`). */
+  origin?: string | null;
+  /** `GST`, `FRE` or `N-T` (0043), printed in the Tax column. */
+  tax_code?: string | null;
+  /** The item this line names, if any — its code is the Item ID column (brief 1.10). */
+  item_code?: string | null;
+  item_name?: string | null;
 };
 
 export type InvoicePdfData = {
-  tenant: { name: string; abn: string | null; gstRate: number; profile: InvoiceProfile };
+  tenant: {
+    name: string; abn: string | null; gstRate: number; profile: InvoiceProfile;
+    /** The laundry's logo, embedded at render time (0054). Null prints none. */
+    logo?: PdfLogo | null;
+  };
   customer: {
     business_name: string;
     customer_number: string;
     abn: string | null;
     billing_email: string | null;
     address: string[];
+    /** The contact the invoice is addressed to, in italics above the business (MYOB's layout). */
+    contact_name?: string | null;
   };
   invoice: {
     id: string;
@@ -77,7 +91,7 @@ export async function loadInvoiceForPdf(
 
   const { data: invoice } = await supabase
     .from("invoices")
-    .select("id, invoice_number, invoice_type, status, issue_date, due_date, period_start, period_end, " +
+    .select("id, customer_id, invoice_number, invoice_type, status, issue_date, due_date, period_start, period_end, " +
             "purchase_order_number, payment_terms_days, subtotal, tax_amount, total, " +
             "amount_paid, amount_credited, balance, currency, notes, " +
             "customers(business_name, customer_number, abn, billing_email, " +
@@ -85,6 +99,7 @@ export async function loadInvoiceForPdf(
             "billing_postcode)")
     .eq("id", invoiceId)
     .maybeSingle<InvoicePdfData["invoice"] & {
+      customer_id: string;
       customers: {
         business_name: string; customer_number: string; abn: string | null;
         billing_email: string | null; billing_address_line1: string | null;
@@ -95,28 +110,42 @@ export async function loadInvoiceForPdf(
 
   if (!invoice) return null;
 
-  const [{ data: lines }, { data: tenant }] = await Promise.all([
+  const [{ data: lineRows }, { data: tenant }, contactName] = await Promise.all([
     supabase
       .from("invoice_lines")
-      .select("description, charge_type, quantity, unit_price, amount, taxable, account_code")
+      // The item is embedded for its code and name, which are the Item ID and
+      // the Description the MYOB layout prints (brief 1.10). Unambiguous:
+      // `invoice_lines` has exactly one FK to `items` (§20).
+      .select("description, charge_type, quantity, unit_price, amount, taxable, account_code, " +
+              "origin, tax_code, items(item_code, name)")
       .eq("invoice_id", invoiceId)
       .order("sequence")
-      .returns<InvoicePdfLine[]>(),
+      .returns<Array<Omit<InvoicePdfLine, "item_code" | "item_name"> & {
+        items: { item_code: string | null; name: string | null }
+          | Array<{ item_code: string | null; name: string | null }> | null;
+      }>>(),
     supabase
       .from("tenants")
       .select("name, abn, gst_rate, settings")
       .eq("id", tenantId)
       .maybeSingle<{ name: string; abn: string | null; gst_rate: number; settings: unknown }>(),
+    loadContactName(supabase, tenantId, invoice.customer_id),
   ]);
 
   const c = invoice.customers;
+  const profile = parseInvoiceProfile(tenant?.settings);
+  const lines: InvoicePdfLine[] = (lineRows ?? []).map(({ items, ...line }) => {
+    const item = Array.isArray(items) ? items[0] ?? null : items;
+    return { ...line, item_code: item?.item_code ?? null, item_name: item?.name ?? null };
+  });
 
   return {
     tenant: {
       name: tenant?.name ?? "Laundry",
       abn: tenant?.abn ?? null,
       gstRate: Number(tenant?.gst_rate ?? 0.1),
-      profile: parseInvoiceProfile(tenant?.settings),
+      profile,
+      logo: await loadTenantLogo(supabase, tenantId, profile.logoPath),
     },
     customer: {
       business_name: c?.business_name ?? "Unknown customer",
@@ -128,9 +157,32 @@ export async function loadInvoiceForPdf(
         c?.billing_address_line2,
         [c?.billing_suburb, c?.billing_state, c?.billing_postcode].filter(Boolean).join(" "),
       ].filter((part): part is string => Boolean(part && part.trim())),
+      contact_name: contactName,
     },
     invoice,
-    lines: lines ?? [],
+    lines,
     breakdown: await loadInvoiceBreakdown(supabase, tenantId, invoiceId),
   };
+}
+
+/**
+ * The person an invoice is addressed to — the customer's primary contact, or
+ * their first, or nobody. Read through `can_read_customers()` (0048); a role
+ * that cannot read contacts simply prints no name, never an error.
+ */
+export async function loadContactName(
+  supabase: Awaited<ReturnType<typeof createClient>>, tenantId: string, customerId: string,
+): Promise<string | null> {
+  const { data } = await supabase
+    .from("customer_contacts")
+    .select("name")
+    .eq("tenant_id", tenantId)
+    .eq("customer_id", customerId)
+    .is("deleted_at", null)
+    .order("is_primary", { ascending: false })
+    .order("created_at", { ascending: true })
+    .limit(1)
+    .returns<Array<{ name: string | null }>>();
+  const name = data?.[0]?.name?.trim();
+  return name ? name : null;
 }

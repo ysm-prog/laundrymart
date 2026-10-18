@@ -4,9 +4,11 @@ import { can, type Capability, type Role } from "@/lib/roles";
  * The navigation map.
  *
  * Organised by the operator's day, not by the database. Every destination the
- * app has is still reachable, but the rail lists **areas of work** (at most
- * eleven rows, usually fewer) and the screens inside an area appear as tabs once
- * you are in it. The previous rail was a flat inventory of 22 tables under six
+ * app has is still reachable, but the rail lists **five areas of work** —
+ * Today, Laundry, Deliveries, Customers, Billing (brief 3.1) — and the screens
+ * inside an area appear as tabs once you are in it. The areas somebody sets up
+ * once and comes back to (Fleet, Linen, Reports, Settings, Help, Platform) are
+ * `placement: "profile"` and live in the account menu instead. The previous rail was a flat inventory of 22 tables under six
  * headings named after internal concepts (Plant, Fleet, Accounts) — a
  * first-timer had to know the data model to find anything.
  *
@@ -52,6 +54,19 @@ export type NavItem = {
   blurb?: string;
   /** Screens inside this area. Rendered as tabs, never as a nested menu. */
   children?: NavItem[];
+  /**
+   * Where the area is drawn. Omitted is the rail; `"profile"` is the account
+   * menu in the header. Either way the area is in `navigationFor()`, so
+   * `sectionFor` and the tab strip treat it exactly as before.
+   */
+  placement?: "profile";
+  /**
+   * A screen that only exists while a tenant setting says so. `"plant"` is the
+   * production-batch screens, off until the laundry records batches (brief
+   * 3.9, `parseOperations`). Filtered by `navigationFor`'s options, so a
+   * hidden screen is absent from the tab strip and the help page alike.
+   */
+  feature?: "plant";
 };
 
 export const NAVIGATION: NavItem[] = [
@@ -66,55 +81,64 @@ export const NAVIGATION: NavItem[] = [
     blurb: "What needs a decision right now.",
   },
   {
-    // Was a single row pointing at `/run`: today's run, no date, one run only.
-    // It is now the area, with `/run` kept inside it rather than replaced —
-    // that screen owns the offline outbox and the service worker, and it is the
-    // one part of the app that has to work in a car park with no signal.
+    // The counter's work, and deliberately a separate area from Deliveries: a
+    // visit is a stop on a round, a job is a customer's laundry from the
+    // moment it lands on the counter to the moment it goes back. `/orders`
+    // rather than `/jobs` because the routing module took that path in 0004 —
+    // the same label-is-not-the-route arrangement as Contracts (`/agreements`)
+    // and Linen (`/inventory`), and /help defines both words.
     //
-    // Gated on `routes.read` rather than `run.execute`, because the area is not
-    // only the driver's: a manager opens it to see what they have given
-    // someone. `/run` keeps `run.execute`, so a manager sees the area with one
-    // tab and a driver sees it with two.
-    label: "My Runs",
-    href: "/my-runs",
-    icon: "myRun",
-    capability: "routes.read",
-    blurb: "The deliveries assigned to you, for any day you choose.",
+    // **Opens on the board** (brief 3.3), not the list: five columns read as
+    // where the work is, and the list stays one tab across for searching.
+    label: "Laundry",
+    href: "/orders/board",
+    icon: "jobs",
+    capability: "orders.read",
+    count: "overdueJobs",
+    blurb: "Laundry taken in at the counter, from drop-off to delivery or collection.",
     children: [
       {
-        label: "My Runs", href: "/my-runs", capability: "routes.read",
-        blurb: "The jobs assigned to you for a day: confirm the load, start the route, deliver.",
+        label: "Board", href: "/orders/board", capability: "orders.read",
+        blurb: "Every job in a column: in the plant, ready, out, delivered, billed.",
       },
       {
-        label: "At the depot", href: "/run", capability: "run.execute",
-        blurb: "Record a collection or delivery where you are standing. Works without signal.",
+        label: "All jobs", href: "/orders", capability: "orders.read",
+        count: "overdueJobs",
+        blurb: "Search and filter every job, by customer, status or date.",
       },
     ],
   },
   {
     /**
-     * Runs — a day, a board, and the order it drives in.
+     * Deliveries — the round's day and the office's view of it, in one area
+     * (Darshan's review, brief 3.1).
      *
-     * **Not the run-management area the 2026-08-14 simplification removed.**
-     * Nobody creates a run here, opens one, or reads a run code: a job is still
-     * given straight to a board and a date, and the `daily_routes` row
-     * underneath is still found-or-created by the action. `/routes/daily`,
-     * `/routes/planner` and `/routes/templates` remain unlinked, and
-     * `nav.test.ts` still asserts that no rail href starts with `/routes/`.
+     * What were two rail rows, My Runs and Runs, are tabs of one area here:
+     * a board opens it on its own day, the office opens it on the same screen
+     * and moves across to Run order, and the four visit screens that left the
+     * rail in Phase 2 ride along at the end. Every href is unchanged, so no
+     * bookmark breaks and `/routes/*` is still off the map — `nav.test.ts`
+     * still asserts that.
      *
-     * What this row is for is the one decision the office was left unable to
-     * make — *in what order does the board drive?* — plus moving work between
-     * boards. Gated on `routes.read` so a board can see the sequence it will
-     * drive; changing it needs `routes.sequence` (0036), which a board, a
-     * driver and — deliberately — a dispatcher all lack. Moving work between
-     * boards is the separate, wider `routes.write`.
+     * Gated on `routes.read`: the round, the driver, the counter and the
+     * office all hold it. `/run` keeps `run.execute`, so the depot screen is a
+     * tab for the people who drive and not for the people who plan.
      */
-    label: "Runs",
-    href: "/runs",
-    icon: "runs",
+    label: "Deliveries",
+    href: "/my-runs",
+    icon: "myRun",
     capability: "routes.read",
-    blurb: "A board's day, in the order it drives.",
+    count: "exceptions",
+    blurb: "Who is delivering what today, in the order they drive.",
     children: [
+      {
+        label: "My Runs", href: "/my-runs", capability: "routes.read",
+        blurb: "The jobs assigned to a round for a day: start the day, then deliver at each door.",
+      },
+      {
+        label: "At the depot", href: "/run", capability: "run.execute",
+        blurb: "Record a collection or delivery where you are standing. Works without signal.",
+      },
       {
         label: "Run order", href: "/runs", capability: "routes.read",
         blurb: "What each board is delivering on a day, and the order it drives in.",
@@ -129,44 +153,15 @@ export const NAVIGATION: NavItem[] = [
         label: "Due for collection", href: "/runs/collections", capability: "routes.write",
         blurb: "Customers collected on this weekday, and whether they are on a round yet.",
       },
-    ],
-  },
-  {
-    // Drivers and Vehicles were children of the old Runs area and are
-    // emphatically not run management, so they keep their place under their own
-    // heading. Boards leads it, because a board is what work is assigned to.
-    label: "Fleet",
-    href: "/boards",
-    icon: "runs",
-    capability: "fleet.read",
-    blurb: "The people who drive, and what they drive.",
-    children: [
+      // The four tabs that were the "Driver visits" rail row until Phase 2 of
+      // Darshan's review (brief 2.1). A visit is the internal stop record a
+      // laundry job is delivered through, and since 0056 it finishes itself when
+      // the job does — so it stopped being a separate place anybody has to go.
+      // The screens survive as tabs here, under the area they are about, so a
+      // problem stop, the collections list and its Take in press are still one
+      // click away.
       {
-        // First, because a board is what work is assigned to. Drivers sit beside
-        // it as the record of which *person* did the work.
-        label: "Boards", href: "/boards", capability: "fleet.read",
-        blurb: "The delivery rounds. Jobs are assigned to a board, not to a person.",
-      },
-      {
-        label: "Drivers", href: "/drivers", capability: "fleet.read",
-        blurb: "The people who drive, and the login each one uses.",
-      },
-      {
-        label: "Vehicles", href: "/vehicles", capability: "fleet.read",
-        blurb: "Your trucks and trailers, and which are off the road.",
-      },
-    ],
-  },
-  {
-    label: "Driver visits",
-    href: "/jobs",
-    icon: "stops",
-    capability: "routes.read",
-    count: "exceptions",
-    blurb: "Every time a driver called on a customer: what was collected, what was dropped off.",
-    children: [
-      {
-        label: "All visits", href: "/jobs", capability: "routes.read",
+        label: "Driver visits", href: "/jobs", capability: "routes.read",
         blurb: "Every visit, filtered by day, delivery round or customer.",
       },
       {
@@ -179,25 +174,10 @@ export const NAVIGATION: NavItem[] = [
         blurb: "Linen picked up, with anything damaged or short.",
       },
       {
-        label: "Deliveries", href: "/operations/deliveries", capability: "operations.read",
+        label: "Delivery records", href: "/operations/deliveries", capability: "operations.read",
         blurb: "Clean linen handed over, with the signature taken at the door.",
       },
     ],
-  },
-  {
-    // The counter's work, and deliberately a separate row from "Stops": a stop
-    // is a visit on a driver's run, a job is a customer's laundry from the
-    // moment it lands on the counter to the moment it goes back. They meet only
-    // when a job is collected or delivered by a driver. `/orders` rather than
-    // `/jobs` because the routing module took that path in 0004 — the same
-    // label-is-not-the-route arrangement as Contracts (`/agreements`) and Linen
-    // (`/inventory`), and /help defines both words.
-    label: "Customer laundry",
-    href: "/orders",
-    icon: "jobs",
-    capability: "orders.read",
-    count: "overdueJobs",
-    blurb: "Laundry taken in at the counter, from drop-off to delivery or collection.",
   },
   {
     label: "Customers",
@@ -217,15 +197,16 @@ export const NAVIGATION: NavItem[] = [
     ],
   },
   {
-    // Renamed from "Invoices" when the payable side landed: the row now covers
-    // money in *and* money out, and an area named after one of its six tabs
-    // would read as the odd one out.
+    // "Billing" since brief 3.1, "Money" before that and "Invoices" before
+    // the payable side landed. The area covers money in *and* money out; the
+    // period screen that used to be its "Billing" tab is "By period" now, so
+    // the area and one of its tabs do not share a name.
     //
     // An operational role reaches none of it. That is enforced twice: no
     // operational role holds `invoices.*`, `billing.*` or `purchases.*`, and
     // the RLS policies on every billing table say the same thing independently
     // through `can_read_billing()` (0017).
-    label: "Money",
+    label: "Billing",
     href: "/invoices",
     icon: "invoices",
     capability: "invoices.read",
@@ -241,7 +222,7 @@ export const NAVIGATION: NavItem[] = [
         // The month-end screen: a period, a customer, one invoice for everything
         // they had done in it. Distinct from the queue below, which asks the
         // other question — *what needs pricing?* — over no period at all.
-        label: "Billing", href: "/billing", capability: "billing.read",
+        label: "By period", href: "/billing", capability: "billing.read",
         blurb: "Bill a customer for a week or a month in one invoice.",
       },
       {
@@ -307,11 +288,38 @@ export const NAVIGATION: NavItem[] = [
     ],
   },
   {
+    // Drivers and Vehicles were children of the old Runs area and are
+    // emphatically not run management, so they keep their place under their own
+    // heading. Boards leads it, because a board is what work is assigned to.
+    placement: "profile",
+    label: "Fleet",
+    href: "/boards",
+    icon: "runs",
+    capability: "fleet.read",
+    blurb: "The people who drive, and what they drive.",
+    children: [
+      {
+        // First, because a board is what work is assigned to. Drivers sit beside
+        // it as the record of which *person* did the work.
+        label: "Boards", href: "/boards", capability: "fleet.read",
+        blurb: "The delivery rounds. Jobs are assigned to a board, not to a person.",
+      },
+      {
+        label: "Drivers", href: "/drivers", capability: "fleet.read",
+        blurb: "The people who drive, and the login each one uses.",
+      },
+      {
+        label: "Vehicles", href: "/vehicles", capability: "fleet.read",
+        blurb: "Your trucks and trailers, and which are off the road.",
+      },
+    ],
+  },
+  {
+    placement: "profile",
     label: "Linen",
     href: "/inventory",
     icon: "linen",
     capability: "inventory.read",
-    count: "batches",
     blurb: "Where your stock is right now, and what the plant is working on.",
     children: [
       {
@@ -320,7 +328,7 @@ export const NAVIGATION: NavItem[] = [
       },
       {
         label: "In the plant", href: "/warehouse", capability: "warehouse.read",
-        count: "batches",
+        count: "batches", feature: "plant",
         blurb: "Loads moving through washing, drying, folding and packing.",
       },
       {
@@ -336,6 +344,7 @@ export const NAVIGATION: NavItem[] = [
     ],
   },
   {
+    placement: "profile",
     label: "Reports",
     href: "/reports",
     icon: "reports",
@@ -343,6 +352,7 @@ export const NAVIGATION: NavItem[] = [
     blurb: "How the business did over a period you choose.",
   },
   {
+    placement: "profile",
     label: "Settings",
     href: "/admin/depots",
     icon: "settings",
@@ -367,6 +377,11 @@ export const NAVIGATION: NavItem[] = [
         // Write, not read: a form and nothing else, and the Owner's alone.
         label: "Invoicing", href: "/admin/invoicing", capability: "admin.write",
         blurb: "Your ABN, address and bank details on every invoice.",
+      },
+      {
+        // Write, not read: a form and nothing else, and the Owner's alone.
+        label: "How you work", href: "/admin/operations", capability: "admin.write",
+        blurb: "When laundry is promised back, and whether the plant screens are shown.",
       },
       {
         // Write, not read: the page is an upload form and nothing else, so a
@@ -394,6 +409,7 @@ export const NAVIGATION: NavItem[] = [
   {
     // No capability, deliberately: no role should be unable to look up what a
     // word means.
+    placement: "profile",
     label: "Help",
     href: "/help",
     icon: "help",
@@ -404,6 +420,7 @@ export const NAVIGATION: NavItem[] = [
     // is held by `platform_admin` alone (0019). This is the deployment, not a
     // laundry — an owner opening their own Settings should never see a row that
     // implies there are other businesses on the other side of it.
+    placement: "profile",
     label: "Platform",
     href: "/platform",
     icon: "platform",
@@ -464,9 +481,15 @@ function resolve(role: Role, item: NavItem): Pick<NavItem, "href" | "capability"
  * An area whose own screen is out of reach keeps its label and borrows the first
  * child's href, so "Runs" still reads as Runs for a driverless dispatcher.
  */
-export function navigationFor(role: Role): NavItem[] {
+export function navigationFor(
+  role: Role,
+  /** Tenant switches. Omitted means every feature-gated screen is hidden. */
+  options: { plantStages?: boolean } = {},
+): NavItem[] {
+  const shown = (entry: NavItem) => entry.feature !== "plant" || options.plantStages === true;
   return NAVIGATION
-    .filter((item) => reachable(role, item))
+    .map((item) => ({ ...item, children: item.children?.filter(shown) }))
+    .filter((item) => shown(item) && reachable(role, item))
     .map((item) => ({
       ...item,
       ...resolve(role, item),
@@ -474,103 +497,39 @@ export function navigationFor(role: Role): NavItem[] {
     }));
 }
 
-/* ------------------------------------------------------- rail grouping --- */
+/* ------------------------------------------------- rail and profile menu --- */
 
 /**
- * The rail, in three collapsible groups.
+ * Split a role's areas into the rail and the account menu (brief 3.1).
  *
- * **This softens a decision §6 records, and it is worth saying so rather than
- * doing it quietly.** The rail was deliberately "one flat list of areas — no
- * headings, no nesting", because what it replaced was a 22-row inventory of
- * database tables under headings named after internal concepts. That objection
- * still stands, and nothing here brings it back: the *screens* inside an area
- * are still tabs, never rail rows, so the rail never becomes a table of
- * contents for the schema.
+ * The rail is the five areas of a working day; everything set up once and
+ * visited occasionally sits behind the account menu. This replaced the three
+ * collapsible rail groups of 2026-08-24 — with five rows there is nothing left
+ * to collapse, and a drawer that might be shut is one more thing to look in.
  *
- * What changed is the count. The flat list was eleven rows when that decision
- * was made; Runs came back on 2026-08-20 and Platform before it, so an owner
- * now opens a column of thirteen with no shape to it — which is what the owner
- * asked to be tidied on 2026-08-24. Three headings in the operator's own words
- * turn thirteen rows into a short list plus two closed drawers, and every
- * destination is still exactly one click from where it was.
- *
- * A group is keyed on the area hrefs it holds rather than on a flag per item,
- * for the reason §19 gives about the rejected simple mode: a second list of
- * "which rows are advanced" hanging off each nav entry is a thing to keep in
- * step, and it drifts. This is one list in one place, and `nav.test.ts` asserts
- * every area lands in exactly one group.
+ * Takes the output of `navigationFor()` rather than replacing it: `sectionFor`,
+ * the tab strip and the help page still see one flat list. An area with no
+ * placement is drawn on the rail, so a row added tomorrow shows up rather than
+ * silently disappearing — the failure mode that matters.
  */
-export type NavGroup = { label: string; items: NavItem[] };
-
-const GROUPS: Array<{ label: string; hrefs: string[]; openByDefault: boolean }> = [
-  {
-    // The work of a day, for every role that has one. Open, because this is
-    // what somebody signed in to do.
-    label: "Day to day",
-    hrefs: ["/dashboard", "/my-runs", "/runs", "/orders", "/jobs"],
-    openByDefault: true,
-  },
-  {
-    label: "Customers & money",
-    hrefs: ["/customers", "/invoices"],
-    openByDefault: false,
-  },
-  {
-    // Things you set up once and come back to occasionally.
-    label: "Set-up & reports",
-    hrefs: ["/boards", "/inventory", "/reports", "/admin/depots", "/platform"],
-    openByDefault: false,
-  },
-];
-
-/**
- * Help sits outside the groups, pinned last.
- *
- * It is the one row somebody reaches for precisely when they are lost, and
- * putting it inside a drawer that might be shut is the exact moment it stops
- * working. It carries no capability either, so it is the only row guaranteed to
- * be there for all twelve roles.
- */
-const UNGROUPED = ["/help"];
-
-export const NAV_GROUP_LABELS = GROUPS.map((group) => group.label);
-
-export function groupIsOpenByDefault(label: string): boolean {
-  return GROUPS.find((group) => group.label === label)?.openByDefault ?? true;
+export function railNavigation(items: NavItem[]): { main: NavItem[]; profile: NavItem[] } {
+  return {
+    main: items.filter((item) => item.placement !== "profile"),
+    profile: items.filter((item) => item.placement === "profile"),
+  };
 }
 
 /**
- * Arrange a role's areas into groups for the rail.
- *
- * Takes the output of `navigationFor()` rather than replacing it: every other
- * caller — `sectionFor`, the tab strip, the tests — still sees one flat list,
- * so this adds a way to *draw* the rail without changing what the rail is.
- *
- * An area a role cannot see is already absent, so a group can come back empty;
- * an empty group renders no heading at all. Anything not named in a group falls
- * through to `rest`, which means a rail row added tomorrow shows up rather than
- * silently disappearing — the failure mode that matters.
+ * The tab inside an area that the current path belongs to. Longest match
+ * wins, so on `/orders/board` the Board tab is lit and All jobs (`/orders`) is
+ * not — `isActive` alone would light both, since one is a prefix of the other.
  */
-export function groupNavigation(items: NavItem[]): { groups: NavGroup[]; rest: NavItem[] } {
-  const byHref = new Map(items.map((item) => [item.href, item]));
-  const claimed = new Set<string>();
-
-  const groups = GROUPS.map((group) => {
-    const found = group.hrefs
-      .map((href) => byHref.get(href))
-      .filter((item): item is NavItem => item !== undefined);
-    found.forEach((item) => claimed.add(item.href));
-    return { label: group.label, items: found };
-  }).filter((group) => group.items.length > 0);
-
-  // `UNGROUPED` first so Help keeps its place at the foot of the rail, then
-  // anything a future release adds without touching this file.
-  const rest = [
-    ...items.filter((item) => UNGROUPED.includes(item.href)),
-    ...items.filter((item) => !claimed.has(item.href) && !UNGROUPED.includes(item.href)),
-  ];
-
-  return { groups, rest };
+export function activeTab(pathname: string, tabs: NavItem[]): NavItem | undefined {
+  let best: NavItem | undefined;
+  for (const tab of tabs) {
+    if (isActive(pathname, tab.href) && (!best || tab.href.length > best.href.length)) best = tab;
+  }
+  return best;
 }
 
 export function isActive(pathname: string, href: string): boolean {

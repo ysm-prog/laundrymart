@@ -3,6 +3,10 @@ import type { createClient } from "@/lib/supabase/server";
 import { describeDbError } from "@/lib/actions";
 import { checkTransition, type OrderStatus } from "@/lib/domain/laundry-orders";
 import { logOrderActivity } from "@/lib/orders/activity";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { autoPriceCompletedJob } from "@/lib/orders/job-billing";
+import type { AutoPriceOutcome } from "@/lib/domain/job-pricing";
+import { autoApproveIfClean, type AutoApproveOutcome } from "@/lib/orders/auto-approve";
 
 /**
  * Finishing a laundry job — the single implementation, called from two places.
@@ -49,11 +53,33 @@ export type CompletionInput = {
    * Route normally does. So the road passes `true` and the counter does not.
    */
   dispatchIfNeeded?: boolean;
+  /**
+   * What the round recorded at the door (brief 2.4), written in the same UPDATE
+   * as the completion so a delivered job can never exist without its proof, nor
+   * proof without the delivery. Paths have already been checked against this
+   * job's own folder (`isDeliveryProofPath`); 0056's check constraint is the
+   * boundary under that.
+   */
+  proof?: DeliveryProof;
+};
+
+export type DeliveryProof = {
+  receivedBy: string | null;
+  signaturePath: string | null;
+  photoPaths: string[];
+  short: boolean;
+  quantities: Array<{ item_row_id: string; description: string; taken_in: number | null; delivered: number | null }>;
+  /** The round that delivered it, and the person operating that round today. */
+  boardId: string | null;
+  driverId: string | null;
 };
 
 export async function completeLaundryOrder(
   supabase: Supabase, session: Session, order: CompletionTarget, input: CompletionInput,
-): Promise<{ ok: true; delivered: boolean } | { ok: false; error: string }> {
+): Promise<
+  | { ok: true; delivered: boolean; pricing?: AutoPriceOutcome; approval?: AutoApproveOutcome }
+  | { ok: false; error: string }
+> {
   let status: OrderStatus = order.status;
 
   if (input.dispatchIfNeeded
@@ -76,6 +102,17 @@ export async function completeLaundryOrder(
       ...(delivered
         ? { delivered_at: input.at, delivered_by: input.handledBy }
         : { collected_at: input.at, collected_by: input.handledBy }),
+      ...(delivered && input.proof
+        ? {
+            delivery_received_by: input.proof.receivedBy,
+            delivery_signature_path: input.proof.signaturePath,
+            delivery_photo_paths: input.proof.photoPaths,
+            delivery_short: input.proof.short,
+            delivery_quantities: input.proof.quantities,
+            delivered_board_id: input.proof.boardId,
+            delivered_driver_id: input.proof.driverId,
+          }
+        : {}),
     })
     .eq("id", order.id)
     // RLS already scopes this; the filter states the intent, as elsewhere.
@@ -85,11 +122,36 @@ export async function completeLaundryOrder(
   await logOrderActivity(supabase, session, order.id, {
     activity_type: delivered ? "delivered" : "collected",
     previous: { status },
-    next: { status: "completed", at: input.at, by: input.handledBy },
+    next: {
+      status: "completed", at: input.at, by: input.handledBy,
+      ...(input.proof
+        ? {
+            board: input.proof.boardId, driver: input.proof.driverId,
+            received_by: input.proof.receivedBy, signed: Boolean(input.proof.signaturePath),
+            photos: input.proof.photoPaths.length, short: input.proof.short,
+          }
+        : {}),
+    },
     note: input.note ?? null,
   });
 
-  return { ok: true, delivered };
+  // Price it now, so nobody has to remember to press Price this job (brief 1.3).
+  // 0017's hook has just moved it to `awaiting_review`. Never approves, and
+  // never fails the completion — the work was finished whatever the pricing
+  // makes of it. See `autoPriceCompletedJob` for why it is the service role.
+  let pricing: AutoPriceOutcome = { state: "skipped" };
+  let approval: AutoApproveOutcome = { state: "skipped" };
+  try {
+    const admin = createAdminClient();
+    pricing = await autoPriceCompletedJob(admin, session, order.id);
+    // Delivered means billed (brief 2.3): a job priced cleanly from the
+    // customer's rates goes onto their draft now. Never fails the completion.
+    if (pricing.state === "priced") approval = await autoApproveIfClean(admin, session, order.id);
+  } catch (cause) {
+    console.error("automatic pricing could not start", { orderId: order.id, cause });
+  }
+
+  return { ok: true, delivered, pricing, approval };
 }
 
 /** One plain status move, with its timeline row. Shared by the step above. */

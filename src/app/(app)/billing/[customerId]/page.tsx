@@ -241,7 +241,11 @@ export default async function CustomerBillingPage({
                     {job.itemQuantity.toLocaleString("en-AU")} pieces
                   </span>
                   <span className="ml-auto flex items-center gap-2">
-                    {job.invoiced ? <Badge tone="success">Invoiced</Badge> : null}
+                    {job.invoiced ? (
+                      <Badge tone={job.onDraft ? "warning" : "success"}>
+                        {job.onDraft ? "Draft – not issued" : "Invoiced"}
+                      </Badge>
+                    ) : null}
                     {!job.invoiced && job.billingStatus !== "approved" ? (
                       <Badge tone="warning">{BILLING_STATUS_LABELS[job.billingStatus]}</Badge>
                     ) : null}

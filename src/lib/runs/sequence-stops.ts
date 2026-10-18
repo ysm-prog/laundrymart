@@ -33,7 +33,7 @@ type StopRow = {
 };
 
 type JobRow = {
-  id: string; order_number: string; stop_id: string;
+  id: string; order_number: string; status: string; stop_id: string;
   laundry_order_items: Array<{ id: string }>;
 };
 
@@ -85,7 +85,7 @@ export async function loadSequenceStops(
   // One read for every stop's laundry rather than one per stop.
   const { data: jobRows } = await supabase
     .from("laundry_orders")
-    .select("id, order_number, stop_id, laundry_order_items(id)")
+    .select("id, order_number, status, stop_id, laundry_order_items(id)")
     .eq("tenant_id", tenantId)
     .in("stop_id", stops.map((stop) => stop.id))
     .not("status", "in", "(cancelled)")
@@ -98,6 +98,7 @@ export async function loadSequenceStops(
     bucket.push({
       id: job.id,
       orderNumber: job.order_number,
+      status: job.status,
       itemCount: job.laundry_order_items?.length ?? 0,
     });
     jobsByStop.set(job.stop_id, bucket);

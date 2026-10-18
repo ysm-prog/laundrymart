@@ -141,6 +141,12 @@ async function Day({
     ? await loadBoardSequence(supabase, session.tenantId, boardId, date)
     : null;
 
+  // Who is driving today (brief 2.4), asked on Start my day. Only read when the
+  // press is on screen, defaulting to whoever operated this round last.
+  const crew = canWork && day.toDeliver.length > 0
+    ? await loadCrew(supabase, session.tenantId, boardId)
+    : { drivers: [], lastDriverId: null };
+
   return (
     <div className="space-y-5">
       {/* The phone's running total. Sticky so it survives a long scroll, and
@@ -165,7 +171,8 @@ async function Day({
 
       {canWork ? (
         <DayWorkflow jobs={jobs} boardId={boardId} date={date} returnTo={returnTo}
-                     assignee={isSelf ? "you" : boardName} />
+                     assignee={isSelf ? "you" : boardName}
+                     drivers={crew.drivers} defaultDriverId={crew.lastDriverId} />
       ) : null}
 
       {sequence && sequence.stops.length > 0 ? (
@@ -191,13 +198,13 @@ async function Day({
 
       <JobGroup title="To deliver" count={day.toDeliver.length}>
         {day.toDeliver.map((job) => (
-          <JobCard key={job.id} job={job} actionable={canWork} />
+          <JobCard key={job.id} job={job} actionable={canWork} returnTo={returnTo} />
         ))}
       </JobGroup>
 
       <JobGroup title="Out for delivery" count={day.outForDelivery.length}>
         {day.outForDelivery.map((job) => (
-          <JobCard key={job.id} job={job} actionable={canWork} />
+          <JobCard key={job.id} job={job} actionable={canWork} returnTo={returnTo} />
         ))}
       </JobGroup>
 
@@ -205,7 +212,7 @@ async function Day({
           earlier date still shows what happened on it. */}
       <JobGroup title="Completed" count={day.completed.length}>
         {day.completed.map((job) => (
-          <JobCard key={job.id} job={job} actionable={canWork} />
+          <JobCard key={job.id} job={job} actionable={canWork} returnTo={returnTo} />
         ))}
       </JobGroup>
     </div>
@@ -231,6 +238,24 @@ function NoBoard({ canChooseBoard }: { canChooseBoard: boolean }) {
         : "A manager needs to link your account to a board before your jobs appear here."}
     </Notice>
   );
+}
+
+/** Active drivers, and the one who last operated this round. */
+async function loadCrew(
+  supabase: Awaited<ReturnType<typeof createClient>>, tenantId: string, boardId: string,
+): Promise<{ drivers: Array<{ id: string; full_name: string }>; lastDriverId: string | null }> {
+  const [{ data: drivers }, { data: last }] = await Promise.all([
+    supabase.from("drivers").select("id, full_name")
+      .eq("tenant_id", tenantId).eq("status", "active").is("deleted_at", null)
+      .order("full_name")
+      .returns<Array<{ id: string; full_name: string }>>(),
+    supabase.from("daily_routes").select("operated_by_driver_id")
+      .eq("tenant_id", tenantId).eq("board_id", boardId)
+      .not("operated_by_driver_id", "is", null)
+      .order("route_date", { ascending: false }).limit(1)
+      .maybeSingle<{ operated_by_driver_id: string }>(),
+  ]);
+  return { drivers: drivers ?? [], lastDriverId: last?.operated_by_driver_id ?? null };
 }
 
 /** Morning / afternoon / evening, decided in Adelaide rather than on the server. */

@@ -6,6 +6,10 @@ import { pushInvoiceToXero } from "@/lib/xero/push";
 import { addDays } from "@/lib/domain/dates";
 import { businessToday } from "@/lib/domain/timezone";
 import { issueRefusal } from "@/lib/domain/payment-gate";
+import { can } from "@/lib/roles";
+import {
+  issueBlockedReason, issueGaps, parseInvoiceProfile, type IssueGap,
+} from "@/lib/domain/invoice-profile";
 
 /**
  * Issuing one invoice — the single implementation.
@@ -38,13 +42,59 @@ import { issueRefusal } from "@/lib/domain/payment-gate";
 
 type Client = Awaited<ReturnType<typeof createClient>>;
 
+export type IssueReadiness = {
+  gaps: IssueGap[];
+  /** The sentence to show beside a disabled Issue button, or null when issuing is open. */
+  blocked: string | null;
+};
+
+/**
+ * Whether this laundry's invoices can be issued at all yet (brief 1.1): the ABN,
+ * the address and the bank details a tax invoice needs. Read by every screen that
+ * draws an Issue button, so the button and the action agree, and by
+ * `issueOneInvoice` itself, so no path can skip it. `guard_invoice_issue` (0053)
+ * refuses the same thing underneath.
+ *
+ * A failed read is treated as *not ready*: issuing a document that may be missing
+ * its ABN is worse than asking somebody to press the button again.
+ */
+export async function loadIssueReadiness(
+  supabase: Client, tenantId: string,
+  /** Whether the viewer can open Settings › Invoicing (`admin.write`) — changes the sentence only. */
+  canEditSettings = true,
+): Promise<IssueReadiness> {
+  const { data, error } = await supabase
+    .from("tenants").select("abn, settings").eq("id", tenantId)
+    .maybeSingle<{ abn: string | null; settings: unknown }>();
+  if (error || !data) {
+    return {
+      gaps: [],
+      blocked: "This laundry's invoice details could not be read just now, so nothing can be issued. Try again in a moment.",
+    };
+  }
+  const gaps = issueGaps(data.abn, parseInvoiceProfile(data.settings));
+  return { gaps, blocked: issueBlockedReason(gaps, canEditSettings) };
+}
+
+/** Where the blocked sentence points, for the roles that can follow it. */
+export const INVOICE_SETTINGS_LINK = { href: "/admin/invoicing", label: "Settings › Invoicing" } as const;
+
 export type IssueResult =
   | { ok: true; xero: "pushed" | "skipped" | "failed"; reason?: string }
-  | { ok: false; error: string };
+  /** `blocked`: refused because the laundry's invoice details are incomplete (brief 1.1). */
+  | { ok: false; error: string; blocked?: boolean };
 
 export async function issueOneInvoice(
   supabase: Client, session: Session, invoiceId: string,
+  /** Already read by a bulk caller, so forty invoices do not read the tenant forty times. */
+  readiness?: IssueReadiness,
 ): Promise<IssueResult> {
+  // First, before anything is read or recalculated: a laundry with no ABN, address
+  // or bank details cannot issue a tax invoice at all (brief 1.1).
+  const ready = readiness
+    ?? await loadIssueReadiness(supabase, session.tenantId, can(session.role, "admin.write"));
+  if (ready.blocked) return { ok: false, error: ready.blocked, blocked: true };
+
   // Read the terms back rather than trusting a caller: the due date has to be
   // derived from what this invoice actually promises, and a form field is not
   // evidence of it. The status is read first so a non-draft is refused before

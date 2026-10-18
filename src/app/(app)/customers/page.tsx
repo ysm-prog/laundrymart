@@ -9,12 +9,27 @@ import {
 import { ListControls, Pagination, pageFrom, rangeFor } from "@/components/list-controls";
 import { FilterChips } from "@/components/filters";
 import { isFiltered } from "@/lib/filters";
+import { listActiveBoards } from "@/lib/runs/my-runs";
+import { weekdayName } from "@/lib/domain/collections";
+import { SetRound } from "./set-round";
 
 export const metadata = { title: "Customers" };
 export const dynamic = "force-dynamic";
 
-type Search = { q?: string; status?: string; page?: string; error?: string; ok?: string };
-const FILTER_KEYS = ["q", "status"] as const;
+type Search = {
+  q?: string; status?: string; round?: string; page?: string; error?: string; ok?: string;
+};
+const FILTER_KEYS = ["q", "status", "round"] as const;
+
+/**
+ * Whether the customer is on a round (brief 2.2). "No round" is the list the
+ * bulk Set the round panel exists to empty: a job only goes onto a round by
+ * itself once its customer has one.
+ */
+const ROUND_FILTERS = [
+  { value: "none", label: "No round" },
+  { value: "set", label: "On a round" },
+] as const;
 
 const CUSTOMER_STATUSES = [
   { value: "active", label: "Active" },
@@ -54,20 +69,29 @@ export default async function CustomersPage({
              absent — this list is paginated, so a count per status would be five
              more round trips for a number `Pagination` already gives for the one
              status you picked. */
-          <FilterChips
-            basePath="/customers" params={params} name="status" label="Customer status"
-            allLabel="All customers" options={CUSTOMER_STATUSES}
-          />
+          <>
+            <FilterChips
+              basePath="/customers" params={params} name="status" label="Customer status"
+              allLabel="All customers" options={CUSTOMER_STATUSES}
+            />
+            <FilterChips
+              basePath="/customers" params={params} name="round" label="Round"
+              allLabel="Any round" options={ROUND_FILTERS}
+            />
+          </>
         }
       />
       <Suspense key={JSON.stringify(params)} fallback={<SkeletonRows rows={6} />}>
-        <CustomerList params={params} canWrite={can(session.role, "customers.write")} />
+        <CustomerList params={params} canWrite={can(session.role, "customers.write")}
+                      tenantId={session.tenantId} />
       </Suspense>
     </div>
   );
 }
 
-async function CustomerList({ params, canWrite }: { params: Search; canWrite: boolean }) {
+async function CustomerList({
+  params, canWrite, tenantId,
+}: { params: Search; canWrite: boolean; tenantId: string }) {
   const supabase = await createClient();
   const page = pageFrom(params.page);
   const [from, to] = rangeFor(page);
@@ -77,7 +101,7 @@ async function CustomerList({ params, canWrite }: { params: Search; canWrite: bo
     .select(
       "id, customer_number, business_name, trading_name, abn, billing_suburb, billing_state, " +
       "billing_email, phone, payment_terms_days, purchase_order_number, special_instructions, " +
-      "notes, status, depot_id, created_at",
+      "notes, status, depot_id, created_at, collection_board_id, collection_weekday",
       { count: "exact" },
     )
     .is("deleted_at", null)
@@ -85,6 +109,8 @@ async function CustomerList({ params, canWrite }: { params: Search; canWrite: bo
     .range(from, to);
 
   if (params.status) query = query.eq("status", params.status);
+  if (params.round === "none") query = query.is("collection_board_id", null);
+  if (params.round === "set") query = query.not("collection_board_id", "is", null);
   if (params.q) {
     const term = `%${params.q}%`;
     query = query.or(
@@ -92,8 +118,19 @@ async function CustomerList({ params, canWrite }: { params: Search; canWrite: bo
     );
   }
 
-  const { data, count, error } = await query.returns<Customer[]>();
+  const [{ data, count, error }, boards] = await Promise.all([
+    query.returns<Customer[]>(),
+    listActiveBoards(supabase, tenantId),
+  ]);
   if (error) throw new Error(error.message);
+  const boardName = new Map(boards.map((board) => [board.id, board.name]));
+  const roundOf = (row: Customer): string | null => row.collection_board_id
+    ? [boardName.get(row.collection_board_id) ?? "A retired round", weekdayName(row.collection_weekday)]
+        .filter(Boolean).join(", ")
+    : null;
+  const returnTo = `/customers?${new URLSearchParams(
+    Object.entries(params).filter(([key, value]) => value && key !== "error" && key !== "ok") as [string, string][],
+  ).toString()}`;
 
   return (
     <>
@@ -120,10 +157,22 @@ async function CustomerList({ params, canWrite }: { params: Search; canWrite: bo
             hideBelow: "md",
           },
           { header: "Terms", cell: (row) => `${row.payment_terms_days} days`, hideBelow: "lg" },
+          { header: "Round", cell: (row) => roundOf(row) ?? "—", hideBelow: "md" },
           { header: "Status", cell: (row) => <StatusBadge status={row.status} /> },
         ]}
       />
       <Pagination page={page} total={count ?? 0} params={params} basePath="/customers" />
+      {canWrite && boards.length > 0 ? (
+        <div className="mt-5">
+          <SetRound
+            customers={(data ?? []).map((row) => ({
+              id: row.id, name: row.business_name, number: row.customer_number, round: roundOf(row),
+            }))}
+            boards={boards.map((board) => ({ id: board.id, name: board.name }))}
+            returnTo={returnTo}
+          />
+        </div>
+      ) : null}
     </>
   );
 }

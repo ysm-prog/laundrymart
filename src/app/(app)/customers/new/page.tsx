@@ -23,7 +23,7 @@ export default async function NewCustomerPage() {
     <div className="max-w-3xl">
       <PageHeader
         title="New customer"
-        description="Four things get you started. Everything else can wait until you need it."
+        description="Who they are, which round calls, and how they are billed. Everything else can wait."
       />
       <CustomerForm
         action={createCustomer}

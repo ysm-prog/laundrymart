@@ -68,3 +68,49 @@ export function summariseReceivables(
   const total = r2(customers.reduce((sum, c) => sum + c.total, 0));
   return { customers, totals, total, invoiceCount: kept.length, hiddenSmall: options.includeSmall ? 0 : hiddenSmall };
 }
+
+/* ------------------------------------------- trusted receivables (brief 1.9) */
+
+/**
+ * From when an imported balance can be trusted (brief 1.9, gap G5).
+ *
+ * Today's Overdue tile read **$38k across 297 invoices** — almost all of it MYOB
+ * history imported as headers, whose payments were recorded in MYOB and never
+ * came across. Until somebody has reconciled those balances, an imported invoice
+ * dated before this day is **not** counted on Today — not in the Overdue tile and
+ * not in Needs a decision — and the register marks it "Imported – not
+ * reconciled". It stays in the register and in the reports; nothing about it
+ * changes but where it is counted.
+ *
+ * Kept in `tenants.settings.receivables.ar_trusted_from` (0055 widens
+ * `save_tenant_settings` to accept it) and defaulted to **1 October 2026**, the
+ * Xero cut-over, so nothing has to be written for the rule to apply. Moving the
+ * date back is how an owner says the history has been reconciled.
+ */
+export const DEFAULT_AR_TRUSTED_FROM = "2026-10-01";
+
+export function arTrustedFrom(settings: unknown): string {
+  const bag = settings && typeof settings === "object" && !Array.isArray(settings)
+    ? (settings as Record<string, unknown>).receivables : undefined;
+  const value = bag && typeof bag === "object" && !Array.isArray(bag)
+    ? (bag as Record<string, unknown>).ar_trusted_from : undefined;
+  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(value))
+    ? value : DEFAULT_AR_TRUSTED_FROM;
+}
+
+/** An imported invoice from before the trusted date: shown, badged, not counted on Today. */
+export function isUnreconciledImport(
+  invoice: { source?: string | null; issue_date: string | null },
+  trustedFrom: string,
+): boolean {
+  return invoice.source === "import" && Boolean(invoice.issue_date) && invoice.issue_date! < trustedFrom;
+}
+
+/**
+ * The PostgREST filter that keeps only invoices Today may count: everything the
+ * app raised, and imports dated on or after the trusted day. Built here so the
+ * tile and the list cannot apply two different rules.
+ */
+export function trustedReceivablesFilter(trustedFrom: string): string {
+  return `source.eq.app,issue_date.gte.${trustedFrom}`;
+}

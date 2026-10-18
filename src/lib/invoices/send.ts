@@ -178,21 +178,33 @@ export async function markInvoiceJobsPaid(
  * the *price* was wrong, the reviewer sends the job back explicitly.
  */
 export type ReleaseOutcome =
-  | { ok: true; released: number }
-  | { ok: false; error: string; released: number };
+  | { ok: true; released: number; excluded: number }
+  | { ok: false; error: string; released: number; excluded: number };
+
+/**
+ * What to do with the work on a voided invoice (brief 1.6). `rebill: true` is
+ * what voiding has always done — the jobs go back to `approved`, to be billed
+ * again. `rebill: false` takes them out of billing altogether: `not_billable`,
+ * with the void's reason on the record. Getting there passes through
+ * `approved` deliberately — 0017's guard has no edge from an invoiced state to
+ * `not_billable`, and both steps it does have are the ones a person would take.
+ */
+export type ReleaseChoice = { rebill: boolean; reason?: string | null };
 
 export async function releaseVoidedInvoiceJobs(
   supabase: Client, session: Session, invoiceId: string,
+  choice: ReleaseChoice = { rebill: true },
 ): Promise<ReleaseOutcome> {
   const { data: sources, error: readError } = await supabase
     .from("invoice_source_jobs")
     .select("order_id")
     .eq("invoice_id", invoiceId)
+    .eq("tenant_id", session.tenantId)
     .returns<Array<{ order_id: string }>>();
-  if (readError) return { ok: false, error: describeDbError(readError), released: 0 };
+  if (readError) return { ok: false, error: describeDbError(readError), released: 0, excluded: 0 };
 
   const jobIds = (sources ?? []).map((row) => row.order_id);
-  if (jobIds.length === 0) return { ok: true, released: 0 };
+  if (jobIds.length === 0) return { ok: true, released: 0, excluded: 0 };
 
   // **Order matters, and the guard is what makes it matter.** 0017 permits
   // `invoice_generated → approved` only when no `invoice_source_jobs` row
@@ -204,7 +216,7 @@ export async function releaseVoidedInvoiceJobs(
     .delete()
     .eq("invoice_id", invoiceId)
     .eq("tenant_id", session.tenantId);
-  if (unlinkError) return { ok: false, error: describeDbError(unlinkError), released: 0 };
+  if (unlinkError) return { ok: false, error: describeDbError(unlinkError), released: 0, excluded: 0 };
 
   const { data: moved, error: moveError } = await supabase
     .from("laundry_orders")
@@ -213,19 +225,48 @@ export async function releaseVoidedInvoiceJobs(
     .eq("tenant_id", session.tenantId)
     .in("billing_status", ["invoice_generated", "invoice_sent"])
     .select("id");
-  if (moveError) return { ok: false, error: describeDbError(moveError), released: 0 };
+  if (moveError) return { ok: false, error: describeDbError(moveError), released: 0, excluded: 0 };
 
   // A job that did not move is stranded in a state the void did not undo (a
   // `paid` job is the case the 12 October test found). Said, never hidden: the
   // toast used to claim every job was back in the queue regardless.
-  const released = moved?.length ?? 0;
+  const movedIds = (moved ?? []).map((row: { id: string }) => row.id);
+  const released = movedIds.length;
   if (released < jobIds.length) {
     return {
-      ok: false, released,
+      ok: false, released, excluded: 0,
       error: `${jobIds.length - released} of ${jobIds.length} jobs on it could not be put back in the billing queue — check their billing status.`,
     };
   }
-  return { ok: true, released };
+
+  if (choice.rebill) return { ok: true, released, excluded: 0 };
+
+  // "Don't bill it again." Their frozen charges stay as the record of what was
+  // once priced; the job just leaves billing, with the reason on it.
+  const reason = choice.reason?.trim() || "Invoice voided — not to be billed again";
+  const { data: excluded, error: excludeError } = await supabase
+    .from("laundry_orders")
+    .update({ billing_status: "not_billable", billing_exclusion_reason: reason, billing_hold_reason: null })
+    .in("id", movedIds)
+    .eq("tenant_id", session.tenantId)
+    .eq("billing_status", "approved")
+    .select("id");
+  if (excludeError) {
+    return {
+      ok: false, released, excluded: 0,
+      error: `the jobs went back to the billing queue but could not be marked not billable: ${describeDbError(excludeError)}`,
+    };
+  }
+  const excludedCount = excluded?.length ?? 0;
+  for (const id of movedIds) {
+    await logOrderActivity(supabase, session, id, {
+      activity_type: "status_changed",
+      previous: { billing_status: "invoice_generated" },
+      next: { billing_status: "not_billable" },
+      note: `Its invoice was voided and it is not to be billed again: ${reason}`,
+    });
+  }
+  return { ok: true, released: 0, excluded: excludedCount };
 }
 
 /**

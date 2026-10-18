@@ -5,6 +5,7 @@ import { counted, money } from "@/lib/format";
 import { businessToday } from "@/lib/domain/timezone";
 import { isFiltered } from "@/lib/filters";
 import { loadOpenDrafts, type DraftSummary } from "@/lib/invoices/open-draft";
+import { loadIssueReadiness } from "@/lib/invoices/issue";
 import { DraftCard } from "./draft-card";
 import {
   ButtonLink, Card, EmptyState, Notice, PageContainer, PageHeader, Stat,
@@ -13,7 +14,9 @@ import { ListControls } from "@/components/list-controls";
 import { FilterChips, FilterSummary } from "@/components/filters";
 import { InvoiceSelection } from "../invoice-selection";
 import { issueInvoice } from "../actions";
-import { issueSelectedInvoices } from "../bulk-actions";
+import { issueAndSendAllReady, issueSelectedInvoices } from "../bulk-actions";
+import { isReadyDraft, parseAutomation } from "@/lib/domain/automation";
+import { ConfirmSubmit } from "@/components/confirm-submit";
 
 export const dynamic = "force-dynamic";
 
@@ -63,6 +66,24 @@ export default async function OpenDraftsPage({
   const drafts = await loadOpenDrafts(supabase, session.tenantId);
   const mayIssue = can(session.role, "invoices.write");
   const mayBulk = mayIssue && can(session.role, "invoices.bulk");
+  // Brief 1.1: nothing is issued until the laundry's ABN, address and bank
+  // details are set. One read, shared by every card and the bulk list.
+  const mayEditSettings = can(session.role, "admin.write");
+  const readiness = mayIssue
+    ? await loadIssueReadiness(supabase, session.tenantId, mayEditSettings)
+    : null;
+  const settingsHref = mayEditSettings ? "/admin/invoicing" : null;
+
+  // Month end in one press (brief 2.5): the drafts whose period has finished and
+  // that carry something to issue. The action re-reads them; this is the count
+  // and total the confirm states.
+  const monthEnd = drafts.filter((draft) => isReadyDraft(draft, today));
+  const monthEndTotal = monthEnd.reduce((sum, draft) => sum + draft.total, 0);
+  const { data: tenantRow } = mayBulk && monthEnd.length > 0
+    ? await supabase.from("tenants").select("settings").eq("id", session.tenantId)
+        .maybeSingle<{ settings: unknown }>()
+    : { data: null };
+  const emailing = parseAutomation(tenantRow?.settings).emailOnIssue && can(session.role, "invoices.send");
 
   /**
    * Which stage a draft is in.
@@ -184,7 +205,8 @@ export default async function OpenDraftsPage({
             <div className="grid gap-4 sm:grid-cols-2">
               {shown.map(({ draft, stage }) => (
                 <DraftCard key={draft.id} draft={draft} stage={stage} mayIssue={mayIssue}
-                           issueAction={issueInvoice} returnTo={BASE} />
+                           issueAction={issueInvoice} returnTo={BASE}
+                           issueBlocked={readiness?.blocked ?? null} settingsHref={settingsHref} />
               ))}
             </div>
           )}
@@ -206,6 +228,35 @@ export default async function OpenDraftsPage({
             </ul>
           </Card>
 
+          {mayBulk && monthEnd.length > 0 ? (
+            <Card title="Month end"
+                  description={`${counted(monthEnd.length, "draft")} from a finished period, ${money(monthEndTotal)} in all.`}>
+              {readiness?.blocked ? (
+                <Notice tone="warning">{readiness.blocked}</Notice>
+              ) : (
+                <form action={issueAndSendAllReady}>
+                  <input type="hidden" name="return_to" value={BASE} />
+                  <ConfirmSubmit
+                    label="Issue and send all ready"
+                    variant="primary"
+                    eyebrow="Month end"
+                    consequence={
+                      `This issues ${counted(monthEnd.length, "invoice")} totalling ${money(monthEndTotal)}`
+                      + (emailing ? ", emails each one to the customer's invoice address" : "")
+                      + " and sends each to Xero. An issued invoice cannot go back to being a draft."
+                    }
+                    pendingLabel="Issuing…"
+                  />
+                  <p className="mt-2 text-sm text-muted-foreground">
+                    {emailing
+                      ? "Each invoice is emailed as it is issued."
+                      : "Emailing is off in Settings › Automation, so nothing is emailed — send them from the register when you are ready."}
+                  </p>
+                </form>
+              )}
+            </Card>
+          ) : null}
+
           {mayBulk && selectable.length > 0 ? (
             <Card title="Issue several at once"
                   description="Issuing does not send. Each becomes a document you can email
@@ -217,6 +268,9 @@ export default async function OpenDraftsPage({
                 verb="Issue selected"
                 pendingLabel="Issuing…"
                 selectAllLabel="Select every draft on screen"
+                confirmIssue
+                blocked={readiness?.blocked ?? null}
+                settingsHref={settingsHref}
               />
             </Card>
           ) : null}

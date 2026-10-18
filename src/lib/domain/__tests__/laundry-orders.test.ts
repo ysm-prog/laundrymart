@@ -385,11 +385,13 @@ describe("how the laundry arrived", () => {
     expect([...RECEIVED_VIA_OPTIONS]).toEqual(["driver_pickup", "customer_dropoff"]);
   });
 
-  it("defaults a new job to pickup by driver, and an existing one to its own value", () => {
-    // Most laundry is collected rather than carried in. An existing job answers
-    // with what is stored, so an edit cannot re-record how it arrived.
-    expect(initialReceivedVia()).toBe("driver_pickup");
-    expect(initialReceivedVia(null)).toBe("driver_pickup");
+  it("defaults a new job by where it was started, and an existing one to its own value", () => {
+    // An existing job answers with what is stored, so an edit cannot re-record
+    // how it arrived. Brief 3.4: the counter's own screen opens on a drop-off, the database's
+    // default; a collection or a driver link says driver pickup.
+    expect(initialReceivedVia()).toBe("customer_dropoff");
+    expect(initialReceivedVia(null)).toBe("customer_dropoff");
+    expect(initialReceivedVia(null, "driver_pickup")).toBe("driver_pickup");
     expect(initialReceivedVia({ received_via: "customer_dropoff" })).toBe("customer_dropoff");
     expect(initialReceivedVia({ received_via: "other" })).toBe("other");
   });
