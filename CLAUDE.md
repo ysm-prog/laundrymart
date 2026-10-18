@@ -1885,7 +1885,7 @@ part company:
 - **Taken instead:** `eslint-config-next` `^16.3.4`, `@types/node` `^26.4.0` (resolving 26.5.0) and
   `lefthook` `^2.1.12`, all green on TypeScript 6 + ESLint 9. #63 stays closed.
 
-**An advisory is not a build failure here, and both of the ones that existed are now gone.**
+**Since 2026-10-18 a high advisory in a runtime dependency fails CI** (`npm audit --omit=dev`, blocking; the whole tree is advisory at `critical`, because `braces` has no fixed release and only the linter uses it). What follows is the history of why. **An advisory was not a build failure here, and both of the ones that existed then were cleared.**
 CI's audit step carries `continue-on-error: true`, so `npm audit --audit-level=high` has never
 failed a run — which is why two high-severity transitive advisories could sit there unnoticed
 through green CI. Both were cleared on 2026-09-09 **without reaching past an existing range**:
@@ -3645,6 +3645,36 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-10-18 · A critical Next.js advisory, and the audit step that hid it
+`npm audit --audit-level=high` reported **9** (8 high, 1 critical) on `Prod` — the critical one
+`next` 16.0.0–16.3.7: RCE in `next/og` `ImageResponse`, cache poisoning of SSG/ISR pages, SSRF in
+image optimisation, and four more. Plus `sharp` < 0.35.5 (librsvg), `source-map-js` 1.0–1.2.1 and
+`brace-expansion`. **No schema, RLS, capability or source change** — `git diff` over `src/` and
+`supabase/` is empty.
+
+- **Taken, inside the existing ranges:** `next` 16.3.4 → **16.4.2**, `sharp` → 0.35.5,
+  `source-map-js` → 1.2.2, `brace-expansion` → 1.1.21 / 5.0.12, via `npm audit fix`. The floors
+  in `package.json` were raised to `next ^16.4.2` and `eslint-config-next ^16.4.2`, so a fresh
+  resolve cannot land back on a vulnerable version.
+- **Also taken from Dependabot's #97, the safe six of its eight:** `@playwright/test` 1.64.1
+  (still pinned exactly), `@types/node` 26.6.5, `lefthook` 2.2.2, `postcss` 8.5.30, `vitest` 5.0.5,
+  and `eslint-config-next` (already 16.4.2). **TypeScript 7 and ESLint 10 are not**, and #97's red
+  lint (`typescript-eslint does not support TS 7.0`) is that pair failing for the **fifth** time
+  (#22 → #44 → #53 → #63 → #68 → #97). `typescript-eslint@latest` is 8.71.2 and still declares
+  `typescript: >=4.8.4 <6.1.0` — §10a's rule: read the peer range first.
+- **Package sets, per §10a:** 573 → 571 (88 in, 90 out, `siginfo` and `stackback` gone with
+  vitest's patch, one optional Android lefthook binding added).
+- **`braces` stays, and it cannot be fixed by a version.** Every release is affected and 3.0.3 is
+  the latest; it reaches the tree only through `eslint-config-next → @next/eslint-plugin-next →
+  fast-glob → micromatch`, so it never ships, and the only input it sees is this repo's own lint
+  globs. `npm audit fix --force` would "fix" it by downgrading `eslint-config-next` to 14.
+- **The CI step was the real defect.** It audited the whole tree with `continue-on-error`, so a
+  red result failed nothing — which is how a critical runtime advisory sat under a green CI run. It is now two steps: **`npm audit --omit=dev --audit-level=high`, blocking**
+  (0 today), and the full tree at `--audit-level=critical`, advisory (0 today; `braces` is high).
+  Both exit codes were read locally before pushing: 0, 0, and the old command still 1.
+- `verify` green: typecheck, lint, **1507 tests across 101 files**, and the production build on
+  Next.js 16.4.2.
+
 ### 2026-10-18 · Released: Phases 1–3 of Darshan's review on Prod
 **0053–0057 went on first, then the code.** Darshan pasted `apply-0053-0057.sql` into the Supabase
 SQL editor (the connector's `apply_migration` came back `cancelled` twice on 0053, with nothing
