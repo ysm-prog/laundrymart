@@ -1,7 +1,11 @@
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { MIN_PASSWORD_LENGTH } from "@/lib/auth/passwords";
 import { MEMBERSHIP_ROLES, ROLES } from "@/lib/roles";
 import {
-  DEFAULT_EMAIL_DOMAIN, ROLE_PROFILES, formerProfileEmail, profileEmail, selectedProfiles,
+  DEFAULT_EMAIL_DOMAIN, MIN_PROFILE_PASSWORD_LENGTH, ROLE_PROFILES, formerProfileEmail,
+  profileEmail, profilePasswordProblem, selectedProfiles,
   type RoleProfile,
   // The provisioning script's own module, imported rather than restated: a
   // second copy of this list is a second thing to keep in step, and the point
@@ -108,5 +112,41 @@ describe("test role profiles", () => {
       expect(profile.name.length, profile.role).toBeGreaterThan(3);
       expect(profile.note.length, profile.role).toBeGreaterThan(20);
     }
+  });
+});
+
+describe("the shared profile password", () => {
+  const sha256 = (value: string) => createHash("sha256").update(value).digest("hex");
+  const scripts = ["scripts/role-profiles.mjs", "scripts/seed-role-profiles.mjs"]
+    .map((path) => readFileSync(path, "utf8"));
+
+  it("has no default, so nothing in this public repository opens a login", () => {
+    expect(profilePasswordProblem(undefined)).toMatch(/no default/);
+    expect(profilePasswordProblem("")).toMatch(/no default/);
+  });
+
+  it("is refused when it is the password that was published", () => {
+    // The digest of the string that used to be committed here. The text itself
+    // is deliberately not restated, in this file or the module.
+    const published = "4536e7d7047c661f172f60e6fd17cd0aa5f0d9650800ed4e0f3558f182e61c1d";
+    const leaked = ["Role", "Test!", "2026"].join("");
+    expect(sha256(leaked)).toBe(published);
+    expect(profilePasswordProblem(leaked)).toMatch(/published/);
+  });
+
+  it("keeps the app's own length floor", () => {
+    // The module cannot import TypeScript, so the number is restated and pinned.
+    expect(MIN_PROFILE_PASSWORD_LENGTH).toBe(MIN_PASSWORD_LENGTH);
+    expect(profilePasswordProblem("short-pw")).toMatch(/at least 10/);
+    expect(profilePasswordProblem(" a-long-enough-one")).toMatch(/space/);
+    expect(profilePasswordProblem("a-long-enough-one")).toBeNull();
+  });
+
+  it("is never written into the scripts, and the runner never prints it", () => {
+    for (const source of scripts) {
+      expect(source).not.toMatch(/RoleTest/);
+      expect(source).not.toMatch(/DEFAULT_PASSWORD/);
+    }
+    expect(scripts[1]).not.toMatch(/console\.log\([^)]*opts\.password/);
   });
 });
