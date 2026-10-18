@@ -26,15 +26,20 @@ export const XERO_CONNECTIONS_URL = "https://api.xero.com/connections";
 /**
  * What we ask Xero for.
  *
- * `accounting.transactions` writes invoices, `accounting.contacts` creates and
- * matches the customer, `offline_access` is what makes a refresh token come
- * back at all — without it the connection dies in thirty minutes and somebody
- * has to reconnect by hand. `openid`/`profile`/`email` identify the person who
- * connected it, for the audit row.
+ * Granular scopes only: Xero apps created on or after 2 March 2026 cannot ask
+ * for the broad `accounting.transactions` scope (older apps lose it on
+ * 13 September 2027), and a request that includes it fails with
+ * `invalid_scope`. `accounting.invoices` writes and voids invoices,
+ * `accounting.payments` records the payments against them,
+ * `accounting.contacts` creates and matches the customer, `offline_access` is
+ * what makes a refresh token come back at all — without it the connection dies
+ * in thirty minutes and somebody has to reconnect by hand.
+ * `openid`/`profile`/`email` identify the person who connected it, for the
+ * audit row.
  */
 export const XERO_SCOPES = [
   "openid", "profile", "email", "offline_access",
-  "accounting.transactions", "accounting.contacts",
+  "accounting.invoices", "accounting.payments", "accounting.contacts",
 ].join(" ");
 
 /**
