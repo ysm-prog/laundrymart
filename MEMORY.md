@@ -729,7 +729,7 @@ entries hold the detail; this is the state to start from.
   `audit_logs.actor_id` named them on 10 rows.
 
 **Two things still open, both flagged to the owner:**
-- **`RoleTest!2026` is in `scripts/role-profiles.mjs`, a committed file in a public repo**, and
+- ~~**The shared profile password is in `scripts/role-profiles.mjs`, a committed file in a public repo**~~ **Closed 2026-10-18: the constant is gone; the runner requires one supplied**, and
   11 test logins still exist under it. None can reach anything now (no memberships), so nothing
   is exposed — but the constant belongs in the environment. `owner@roles.example.com` held
   `super_admin` on the real laundry under that password until today.

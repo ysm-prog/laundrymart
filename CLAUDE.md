@@ -394,8 +394,12 @@ signing in rather than by reading `roles.ts`. `scripts/role-profiles.mjs` is the
 JS — the runner is bare Node with no build step, and `role-profiles.test.ts` imports that same
 file, so there is no second copy); `scripts/seed-role-profiles.mjs` is the runner. Addresses are
 `<role-with-hyphens>@roles.example.com` — reserved by RFC 2606, so a stray invitation or overdue
-chase aimed at a test profile can never leave the building — and the shared password is printed
-on every run. **The exception is the owner, who is `owner@roles.example.com` and not
+chase aimed at a test profile can never leave the building. **The shared password has no default
+and is never printed (since 2026-10-18)**: provisioning requires `--password` or
+`ROLE_PROFILE_PASSWORD`, at least ten characters, and refuses the one that used to be committed here
+— by SHA-256 digest, so the refusal does not republish it. `profilePasswordProblem` in
+`role-profiles.mjs` is the rule and `role-profiles.test.ts` pins it. A removal or a dry run needs
+none. **The exception is the owner, who is `owner@roles.example.com` and not
 `super-admin@`**: a profile may carry an `email` local part, and `super_admin` does, because
 "Owner" is what `ROLE_PRESETS`, the People picker and the profile's own name all call that role.
 Deriving the address from the role *identifier* made the one string an operator has to type the
@@ -421,7 +425,8 @@ discovered:
   live members and were stale for five days; the substance of them is kept below because it is
   what makes re-adding one a decision rather than a convenience.
 - **Re-adding a profile to a real laundry makes the shared password a live credential.** It is
-  printed on every run and written down in `scripts/role-profiles.mjs`. If you ever need to sign in
+  no longer written down anywhere in the repository, but it is still one password for many logins.
+  The old one stays in git history for good. If you ever need to sign in
   as a role against real data, give that profile its own password first — People › *Email sign-in
   link* (§10c) — rather than reusing the shared one.
 - **`@roles.example.com` cannot receive mail** (RFC 2606), so a stray invoice or overdue chase
@@ -3128,7 +3133,7 @@ Advisors stayed at **18** — 0033 adds no function.
 - **Five boards.** `Adelaide Towel Service` — the real laundry — has **Board 1–4** at the Adelaide
   depot, **none linked to a login**, because none exists and this deployment cannot send an
   invitation. `Harbour Commercial Laundry` has **Board 1**, linked, at Sydney Depot.
-- **A twelfth role profile.** `board@roles.example.com` / `RoleTest!2026`, `board` in Harbour and
+- **A twelfth role profile.** `board@roles.example.com` (the shared profile password), `board` in Harbour and
   nowhere else. Written by SQL like the other eleven (§3a) and checked column by column against
   `driver@roles.example.com`: `aud`/`role`, confirmed, all eight token columns `''` rather than
   NULL (the 2026-08-18 trap), `email_change_confirm_status` 0, `app_meta`, a bcrypt `$2a$` hash
@@ -3645,6 +3650,26 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-10-18 · The test-login password leaves the public repository
+`scripts/role-profiles.mjs` carried the shared test-profile password as a constant in a **public**
+repository, and `npm run seed:roles` printed it on every run. MEMORY.md had flagged it as open since
+2026-08-27, when `owner@roles.example.com` was found holding `super_admin` on the real laundry
+under it. **No migration, no `src/` change** — the scripts, their types, one test file and the docs.
+
+- **No default.** Provisioning refuses to run without `--password` or `ROLE_PROFILE_PASSWORD`, says
+  so in a sentence, and never prints the value. A removal and a dry run need none, because neither
+  sets a password.
+- **The rule is pure** — `profilePasswordProblem`, at least ten characters (pinned to the app's
+  `MIN_PASSWORD_LENGTH`), no surrounding whitespace, and **the published password refused**. It is
+  matched by SHA-256 digest so the refusal does not republish the string; the docs' three mentions
+  of it are gone too.
+- **What this cannot undo:** the old password is in git history for good. The eleven
+  `@roles.example.com` logins that used it still exist, with **no memberships**, so they open
+  nothing; deleting them, or resetting their passwords through the Auth API, is a live change
+  nobody has asked for and is left alone.
+- 4 new tests in `role-profiles.test.ts`; each of five mutations (no published check, a 6-character floor, no empty check, no whitespace check, printing the password) fails exactly one; the
+  runner's two refusals exercised from the command line.
+
 ### 2026-10-18 · The runtime dependencies Dependabot's #73 had waited on since September
 The rest of #73 (opened 2026-09-30), whose `next` half the advisory fix above had already
 superseded. **No schema, RLS, capability or source change** — `git diff` over `src/` and
@@ -6069,7 +6094,7 @@ no schema/RLS/capability/code change** — a live data change and nothing else.
 
 **Two test profiles were still members of the real laundry, and one was an owner.**
 `owner@roles.example.com` held **`super_admin`** on Adelaide Towel Service and still used
-`RoleTest!2026` — the shared password §3a documents in `scripts/role-profiles.mjs`, a committed
+the shared profile password — the one §3a documents in `scripts/role-profiles.mjs`, a committed
 file in a **public** repository. Confirmed by hashing, not assumed. So the published password
 opened an owner account on a real business: 451 customers, 647 invoices and the chart of accounts.
 `branch-manager@roles.example.com` was the same with a narrower role. **Both memberships are now
@@ -9385,7 +9410,7 @@ capability or workflow change.**
   "That email and password combination was not recognised", which was true and told them nothing.
   A profile may now carry its own `email` local part, and `super_admin` does.
 - **The account was never the problem, and that was worth proving rather than assuming.** All
-  eleven test logins verify against `RoleTest!2026` on the live project — checked with
+  eleven test logins verify against the shared profile password on the live project — checked with
   `encrypted_password = crypt(...)` — with well-formed `auth.identities`, `email_verified` true
   and `app_metadata.provider = email`. Both real owner logins (`darshan@`, `jay@`) are
   `super_admin` in both laundries and platform admins, and `jay@` signed in **successfully** at

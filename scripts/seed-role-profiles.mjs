@@ -8,8 +8,10 @@
  *   node --env-file=.env.local scripts/seed-role-profiles.mjs --remove --yes
  *
  * Idempotent: run it as often as you like. An address that already exists is
- * reused and its password reset to the one printed at the end, so a rerun is
- * also how you recover a test login nobody wrote down.
+ * reused and its password reset to the one you supply, so a rerun is also how
+ * you recover a test login nobody wrote down. There is no default password and
+ * none is printed: a password in a public repository, or in a terminal log,
+ * is not a credential (see `profilePasswordProblem` in role-profiles.mjs).
  *
  * **These are no longer sandbox logins, and that changed on 2026-08-26.** The
  * demo laundry was deleted when `Adelaide Towel Service` became the only tenant
@@ -38,7 +40,7 @@
 
 import { createClient } from "@supabase/supabase-js";
 import {
-  DEFAULT_EMAIL_DOMAIN, DEFAULT_PASSWORD, DEFAULT_TENANT,
+  DEFAULT_EMAIL_DOMAIN, DEFAULT_TENANT, profilePasswordProblem,
   formerProfileEmail, profileEmail, selectedProfiles,
 } from "./role-profiles.mjs";
 
@@ -48,7 +50,7 @@ function parseArgs(argv) {
   const opts = {
     tenant: process.env.ROLE_PROFILE_TENANT ?? DEFAULT_TENANT,
     domain: process.env.ROLE_PROFILE_EMAIL_DOMAIN ?? DEFAULT_EMAIL_DOMAIN,
-    password: process.env.ROLE_PROFILE_PASSWORD ?? DEFAULT_PASSWORD,
+    password: process.env.ROLE_PROFILE_PASSWORD,
     includePlatformAdmin: false,
     dryRun: false,
     remove: false,
@@ -69,7 +71,12 @@ function parseArgs(argv) {
     else if (arg === "--help" || arg === "-h") usage(0);
     else fatal(`Unknown argument: ${arg}`);
   }
-  if (opts.password.length < 6) fatal("Supabase requires a password of at least 6 characters.");
+  // Only a provisioning run sets a password, so only it needs one. A removal or
+  // a dry run with no password is fine and says nothing about the credential.
+  if (!opts.remove && !opts.dryRun) {
+    const problem = profilePasswordProblem(opts.password);
+    if (problem) fatal(problem);
+  }
   return opts;
 }
 
@@ -79,7 +86,7 @@ Provision a test login for every role.
 
   --tenant <name|uuid>   Laundry the memberships go in (default: ${DEFAULT_TENANT})
   --domain <domain>      Email domain for the logins  (default: ${DEFAULT_EMAIL_DOMAIN})
-  --password <password>  Shared password             (default: ${DEFAULT_PASSWORD})
+  --password <password>  Shared password — required to provision, no default
   --platform-admin       Also provision platform_admin — reaches EVERY laundry
   --dry-run              Say what would change and write nothing
   --remove               Take the profiles back off (needs --yes)
@@ -409,7 +416,7 @@ for (const profile of profiles) {
 
 if (!opts.remove) {
   const width = Math.max(...rows.map((r) => r.email.length));
-  console.log(`\n  Sign in at /login with password: ${opts.password}\n`);
+  console.log("\n  Sign in at /login with the password you supplied (it is not printed).\n");
   for (const row of rows) console.log(`  ${row.email.padEnd(width)}  ${row.note}`);
   if (!opts.includePlatformAdmin) {
     console.log(
