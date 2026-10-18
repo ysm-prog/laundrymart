@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { DRAFT_DATE_TEXT } from "@/lib/domain/billing";
 import { requireSession } from "@/lib/auth/context";
 import { createClient } from "@/lib/supabase/server";
 import { can, type Role } from "@/lib/roles";
@@ -268,7 +269,7 @@ async function search(term: string, role: Role): Promise<Group[]> {
     (invoices.data ?? []).map((row) => ({
       href: `/invoices/${row.id}`,
       title: `${row.invoice_number} · ${row.customers?.business_name ?? "Unknown customer"}`,
-      detail: `Issued ${formatDate(row.issue_date)} · ${money(row.balance)} outstanding`,
+      detail: `${row.status === "draft" ? DRAFT_DATE_TEXT : `Issued ${formatDate(row.issue_date)}`} · ${money(row.balance)} outstanding`,
       trailing: <StatusBadge status={row.status} />,
     })));
 

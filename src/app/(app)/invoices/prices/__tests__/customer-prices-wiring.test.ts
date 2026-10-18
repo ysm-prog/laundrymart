@@ -41,6 +41,9 @@ describe("the customer price list, from form to pricer", () => {
 
   it("prices a job from the customer's rows and the usual list together", () => {
     const pricer = code(read("lib/orders/job-billing.ts"));
-    expect(pricer).toMatch(/itemPriceListFor\(job\.customer_id/);
+    // `priceItemsForCustomer` (brief 3.4) is the one pricer, shared with the
+    // intake quote, so the customer arrives as an argument.
+    expect(pricer).toMatch(/itemPriceListFor\(customerId/);
+    expect(pricer).toMatch(/priceListFor\(customerId/);
   });
 });

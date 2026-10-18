@@ -200,8 +200,8 @@ async function Sites({ customerId, writable }: { customerId: string; writable: b
       {writable ? (
         <form action={addLocation} className="mt-4 grid gap-3 border-t pt-4 sm:grid-cols-2">
           <input type="hidden" name="customer_id" value={customerId} />
-          <Field label="Site name" name="name" required>
-            <Input name="name" required placeholder="Main kitchen" />
+          <Field label="Site name" name="site_name" required>
+            <Input id="site_name" name="name" required placeholder="Main kitchen" />
           </Field>
           <Field label="Address" name="address_line1">
             <Input name="address_line1" />
@@ -247,8 +247,11 @@ async function Contacts({ customerId, writable }: { customerId: string; writable
       {writable ? (
         <form action={addContact} className="mt-4 grid gap-3 border-t pt-4 sm:grid-cols-2">
           <input type="hidden" name="customer_id" value={customerId} />
-          <Field label="Name" name="name" required>
-            <Input name="name" required />
+          {/* `Field` labels by id, and the site form above also has a field
+              called `name` — so this label pointed at the site's box, and the
+              contact's own Name box had no label at all (brief 3.10). */}
+          <Field label="Contact name" name="contact_name" required>
+            <Input id="contact_name" name="name" required autoComplete="name" />
           </Field>
           <Field label="Role" name="role">
             <Input name="role" placeholder="Venue manager" />

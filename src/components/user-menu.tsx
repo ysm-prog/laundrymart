@@ -1,7 +1,10 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { Building2, ChevronDown, LogOut } from "lucide-react";
+import { NAV_ICONS } from "./app-nav";
+import type { NavIcon } from "@/lib/nav";
 import { signOut } from "@/app/login/actions";
 import { switchTenant } from "@/app/(app)/platform/actions";
 import { cx } from "./ui";
@@ -14,12 +17,18 @@ import { cx } from "./ui";
  * you have to open) and again on a collapsed desktop rail. In the header it is
  * reachable at every width.
  *
+ * Since brief 3.1 it is also where the areas somebody sets up once and comes
+ * back to occasionally live — Fleet, Linen, Reports, Settings, Help and, for a
+ * platform admin, Platform — so the rail can be the five areas of a working
+ * day. They are ordinary links: every one is still in `navigationFor()`, so
+ * the tab strip and the help page see them exactly as before.
+ *
  * `signOut` is a server action imported straight into this client component, so
  * the menu is still a real form post and works with JavaScript disabled once
  * open.
  */
 export function UserMenu({
-  email, role, initials, tenantName, tenants = [],
+  email, role, initials, tenantName, tenants = [], links = [],
 }: {
   email: string; role: string; initials: string;
   /** The laundry currently being looked at. */
@@ -31,6 +40,8 @@ export function UserMenu({
    * membership in more than one laundry.
    */
   tenants?: ReadonlyArray<{ id: string; name: string }>;
+  /** The profile-menu areas this role can open, in `nav.ts` order. */
+  links?: ReadonlyArray<{ href: string; label: string; icon?: NavIcon }>;
 }) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -73,8 +84,8 @@ export function UserMenu({
 
       {open ? (
         <div role="menu"
-             className="absolute right-0 top-full z-50 mt-1.5 w-64 animate-slide-up overflow-hidden
-                        rounded-xl border bg-surface shadow-lg">
+             className="absolute right-0 top-full z-50 mt-1.5 max-h-[calc(100dvh-5rem)] w-64
+                        animate-slide-up overflow-y-auto rounded-xl border bg-surface shadow-lg">
           <div className="border-b px-4 py-3">
             <p className="truncate text-sm font-semibold">{email}</p>
             <p className="mt-0.5 text-xs text-muted-foreground">{role}</p>
@@ -82,6 +93,23 @@ export function UserMenu({
               <p className="mt-1 truncate text-xs font-medium">{tenantName}</p>
             ) : null}
           </div>
+
+          {links.length > 0 ? (
+            <div role="group" aria-label="More" className="border-b p-1.5">
+              {links.map((link) => {
+                const Icon = link.icon ? NAV_ICONS[link.icon] : undefined;
+                return (
+                  <Link key={link.href} href={link.href} role="menuitem"
+                        onClick={() => setOpen(false)}
+                        className="flex min-h-11 w-full items-center gap-2.5 rounded-lg px-2.5 text-sm
+                                   font-medium transition hover:bg-surface-muted">
+                    {Icon ? <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden /> : null}
+                    <span className="truncate">{link.label}</span>
+                  </Link>
+                );
+              })}
+            </div>
+          ) : null}
 
           {tenants.length > 1 ? (
             <div className="border-b p-1.5">

@@ -1,12 +1,14 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { Field, FormActions, Input, Select, SubmitButton, Textarea } from "@/components/form";
+import { useEffect, useMemo, useState } from "react";
+import {
+  Field, FormActions, Input, Select, SubmitButton, Textarea, useFieldControl,
+} from "@/components/form";
 import {
   Badge, ButtonLink, CONTROL, Eyebrow, FormSection, Notice, StatusBadge, cx, humanise,
 } from "@/components/ui";
 import {
-  Building2, CalendarClock, Check, Plus, Search, Shirt, Truck,
+  Building2, CalendarClock, Check, Minus, Plus, Search, Shirt, Truck,
 } from "lucide-react";
 import { ItemPicker } from "@/components/coding-pickers";
 import { CustomerEssentials, FormDisclosure } from "@/app/(app)/customers/customer-form";
@@ -14,9 +16,13 @@ import {
   DELIVERY_WINDOWS, DELIVERY_WINDOW_LABELS, ITEM_TYPES, ITEM_TYPE_LABELS,
   ORDER_PRIORITIES, PRIORITY_LABELS, QUANTITY_TYPES, QUANTITY_TYPE_LABELS,
   ITEM_OWNERSHIP, ITEM_OWNERSHIP_LABELS, RECEIVED_VIA_LABELS, defaultOwnership, summariseItems,
-  initialDeliveryRequired, initialReceivedVia, receivedViaOptions,
+  initialDeliveryRequired, initialReceivedVia, isBlankItem, receivedViaOptions,
   type ItemOwnership, type OrderItemInput, type ReceivedVia,
 } from "@/lib/domain/laundry-orders";
+import { stepQuantity } from "@/lib/domain/intake";
+import { money } from "@/lib/format";
+import type { IntakeQuote } from "./intake-actions";
+import type { IntakeDefaults } from "@/lib/orders/intake";
 import { customerStatusNeedsSaying } from "@/lib/domain/customers";
 import { businessToday, toZonedDate } from "@/lib/domain/timezone";
 import type { LaundryOrder } from "@/lib/db/types";
@@ -121,6 +127,30 @@ function blankItem(key: number): ItemRow {
   };
 }
 
+/** Stored or prefilled rows, as the form's own. */
+function rowsFrom(items: readonly OrderItemInput[]): ItemRow[] {
+  return items.map((item, index) => ({
+    key: index,
+    itemId: item.item_id ?? "",
+    itemType: item.item_type,
+    customDescription: item.custom_description ?? "",
+    quantityType: item.quantity_type === "bulk_lot" ? "bulk_lot" : "exact",
+    exactQuantity: item.exact_quantity == null ? "" : String(item.exact_quantity),
+    bagCount: item.bag_count == null ? "" : String(item.bag_count),
+    estimatedQuantity: item.estimated_quantity == null ? "" : String(item.estimated_quantity),
+    notes: item.notes ?? "",
+    // A stored answer wins; a row from before 0051 is left unanswered rather
+    // than guessed at, so saving an old job does not invent a fact about it.
+    ownership: item.ownership === "rental" || item.ownership === "own" ? item.ownership : "",
+  }));
+}
+
+/** One blank row nobody has touched — the only list a prefill may replace. */
+function untouched(rows: readonly ItemRow[]): boolean {
+  return rows.length === 1 && !rows[0]!.itemId && !rows[0]!.exactQuantity.trim()
+    && !rows[0]!.bagCount.trim() && !rows[0]!.notes.trim();
+}
+
 /** "" → absent, so an untouched number field is not posted as zero. */
 function numberOrNull(value: string): number | null {
   const trimmed = value.trim();
@@ -132,6 +162,7 @@ function numberOrNull(value: string): number | null {
 export function JobForm({
   action, customerAction, customers, drivers, staff,
   order, items, seed, catalogue = [], defaultCustomerId, canBackdate, returnPath,
+  entryReceivedVia, intake,
 }: {
   action: (formData: FormData) => Promise<void>;
   /** The existing `createCustomer` action — this module adds no customer flow. */
@@ -158,12 +189,30 @@ export function JobForm({
     description?: string | null; laundry_category: string | null;
     /** Only to default the Rental / Own toggle — never read as a price. */
     rental_price?: number | string | null;
+    /** The usual price, shown in the picker to a role that may read prices (brief 3.5). */
+    list_price?: { unitPrice: number; bagPrice: number | null; taxable: boolean } | null;
   }>;
   defaultCustomerId?: string;
   /** `orders.manage` — only they may record a job as arriving on an earlier day. */
   canBackdate: boolean;
   /** Where the quick-create returns to, so the job form is not restarted. */
   returnPath: string;
+  /**
+   * How a new job arrived, decided by where it was started (brief 3.4): the
+   * counter's own screen is a drop-off, a collection is a driver pickup.
+   */
+  entryReceivedVia?: ReceivedVia;
+  /**
+   * Taking a job in quickly (brief 3.4): the defaults for a chosen customer —
+   * their last job's laundry and the date it goes back — and, for a role that
+   * may read prices, a running quote. New jobs only; an edit is never prefilled.
+   */
+  intake?: {
+    load: (customerId: string) => Promise<IntakeDefaults | null>;
+    quote?: ((customerId: string, itemsJson: string) => Promise<IntakeQuote | null>) | null;
+    /** Worked out on the server for a customer the page opened with. */
+    initial?: IntakeDefaults | null;
+  };
 }) {
   const editing = order !== undefined;
 
@@ -190,7 +239,9 @@ export function JobForm({
   // job stores. `order` wins where both are somehow set, because a stored answer
   // is a fact and a seed is a suggestion.
   const arrival = order ?? seed;
-  const [receivedVia, setReceivedVia] = useState<string>(() => initialReceivedVia(arrival));
+  const [receivedVia, setReceivedVia] = useState<string>(
+    () => initialReceivedVia(arrival, entryReceivedVia),
+  );
   const [deliveryRequired, setDeliveryRequired] = useState(() => initialDeliveryRequired(order));
   const [deliveryWindow, setDeliveryWindow] = useState<string>(
     order?.delivery_window ?? "no_specific_time",
@@ -198,22 +249,41 @@ export function JobForm({
   const [customAddress, setCustomAddress] = useState(order?.delivery_address_source === "custom");
   const [nextKey, setNextKey] = useState(1);
   const [rows, setRows] = useState<ItemRow[]>(() => {
-    if (!items?.length) return [blankItem(0)];
-    return items.map((item, index) => ({
-      key: index,
-      itemId: item.item_id ?? "",
-      itemType: item.item_type,
-      customDescription: item.custom_description ?? "",
-      quantityType: item.quantity_type === "bulk_lot" ? "bulk_lot" : "exact",
-      exactQuantity: item.exact_quantity == null ? "" : String(item.exact_quantity),
-      bagCount: item.bag_count == null ? "" : String(item.bag_count),
-      estimatedQuantity: item.estimated_quantity == null ? "" : String(item.estimated_quantity),
-      notes: item.notes ?? "",
-      // A stored answer wins; a row from before 0051 is left unanswered rather
-      // than guessed at, so saving an old job does not invent a fact about it.
-      ownership: item.ownership === "rental" || item.ownership === "own" ? item.ownership : "",
-    }));
+    if (items?.length) return rowsFrom(items);
+    // The customer's last job (brief 3.4), for a customer the page opened with.
+    if (!editing && intake?.initial?.items.length) return rowsFrom(intake.initial.items);
+    return [blankItem(0)];
   });
+
+  // When the job is due back. Controlled, so choosing a customer can fill it
+  // with their round's next day — until the counter changes it themselves.
+  const [due, setDue] = useState(() => ({
+    value: order?.expected_delivery_date ?? intake?.initial?.returnDate ?? "",
+    touched: Boolean(order?.expected_delivery_date),
+  }));
+  const [defaults, setDefaults] = useState<IntakeDefaults | null>(
+    editing ? null : intake?.initial ?? null,
+  );
+
+  /**
+   * Choosing a customer (brief 3.4). For a new job, their defaults arrive
+   * afterwards: the last job's laundry replaces the one blank row — never rows
+   * the counter has started — and their round's next day fills the date unless
+   * somebody has already set one. Both are offers; every field stays editable.
+   */
+  function chooseCustomer(id: string) {
+    setCustomerId(id);
+    if (editing || !intake || items?.length) return;
+    void intake.load(id).then((loaded) => {
+      if (!loaded) return;
+      setDefaults(loaded);
+      if (loaded.items.length) {
+        setRows((current) => (untouched(current) ? rowsFrom(loaded.items) : current));
+        setNextKey((key) => Math.max(key, loaded.items.length));
+      }
+      setDue((current) => (current.touched ? current : { value: loaded.returnDate, touched: false }));
+    });
+  }
 
   const selected = customers.find((customer) => customer.id === customerId);
 
@@ -257,6 +327,41 @@ export function JobForm({
       ownership: row.ownership || null,
     })),
   ), [rows]);
+
+  // The running price (brief 3.4), from the pricer that prices the finished
+  // job. Debounced, and keyed on what it was asked about, so a slow answer to
+  // an older list is never drawn against a newer one.
+  const quoteKey = `${customerId}|${itemsPayload}`;
+  const [quote, setQuote] = useState<{ key: string; value: IntakeQuote | null } | null>(null);
+  useEffect(() => {
+    const ask = intake?.quote;
+    if (!ask || !customerId) return;
+    const timer = setTimeout(() => {
+      void ask(customerId, itemsPayload).then((value) => setQuote({ key: quoteKey, value }));
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [intake?.quote, customerId, itemsPayload, quoteKey]);
+  const liveQuote = quote && quote.key === quoteKey ? quote.value : null;
+
+  // The quote answers per non-blank row, in order — the server reads the rows
+  // with the same parser `createOrder` uses, which drops blank ones.
+  const quoteByKey = useMemo(() => {
+    const map = new Map<number, { unitPrice: number; amount: number } | null>();
+    if (!liveQuote) return map;
+    let index = 0;
+    for (const row of rows) {
+      const blank = isBlankItem({
+        item_type: row.itemType, custom_description: row.customDescription,
+        quantity_type: row.quantityType,
+        exact_quantity: numberOrNull(row.exactQuantity), bag_count: numberOrNull(row.bagCount),
+        estimated_quantity: numberOrNull(row.estimatedQuantity), notes: row.notes,
+      });
+      if (blank) continue;
+      map.set(row.key, liveQuote.rows[index] ?? null);
+      index += 1;
+    }
+    return map;
+  }, [liveQuote, rows]);
 
   function patch(key: number, next: Partial<ItemRow>) {
     setRows((current) => current.map((row) => (row.key === key ? { ...row, ...next } : row)));
@@ -401,7 +506,7 @@ export function JobForm({
                                    rounded-xl border bg-surface py-1 shadow-lg">
                       {found.shown.map((customer) => (
                         <li key={customer.id}>
-                          <button type="button" onClick={() => setCustomerId(customer.id)}
+                          <button type="button" onClick={() => chooseCustomer(customer.id)}
                                   className="flex min-h-12 w-full flex-col items-start justify-center
                                              px-4 py-2 text-left transition hover:bg-surface-muted">
                             <span className="flex flex-wrap items-center gap-2 text-sm font-medium">
@@ -528,6 +633,11 @@ export function JobForm({
             </button>
           }
         >
+          {defaults?.lastOrderNumber && defaults.items.length ? (
+            <p className="mb-3 text-sm text-muted-foreground">
+              Filled in from {defaults.lastOrderNumber}, their last job. Change anything that is different.
+            </p>
+          ) : null}
           <ul className="space-y-3">
             {rows.map((row, index) => (
               <li key={row.key} className="rounded-lg border p-3">
@@ -611,14 +721,31 @@ export function JobForm({
 
 
                   {row.quantityType === "exact" ? (
-                    <label className="w-24 shrink-0 space-y-1 sm:w-32">
-                      <span className="block text-sm font-medium text-foreground">
+                    <div className="shrink-0 space-y-1">
+                      <label htmlFor={`qty-${row.key}`} className="block text-sm font-medium text-foreground">
                         How many
-                      </span>
-                      <input className={CONTROL} type="number" min={1} step={1} inputMode="numeric"
-                             value={row.exactQuantity}
-                             onChange={(event) => patch(row.key, { exactQuantity: event.target.value })} />
-                    </label>
+                      </label>
+                      {/* −/+ steppers (brief 3.4): a prefilled count is usually
+                          adjusted by a few, not retyped. 44px each. */}
+                      <div className="flex items-center gap-1">
+                        <button type="button" aria-label={`One fewer, item ${index + 1}`}
+                                onClick={() => patch(row.key, { exactQuantity: stepQuantity(row.exactQuantity, -1) })}
+                                className="flex size-11 items-center justify-center rounded-lg border
+                                           border-control-border bg-surface transition hover:bg-surface-muted">
+                          <Minus className="size-4" aria-hidden />
+                        </button>
+                        <input id={`qty-${row.key}`} className={cx(CONTROL, "w-20 text-center sm:w-24")}
+                               type="number" min={1} step={1} inputMode="numeric"
+                               value={row.exactQuantity}
+                               onChange={(event) => patch(row.key, { exactQuantity: event.target.value })} />
+                        <button type="button" aria-label={`One more, item ${index + 1}`}
+                                onClick={() => patch(row.key, { exactQuantity: stepQuantity(row.exactQuantity, 1) })}
+                                className="flex size-11 items-center justify-center rounded-lg border
+                                           border-control-border bg-surface transition hover:bg-surface-muted">
+                          <Plus className="size-4" aria-hidden />
+                        </button>
+                      </div>
+                    </div>
                   ) : (
                     <label className="w-24 shrink-0 space-y-1 sm:w-32">
                       <span className="block text-sm font-medium text-foreground">
@@ -707,6 +834,14 @@ export function JobForm({
                     </label>
                   ) : null}
 
+                  {liveQuote ? (
+                    <p className="text-sm sm:col-span-2 lg:col-span-4" aria-live="polite">
+                      {quoteByKey.get(row.key)
+                        ? <>{money(quoteByKey.get(row.key)!.unitPrice)} each · <span className="font-semibold">{money(quoteByKey.get(row.key)!.amount)}</span></>
+                        : <span className="text-warning">No price for this yet — it will wait under Needs a price.</span>}
+                    </p>
+                  ) : null}
+
                   <label className="space-y-1 sm:col-span-2 lg:col-span-4">
                     <span className="block text-sm font-medium text-foreground">
                       Item notes
@@ -763,10 +898,15 @@ export function JobForm({
 
             {deliveryRequired ? (
               <div className="grid gap-4 sm:grid-cols-2">
-                <Field label="Expected delivery date" name="expected_delivery_date" required>
-                  <Input name="expected_delivery_date" type="date" required
-                         min={businessToday()}
-                         defaultValue={order?.expected_delivery_date ?? undefined} />
+                <Field label="Expected delivery date" name="expected_delivery_date" required
+                       hint={defaults && !due.touched
+                         ? defaults.roundLabel
+                           ? `Their round's next visit — ${defaults.roundLabel}.`
+                           : "Your usual turnaround. Change it in Settings › How you work."
+                         : undefined}>
+                  <DateControl name="expected_delivery_date" required min={businessToday()}
+                               value={due.value}
+                               onChange={(value) => setDue({ value, touched: true })} />
                 </Field>
                 <Field label="Delivery window" name="delivery_window">
                   <select id="delivery_window" name="delivery_window" className={CONTROL}
@@ -882,6 +1022,12 @@ export function JobForm({
           {editing
             ? <ButtonLink href={`/orders/${order.id}`}>Cancel</ButtonLink>
             : <ButtonLink href="/orders">Cancel</ButtonLink>}
+          {liveQuote ? (
+            <span className="text-sm font-semibold" aria-live="polite">
+              {money(liveQuote.total)} incl. GST
+              {liveQuote.unpricedCount > 0 ? <span className="font-normal text-warning"> · {liveQuote.unpricedCount} not priced</span> : null}
+            </span>
+          ) : null}
           <span className="ml-auto hidden text-sm text-muted-foreground sm:inline">
             {rows.length === 1 ? "1 laundry item" : `${rows.length} laundry items`}
             {/* Every row, not the first one: "2 laundry items · 100 × Towels"
@@ -899,6 +1045,19 @@ export function JobForm({
       </form>
 
     </>
+  );
+}
+
+/** A date box that the form controls, still wired to its `Field`'s hint and error. */
+function DateControl({
+  name, value, onChange, required, min,
+}: { name: string; value: string; onChange: (value: string) => void; required?: boolean; min?: string }) {
+  const field = useFieldControl();
+  return (
+    <input id={name} name={name} type="date" required={required} min={min}
+           value={value} onChange={(event) => onChange(event.target.value)}
+           aria-describedby={field.describedBy} aria-invalid={field.invalid || undefined}
+           className={CONTROL} />
   );
 }
 

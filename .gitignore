@@ -11,3 +11,7 @@ next-env.d.ts
 
 # TypeScript incremental build cache
 *.tsbuildinfo
+
+# Playwright (e2e/golden-path.spec.ts)
+/playwright-report/
+/test-results/

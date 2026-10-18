@@ -1,6 +1,6 @@
 /**
  * Whether this laundry's invoices can go to Xero yet (brief 1.2, gaps G2 and
- * G11). Pure, so the Money › Xero pre-flight, the push and the tests read one
+ * G11). Pure, so the Billing › Xero pre-flight, the push and the tests read one
  * rule.
  *
  * **What it guards against is silent mis-posting, not a refusal.** A line whose
@@ -52,8 +52,8 @@ export function pushBlockedReason(problems: readonly AccountProblem[]): string |
   const codes = problems.map((entry) => entry.account.code);
   const shown = codes.slice(0, 4).join(", ") + (codes.length > 4 ? ` and ${codes.length - 4} more` : "");
   return problems.length === 1
-    ? `Account ${shown} is used on your invoices and is not set up in Xero yet. Map it on Money › Xero before invoices are sent — otherwise it would land in the wrong account.`
-    : `${problems.length} accounts used on your invoices are not set up in Xero yet (${shown}). Map them on Money › Xero before invoices are sent — otherwise they would land in the wrong account.`;
+    ? `Account ${shown} is used on your invoices and is not set up in Xero yet. Map it on Billing › Xero before invoices are sent — otherwise it would land in the wrong account.`
+    : `${problems.length} accounts used on your invoices are not set up in Xero yet (${shown}). Map them on Billing › Xero before invoices are sent — otherwise they would land in the wrong account.`;
 }
 
 /**

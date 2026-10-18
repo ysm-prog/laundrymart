@@ -3,6 +3,7 @@ import { Field, FormActions, Input, Select, SubmitButton, Textarea } from "@/com
 import { ButtonLink, Card } from "@/components/ui";
 import type { Customer, Depot } from "@/lib/db/types";
 import { WEEKDAYS, describeCollectionSchedule } from "@/lib/domain/collections";
+import { BILLING_METHODS, BILLING_METHOD_BLURBS, BILLING_METHOD_LABELS } from "@/lib/domain/billing";
 
 const AU_STATES = ["NSW", "VIC", "QLD", "WA", "SA", "TAS", "ACT", "NT"]
   .map((state) => ({ value: state, label: state }));
@@ -40,6 +41,40 @@ export function FormDisclosure({
  * — `formId` associates the fields with a form element rendered elsewhere, so
  * the quick-create can live inside another form's markup without nesting.
  */
+/**
+ * How a new customer is served and billed (brief 3.6, G16): the round that
+ * calls and on which day, how their work is invoiced, and their terms. On the
+ * new-customer form's essentials, because a customer with no round is a job
+ * that waits under Needs a driver and one with the wrong billing method is an
+ * invoice that has to be re-raised. Editing an existing customer keeps these
+ * where they were — the weekly collection and the billing card.
+ */
+export function CustomerServiceTerms({ boards }: { boards: Array<{ id: string; name: string }> }) {
+  return (
+    <div className="grid gap-4 sm:grid-cols-2">
+      <Field label="Round" name="collection_board_id"
+             hint={boards.length
+               ? "The round that collects and delivers for them. Ready jobs go onto it by themselves."
+               : "No active rounds yet — set one up under Fleet. You can add it later."}>
+        <Select name="collection_board_id" placeholder="No round yet"
+                options={boards.map((board) => ({ value: board.id, label: board.name }))} />
+      </Field>
+      <Field label="Collection day" name="collection_weekday" hint="The same day every week.">
+        <Select name="collection_weekday" placeholder="No standing collection"
+                options={WEEKDAYS.map((day) => ({ value: day.value.toString(), label: day.label }))} />
+      </Field>
+      <Field label="Billing" name="billing_method"
+             hint={BILLING_METHOD_BLURBS.monthly_consolidated}>
+        <Select name="billing_method" defaultValue="monthly_consolidated"
+                options={BILLING_METHODS.map((method) => ({ value: method, label: BILLING_METHOD_LABELS[method] }))} />
+      </Field>
+      <Field label="Payment terms (days)" name="payment_terms_days" hint="Days from invoice to due date">
+        <Input name="payment_terms_days" type="number" min={0} defaultValue={14} />
+      </Field>
+    </div>
+  );
+}
+
 export function CustomerEssentials({
   customer, formId, withSite = true,
 }: { customer?: Customer; formId?: string; withSite?: boolean }) {
@@ -143,8 +178,13 @@ export function CustomerForm({
       {/* Collapsed fields all carry defaults, so an untouched disclosure still posts a valid customer. */}
 
       <Card title="The essentials"
-            description={customer ? undefined : "These four fields are all it takes — everything below has a sensible default."}>
+            description={customer ? undefined : "Who they are, which round calls, and how they are billed. Everything below has a sensible default."}>
         <CustomerEssentials customer={customer} withSite={!customer} />
+        {customer ? null : (
+          <div className="mt-4 border-t pt-4">
+            <CustomerServiceTerms boards={boards} />
+          </div>
+        )}
       </Card>
 
       <FormDisclosure summary="Billing details" hint="ABN, billing address, payment terms">
@@ -168,9 +208,12 @@ export function CustomerForm({
           <Field label="Postcode" name="billing_postcode">
             <Input name="billing_postcode" defaultValue={customer?.billing_postcode} />
           </Field>
-          <Field label="Payment terms (days)" name="payment_terms_days" hint="Days from invoice to due date">
-            <Input name="payment_terms_days" type="number" min={0} defaultValue={customer?.payment_terms_days ?? 14} />
-          </Field>
+          {/* On the essentials for a new customer (brief 3.6); here when editing. */}
+          {customer ? (
+            <Field label="Payment terms (days)" name="payment_terms_days" hint="Days from invoice to due date">
+              <Input name="payment_terms_days" type="number" min={0} defaultValue={customer.payment_terms_days ?? 14} />
+            </Field>
+          ) : null}
           <Field label="Purchase order number" name="purchase_order_number"
                  hint="Printed on their invoices, if their accounts team needs one">
             <Input name="purchase_order_number" defaultValue={customer?.purchase_order_number} />
@@ -178,7 +221,8 @@ export function CustomerForm({
         </div>
       </FormDisclosure>
 
-      <WeeklyCollection customer={customer} boards={boards} />
+      {/* A new customer's round is on the essentials above (brief 3.6). */}
+      {customer ? <WeeklyCollection customer={customer} boards={boards} /> : null}
 
       <FormDisclosure summary="More" hint="Status, servicing site, notes">
         <div className="grid gap-4 sm:grid-cols-2">

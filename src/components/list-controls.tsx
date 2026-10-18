@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { Search, X } from "lucide-react";
+import { FilterCombobox } from "@/components/filter-combobox";
 import { isFiltered as anyFilterSet, filterHref, type FilterParams } from "@/lib/filters";
 import { Button, CONTROL, SELECT_CHEVRON, cx } from "./ui";
 
@@ -42,6 +43,8 @@ export function ListControls({
     label: string;
     value?: string;
     options: ReadonlyArray<{ value: string; label: string }>;
+    /** Long lists (customers) get a type-ahead rather than a select (brief 3.10). */
+    searchable?: boolean;
   }>;
   /** Chip groups rendered above the fields — `FilterChips`, `ToggleChips`, `PeriodFilter`. */
   chips?: ReactNode;
@@ -89,7 +92,10 @@ export function ListControls({
           <input id={inputId} name="q" type="search" defaultValue={q} placeholder={placeholder}
                  className={cx(CONTROL, "pl-9")} />
         </div>
-        {filters?.map((filter) => (
+        {filters?.map((filter) => filter.searchable ? (
+          <FilterCombobox key={filter.name} name={filter.name} label={filter.label}
+                          value={filter.value} options={filter.options} className="sm:w-64" />
+        ) : (
           <div key={filter.name} className="sm:w-auto">
             <label htmlFor={filter.name} className="sr-only">{filter.label}</label>
             <select id={filter.name} name={filter.name} defaultValue={filter.value ?? ""}

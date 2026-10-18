@@ -9,7 +9,29 @@ where that is genuinely what it is. The multi-tenancy architecture stays: one op
 fact about today's data, not a reason to drop `tenant_id`, RLS, or §23's rule that a read feeding a
 write names its tenant.
 
-## Latest: Darshan's BA review, Phase 2 (2026-10-18), `claude/relaxed-faraday-4ey58h-phase2`
+## Latest: Darshan's BA review, Phase 3 (2026-10-18), `claude/relaxed-faraday-4ey58h-phase3`
+Items 3.1–3.10, **stacked on Phase 2** (#85), which is stacked on #82. Same one-pass instruction.
+CLAUDE.md's Phase 3 changelog entry and §6 have the detail.
+- **0057 written, NOT applied.** Apply after 0056 and before Phase 3 merges — it only adds the
+  `operations` key to `save_tenant_settings`; without it Settings › How you work refuses to save
+  (22023, said in words). Changes no row.
+- Rail is five areas (Today, Laundry, Deliveries, Customers, Billing); the rest is in the account
+  menu. Money is "Billing", its old Billing tab "By period". `/laundry`, `/deliveries`, `/money`
+  redirect.
+- Today is an inbox of five sections; Laundry opens on a five-column board with bulk Mark ready /
+  Assign / Approve and a docket scan box; intake prefills from the last job, sets the return date
+  from the round or the turnaround, shows prices to a role that may read them, and prints a Code
+  128 docket.
+- **Plant hidden by default** (Settings › How you work) — hidden, not linked: no join from a batch
+  to a laundry job exists.
+- **Section 5's E2E spec is updated for Phase 3** (repeat intake held to ≤4 actions, docket scan,
+  Issue blocked then passing via `E2E_INVOICE_*` secrets) and **still never run** — it needs a
+  seeded Supabase branch + preview + login secrets, which only Darshan can set up.
+- Found on the way: the customer page's contact Name label pointed at the *site* form's input
+  (two fields called `name`); merged invoice lines kept the first job's count in the description;
+  moving a job between boards logged the old board's id.
+
+## Previously: Darshan's BA review, Phase 2 (2026-10-18), `claude/relaxed-faraday-4ey58h-phase2`
 Items 2.1–2.5, **stacked on Phase 1** (#82), so its PR waits for #82. Written in one pass under the
 same instruction. CLAUDE.md's Phase 2 changelog entry has the detail.
 - **0056 written, NOT applied.** Apply after 0053–0055 and **before** Phase 2 merges — My Runs and

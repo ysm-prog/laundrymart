@@ -193,7 +193,7 @@ export async function BillingAndPricing({
               description={
                 rateCard
                   ? "Jobs for this customer will arrive at review with nothing priced."
-                  : "Without one, completed jobs are priced from your laundry price list (Money › Laundry prices). A rate card is only needed for rates agreed with this customer."
+                  : "Without one, completed jobs are priced from your laundry price list (Billing › Laundry prices). A rate card is only needed for rates agreed with this customer."
               }
             />
           }
