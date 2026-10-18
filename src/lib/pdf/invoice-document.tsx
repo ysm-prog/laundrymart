@@ -1,220 +1,170 @@
 /**
- * The tax-invoice PDF (spec §7.14, §18).
+ * The tax-invoice PDF (spec §7.14, §18), drawn to the layout of the laundry's
+ * own MYOB invoice (brief 1.10, template `Invoice-00321043.pdf`).
  *
- * Until now the invoice page was print-styled and the browser's own dialog did
- * the work, which is fine for a person looking at a screen and useless for an
- * attachment. This renders the same document server-side so a customer, a
- * mailbox and an auditor all get identical bytes.
+ * Rendered server-side so a customer, a mailbox and an auditor all get
+ * identical bytes. The page is built from `myob-layout.tsx`, which the credit
+ * note shares, so the two documents a customer keeps are drawn one way.
  *
- * Deliberately uses the PDF standard fonts rather than registering a web font:
- * font registration fetches over the network at render time, which would make
- * invoicing fail whenever a font CDN did.
- *
- * ATO wording matters here. Where GST applies, the document has to say "Tax
- * invoice" and show the GST amount separately — both are below, driven by the
- * tenant's own GST rate rather than hard-coded.
+ * The data rules did not move with the layout:
+ *  - **Line amounts are GST-inclusive** (0043), so the money columns say
+ *    "including tax" and the Tax row is the GST *within* the total, not added
+ *    to it.
+ *  - "Tax invoice" only where GST is charged (the ATO's wording), "Draft
+ *    invoice" on a draft, "Adjustment note" on a credit (`invoiceDocumentTitle`).
+ *  - The void banner stays.
+ *  - **No ledger code and no internal charge type** (2026-10-12): `4-1100` and
+ *    "Wash only" are the laundry's bookkeeping vocabulary. The Item ID column is
+ *    the *item* code the customer also uses (`T35`), never the GL code.
+ *  - The payment line is built from the invoice profile Darshan fills in on
+ *    Settings › Invoicing — never written here.
  */
 
 import { Document, Page, StyleSheet, Text, View } from "@react-pdf/renderer";
 import { formatMoney } from "@/lib/domain/pricing";
-import { formatAbn, invoiceTotalsRows, paymentInstructions } from "@/lib/domain/invoice-profile";
+import {
+  bankingDetailsLine, formatAbn, invoiceTotalsRows,
+} from "@/lib/domain/invoice-profile";
+import { auDate, invoiceDocumentTitle, pdfLineCells } from "./line-display";
+import {
+  BillToRow, DocFooter, DocHeader, LineTable, NotesAndTotals, TitleRow,
+  formatAmount, formatQty, s,
+  type Detail, type TableLine, type TotalRow,
+} from "./myob-layout";
 import type { InvoicePdfData } from "./invoice-data";
 
-const styles = StyleSheet.create({
-  page: { fontFamily: "Helvetica", fontSize: 9, color: "#111827", paddingTop: 40, paddingBottom: 56, paddingHorizontal: 44 },
-  header: { flexDirection: "row", justifyContent: "space-between", marginBottom: 20 },
-  brand: { fontFamily: "Helvetica-Bold", fontSize: 18 },
-  docTitle: { fontFamily: "Helvetica-Bold", fontSize: 14, textAlign: "right" },
-  muted: { color: "#6b7280" },
-  text: { fontSize: 9, lineHeight: 1.5, color: "#374151" },
-  bold: { fontFamily: "Helvetica-Bold" },
-  right: { textAlign: "right" },
-  divider: { borderBottomWidth: 1, borderBottomColor: "#e5e7eb", marginVertical: 10 },
-  columns: { flexDirection: "row", justifyContent: "space-between", marginBottom: 14 },
-  label: { fontSize: 8, letterSpacing: 0.6, color: "#6b7280", marginBottom: 3 },
-  tableHeader: { flexDirection: "row", backgroundColor: "#f3f4f6", paddingVertical: 5, paddingHorizontal: 6 },
-  tableRow: { flexDirection: "row", paddingVertical: 5, paddingHorizontal: 6, borderBottomWidth: 1, borderBottomColor: "#f3f4f6" },
-  colDescription: { flex: 4 },
-  colNumber: { flex: 1.2, textAlign: "right" },
-  colAmount: { flex: 1.4, textAlign: "right" },
-  totals: { marginTop: 12, alignSelf: "flex-end", width: 220 },
-  totalRow: { flexDirection: "row", justifyContent: "space-between", paddingVertical: 2 },
-  grandTotal: { flexDirection: "row", justifyContent: "space-between", paddingTop: 5, marginTop: 4, borderTopWidth: 1, borderTopColor: "#111827" },
-  notes: { marginTop: 22 },
-  breakdown: { marginTop: 22 },
-  breakdownWeek: { marginTop: 8 },
-  breakdownWeekHead: { flexDirection: "row", justifyContent: "space-between", borderBottomWidth: 1, borderBottomColor: "#e5e7eb", paddingBottom: 2 },
-  breakdownJob: { marginTop: 3, paddingLeft: 6 },
-  breakdownRow: { flexDirection: "row", justifyContent: "space-between" },
-  breakdownItemRow: { flexDirection: "row", justifyContent: "space-between", paddingLeft: 10 },
-  breakdownTotals: { marginTop: 10, padding: 6, backgroundColor: "#f3f4f6" },
-  footer: { position: "absolute", bottom: 28, left: 44, right: 44, fontSize: 8, color: "#6b7280", textAlign: "center" },
-  voided: { marginTop: 10, padding: 6, backgroundColor: "#fef2f2", color: "#991b1b", fontFamily: "Helvetica-Bold" },
-});
+/** What the importer writes into `notes`; it describes our import, not the customer's invoice. */
+const IMPORT_NOTE = /^Imported from the MYOB\b/i;
 
-function auDate(value: string | null): string {
-  if (!value) return "—";
-  const [year, month, day] = value.split("-");
-  return year && month && day ? `${day}/${month}/${year}` : value;
-}
+const b = StyleSheet.create({
+  section: { marginTop: 22 },
+  head: { fontFamily: "Helvetica-Bold", fontSize: 9 },
+  muted: { fontSize: 8.5, color: "#404040", marginTop: 2 },
+  week: { marginTop: 8 },
+  weekHead: {
+    flexDirection: "row", justifyContent: "space-between",
+    borderBottomWidth: 1, borderBottomColor: "#E3E3E3", paddingBottom: 2,
+  },
+  job: { marginTop: 3, paddingLeft: 6 },
+  row: { flexDirection: "row", justifyContent: "space-between" },
+  itemRow: { flexDirection: "row", justifyContent: "space-between", paddingLeft: 10 },
+  text: { fontSize: 8.5, lineHeight: 1.3 },
+  grey: { fontSize: 8.5, lineHeight: 1.3, color: "#404040" },
+  totals: { marginTop: 10, padding: 6, backgroundColor: "#EEEEEE" },
+});
 
 export function InvoiceDocument({ data }: { data: InvoicePdfData }) {
   const { tenant, customer, invoice, lines, breakdown } = data;
   const currency = invoice.currency || "AUD";
   const cash = (value: number) => formatMoney(Number(value ?? 0), currency);
-  const gstPercent = Math.round(tenant.gstRate * 1000) / 10;
+  const title = invoiceDocumentTitle(invoice);
+  const isCredit = invoice.invoice_type === "credit" || Number(invoice.total) < 0;
 
-  // "Tax invoice" is only the correct heading when GST is actually charged.
-  // A credit is money owed to the customer, not a tax invoice; a draft can
-  // still change, so it must not print looking like the final document.
-  const heading = invoice.invoice_type === "credit" || Number(invoice.total) < 0
-    ? "CREDIT"
-    : invoice.status === "draft"
-      ? "DRAFT INVOICE"
-      : Number(invoice.tax_amount) > 0 ? "TAX INVOICE" : "INVOICE";
+  const tableLines: TableLine[] = lines.map((line) => {
+    const cells = pdfLineCells(line);
+    return {
+      ...cells,
+      qty: formatQty(line.quantity),
+      unitPrice: formatAmount(line.unit_price, 4),
+      amount: formatAmount(line.amount),
+    };
+  });
+
+  // A draft can still change and a void is not payable; a credit is money owed
+  // the other way. None of them carries a way to pay.
+  const payable = invoice.status !== "draft" && invoice.status !== "void" && !isCredit;
+  const banking = payable ? bankingDetailsLine(tenant.profile) : null;
+  const notes = [
+    ...(banking ? [banking, `Please quote ${invoice.invoice_number} as the payment reference.`] : []),
+    ...(invoice.notes && !IMPORT_NOTE.test(invoice.notes.trim()) ? [invoice.notes.trim()] : []),
+  ];
+
+  // Paid, credited and the balance — the 0052 rows, from the same rule the
+  // invoice page and the email use, so the three cannot disagree.
+  const settlement: TotalRow[] = invoiceTotalsRows({
+    total: invoice.total, taxAmount: invoice.tax_amount, amountPaid: invoice.amount_paid,
+    amountCredited: invoice.amount_credited ?? 0, balance: invoice.balance,
+  })
+    .filter((row) => row.label === "Paid" || row.label === "Credited" || row.label === "Balance due")
+    .map((row) => ({ label: row.label, value: cash(row.value), strong: row.strong }));
+
+  const details: Detail[] = [
+    ...(customer.customer_number ? [{ label: "Customer", value: customer.customer_number }] : []),
+    ...(invoice.period_start
+      ? [{ label: "Period", value: `${auDate(invoice.period_start)} – ${auDate(invoice.period_end)}` }]
+      : []),
+    ...(invoice.purchase_order_number ? [{ label: "Your order", value: invoice.purchase_order_number }] : []),
+    { label: "Terms", value: `${invoice.payment_terms_days} days` },
+  ];
 
   return (
-    <Document title={`${heading} ${invoice.invoice_number}`} author={tenant.name}>
-      <Page size="A4" style={styles.page}>
-        <View style={styles.header}>
-          <View>
-            <Text style={styles.brand}>{tenant.name}</Text>
-            {tenant.abn ? <Text style={styles.text}>ABN {formatAbn(tenant.abn)}</Text> : null}
-            {tenant.profile.addressLines.map((line) => (
-              <Text key={line} style={styles.text}>{line}</Text>
-            ))}
-            {tenant.profile.phone ? <Text style={styles.text}>{tenant.profile.phone}</Text> : null}
-            {tenant.profile.email ? <Text style={styles.text}>{tenant.profile.email}</Text> : null}
-          </View>
-          <View>
-            <Text style={styles.docTitle}>{heading}</Text>
-            <Text style={[styles.text, styles.right]}>{invoice.invoice_number}</Text>
-            <Text style={[styles.text, styles.right, styles.muted]}>
-              Issued {auDate(invoice.issue_date)}
-            </Text>
-            <Text style={[styles.text, styles.right, styles.muted]}>
-              Due {auDate(invoice.due_date)}
-            </Text>
-          </View>
-        </View>
+    <Document title={`${title} ${invoice.invoice_number}`} author={tenant.name}>
+      <Page size="A4" style={s.page}>
+        <DocHeader business={{
+          name: tenant.name, abn: tenant.abn, addressLines: tenant.profile.addressLines,
+          phone: tenant.profile.phone, email: tenant.profile.email,
+          website: tenant.profile.website, logo: tenant.logo ?? null,
+        }} />
+
+        <TitleRow title={title} columns={[
+          { label: "Invoice number", value: invoice.invoice_number, strong: true },
+          { label: "Issue date", value: auDate(invoice.issue_date) },
+          ...(invoice.due_date && !isCredit ? [{ label: "Due date", value: auDate(invoice.due_date) }] : []),
+        ]} />
 
         {invoice.status === "void" ? (
-          <Text style={styles.voided}>This invoice has been voided and is not payable.</Text>
+          <Text style={s.banner}>This invoice has been voided and is not payable.</Text>
         ) : null}
 
-        <View style={styles.divider} />
+        <BillToRow
+          billTo={{
+            contact: customer.contact_name ?? null,
+            business: customer.business_name,
+            lines: [
+              ...customer.address,
+              ...(customer.abn ? [`ABN: ${formatAbn(customer.abn)}`] : []),
+            ],
+          }}
+          details={details}
+        />
 
-        <View style={styles.columns}>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.label}>BILL TO</Text>
-            <Text style={[styles.text, styles.bold]}>{customer.business_name}</Text>
-            {customer.abn ? <Text style={styles.text}>ABN {customer.abn}</Text> : null}
-            {customer.address.map((line) => (
-              <Text key={line} style={styles.text}>{line}</Text>
-            ))}
-          </View>
-          <View style={{ flex: 1, paddingLeft: 20 }}>
-            <Text style={styles.label}>DETAILS</Text>
-            <Text style={styles.text}>Customer {customer.customer_number}</Text>
-            {invoice.period_start ? (
-              <Text style={styles.text}>
-                Period {auDate(invoice.period_start)} – {auDate(invoice.period_end)}
-              </Text>
-            ) : null}
-            <Text style={styles.text}>Terms {invoice.payment_terms_days} days</Text>
-            {invoice.purchase_order_number ? (
-              <Text style={styles.text}>PO {invoice.purchase_order_number}</Text>
-            ) : null}
-          </View>
-        </View>
+        <LineTable lines={tableLines} empty="No lines on this invoice." />
 
-        <View style={styles.tableHeader}>
-          {/*
-            No ledger code and no internal charge type (2026-10-12). Both are
-            this laundry's bookkeeping vocabulary — `4-1100`, "Wash only" — and a
-            customer reading them is reading somebody else's chart of accounts.
-            The codes still travel to Xero, which is where they are used.
-          */}
-          <Text style={[styles.text, styles.bold, styles.colDescription]}>Description</Text>
-          <Text style={[styles.text, styles.bold, styles.colNumber]}>Qty</Text>
-          <Text style={[styles.text, styles.bold, styles.colNumber]}>Unit</Text>
-          <Text style={[styles.text, styles.bold, styles.colAmount]}>Amount</Text>
-        </View>
+        <NotesAndTotals
+          notes={notes}
+          tax={cash(invoice.tax_amount)}
+          total={cash(invoice.total)}
+          after={settlement}
+        />
 
-        {lines.length === 0 ? (
-          <View style={styles.tableRow}>
-            <Text style={[styles.text, styles.muted]}>No lines on this invoice.</Text>
-          </View>
-        ) : (
-          lines.map((line, index) => (
-            <View key={`${line.description}-${index}`} style={styles.tableRow} wrap={false}>
-              <Text style={[styles.text, styles.colDescription]}>
-                {line.description}{line.taxable ? "" : " (GST free)"}
-              </Text>
-              <Text style={[styles.text, styles.colNumber]}>{Number(line.quantity)}</Text>
-              <Text style={[styles.text, styles.colNumber]}>{cash(line.unit_price)}</Text>
-              <Text style={[styles.text, styles.colAmount]}>{cash(line.amount)}</Text>
-            </View>
-          ))
-        )}
-
-        <View style={styles.totals}>
-          {invoiceTotalsRows({
-            total: invoice.total, taxAmount: invoice.tax_amount, amountPaid: invoice.amount_paid,
-            amountCredited: invoice.amount_credited ?? 0, balance: invoice.balance,
-          }).map((row) => (
-            <View key={row.label} style={row.strong ? styles.grandTotal : styles.totalRow}>
-              <Text style={[styles.text, row.strong ? styles.bold : {}, row.muted ? styles.muted : {}]}>
-                {row.label === "Includes GST of" ? `Includes GST (${gstPercent}%) of` : row.label}
-              </Text>
-              <Text style={[styles.text, row.strong ? styles.bold : {}, row.muted ? styles.muted : {}]}>
-                {cash(row.value)}
-              </Text>
-            </View>
-          ))}
-        </View>
-
-        {invoice.status !== "void" && invoice.status !== "draft"
-          && paymentInstructions(tenant.profile, invoice.invoice_number).length > 0 ? (
-          <View style={styles.notes} wrap={false}>
-            <Text style={styles.label}>HOW TO PAY</Text>
-            {paymentInstructions(tenant.profile, invoice.invoice_number).map((line) => (
-              <Text key={line} style={styles.text}>{line}</Text>
-            ))}
-          </View>
-        ) : null}
-
-        {/* The audit trail behind a rolled-up invoice. Rendered only when the
-            invoice really covers several jobs — on a per-job invoice the lines
-            above already are the detail, and repeating them reads as an error. */}
-        {breakdown.jobCount > 1 ? (
-          <View style={styles.breakdown} break={breakdown.weeks.length > 3}>
-            <Text style={styles.label}>SERVICE BREAKDOWN</Text>
-            <Text style={[styles.text, styles.muted]}>
-              What was processed on this invoice — {breakdown.jobCount} jobs.
+        {/* What was processed, job by job. Printed whenever the invoice bills
+            jobs — one or many — because the line now carries the item's name
+            and not the job number (brief 1.10, gap G15), so this is the only
+            place the customer can read which job each towel came from. */}
+        {breakdown.jobCount >= 1 ? (
+          <View style={b.section} break={breakdown.weeks.length > 3}>
+            <Text style={b.head}>Service breakdown</Text>
+            <Text style={b.muted}>
+              What was processed on this invoice — {breakdown.jobCount} {breakdown.jobCount === 1 ? "job" : "jobs"}.
             </Text>
             {breakdown.weeks.map((week) => (
-              <View key={week.weekStart ?? "undated"} style={styles.breakdownWeek} wrap={false}>
-                <View style={styles.breakdownWeekHead}>
-                  <Text style={[styles.text, styles.bold]}>
-                    {week.weekStart ? `Week of ${week.weekStart}` : "No completion date"}
+              <View key={week.weekStart ?? "undated"} style={b.week} wrap={false}>
+                <View style={b.weekHead}>
+                  <Text style={b.head}>
+                    {week.weekStart ? `Week of ${auDate(week.weekStart)}` : "No completion date"}
                   </Text>
-                  <Text style={[styles.text, styles.bold]}>{cash(week.total)}</Text>
+                  <Text style={b.head}>{cash(week.total)}</Text>
                 </View>
                 {week.jobs.map((job) => (
-                  <View key={job.jobId} style={styles.breakdownJob}>
-                    <View style={styles.breakdownRow}>
-                      <Text style={[styles.text, styles.muted]}>
-                        {job.date ?? "—"} · {job.orderNumber}
-                      </Text>
-                      <Text style={styles.text}>{cash(job.total)}</Text>
+                  <View key={job.jobId} style={b.job}>
+                    <View style={b.row}>
+                      <Text style={b.grey}>{job.date ? auDate(job.date) : "—"} · {job.orderNumber}</Text>
+                      <Text style={b.text}>{cash(job.total)}</Text>
                     </View>
                     {job.items.map((item, index) => (
-                      <View key={`${job.jobId}-${index}`} style={styles.breakdownItemRow}>
-                        <Text style={[styles.text, styles.muted]}>{item.description}</Text>
-                        <Text style={[styles.text, styles.muted]}>
-                          {Number(item.quantity).toLocaleString("en-AU")}
-                        </Text>
+                      <View key={`${job.jobId}-${index}`} style={b.itemRow}>
+                        <Text style={b.grey}>{item.description}</Text>
+                        <Text style={b.grey}>{Number(item.quantity).toLocaleString("en-AU")}</Text>
                       </View>
                     ))}
                   </View>
@@ -223,14 +173,12 @@ export function InvoiceDocument({ data }: { data: InvoicePdfData }) {
             ))}
 
             {breakdown.totals.length > 0 ? (
-              <View style={styles.breakdownTotals} wrap={false}>
-                <Text style={[styles.text, styles.bold]}>Total for the period</Text>
+              <View style={b.totals} wrap={false}>
+                <Text style={b.head}>Total for the period</Text>
                 {breakdown.totals.map((total) => (
-                  <View key={total.key} style={styles.breakdownRow}>
-                    <Text style={styles.text}>{total.description}</Text>
-                    <Text style={styles.text}>
-                      {Number(total.quantity).toLocaleString("en-AU")}
-                    </Text>
+                  <View key={total.key} style={b.row}>
+                    <Text style={b.text}>{total.description}</Text>
+                    <Text style={b.text}>{Number(total.quantity).toLocaleString("en-AU")}</Text>
                   </View>
                 ))}
               </View>
@@ -238,19 +186,7 @@ export function InvoiceDocument({ data }: { data: InvoicePdfData }) {
           </View>
         ) : null}
 
-        {invoice.notes ? (
-          <View style={styles.notes}>
-            <Text style={styles.label}>NOTES</Text>
-            <Text style={styles.text}>{invoice.notes}</Text>
-          </View>
-        ) : null}
-
-        <Text
-          style={styles.footer}
-          render={({ pageNumber, totalPages }) =>
-            `${invoice.invoice_number} · ${tenant.name} · page ${pageNumber} of ${totalPages}`}
-          fixed
-        />
+        <DocFooter numberLabel="Invoice no" number={invoice.invoice_number} total={cash(invoice.total)} />
       </Page>
     </Document>
   );

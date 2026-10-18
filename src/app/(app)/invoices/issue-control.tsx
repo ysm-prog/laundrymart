@@ -66,6 +66,7 @@ export function IssueControl({
         label={label}
         eyebrow="This can't be undone"
         consequence={`Issue ${invoiceNumber} for ${money(total)}? It can't be undone — it is dated today, its lines are frozen, and it becomes the tax invoice the customer is sent.`}
+        cancelLabel="Keep it as a draft"
         pendingLabel="Issuing…"
       />
     </form>

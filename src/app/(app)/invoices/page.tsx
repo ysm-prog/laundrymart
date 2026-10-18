@@ -8,7 +8,7 @@ import { counted, date, money, relativeDays, today } from "@/lib/format";
 import { previousMonth } from "@/lib/domain/dates";
 import { CHARGE_TYPE_LABELS, type ChargeType } from "@/lib/domain/pricing";
 import {
-  ButtonLink, Card, EmptyState, Eyebrow, Notice, PageHeader,
+  Badge, ButtonLink, Card, EmptyState, Eyebrow, Notice, PageHeader,
   SkeletonRows, SkeletonStats, StatusBadge, cx, humanise,
 } from "@/components/ui";
 import { Field, Input, Select, SubmitButton } from "@/components/form";
@@ -24,6 +24,7 @@ import { InvoiceSelection } from "./invoice-selection";
 import { IssueControl } from "./issue-control";
 import { issueSelectedInvoices, sendSelectedInvoices } from "./bulk-actions";
 import { loadIssueReadiness } from "@/lib/invoices/issue";
+import { arTrustedFrom, isUnreconciledImport } from "@/lib/domain/receivables";
 
 export const metadata = { title: "Invoices" };
 export const dynamic = "force-dynamic";
@@ -140,7 +141,7 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
             }
           />
           <Suspense key={JSON.stringify(params)} fallback={<SkeletonRows rows={10} />}>
-            <Register params={params} />
+            <Register params={params} tenantId={session.tenantId} />
           </Suspense>
         </div>
 
@@ -232,6 +233,8 @@ type RegisterRow = {
   invoice_number: string;
   invoice_type: string;
   status: string;
+  /** `app` or `import` (0055). */
+  source: string | null;
   issue_date: string;
   due_date: string | null;
   total: number;
@@ -239,15 +242,19 @@ type RegisterRow = {
   customers: { business_name: string } | null;
 };
 
-async function Register({ params }: { params: Search }) {
+async function Register({ params, tenantId }: { params: Search; tenantId: string }) {
   const supabase = await createClient();
   const page = pageFrom(params.page);
   const [from, to] = rangeFor(page);
   const now = today();
+  // Brief 1.9: MYOB history from before the trusted day is shown, and badged.
+  const { data: tenantRow } = await supabase.from("tenants").select("settings").eq("id", tenantId)
+    .maybeSingle<{ settings: unknown }>();
+  const trusted = arTrustedFrom(tenantRow?.settings);
 
   let query = supabase
     .from("invoices")
-    .select("id, invoice_number, invoice_type, status, issue_date, due_date, total, balance, " +
+    .select("id, invoice_number, invoice_type, status, source, issue_date, due_date, total, balance, " +
             "customers(business_name)", { count: "exact" })
     .is("deleted_at", null)
     .order("issue_date", { ascending: false })
@@ -314,6 +321,8 @@ async function Register({ params }: { params: Search }) {
                   </div>
                   <div className="mt-1 flex flex-wrap items-center gap-2">
                     <StatusBadge status={row.status} />
+                    {isUnreconciledImport(row, trusted)
+                      ? <Badge tone="neutral">Imported – not reconciled</Badge> : null}
                     <span className={cx(
                       "text-xs",
                       chasing ? "text-warning" : "text-muted-foreground",

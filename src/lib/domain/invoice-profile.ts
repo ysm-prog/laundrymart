@@ -17,20 +17,29 @@ export type InvoiceProfile = {
   addressLines: string[];
   phone: string | null;
   email: string | null;
+  /** Printed under the email in the header, as on the laundry's MYOB invoice (brief 1.10). */
+  website: string | null;
   bankAccountName: string | null;
   bsb: string | null;
   accountNumber: string | null;
+  /**
+   * The logo printed top-left, as an object key in the private `tenant-branding`
+   * bucket (0054) — `<tenant_id>/invoice-logo-<stamp>.<ext>`. The tenant's data,
+   * uploaded on Settings › Invoicing; never a file in this repository.
+   */
+  logoPath: string | null;
 };
 
 export const EMPTY_PROFILE: InvoiceProfile = {
-  addressLines: [], phone: null, email: null,
-  bankAccountName: null, bsb: null, accountNumber: null,
+  addressLines: [], phone: null, email: null, website: null,
+  bankAccountName: null, bsb: null, accountNumber: null, logoPath: null,
 };
 
 const text = z.string().trim().max(200).nullable().optional();
 const stored = z.object({
   addressLines: z.array(z.string().trim().max(200)).max(6).optional(),
-  phone: text, email: text, bankAccountName: text, bsb: text, accountNumber: text,
+  phone: text, email: text, website: text, bankAccountName: text, bsb: text, accountNumber: text,
+  logoPath: z.string().trim().max(300).nullable().optional(),
 });
 
 const clean = (v: string | null | undefined) => (v && v.trim() ? v.trim() : null);
@@ -43,10 +52,38 @@ export function parseInvoiceProfile(settings: unknown): InvoiceProfile {
   const p = parsed.data;
   return {
     addressLines: (p.addressLines ?? []).map((l) => l.trim()).filter(Boolean),
-    phone: clean(p.phone), email: clean(p.email),
+    phone: clean(p.phone), email: clean(p.email), website: clean(p.website),
     bankAccountName: clean(p.bankAccountName), bsb: clean(p.bsb),
-    accountNumber: clean(p.accountNumber),
+    accountNumber: clean(p.accountNumber), logoPath: clean(p.logoPath),
   };
+}
+
+/**
+ * A website as typed, made printable: `adelaidetowelservice.com.au`,
+ * `www.example.com.au` and `https://www.example.com.au/` all print the way the
+ * MYOB invoice does — no scheme, no trailing slash. Null for anything that is
+ * not a plausible host, so a stray sentence never reaches a tax invoice.
+ */
+export function normaliseWebsite(raw: string): string | null {
+  const trimmed = raw.trim().replace(/^https?:\/\//i, "").replace(/\/+$/, "");
+  return /^[a-z0-9-]+(\.[a-z0-9-]+)+(\/[^\s]*)?$/i.test(trimmed) ? trimmed.toLowerCase() : null;
+}
+
+/**
+ * The one-line payment instruction the PDF prints under **Notes**, in the
+ * format of the laundry's own MYOB invoice (brief 1.10):
+ *
+ *     Banking Details: BSB: 062-000 Account No. 12345678 Account Name: Example Laundry
+ *
+ * Built from the profile and gated by `paymentInstructions` — all three bank
+ * details or nothing — so the PDF and the email cannot disagree about whether
+ * the laundry can be paid. Never hard-coded: Darshan enters the details in
+ * Settings › Invoicing.
+ */
+export function bankingDetailsLine(profile: InvoiceProfile): string | null {
+  if (paymentInstructions(profile, "X").length === 0) return null;
+  return `Banking Details: BSB: ${profile.bsb} Account No. ${profile.accountNumber} `
+    + `Account Name: ${profile.bankAccountName}`;
 }
 
 /** `062000` / `062-000` / `062 000` → `062-000`; anything else is refused. */

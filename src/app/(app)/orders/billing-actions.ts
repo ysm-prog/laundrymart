@@ -13,7 +13,7 @@ import { jobChargeSubtotal } from "@/lib/domain/job-pricing";
 import { money } from "@/lib/format";
 import { logOrderActivity } from "@/lib/orders/activity";
 import {
-  loadJobCharges, loadJobForBilling, priceAndSaveJob, saveJobCharges,
+  loadJobCharges, loadJobForBilling, priceAndSaveJob, saveJobCharges, setBillingHold,
 } from "@/lib/orders/job-billing";
 import { approveAndPlaceJob } from "@/lib/orders/approve";
 import { describePlacementOutcome } from "@/lib/domain/placement";
@@ -130,6 +130,9 @@ export async function updateJobCharges(formData: FormData): Promise<void> {
 
   const saved = await saveJobCharges(supabase, session.tenantId, job.id, charges.lines);
   if (!saved.ok) return fail(back, saved.error);
+  // A person has set the charges by hand, which is what Needs a price was asking
+  // for (brief 1.3) — it is no longer waiting on one, whatever the pricer said.
+  await setBillingHold(supabase, session.tenantId, job.id, charges.lines.length > 0 ? null : "needs_price");
 
   await logOrderActivity(supabase, session, job.id, {
     activity_type: "updated",
@@ -291,6 +294,7 @@ export async function markJobNotBillable(formData: FormData): Promise<void> {
     .update({
       billing_status: "not_billable",
       billing_exclusion_reason: parsed.data.billing_exclusion_reason,
+      billing_hold_reason: null,
     })
     .eq("id", parsed.data.id)
     .eq("tenant_id", session.tenantId);

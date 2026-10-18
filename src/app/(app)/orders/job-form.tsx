@@ -472,8 +472,13 @@ export function JobForm({
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <Field label="Received date" name="received_date" required
                    hint={canBackdate ? undefined : "Today. A manager can record an earlier day."}>
+              {/* Never a day in the future (brief 1.5) — for a manager as well,
+                  which is how LJ00031 was recorded as received two days ahead.
+                  A job already carrying a future date keeps it as the ceiling,
+                  so an edit that leaves the date alone can still be saved; the
+                  server refuses any *change* to a future day. */}
               <Input name="received_date" type="date" required defaultValue={receivedDate}
-                     max={canBackdate ? undefined : businessToday()} />
+                     max={receivedDate > businessToday() ? receivedDate : businessToday()} />
             </Field>
             <Field label="Received via" name="received_via">
               <select id="received_via" name="received_via" className={CONTROL}

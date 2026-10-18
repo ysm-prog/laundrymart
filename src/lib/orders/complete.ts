@@ -3,6 +3,9 @@ import type { createClient } from "@/lib/supabase/server";
 import { describeDbError } from "@/lib/actions";
 import { checkTransition, type OrderStatus } from "@/lib/domain/laundry-orders";
 import { logOrderActivity } from "@/lib/orders/activity";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { autoPriceCompletedJob } from "@/lib/orders/job-billing";
+import type { AutoPriceOutcome } from "@/lib/domain/job-pricing";
 
 /**
  * Finishing a laundry job — the single implementation, called from two places.
@@ -53,7 +56,7 @@ export type CompletionInput = {
 
 export async function completeLaundryOrder(
   supabase: Supabase, session: Session, order: CompletionTarget, input: CompletionInput,
-): Promise<{ ok: true; delivered: boolean } | { ok: false; error: string }> {
+): Promise<{ ok: true; delivered: boolean; pricing?: AutoPriceOutcome } | { ok: false; error: string }> {
   let status: OrderStatus = order.status;
 
   if (input.dispatchIfNeeded
@@ -89,7 +92,18 @@ export async function completeLaundryOrder(
     note: input.note ?? null,
   });
 
-  return { ok: true, delivered };
+  // Price it now, so nobody has to remember to press Price this job (brief 1.3).
+  // 0017's hook has just moved it to `awaiting_review`. Never approves, and
+  // never fails the completion — the work was finished whatever the pricing
+  // makes of it. See `autoPriceCompletedJob` for why it is the service role.
+  let pricing: AutoPriceOutcome = { state: "skipped" };
+  try {
+    pricing = await autoPriceCompletedJob(createAdminClient(), session, order.id);
+  } catch (cause) {
+    console.error("automatic pricing could not start", { orderId: order.id, cause });
+  }
+
+  return { ok: true, delivered, pricing };
 }
 
 /** One plain status move, with its timeline row. Shared by the step above. */

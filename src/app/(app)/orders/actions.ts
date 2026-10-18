@@ -14,12 +14,13 @@ import { parseOrderItems } from "./order-items";
 import {
   DELIVERY_WINDOWS, ORDER_PRIORITIES, ORDER_STATUS_LABELS, RECEIVED_VIA,
   STAGE_CONTROLS, capabilitiesForMove, checkTransition, isOrderStatus,
-  leavesTheRound, receivedInstant, validateItem,
+  leavesTheRound, receivedInstant, receivedInFuture, RECEIVED_IN_FUTURE_MESSAGE, validateItem,
   type OrderItemInput, type OrderStatus,
 } from "@/lib/domain/laundry-orders";
 import { businessToday, isClockTime, toInstant } from "@/lib/domain/timezone";
 import { logOrderActivity } from "@/lib/orders/activity";
 import { completeLaundryOrder } from "@/lib/orders/complete";
+import { autoPriceSentence } from "@/lib/domain/job-pricing";
 import { retireStopIfEmpty } from "@/lib/runs/assign";
 
 /**
@@ -318,6 +319,11 @@ export async function createOrder(formData: FormData): Promise<void> {
       && !can(session.role, "orders.manage")) {
     return fail(backToForm, "Only a manager can record a job as received on an earlier day.");
   }
+  // And never on a later one, for anybody (brief 1.5). 0055's trigger is the
+  // boundary; this is the sentence in front of it.
+  if (receivedInFuture(receivedInstant(parsed.data.received_date))) {
+    return fail(backToForm, RECEIVED_IN_FUTURE_MESSAGE);
+  }
 
   const { data: customer, error: customerError } = await supabase
     .from("customers")
@@ -466,13 +472,24 @@ export async function updateOrder(formData: FormData): Promise<void> {
       "That customer could not be found — please select one from the list.");
   }
 
-  const deliveryAddress = await resolveDeliveryAddress(supabase, session.tenantId, parsed.data);
   // The stored time of day is carried over, so correcting the received *date*
   // does not move an 8am drop-off to whenever the correction was made.
-  const row = toRow(
-    parsed.data, deliveryAddress,
-    receivedInstant(parsed.data.received_date, existing.received_at),
-  );
+  const composed = receivedInstant(parsed.data.received_date, existing.received_at);
+  // The form carries the date and the time to the minute, so an edit that left
+  // the date alone writes back the stored instant exactly — seconds and all —
+  // rather than a value a few seconds off that would read as a change.
+  const unchanged = Math.floor(Date.parse(composed) / 60_000)
+    === Math.floor(Date.parse(existing.received_at) / 60_000);
+  const received = unchanged ? existing.received_at : composed;
+  // A *change* to a future day is refused (brief 1.5); a job that already
+  // carries one (LJ00031) can still be edited without touching it, which is
+  // what 0055's trigger allows too — it is reported, not rewritten.
+  if (!unchanged && receivedInFuture(received)) {
+    return fail(backTo, RECEIVED_IN_FUTURE_MESSAGE);
+  }
+
+  const deliveryAddress = await resolveDeliveryAddress(supabase, session.tenantId, parsed.data);
+  const row = toRow(parsed.data, deliveryAddress, received);
 
   const { data: before } = await supabase
     .from("laundry_orders")
@@ -677,8 +694,13 @@ export async function completeOrder(formData: FormData): Promise<void> {
 
   revalidatePath(LIST);
   revalidatePath(detail);
+  revalidatePath("/invoices/awaiting");
+  // What the automatic pricing made of it (brief 1.3) — said only to somebody
+  // who may read a price. The counter's own role does not hold `billing.read`.
+  const priced = can(session.role, "billing.read") && result.pricing
+    ? autoPriceSentence(result.pricing) : "";
   return done(detail,
-    `Job ${existing.order_number} ${delivered ? "delivered" : "collected"} and completed.`);
+    `Job ${existing.order_number} ${delivered ? "delivered" : "collected"} and completed.${priced}`);
 }
 
 /* ---------------------------------------------------------------- cancel */

@@ -4,9 +4,10 @@ import { accountLookupsFor, resolveChargeAccount } from "@/lib/invoices/account-
 import { recordAudit } from "@/lib/audit";
 import { describeDbError } from "@/lib/actions";
 import {
-  UNPRICED_REASON_TEXT, jobChargeSubtotal, priceJob, pricingSourceLabel,
-  type JobChargeLine, type JobPricingResult, type RateLine, type UnpricedReason,
+  UNPRICED_REASON_TEXT, itemSellPriceList, jobChargeSubtotal, needsPrice, priceJob, pricingSourceLabel,
+  type AutoPriceOutcome, type JobChargeLine, type JobPricingResult, type RateLine, type UnpricedReason,
 } from "@/lib/domain/job-pricing";
+import { GST_RATE_FALLBACK } from "@/lib/domain/items";
 import { itemPriceListFor, priceListFor, type LaundryPriceRow } from "@/lib/domain/laundry-billing";
 import type { OrderItemInput } from "@/lib/domain/laundry-orders";
 import { checkBillingTransition, isBillingStatus, type BillingStatus } from "@/lib/domain/billing";
@@ -220,6 +221,23 @@ export async function priceJobFromRateCard(
       .returns<LaundryPriceRow[]>(),
   ]);
 
+  // The last tier (brief 1.3): the item master's own selling price, for the
+  // items actually on this job. Named by tenant like the list above — this read
+  // feeds the same write — and with the laundry's own GST rate, because an
+  // exclusive selling price is grossed up before it becomes a line.
+  const itemIds = [...new Set(items.map((item) => item.item_id).filter((id): id is string => Boolean(id)))];
+  const [{ data: sellRows }, { data: tenant }] = itemIds.length === 0
+    ? [{ data: [] as SellRow[] }, { data: null }]
+    : await Promise.all([
+        supabase.from("items")
+          .select("id, sell_price, sell_price_basis, tax_code")
+          .eq("tenant_id", tenantId)
+          .in("id", itemIds)
+          .returns<SellRow[]>(),
+        supabase.from("tenants").select("gst_rate").eq("id", tenantId)
+          .maybeSingle<{ gst_rate: number | null }>(),
+      ]);
+
   const { lines, unpriced } = priceJob({
     items,
     rateLines: rateCard.lines,
@@ -228,9 +246,109 @@ export async function priceJobFromRateCard(
     // The same list keyed on the item, which is the more specific answer within
     // this tier — a price written against TOW001 is a price for TOW001.
     itemPriceList: itemPriceListFor(job.customer_id, priceRows.data ?? []),
+    itemSellPrices: itemSellPriceList(sellRows ?? [], Number(tenant?.gst_rate ?? GST_RATE_FALLBACK)),
   });
 
   return { lines, unpriced, card: rateCard.card };
+}
+
+type SellRow = { id: string; sell_price: number | null; sell_price_basis: string | null; tax_code: string | null };
+
+/** Set or clear the `needs_price` mark. Never fails the work it rides on. */
+export async function setBillingHold(
+  supabase: Client, tenantId: string, orderId: string, hold: "needs_price" | null,
+): Promise<void> {
+  const { error } = await supabase
+    .from("laundry_orders")
+    .update({ billing_hold_reason: hold })
+    .eq("id", orderId)
+    .eq("tenant_id", tenantId);
+  if (error) console.error("billing hold update failed", { orderId, error: error.message });
+}
+
+/**
+ * Price a job the moment it is finished (brief 1.3, gap G3).
+ *
+ * `LJ00032` sat at "No charges yet" after delivery until somebody pressed
+ * **Price this job**, and four of the five jobs then awaiting review were
+ * unpriced — the oldest taken in on 27 August. So completion now runs the very
+ * pricing the button runs (`priceJobFromRateCard`: rate card, then the
+ * customer's laundry price, then the house price, then the item's selling
+ * price) and writes the result. **It never approves**: a person still checks
+ * and approves, and approval is still the freeze.
+ *
+ * **On the service-role client, and why.** The person finishing the job is as
+ * often a delivery round or a driver as the office, and neither can read a
+ * price or write a charge — `can_read_pricing()` and `can_write_billing()`
+ * (0017, 0033) see to that, correctly. Pricing the job is the business's
+ * bookkeeping, not theirs, so it runs with the service role — and therefore
+ * every read and write here names the tenant from the session (§2), and every
+ * id is one derived from a tenant-filtered read of the job itself.
+ *
+ * A job that already carries charges is left alone, so this can never write
+ * over a reviewer's work; and nothing here throws — a failure to price leaves
+ * the job exactly where completion put it, in review, unpriced.
+ */
+export async function autoPriceCompletedJob(
+  admin: Client, session: Session, orderId: string,
+): Promise<AutoPriceOutcome> {
+  try {
+    const { data: job } = await admin
+      .from("laundry_orders")
+      .select("id, order_number, customer_id, status, billing_status")
+      .eq("id", orderId)
+      .eq("tenant_id", session.tenantId)
+      .maybeSingle<{ id: string; order_number: string; customer_id: string; status: string; billing_status: string }>();
+    if (!job || job.status !== "completed" || job.billing_status !== "awaiting_review") {
+      return { state: "skipped" };
+    }
+
+    const { count } = await admin
+      .from("job_charge_snapshots")
+      .select("id", { count: "exact", head: true })
+      .eq("tenant_id", session.tenantId)
+      .eq("order_id", job.id);
+    if ((count ?? 0) > 0) return { state: "skipped" };
+
+    const priced = await priceJobFromRateCard(admin, session.tenantId, job);
+    if (priced.lines.length > 0) {
+      const saved = await saveJobCharges(admin, session.tenantId, job.id, priced.lines);
+      if (!saved.ok) {
+        console.error("automatic pricing could not save", { orderId, error: saved.error });
+        await setBillingHold(admin, session.tenantId, job.id, "needs_price");
+        return {
+          state: "needs_price", orderNumber: job.order_number,
+          lines: 0, unpriced: priced.unpriced.length, note: "",
+        };
+      }
+    }
+
+    const hold = needsPrice(priced);
+    await setBillingHold(admin, session.tenantId, job.id, hold ? "needs_price" : null);
+
+    const subtotal = jobChargeSubtotal(priced.lines);
+    const source = pricingSourceLabel(priced.lines, priced.card);
+    await logOrderActivity(admin, session, job.id, {
+      activity_type: "updated",
+      next: {
+        billing: hold ? "needs_price" : "priced", priced_from: source,
+        lines: priced.lines.length, unpriced: priced.unpriced.length, subtotal, automatic: true,
+      },
+      note: hold
+        ? "Priced automatically when the job was finished. Some of it still needs a price."
+        : "Priced automatically when the job was finished.",
+    });
+
+    return hold
+      ? {
+          state: "needs_price", orderNumber: job.order_number, lines: priced.lines.length,
+          unpriced: priced.unpriced.length, note: describeUnpriced(priced.unpriced),
+        }
+      : { state: "priced", orderNumber: job.order_number, lines: priced.lines.length, subtotal, source };
+  } catch (cause) {
+    console.error("automatic pricing threw", { orderId, cause });
+    return { state: "skipped" };
+  }
 }
 
 /**
@@ -286,6 +404,7 @@ export async function priceAndSaveJob(
     return refuse(`${job.order_number}: there is no laundry on this job, so there is nothing to price.`, card);
   }
   if (lines.length === 0) {
+    await setBillingHold(supabase, session.tenantId, job.id, "needs_price");
     return refuse(
       `${job.order_number}: nothing on this job could be priced — `
       + (card
@@ -297,6 +416,8 @@ export async function priceAndSaveJob(
 
   const saved = await saveJobCharges(supabase, session.tenantId, job.id, lines);
   if (!saved.ok) return refuse(`${job.order_number}: ${saved.error}`, card);
+  // On the Needs a price list exactly while something on it is still unpriced.
+  await setBillingHold(supabase, session.tenantId, job.id, unpriced.length > 0 ? "needs_price" : null);
 
   const source = pricingSourceLabel(lines, card);
   const subtotal = jobChargeSubtotal(lines);
@@ -431,6 +552,8 @@ export async function approveJob(
       billing_status: "approved",
       billing_approved_at: new Date().toISOString(),
       billing_approved_by: session.userId,
+      // Approved means a person has decided the price; it no longer needs one.
+      billing_hold_reason: null,
     })
     .eq("id", orderId)
     .eq("tenant_id", session.tenantId)

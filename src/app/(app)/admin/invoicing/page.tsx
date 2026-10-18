@@ -3,9 +3,13 @@ import { createClient } from "@/lib/supabase/server";
 import {
   formatAbn, invoiceProfileGaps, parseInvoiceProfile,
 } from "@/lib/domain/invoice-profile";
-import { Card, FormSection, Notice, PageHeader } from "@/components/ui";
+import { CONTROL, Card, FormSection, Notice, PageHeader, cx } from "@/components/ui";
 import { Field, FormActions, Input, SubmitButton } from "@/components/form";
-import { saveInvoiceProfile } from "./actions";
+import { BRANDING_BUCKET, isTenantLogoPath } from "@/lib/branding";
+import { arTrustedFrom } from "@/lib/domain/receivables";
+import {
+  removeInvoiceLogo, saveInvoiceProfile, saveReceivablesSettings, uploadInvoiceLogo,
+} from "./actions";
 
 export const metadata = { title: "Invoicing" };
 
@@ -22,6 +26,16 @@ export default async function InvoicingSettingsPage() {
     .maybeSingle<{ name: string; abn: string | null; settings: unknown }>();
   const profile = parseInvoiceProfile(tenant?.settings);
   const gaps = invoiceProfileGaps(tenant?.abn ?? null, profile);
+
+  // The logo is private (0054), so the preview is a short-lived signed URL.
+  // A failure — the bucket not set up yet, the file gone — shows no preview,
+  // never an error page.
+  let logoUrl: string | null = null;
+  if (isTenantLogoPath(session.tenantId, profile.logoPath)) {
+    const { data: signed } = await supabase.storage.from(BRANDING_BUCKET)
+      .createSignedUrl(profile.logoPath, 300);
+    logoUrl = signed?.signedUrl ?? null;
+  }
 
   return (
     <div className="space-y-6">
@@ -56,6 +70,9 @@ export default async function InvoicingSettingsPage() {
             <Field label="Accounts email" name="email">
               <Input name="email" type="email" defaultValue={profile.email ?? ""} />
             </Field>
+            <Field label="Website" name="website" hint="Printed under the email, the way it reads — no https://.">
+              <Input name="website" defaultValue={profile.website ?? ""} placeholder="adelaidetowelservice.com.au" />
+            </Field>
           </FormSection>
           <FormSection title="How customers pay you"
                        description="Printed on every issued invoice, with a line asking the customer to quote the invoice number.">
@@ -72,6 +89,45 @@ export default async function InvoicingSettingsPage() {
           <FormActions>
             <SubmitButton pendingLabel="Saving…">Save invoice details</SubmitButton>
           </FormActions>
+        </form>
+      </Card>
+      <Card>
+        <FormSection title="Logo"
+                     description="Printed top-left on every invoice and credit note. A PNG or a JPEG, under 900 KB.">
+          {logoUrl ? (
+            <div className="flex flex-wrap items-center gap-4">
+              {/* A signed URL to a private object, not a static asset, so next/image's optimiser has nothing to fetch. */}
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={logoUrl} alt="Your invoice logo"
+                   className="h-24 w-auto max-w-56 rounded-lg border border-strong bg-white object-contain p-2" />
+              <form action={removeInvoiceLogo}>
+                <SubmitButton variant="secondary" size="md" pendingLabel="Removing…">Remove logo</SubmitButton>
+              </form>
+            </div>
+          ) : profile.logoPath ? (
+            <Notice tone="warning">A logo is saved but could not be shown. Upload it again to replace it.</Notice>
+          ) : (
+            <p className="text-sm text-muted-foreground">No logo yet. Invoices print without one until you add it.</p>
+          )}
+          <form action={uploadInvoiceLogo} className="mt-4 space-y-3">
+            <Field label={logoUrl ? "Replace the logo" : "Upload a logo"} name="logo">
+              <input id="logo" name="logo" type="file" accept="image/png,image/jpeg" required
+                     className={cx(CONTROL, "file:mr-3 file:border-0 file:bg-transparent file:text-sm file:font-medium")} />
+            </Field>
+            <SubmitButton variant="secondary" size="md" pendingLabel="Uploading…">Save logo</SubmitButton>
+          </form>
+        </FormSection>
+      </Card>
+      <Card>
+        <form action={saveReceivablesSettings}>
+          <FormSection title="Imported balances"
+                       description="Invoices brought in from MYOB before this date are kept in the register, marked “Imported – not reconciled”, and left out of Today’s overdue figures until you have reconciled them. Move the date back once you have.">
+            <Field label="Count imported invoices from" name="ar_trusted_from"
+                   hint="1 October 2026 — the move to Xero — unless you change it.">
+              <Input name="ar_trusted_from" type="date" defaultValue={arTrustedFrom(tenant?.settings)} />
+            </Field>
+            <SubmitButton variant="secondary" size="md" pendingLabel="Saving…">Save</SubmitButton>
+          </FormSection>
         </form>
       </Card>
     </div>

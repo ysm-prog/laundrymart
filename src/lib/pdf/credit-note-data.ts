@@ -2,10 +2,15 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { parseInvoiceProfile, type InvoiceProfile } from "@/lib/domain/invoice-profile";
+import { loadContactName } from "./invoice-data";
+import { loadTenantLogo, type PdfLogo } from "./logo";
 
 export type CreditNotePdfData = {
-  tenant: { name: string; abn: string | null; profile: InvoiceProfile };
-  customer: { business_name: string; customer_number: string; abn: string | null; address: string[] };
+  tenant: { name: string; abn: string | null; profile: InvoiceProfile; logo?: PdfLogo | null };
+  customer: {
+    business_name: string; customer_number: string; abn: string | null; address: string[];
+    contact_name?: string | null;
+  };
   note: {
     credit_note_number: string; status: string; issue_date: string; reason: string | null;
     subtotal: number; tax_amount: number; total: number; invoice_number: string;
@@ -17,13 +22,13 @@ export async function loadCreditNoteForPdf(id: string, tenantId: string): Promis
   const supabase = await createClient();
   const { data: note } = await supabase
     .from("credit_notes")
-    .select("credit_note_number, status, issue_date, reason, subtotal, tax_amount, total, " +
+    .select("credit_note_number, status, issue_date, reason, subtotal, tax_amount, total, customer_id, " +
             "invoices(invoice_number), customers(business_name, customer_number, abn, " +
             "billing_address_line1, billing_address_line2, billing_suburb, billing_state, billing_postcode)")
     .eq("id", id).eq("tenant_id", tenantId)
     .maybeSingle<{
       credit_note_number: string; status: string; issue_date: string; reason: string | null;
-      subtotal: number; tax_amount: number; total: number;
+      subtotal: number; tax_amount: number; total: number; customer_id: string;
       invoices: { invoice_number: string } | null;
       customers: {
         business_name: string; customer_number: string; abn: string | null;
@@ -33,18 +38,23 @@ export async function loadCreditNoteForPdf(id: string, tenantId: string): Promis
     }>();
   if (!note) return null;
 
-  const [{ data: lines }, { data: tenant }] = await Promise.all([
+  const [{ data: lines }, { data: tenant }, contactName] = await Promise.all([
     supabase.from("credit_note_lines")
       .select("description, quantity, unit_price, amount, taxable")
       .eq("credit_note_id", id).eq("tenant_id", tenantId)
       .returns<CreditNotePdfData["lines"]>(),
     supabase.from("tenants").select("name, abn, settings").eq("id", tenantId)
       .maybeSingle<{ name: string; abn: string | null; settings: unknown }>(),
+    loadContactName(supabase, tenantId, note.customer_id),
   ]);
   const c = note.customers;
+  const profile = parseInvoiceProfile(tenant?.settings);
+  const { customer_id: _customerId, invoices, customers: _customers, ...rest } = note;
   return {
-    tenant: { name: tenant?.name ?? "Laundry", abn: tenant?.abn ?? null,
-              profile: parseInvoiceProfile(tenant?.settings) },
+    tenant: {
+      name: tenant?.name ?? "Laundry", abn: tenant?.abn ?? null, profile,
+      logo: await loadTenantLogo(supabase, tenantId, profile.logoPath),
+    },
     customer: {
       business_name: c?.business_name ?? "Unknown customer",
       customer_number: c?.customer_number ?? "",
@@ -52,9 +62,9 @@ export async function loadCreditNoteForPdf(id: string, tenantId: string): Promis
       address: [c?.billing_address_line1, c?.billing_address_line2,
         [c?.billing_suburb, c?.billing_state, c?.billing_postcode].filter(Boolean).join(" ")]
         .filter((part): part is string => Boolean(part && part.trim())),
+      contact_name: contactName,
     },
-    note: { ...note, invoice_number: note.invoices?.invoice_number ?? "" },
+    note: { ...rest, invoice_number: invoices?.invoice_number ?? "" },
     lines: lines ?? [],
   };
 }
-

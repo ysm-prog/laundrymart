@@ -9,7 +9,23 @@ where that is genuinely what it is. The multi-tenancy architecture stays: one op
 fact about today's data, not a reason to drop `tenant_id`, RLS, or §23's rule that a read feeding a
 write names its tenant.
 
-## Latest: #77 and #78 merged and on Prod (2026-10-12)
+## Latest: Darshan's BA review, Phase 1 (2026-10-18), `claude/relaxed-faraday-4ey58h`
+Items 1.1–1.10 except 1.7 (dropped — "Electro Services" is the product name), one PR into `Dev`.
+CLAUDE.md's 2026-10-18 entry has the detail. **Darshan's instruction mid-session: write it in one
+pass, no per-item tests or browser checks, docs once, verify once.**
+- **Three migrations, all written and NOT applied.** 0053 (issue guard) can follow the merge; **0054
+  (logo bucket) and 0055 (`billing_hold_reason`, received-at guard, `invoices.source` + backfill,
+  `receivables` settings key) must go on before it** — the queue, the register, Today and the Xero
+  gate select the new columns. 0055's backfill changes rows (marks the MYOB imports `import`).
+- **Not done, and to say so:** the side-by-side PDF screenshot; a mocked end-to-end Xero push; any
+  screen opened behind the auth gate. The test-data clean-up has **not been run** — Darshan confirms
+  the customer list (Test1, Jay, ZZ TEST Demo Laundry, ZZ TEST – Claude BA, Core IT) first.
+- **Open for Darshan:** whether new invoices continue MYOB's 8-digit numbering (`next_number()`
+  untouched); bank details, phone and email are his to enter in Settings › Invoicing.
+- Completion now prices the job on the **service-role** client (rounds and drivers read no price);
+  every read there names the tenant, and a test reads the source to keep it so.
+
+## Previously: #77 and #78 merged and on Prod (2026-10-12)
 `Dev` is at `426cb5a` and `Prod` at `26fb2a1` (#79). The trees are identical. 0051 and 0052 are
 **live** (Darshan applied them through the SQL editor). The ledger has 57 entries, verified over the
 connector, and advisors are at 30. CI is green on Dev (run 342) and on Prod. CLAUDE.md's merge

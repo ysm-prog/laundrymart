@@ -28,6 +28,17 @@ export async function listXeroSalesAccounts(tenantId: string): Promise<XeroBankA
   return listXeroAccounts(tenantId, 'Type=="REVENUE"||Type=="SALES"');
 }
 
+/**
+ * Every active account code in the connected Xero chart, for the pre-flight
+ * (brief 1.2) — which compares it against the codes the app's invoices use.
+ * Empty when not connected or the read fails, which the pre-flight reads as
+ * "could not check the chart", never as "nothing is missing".
+ */
+export async function listXeroChartCodes(tenantId: string): Promise<string[]> {
+  const accounts = await listXeroAccounts(tenantId, 'Status=="ACTIVE"');
+  return accounts.map((account) => account.code);
+}
+
 async function listXeroAccounts(tenantId: string, where: string): Promise<XeroBankAccount[]> {
   const tokens = await getXeroTokens(tenantId);
   if (!tokens) return [];

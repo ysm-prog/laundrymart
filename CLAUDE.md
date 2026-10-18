@@ -108,7 +108,16 @@ The master spec names a .NET 9 Web API; this build follows the supplied skeleton
     currently needs it is a constant somebody has to re-derive later.
 - Invoice PDFs render server-side with `@react-pdf/renderer` (`src/lib/pdf/`), streamed from
   `/api/invoices/:id/pdf` and attached to the Resend email. `serverExternalPackages` keeps the
-  renderer out of the client bundle.
+  renderer out of the client bundle. **Since 2026-10-18 both the tax invoice and the credit note
+  (MYOB's "Adjustment note") are drawn to the laundry's own MYOB invoice** (brief 1.10, template
+  `Invoice-00321043.pdf`) from one set of blocks in `myob-layout.tsx`: logo top-left, the business
+  right-aligned, Bill-to in a grey panel, **Item ID | Description | Qty | Unit price | Tax |
+  Amount** with "including tax" under the money headers, Notes with MYOB's one-line banking
+  details, a boxed Total amount, and `Page n of N` / `Invoice no … Total amount …` on every page.
+  `pdfLineCells` is the rule for a line (item code, the item's name on a job line, the tax code);
+  the job number now lives only in the service breakdown, which prints for any job-billed
+  invoice. **The logo is the tenant's data**: uploaded on Settings › Invoicing into the private
+  `tenant-branding` bucket (0054) and embedded at render time — nothing is committed here.
 - **A person is shown by name, and the directory is one read** (`src/lib/directory.ts` over
   `tenant_members()`, 0030). Every `assigned_to`, `created_by`, `actor_id` and `delivered_by`
   column holds an `auth.users` id; the screens used to resolve those through the GoTrue admin
@@ -613,6 +622,27 @@ key remains the way to reset or re-assert them through the Auth API, but nothing
   the message. **An INSERT is not guarded**, deliberately: the MYOB import writes its history
   straight in as `issued`/`paid`, and every invoice this app raises is opened as a draft. Voiding
   a draft stays open whatever the settings say.
+- **No laundry is received in the future** (`guard_laundry_order_received_at`, 0055; brief 1.5).
+  A receipt more than **fifteen minutes** ahead of now is refused on INSERT and on any UPDATE that
+  *changes* it — so `LJ00031` (recorded on 17 October as received on the 19th) is not re-judged by
+  an unrelated edit, and is listed on Reports › Data checks instead of being rewritten. The job
+  form caps the date at today for every role, and `receivedInFuture` refuses it in both actions.
+- **A finished job is priced the moment it is finished** (brief 1.3). `completeLaundryOrder` runs
+  `autoPriceCompletedJob` after the completion write — the same pricer as Price this job (rate
+  card → the customer's price → the house price → **the item's own selling price**, the new last
+  tier) — and **never approves**. On the service-role client, tenant named on every read, because
+  a round or a driver finishing a job can read no price. Anything it cannot price leaves the job
+  in review with `billing_hold_reason = 'needs_price'` (0055), which is the billing queue's
+  **Needs a price** list; pricing it fully, saving charges by hand, approving or excluding clears it.
+- **Voiding asks whether the work is billed again** (brief 1.6). Yes is what voiding always did —
+  the jobs go back to `approved`. No writes them off: `not_billable` with the void's reason,
+  reached **through** `approved`, because 0017's guard has no edge from an invoiced state to
+  `not_billable` and the two steps it does have are the ones a person would take. `voidOneInvoice`
+  (`lib/invoices/void.ts`) is the one implementation, shared with the test-data clean-up.
+- **An invoice says where it came from** (`invoices.source`, `app`/`import`, 0055; brief 1.2).
+  Imported MYOB invoices are marked `import` — backfilled by the importer's note or by a number
+  outside the app's `INV` sequence — and are **never pushed to Xero**, whose copy of that history
+  was imported separately.
 
 ## 5. Branch & deploy
 Feature branch → `Dev` → `Prod`. CI (`Prod`/`Dev`) runs verify, gitleaks and the DB job
@@ -660,7 +690,7 @@ now on each; the month-end question the register could not answer) ·
 `/operations/{pickups,deliveries,exceptions}` · `/run` · `/warehouse[/:id]` · `/inventory` ·
 `/invoices[/:id|/prices|/charge-accounts]` · `/reports` · `/search` · `/help` ·
 `/notifications` ·
-`/admin` (redirects) `[/depots|/users|/holidays|/audit|/notifications|/data]` ·
+`/admin` (redirects) `[/depots|/users|/holidays|/audit|/notifications|/data|/invoicing]` ·
 `/platform[/admins|/settings|/release]` (platform admin only)
 
 **There is no user-facing Runs module.** `/routes/daily`, `/routes/planner` and
@@ -1267,6 +1297,22 @@ produce on demand.
   **Three existing proofs issue drafts** (`charge_accounts`, `gst_inclusive`,
   `open_draft_invoices`) and now give their laundry a complete invoice profile first, with a
   comment saying why. **Written, NOT applied** (§11).
+- `0054_invoice_logo_storage` — **the laundry's logo, as the laundry's data** (brief 1.10). One
+  private bucket, `tenant-branding` (PNG and JPEG, 1 MB), keyed by tenant the way 0007's
+  `run-media` is, with four policies on `storage.objects`: read by any **member** (every role that
+  opens an invoice renders a PDF that embeds it) and written, replaced and removed by the **Owner**
+  alone (`has_role(…, super_admin)`) — unlike `run-media`, which any member writes. Four
+  self-assertions (bucket private, four policies, writes limited to the owner, no `for all`).
+  Adds no table, column or function. **Written, NOT applied** (§11).
+- `0055_billing_flow_guards` — **the four database halves of the review's Phase 1.**
+  `laundry_orders.billing_hold_reason` (`needs_price` or null, brief 1.3);
+  `guard_laundry_order_received_at` and its trigger (brief 1.5); `invoices.source` (`app`/`import`,
+  not null default `app`, brief 1.2) **with a backfill** — the one statement that changes rows,
+  marking every invoice carrying the importer's note or a number outside `^INV[0-9]+$` as an
+  import, which only ever narrows what may be pushed; and `save_tenant_settings` rebuilt from
+  0052's body to accept the `receivables` key (brief 1.9). Eight self-assertions, including that
+  the backfill left no import marked `app`. `billing_flow_guards.test.sql` (15) proves all of it
+  and 0054's policies. **Written, NOT applied** (§11).
 - `0050_pickup_to_job` — **a collection becomes a laundry job, exactly once.**
   `laundry_orders.source_pickup_id` (`on delete set null`),
   `uq_laundry_orders_source_pickup` (partial unique) and
@@ -1551,7 +1597,8 @@ Proofs in `supabase/tests/`: `rls_isolation`, `rls_coverage`, `driver_scope`,
 `audit_log_scope`, `run_sequence`, `accounts_scope`, `open_draft_invoices`,
 `single_laundry`, `charge_accounts`, `gst_inclusive`, `collection_schedule`,
 `customer_record_scope`, `fleet_scope`, `pickup_intake`, `laundry_item_ownership`,
-`invoice_money_guards`, `invoice_issue_guard` (**655 assertions** across 35 files).
+`invoice_money_guards`, `invoice_issue_guard`, `billing_flow_guards` (**670 assertions** across
+36 files).
 
 **Count assertions, not lines starting with `ok`.** pgTAP's function is literally named `ok`, so
 psql prints a centred `ok` **column header** above each result — and `grep -c '^\s*ok '` counts
@@ -2256,6 +2303,17 @@ reports six false gaps.
   `set_records_archived`, `sync_invoice_line_account`, `tenant_members`). That is the 0042 trap
   leaving its usual trace: text typed into `apply_migration` reformatted a little against the file.
   Worth knowing before anybody reads a raw `md5(prosrc)` mismatch as drift.
+
+**`0054_invoice_logo_storage` and `0055_billing_flow_guards` are NOT applied to
+`laundrymart-syd`** (2026-10-18), written on the same branch under the same instruction. **Unlike
+0053, the code depends on both — apply them before the merge, after 0053:** the billing queue and
+the job page select `laundry_orders.billing_hold_reason`, the Xero gate, the register and Today
+select `invoices.source`, Settings › Invoicing saves the `receivables` key, and the logo upload
+writes to `tenant-branding`. PostgREST answers a missing column with an error, not a null, so
+merging first would break Awaiting invoice, the register and Today. **0055 changes rows**: its
+backfill marks the imported MYOB invoices (`notes` from the importer or a non-`INV` number) as
+`import` — expected on live: the ~646 MYOB headers, leaving the handful of `INV` invoices as
+`app`. Neither carries a `delete`, so the connector can apply them; the SQL editor works too.
 
 **`0053_tax_invoice_issue_guard` is NOT applied to `laundrymart-syd`** (2026-10-18), written on
 `claude/relaxed-faraday-4ey58h` under Darshan's instruction not to touch the live database. Unlike
@@ -3473,6 +3531,18 @@ invoice goes, because this app has no counter-cash concept.
     sit a cent from its own quantity times its own unit price. Closing it means sending
     `LineAmount` explicitly, which Xero validates against the other two fields — worth doing on
     the first real connection, not blind.
+- **Nothing is sent while an account in use has no Xero code** (brief 1.2). A line coded to an
+  account with no `xero_account_code` does not fail — it falls through to the default sales
+  account and lands in the wrong place, silently. So `pushInvoiceToXero` refuses while any account
+  the app's invoices use (app invoice lines, sold items' income accounts, charge-type defaults, job
+  charges) is unmapped, and writes the refusal to `xero_push_error`. **Money › Xero** carries the
+  pre-flight — every account in use, its Xero code, and whether the connected chart carries it —
+  and a **Xero problems** list of every invoice Xero refused, with Retry; the invoice page shows
+  its own refusal with Retry too. The used-account set is read on the **service-role** client,
+  tenant named: a gate read through a caller who cannot see the chart would read nothing and pass.
+- **An imported MYOB invoice is never pushed** (`xeroPushRefusal`, `invoices.source`, 0055).
+- **`LineAmountTypes` stays `Inclusive`**, now pinned with the review's own example: $25.08 with
+  $2.28 GST inside it, which would have been $27.59 under `Exclusive`.
 - `summariseXeroError` in `lib/xero/errors.ts` is shared by all three pushes. It was a private
   copy in two of them and the void path would have made three, at which point they drift and the
   least-used one stops parsing the shape Xero actually sends.
@@ -3481,10 +3551,12 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
-### 2026-10-18 · Darshan's BA review, Phase 1: a valid tax invoice before Issue
+### 2026-10-18 · Darshan's BA review, Phase 1: stop the leaks
 From Darshan's BA review and end-to-end test of `ats.coreit.com.au` on 18 October (test customer
 CUST00515 *ZZ TEST – Claude BA*, job LJ00032, INV00008 issued then voided). Branch
-`claude/relaxed-faraday-4ey58h`, off `Dev`. Gap numbers are the review's.
+`claude/relaxed-faraday-4ey58h`, off `Dev`. Gap numbers are the review's. Items 1.1–1.10 except
+1.7, which is dropped: "Electro Services" is the deliberate product name. **Three migrations,
+0053–0055, all written and NOT applied** — 0054 and 0055 must go on before the merge (§11).
 
 **1.1 — Issue is blocked until the invoice is a valid tax invoice (G1).** INV00008 was issued and
 its PDF printed "TAX INVOICE" with no ABN, no business address and no bank details, because
@@ -3511,6 +3583,87 @@ Settings › Invoicing was empty and nothing checked.
   undone…"* — and the bulk lists confirm with the count and the total before posting.
 - With today's live settings (ABN and address set, no bank details) every Issue will read *"Add
   your bank details in Settings › Invoicing before issuing."* — the brief's expected state.
+
+**1.10 — The PDFs are drawn to ATS's own MYOB invoice.** Both documents now share
+`myob-layout.tsx` — §2 has the layout. What it changed for the customer: the line reads
+**`T35 | Towels - Black`** rather than *"LJ00032 — Towels — 10"* (`pdfLineCells`; a typed line keeps
+its own words), the Tax column carries the code, the payment line is MYOB's *"Banking Details: BSB:
+… Account No. … Account Name: …"* built from the profile (`bankingDetailsLine`), and the service
+breakdown prints for every job-billed invoice, one job included, because it is now the only place
+the job number appears (gap G15). The credit note is MYOB's **Adjustment note**. Settings ›
+Invoicing gains **Website** (`normaliseWebsite`) and a **Logo** upload into the private
+`tenant-branding` bucket (0054), read back as bytes and embedded, so no URL in an inbox can
+expire. Saving the text fields keeps the logo, because `save_tenant_settings` replaces the whole
+profile key. **Nothing about the laundry is in code**: a test reads the three PDF sources and fails
+on a BSB, an email, a phone number or ATS's ABN. **Not done: the side-by-side screenshot** — the
+instruction was to write Phase 1 in one pass with no per-item browser checks, so the layout is
+proved by render tests and by measurement off the template, not yet by eye. **Open for Darshan,
+not decided:** whether new invoices continue MYOB's 8-digit series (`00321043`, last migrated
+`00413618`) — `next_number()` is untouched.
+
+**1.3 — A job is priced the moment it is finished (G3).** §4 and §21 have the rule; in short,
+`completeLaundryOrder` prices through the same tiers as Price this job, with the item's own
+selling price as the new last tier, and never approves. The counter's completion toast says what
+it made of it (`autoPriceSentence`) to a role that may read money. Unpriceable laundry marks the
+job `needs_price` (0055) — the new **Needs a price** chip on Awaiting invoice, a badge on the row
+and a notice on the job's Charges card. **Price finished jobs** on Settings › Your records prices
+the backlog: a dry run first listing what each job would become, then the button, never approving.
+
+**1.4 — Billing reads the invoices' own status (G4).** A job on a draft carries
+`invoice_generated` exactly as one on an issued invoice does, so INV00004 and INV00005 — drafts
+since September — read "Invoiced". `periodBillingSummary` now reads each job's invoice status
+through `invoice_source_jobs`, and a period is **"Draft – not issued"** until something is issued
+(`periodInvoiceState`); one customer's period badges each job the same way. Today gains **Drafts
+from a finished period**, linking to the drafts board. Nothing issues anything on its own.
+
+**1.5 — No receipt from the future (G14, part).** §4 has the rule. The form, both actions and 0055
+refuse it; an edit that leaves an existing future date alone still saves (the instant is written
+back exactly, seconds and all, so it is not mistaken for a change). **Reports › Data checks** lists
+the existing rows — LJ00031 — and changes none of them.
+
+**1.6 — The irreversible steps confirm, and a void asks about the work (G9, G17).** Approve on the
+job page (*"Approve $X for LJ…? Prices freeze and go onto the draft."*) and Approve Selected on the
+queue (count and total) are now a second press; Issue already was (1.1); Email invoice confirms
+too, because the Help page said it did. **Void** asks *"Put LJ… back in the billing queue to bill
+again?"* — Yes keeps today's behaviour, No writes the jobs off with the void's reason (§4). The
+sentences live in `lib/domain/confirmations.ts`; `ConfirmSubmit` gained a required `choice` and a
+`cancelLabel`. The Help page's two claims about completion and voiding now match.
+
+**1.2 — Xero readiness (G2, G11).** §20 has it: a pre-flight on Money › Xero listing every account
+in use against the connected chart, **pushes refused while any is unmapped**, imported MYOB
+invoices never pushed (`invoices.source`, 0055 — the importer now writes `import` too), the push
+error on the invoice and on a **Xero problems** list with Retry, and `LineAmountTypes = Inclusive`
+pinned with $25.08 / $2.28. **Not done: a mocked end-to-end push test** — this suite has no fetch
+mocking, so the payload, the gate and the import rule are tested as pure rules and the request
+itself is not.
+
+**1.8 — A test-data clean-up, dry run first (G10).** On Settings › Your records. The person types
+the customers (exact name or customer number; a hyphen matches an en dash); the dry run lists, per
+customer, the invoices it would **void** with the reason "Test data" (never delete), those it
+cannot (payments or credit notes — named), the jobs it would cancel or take out of billing, and
+the archive; jobs still assigned to a round from before a cutoff (default 1 October) are listed
+separately and closed only if ticked. Customers whose names look like test data are *suggested*,
+never chosen: **nothing in the repo names a customer**, and Darshan confirms the list before it
+runs on the real laundry — the brief's candidates are Test1, Jay, ZZ TEST Demo Laundry, ZZ TEST –
+Claude BA and Core IT. **It has not been run anywhere.**
+
+**1.9 — Today counts only trusted receivables (G5).** `ar_trusted_from` lives in
+`tenants.settings.receivables` (0055 widens the writer), defaults to **1 October 2026** with
+nothing written, and is editable on Settings › Invoicing. Imported invoices dated before it are
+left out of Today's Overdue tile and Needs a decision (one PostgREST filter, shared), and badged
+**"Imported – not reconciled"** in the register. Moving the date back is how the owner says the
+history has been reconciled.
+
+- **Checks:** `verify` and the DB suite were run **once, at the end**, as Darshan asked — not per
+  item (the first run caught a missing `empty` prop and a `Date.now()` in render; both fixed and
+  re-run). **1403 unit tests across 91 files**; typecheck, lint and the production build green; all
+  59 migration files applied to a fresh Postgres 16 with **670 pgTAP assertions across 36 files, 0
+  failing, no plan mismatch**, and `supabase/seed.sql` applying on top. The new proofs are
+  `billing_flow_guards.test.sql` (15) and unit tests for every pure rule above. The mutation
+  checks the earlier entries describe were **not** repeated for these items, per the same
+  instruction.
+- **Not verified behind the auth gate**, for the standing reason: no screen was opened with real
+  rows, and no migration is applied.
 
 ### 2026-10-12 · Merged and deployed: Jay's ATS changes and the end-to-end gap fixes
 Approved by Darshan. **#77** (`claude/ats-jay-changes`) and **#78** (`claude/e2e-gap-fixes`) were
@@ -11219,6 +11372,15 @@ appears — the behaviour itself is unreachable from a unit test (`lib/invoices/
   the one implementation, shared by the job page's Price button and the queue's **Price Selected**,
   and it refuses on *nothing came back priced* rather than on the absence of a card.
   `pricingSourceLabel` names which tier actually answered, because both can price parts of one job.
+- **Finishing a job prices it, and the item's selling price is the last tier** (brief 1.3,
+  2026-10-18). `LJ00032` read "No charges yet" after delivery until somebody pressed Price this
+  job, and four of the five jobs in review were unpriced. `autoPriceCompletedJob` now runs from
+  the one completion path with the same pricer, whose tiers are **rate card → the customer's
+  laundry price → the house price → `items.sell_price`** (`itemSellPriceList`, grossed up through
+  `lineRateFromItem` exactly as the Charges card already did, `pricing_model = 'item_price'` so the
+  label can say so). It never approves. What it cannot price is `needs_price` (0055) and listed
+  under **Needs a price** in Money › Awaiting invoice; Settings › Your records' **Price finished
+  jobs** prices the backlog from before this, dry run first, fifty at a time, never approving.
 - **A completed job is a billable source**, and `customers.billing_method` decides the shape at
   generation time: `invoice_per_job` → one invoice each; `*_consolidated` → one invoice carrying
   all of them; `manual` → only ever by explicit selection. Whether August is fifteen invoices or one

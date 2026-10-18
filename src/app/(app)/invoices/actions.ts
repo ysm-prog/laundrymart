@@ -16,7 +16,7 @@ import {
 } from "@/lib/domain/invoicing";
 import { businessToday, toInstant } from "@/lib/domain/timezone";
 import {
-  creditRefusal, paymentRefusal, reversalRefusal, settleHeaderOnly, unsettleHeaderOnly, voidRefusal,
+  creditRefusal, paymentRefusal, reversalRefusal, settleHeaderOnly, unsettleHeaderOnly,
 } from "@/lib/domain/payment-gate";
 import {
   count, describeDbError, done, fail, firstIssue, money, optionalText,
@@ -33,10 +33,10 @@ import { describeWorkAwaitingApproval } from "@/lib/domain/billing";
 import { findOrOpenDraft, rebuildJobLines, removeJobFromDraft } from "@/lib/invoices/open-draft";
 import { loadChargesForJobs } from "@/lib/orders/job-billing";
 import { INVOICE_SETTINGS_LINK, issueOneInvoice } from "@/lib/invoices/issue";
+import { voidOneInvoice } from "@/lib/invoices/void";
+import { parseRebill } from "@/lib/domain/confirmations";
 import { can } from "@/lib/roles";
-import {
-  releaseVoidedInvoiceJobs, resettleInvoice, sendInvoice,
-} from "@/lib/invoices/send";
+import { resettleInvoice, sendInvoice } from "@/lib/invoices/send";
 
 /**
  * Generate recurring invoices for a billing period — **one invoice per
@@ -1212,74 +1212,36 @@ export async function voidInvoice(formData: FormData): Promise<void> {
   const backTo = `/invoices/${parsed.data.id}`;
   const supabase = await createClient();
 
-  // Refused before the write, with the remedy named. `guard_invoice_void` (0052)
-  // is the boundary and refuses the same thing out loud; this is the sentence.
-  const { data: current } = await supabase
-    .from("invoices").select("status, amount_paid")
-    .eq("id", parsed.data.id).eq("tenant_id", session.tenantId)
-    .maybeSingle<{ status: string; amount_paid: number }>();
-  if (!current) return fail(backTo, "That invoice could not be found.");
-  const [{ count: paymentCount }, { count: creditNoteCount }] = await Promise.all([
-    supabase.from("payments").select("id", { count: "exact", head: true })
-      .eq("invoice_id", parsed.data.id).eq("tenant_id", session.tenantId),
-    supabase.from("credit_notes").select("id", { count: "exact", head: true })
-      .eq("invoice_id", parsed.data.id).eq("tenant_id", session.tenantId)
-      .in("status", ["issued", "applied"]),
-  ]);
-  const refusal = voidRefusal({
-    status: current.status, amountPaid: Number(current.amount_paid),
-    paymentCount: paymentCount ?? 0, creditNoteCount: creditNoteCount ?? 0,
-  });
-  if (refusal) return fail(backTo, refusal);
-
-  const { error } = await supabase
-    .from("invoices")
-    .update({
-      status: "void",
-      voided_at: new Date().toISOString(),
-      void_reason: parsed.data.void_reason,
-    })
-    .eq("id", parsed.data.id).eq("tenant_id", session.tenantId);
-  if (error) return fail(backTo, describeDbError(error));
-
-  // Voiding is how a wrong invoice is undone, and the work on it still has to
-  // be billable afterwards — so the jobs go back to `approved` with their
-  // frozen charges intact. This is the *only* way out of an invoiced billing
-  // state, which is why the guard checks the link rows rather than trusting a
-  // caller (migration 0017). The outcome is reported, never assumed.
-  const release = await releaseVoidedInvoiceJobs(supabase, session, parsed.data.id);
-
-  // Void it in Xero too, *after* voiding it here and never blocking on it. An
-  // invoice voided here used to stay AUTHORISED in Xero, so a void was a
-  // two-place job and the books disagreed until somebody noticed — which is
-  // worse than never pushing, because the first successful push teaches
-  // everyone that the two systems agree.
+  // The whole of it — the refusals 0052 also makes, the void, the jobs and the
+  // Xero follow-up — is `voidOneInvoice`, shared with the test-data clean-up.
   //
-  // The refusal that will actually happen is a paid invoice: Xero will not void
-  // one with payments applied, and it is right not to — that protects a
-  // reconciled bank line. `voidGate` catches it before the request so the
-  // message can name the remedy rather than relay validation text.
-  const voided = await pushVoidToXero(supabase, parsed.data.id, session.tenantId);
-
-  await recordAudit(session, {
-    entity: "invoice", entityId: parsed.data.id, action: "status_change",
-    summary: `voided: ${parsed.data.void_reason}`,
-    metadata: { xero: voided.ok ? "voided" : (voided.skipped ? "skipped" : "refused") },
+  // **Whether the work is billed again is now asked** (brief 1.6). Yes is what
+  // voiding always did: the jobs go back to `approved` with their frozen
+  // charges intact. No takes them out of billing with the void's reason on the
+  // record — the answer for an invoice that should never have been raised.
+  const rebill = parseRebill(formData.get("rebill"));
+  const outcome = await voidOneInvoice(supabase, session, parsed.data.id, {
+    reason: parsed.data.void_reason, rebill,
   });
+  if (!outcome.ok) return fail(backTo, outcome.error);
+
   revalidatePath(backTo);
   revalidatePath("/invoices/awaiting");
 
+  const { release } = outcome;
   const released = !release.ok
     ? `Invoice voided, but its jobs were not all released: ${release.error}`
-    : release.released > 0
-      ? `Invoice voided. ${counted(release.released, "job")} back in the billing queue.`
-      : "Invoice voided.";
+    : release.excluded > 0
+      ? `Invoice voided. ${counted(release.excluded, "job")} will not be billed again.`
+      : release.released > 0
+        ? `Invoice voided. ${counted(release.released, "job")} back in the billing queue.`
+        : "Invoice voided.";
 
   // A refusal the operator has to act on is said as a failure — the void here
   // still happened, and the sentence has to make clear that Xero did not follow.
   // A skip (never pushed, already void there, not connected) is silent.
-  if (!voided.ok && !voided.skipped) {
-    return fail(backTo, `${released} But Xero did not: ${voided.reason}`);
+  if (!outcome.xero.ok && !("skipped" in outcome.xero && outcome.xero.skipped)) {
+    return fail(backTo, `${released} But Xero did not: ${"reason" in outcome.xero ? outcome.xero.reason : ""}`);
   }
   if (!release.ok) return fail(backTo, released);
   return done(backTo, released);

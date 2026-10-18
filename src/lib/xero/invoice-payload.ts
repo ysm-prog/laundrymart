@@ -10,6 +10,8 @@
  * it, so the mapping is the part with tests.
  */
 
+import { xeroPushRefusal } from "@/lib/domain/xero-readiness";
+
 /** Xero rejects a line with no description, so there is always a fallback. */
 const FALLBACK_DESCRIPTION = "Laundry services";
 
@@ -288,6 +290,8 @@ export function payloadTotal(payload: XeroInvoicePayload, gstRate = 0.1): number
  * checked here so the two callers (issuing, and the manual retry) cannot
  * disagree about it.
  */
-export function canPushToXero(status: string): boolean {
-  return status !== "draft" && status !== "void" && status !== "voided";
+export function canPushToXero(status: string, source?: string | null): boolean {
+  // Brief 1.2: an invoice brought in from MYOB is never sent — its history went
+  // into Xero separately. `xeroPushRefusal` is the rule and the sentence.
+  return xeroPushRefusal({ status, source }) === null;
 }

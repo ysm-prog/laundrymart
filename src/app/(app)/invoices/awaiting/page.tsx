@@ -32,6 +32,8 @@ const NO_OVERRIDE: Record<string, never> = {};
 
 /** The two things a reviewer actually sorts this queue by, as one-press chips. */
 const PRICED_OPTIONS = [
+  { value: "needs_price", label: "Needs a price",
+    title: "Jobs the automatic pricing could not finish — something on them has no price yet" },
   { value: "unpriced", label: "Not priced yet",
     title: "Jobs with no charges on them — these cannot be approved until they are priced" },
   { value: "priced", label: "Priced", title: "Jobs with charges, ready to check and approve" },
@@ -71,7 +73,7 @@ export default async function AwaitingInvoicePage({
   const { data: jobs } = await supabase
     .from("laundry_orders")
     .select(
-      "id, order_number, customer_id, status, billing_status, completed_at, due_date, " +
+      "id, order_number, customer_id, status, billing_status, billing_hold_reason, completed_at, due_date, " +
       "customers(id, business_name, billing_method, rate_card_agreement_id)",
     )
     // Named rather than left to RLS (§23). Every id on this screen is posted
@@ -85,7 +87,8 @@ export default async function AwaitingInvoicePage({
     .limit(500)
     .returns<Array<{
       id: string; order_number: string; customer_id: string; status: string;
-      billing_status: string; completed_at: string | null; due_date: string | null;
+      billing_status: string; billing_hold_reason: string | null;
+      completed_at: string | null; due_date: string | null;
       customers: {
         id: string; business_name: string; billing_method: string;
         rate_card_agreement_id: string | null;
@@ -111,6 +114,8 @@ export default async function AwaitingInvoicePage({
       chargeCount: charges.length,
       subtotal: jobChargeSubtotal(charges),
       hasRateCard: Boolean(row.customers?.rate_card_agreement_id),
+      // Only meaningful while the job is in review; approval clears it (0055).
+      needsPrice: row.billing_status === "awaiting_review" && row.billing_hold_reason === "needs_price",
     };
   };
 
@@ -154,6 +159,7 @@ export default async function AwaitingInvoicePage({
     if (term && !`${row.orderNumber} ${row.customerName}`.toLowerCase().includes(term)) return false;
     if (f.customer && row.customerId !== f.customer) return false;
     if (f.method && row.billingMethodValue !== f.method) return false;
+    if (f.priced === "needs_price" && !row.needsPrice) return false;
     if (f.priced === "unpriced" && row.chargeCount > 0) return false;
     if (f.priced === "priced" && row.chargeCount === 0) return false;
     // Resolved once for the common case; only a period override pays for a parse.

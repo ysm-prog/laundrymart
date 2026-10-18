@@ -267,6 +267,8 @@ export default async function JobDetailPage({
         <Suspense fallback={<SkeletonRows rows={3} />}>
           <ChargesCard
             orderId={order.id}
+            orderNumber={order.order_number}
+            needsPrice={order.billing_hold_reason === "needs_price"}
             tenantId={session.tenantId}
             billingStatus={billingStatus}
             operationalStatus={order.status}

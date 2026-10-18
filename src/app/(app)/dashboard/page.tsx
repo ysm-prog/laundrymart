@@ -10,6 +10,7 @@ import {
 } from "@/components/ui";
 import { QuickActions } from "@/components/quick-actions";
 import { parseExceptionNotes } from "@/lib/exceptions";
+import { DEFAULT_AR_TRUSTED_FROM, arTrustedFrom, trustedReceivablesFilter } from "@/lib/domain/receivables";
 import { addDays, businessToday, toInstant } from "@/lib/domain/timezone";
 import {
   PLANT_STAGES, SEVERITY_RULE, SEVERITY_TEXT, sortDecisions, type Decision,
@@ -95,7 +96,7 @@ export default async function DashboardPage({
       {setup && !setup.complete ? <GettingStarted steps={setup.steps} /> : null}
 
       <Suspense fallback={<SkeletonStats count={seesMoney ? 5 : 4} />}>
-        <Kpis date={date} seesMoney={seesMoney} />
+        <Kpis date={date} seesMoney={seesMoney} tenantId={session.tenantId} />
       </Suspense>
 
       {/* Only a round or a driver has a run of their own. The owner and the
@@ -111,7 +112,7 @@ export default async function DashboardPage({
         <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_300px]">
           <div className="space-y-4">
             <Suspense fallback={<SkeletonRows rows={6} />}>
-              <NeedsDecision seesMoney={seesMoney} />
+              <NeedsDecision seesMoney={seesMoney} tenantId={session.tenantId} />
             </Suspense>
             <Suspense fallback={<SkeletonRows rows={2} />}>
               <PlantStages />
@@ -218,11 +219,23 @@ function GettingStarted({ steps }: { steps: SetupStep[] }) {
  * in this schema records a promise per customer, so rather than invent a number
  * the row shows what is ready to leave — something the data can stand behind.
  */
-async function Kpis({ date, seesMoney }: { date: string; seesMoney: boolean }) {
+/**
+ * The day from which an imported invoice counts on Today (brief 1.9). Read once
+ * per render by both the tile and the list, so they cannot disagree.
+ */
+async function trustedFrom(tenantId: string): Promise<string> {
+  const supabase = await createClient();
+  const { data } = await supabase.from("tenants").select("settings").eq("id", tenantId)
+    .maybeSingle<{ settings: unknown }>();
+  return arTrustedFrom(data?.settings);
+}
+
+async function Kpis({ date, seesMoney, tenantId }: { date: string; seesMoney: boolean; tenantId: string }) {
   const supabase = await createClient();
   const head = { count: "exact" as const, head: true };
+  const trusted = seesMoney ? await trustedFrom(tenantId) : DEFAULT_AR_TRUSTED_FROM;
 
-  const [jobsTotal, jobsDone, exceptions, pools, overdue] = await Promise.all([
+  const [jobsTotal, jobsDone, exceptions, pools, overdue, staleDrafts] = await Promise.all([
     supabase.from("jobs").select("id", head).eq("scheduled_date", date),
     supabase.from("jobs").select("id", head).eq("scheduled_date", date).eq("status", "completed"),
     supabase.from("jobs").select("id", head).eq("status", "exception"),
@@ -237,8 +250,18 @@ async function Kpis({ date, seesMoney }: { date: string; seesMoney: boolean }) {
           // not "past terms", and adding negatives in shrank the total.
           .gt("balance", 0.005).neq("invoice_type", "credit")
           .lt("due_date", date).is("deleted_at", null)
+          .eq("tenant_id", tenantId)
+          // Brief 1.9: MYOB history before the trusted day is not counted here.
+          .or(trustedReceivablesFilter(trusted))
           .returns<Array<{ balance: number }>>()
       : Promise.resolve({ data: [] as Array<{ balance: number }> }),
+    // Brief 1.4: drafts whose period has ended — work waiting on somebody to
+    // press Issue. Counted, never issued: nothing here acts on them.
+    seesMoney
+      ? supabase.from("invoices").select("id", head)
+          .eq("tenant_id", tenantId).eq("status", "draft")
+          .not("period_end", "is", null).lt("period_end", date).is("deleted_at", null)
+      : Promise.resolve({ count: 0 }),
   ]);
 
   const total = jobsTotal.count ?? 0;
@@ -251,11 +274,12 @@ async function Kpis({ date, seesMoney }: { date: string; seesMoney: boolean }) {
   const overdueRows = overdue.data ?? [];
   const overdueTotal = overdueRows.reduce((sum, row) => sum + Number(row.balance ?? 0), 0);
   const late = exceptions.count ?? 0;
+  const drafts = staleDrafts.count ?? 0;
 
   return (
     <div className={cx(
       "grid gap-4",
-      seesMoney ? "sm:grid-cols-3 lg:grid-cols-5" : "sm:grid-cols-2 lg:grid-cols-4",
+      seesMoney ? "sm:grid-cols-3 lg:grid-cols-6" : "sm:grid-cols-2 lg:grid-cols-4",
     )}>
       <Stat
         label="Stops today"
@@ -280,8 +304,17 @@ async function Kpis({ date, seesMoney }: { date: string; seesMoney: boolean }) {
         <Stat
           label="Overdue"
           value={money(overdueTotal)}
-          hint={`${counted(overdueRows.length, "invoice")} past terms`}
+          hint={`${counted(overdueRows.length, "invoice")} past terms · MYOB history before ${formatDate(trusted)} not counted`}
           tone={overdueTotal > 0 ? "warning" : "success"}
+        />
+      ) : null}
+      {seesMoney ? (
+        <Stat
+          label="Drafts from a finished period"
+          value={String(drafts)}
+          hint={drafts === 0 ? "nothing waiting to issue" : "waiting for you to issue them"}
+          tone={drafts > 0 ? "warning" : "success"}
+          href="/invoices/drafts"
         />
       ) : null}
     </div>
@@ -315,9 +348,10 @@ type OverdueInvoice = {
  * "exceptions" table: a second record of a problem is a second thing to keep
  * in step with the first.
  */
-async function NeedsDecision({ seesMoney }: { seesMoney: boolean }) {
+async function NeedsDecision({ seesMoney, tenantId }: { seesMoney: boolean; tenantId: string }) {
   const supabase = await createClient();
   const date = today();
+  const trusted = seesMoney ? await trustedFrom(tenantId) : DEFAULT_AR_TRUSTED_FROM;
 
   const [jobs, missing, invoices, vehicles] = await Promise.all([
     supabase.from("jobs")
@@ -337,6 +371,9 @@ async function NeedsDecision({ seesMoney }: { seesMoney: boolean }) {
           // is the list somebody can act on.
           .gt("balance", 0.005).neq("invoice_type", "credit")
           .lt("due_date", date).is("deleted_at", null)
+          .eq("tenant_id", tenantId)
+          // Brief 1.9: the same trusted-from rule as the Overdue tile.
+          .or(trustedReceivablesFilter(trusted))
           .order("balance", { ascending: false }).limit(10)
           .returns<OverdueInvoice[]>()
       : Promise.resolve({ data: [] as OverdueInvoice[] }),

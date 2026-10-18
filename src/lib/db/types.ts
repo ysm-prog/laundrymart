@@ -610,6 +610,12 @@ export type LaundryOrder = {
   billing_approved_by: Uuid | null;
   /** Why this job is out of the billing queue. Required unless it was cancelled. */
   billing_exclusion_reason: string | null;
+  /**
+   * `needs_price` when the automatic pricing at completion could not price all
+   * of the job's laundry (0055, brief 1.3) — the billing queue's Needs a price
+   * list. Optional in the type because rows read before 0055 do not carry it.
+   */
+  billing_hold_reason?: string | null;
 
   /**
    * The collection this job was taken in from (0050).

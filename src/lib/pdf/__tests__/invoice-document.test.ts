@@ -7,8 +7,8 @@ const data: InvoicePdfData = {
   tenant: {
     name: "Harbour Linen Co", abn: "51824753556", gstRate: 0.1,
     profile: {
-      addressLines: ["1 Mill Road", "Adelaide SA 5000"], phone: null, email: null,
-      bankAccountName: "Harbour Linen Co", bsb: "062-000", accountNumber: "12345678",
+      addressLines: ["1 Mill Road", "Adelaide SA 5000"], phone: null, email: null, website: null,
+      bankAccountName: "Harbour Linen Co", bsb: "062-000", accountNumber: "12345678", logoPath: null,
     },
   },
   customer: {
@@ -159,14 +159,17 @@ describe("the service breakdown on a consolidated PDF", () => {
     expect(text.startsWith("%PDF")).toBe(true);
   });
 
-  it("renders nothing extra for a single-job invoice — the lines are the detail", async () => {
+  // Brief 1.10 (gap G15): a job's line now prints the item's name, not
+  // "LJ00032 — Towels — 10", so the breakdown is the one place the job number
+  // is read — and it has to be there on a one-job invoice too.
+  it("prints the breakdown for a single-job invoice as well", async () => {
     const single = await renderInvoicePdf({
-      ...data, breakdown: { ...data.breakdown, jobCount: 1 },
+      ...data, breakdown: { ...data.breakdown, jobCount: 1, weeks: data.breakdown.weeks.slice(0, 1) },
     });
     const none = await renderInvoicePdf({
       ...data, breakdown: { weeks: [], totals: [], jobCount: 0 },
     });
-    expect(single.byteLength).toBe(none.byteLength);
+    expect(single.byteLength).toBeGreaterThan(none.byteLength);
   });
 });
 

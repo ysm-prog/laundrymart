@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { approveJobConfirmation } from "@/lib/domain/confirmations";
 import { createClient } from "@/lib/supabase/server";
 import { attachListPrices } from "@/lib/items/list-prices";
 import type { CodingAccount, CodingItem } from "@/components/coding-pickers";
@@ -31,9 +32,14 @@ import {
  * approval is a read-only record with the frozen numbers on it.
  */
 export async function ChargesCard({
-  orderId, billingStatus, operationalStatus, customerId, role, tenantId, approvedAt,
+  orderId, orderNumber, billingStatus, operationalStatus, customerId, role, tenantId, approvedAt,
+  needsPrice = false,
 }: {
   orderId: string;
+  /** Named in the approval's confirmation (brief 1.6). */
+  orderNumber: string;
+  /** The automatic pricing left something unpriced (`billing_hold_reason`, 0055). */
+  needsPrice?: boolean;
   billingStatus: BillingStatus;
   operationalStatus: string;
   customerId: string;
@@ -75,6 +81,15 @@ export async function ChargesCard({
 
       {billingStatus === "not_billable" ? (
         <Notice tone="warning">This job has been taken out of the billing queue.</Notice>
+      ) : null}
+
+      {billingStatus === "awaiting_review" && needsPrice ? (
+        <Notice tone="warning" title="Needs a price">
+          This job was priced automatically when it was finished, and some of its laundry has
+          no price. Add the missing charge below, or set the price on your{" "}
+          <Link href="/invoices/prices" className="text-primary hover:underline">laundry price list</Link>{" "}
+          and press Re-price this job.
+        </Notice>
       ) : null}
 
       {/* The rate card in play, named. "Why was it this much?" should be
@@ -143,11 +158,21 @@ export async function ChargesCard({
             </form>
 
             {canApprove ? (
-              <form action={approveJobCharges}>
+              <form action={approveJobCharges} className="contents">
                 <input type="hidden" name="id" value={orderId} />
-                <SubmitButton size="md" pendingLabel="Approving…">
-                  Approve {charges.length > 0 ? money(subtotal) : "charges"}
-                </SubmitButton>
+                {charges.length > 0 ? (
+                  // The freeze, so a second press (brief 1.6) — the sentence says
+                  // the amount and that the prices stop being editable.
+                  <ConfirmSubmit
+                    label={`Approve ${money(subtotal)}`}
+                    variant="primary"
+                    eyebrow="Prices freeze when you approve"
+                    consequence={approveJobConfirmation(orderNumber, subtotal)}
+                    pendingLabel="Approving…"
+                  />
+                ) : (
+                  <SubmitButton size="md" pendingLabel="Approving…">Approve charges</SubmitButton>
+                )}
               </form>
             ) : null}
 

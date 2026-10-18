@@ -16,6 +16,7 @@ import { uncodedLineCount } from "@/lib/domain/accounts";
 import { loadInvoiceBreakdown } from "@/lib/invoices/breakdown";
 import { describePeriod } from "@/lib/domain/billing-period";
 import { loadInvoiceSourceJobs } from "@/lib/invoices/open-draft";
+import { voidRebillQuestion } from "@/lib/domain/confirmations";
 import { jobStatusOnInvoice } from "@/lib/domain/billing";
 import type { Invoice, InvoiceLine, Payment } from "@/lib/db/types";
 import {
@@ -31,7 +32,7 @@ import { PrintButton } from "@/components/print-button";
 import { emailIsConfigured } from "@/lib/email/send";
 import {
   addInvoiceLine, createCreditNote, emailInvoice, issueInvoice, recordPayment,
-  removeInvoiceLine, removeJobFromInvoice, reversePayment, setInvoiceLineAccount, voidInvoice,
+  removeInvoiceLine, removeJobFromInvoice, retryXeroPush, reversePayment, setInvoiceLineAccount, voidInvoice,
 } from "../actions";
 
 export const dynamic = "force-dynamic";
@@ -39,6 +40,11 @@ export const dynamic = "force-dynamic";
 type InvoiceDetail = Invoice & {
   void_reason: string | null;
   amount_credited: number;
+  /** What Xero said when it refused this invoice (0026); null once accepted. */
+  xero_push_error: string | null;
+  xero_pushed_at: string | null;
+  /** `app` or `import` (0055). */
+  source: string | null;
   customers: {
     business_name: string; customer_number: string; abn: string | null;
     billing_address_line1: string | null; billing_suburb: string | null;
@@ -61,6 +67,7 @@ export default async function InvoiceDetailPage({
     .select("id, invoice_number, customer_id, invoice_type, status, issue_date, due_date, " +
             "period_start, period_end, purchase_order_number, payment_terms_days, subtotal, " +
             "tax_amount, total, amount_paid, amount_credited, balance, notes, void_reason, emailed_at, emailed_to, " +
+            "xero_push_error, xero_pushed_at, source, " +
             "customers(business_name, customer_number, abn, billing_address_line1, billing_suburb, " +
             "billing_state, billing_postcode, billing_email)")
     .eq("id", id)
@@ -72,14 +79,25 @@ export default async function InvoiceDetailPage({
 
   // What stands between this invoice and being voided (0052), and what the
   // tax invoice is missing about the business that issues it.
-  const [{ count: paymentCount }, { count: creditNoteCount }, { data: tenantRow }] = await Promise.all([
+  const [{ count: paymentCount }, { count: creditNoteCount }, { data: tenantRow }, { data: sourceRows }] = await Promise.all([
     supabase.from("payments").select("id", { count: "exact", head: true })
       .eq("invoice_id", id).eq("tenant_id", session.tenantId),
     supabase.from("credit_notes").select("id", { count: "exact", head: true })
       .eq("invoice_id", id).eq("tenant_id", session.tenantId).in("status", ["issued", "applied"]),
     supabase.from("tenants").select("abn, settings").eq("id", session.tenantId)
       .maybeSingle<{ abn: string | null; settings: unknown }>(),
+    // The jobs a void would release — named in its question (brief 1.6).
+    supabase.from("invoice_source_jobs").select("order_id")
+      .eq("invoice_id", id).eq("tenant_id", session.tenantId)
+      .returns<Array<{ order_id: string }>>(),
   ]);
+  const sourceIds = (sourceRows ?? []).map((row) => row.order_id);
+  const { data: sourceJobs } = sourceIds.length === 0
+    ? { data: [] as Array<{ order_number: string }> }
+    : await supabase.from("laundry_orders").select("order_number")
+        .in("id", sourceIds).eq("tenant_id", session.tenantId).order("order_number")
+        .returns<Array<{ order_number: string }>>();
+  const rebillQuestion = voidRebillQuestion((sourceJobs ?? []).map((job) => job.order_number));
   const voidBlocked = voidRefusal({
     status: invoice.status, amountPaid: Number(invoice.amount_paid),
     paymentCount: paymentCount ?? 0, creditNoteCount: creditNoteCount ?? 0,
@@ -144,6 +162,26 @@ export default async function InvoiceDetailPage({
         <Notice tone="danger" title="This invoice is void">
           {invoice.void_reason ?? "No reason recorded."}
         </Notice>
+      ) : null}
+
+      {/* Brief 1.2: a Xero refusal is shown on the invoice it belongs to, with the
+          retry beside it — issuing never waits on Xero, so this is where it is found. */}
+      {invoice.xero_push_error ? (
+        <Notice tone="warning" title="Xero did not accept this invoice">
+          <span className="block">{invoice.xero_push_error}</span>
+          {writable ? (
+            <form action={retryXeroPush} className="mt-2">
+              <input type="hidden" name="id" value={id} />
+              <SubmitButton variant="secondary" size="md" pendingLabel="Retrying…">Retry sending to Xero</SubmitButton>
+            </form>
+          ) : null}
+        </Notice>
+      ) : null}
+
+      {invoice.source === "import" ? (
+        <p className="text-sm text-muted-foreground">
+          Brought in from MYOB. Its history went into Xero separately, so it is never sent from here.
+        </p>
       ) : null}
 
       {/* A running draft says so, because the number on screen is not final and
@@ -241,7 +279,18 @@ export default async function InvoiceDetailPage({
                       <Input name="to" type="email"
                              placeholder={invoice.customers?.billing_email ?? "accounts@customer.com.au"} />
                     </Field>
-                    <SubmitButton>Email invoice</SubmitButton>
+                    {/* The email leaves at once (brief 1.6 — the Help page promised a
+                        confirmation here before there was one). */}
+                    <ConfirmSubmit
+                      label="Email invoice"
+                      variant="primary"
+                      eyebrow="The email leaves straight away"
+                      consequence={`Send ${invoice.invoice_number} to ${invoice.customers?.billing_email
+                        ? `${invoice.customers.billing_email}, or the address above if you typed one`
+                        : "the address above"}? Once it has gone it cannot be called back.`}
+                      cancelLabel="Not yet"
+                      pendingLabel="Sending…"
+                    />
                   </form>
                 )}
               </Card>
@@ -267,6 +316,14 @@ export default async function InvoiceDetailPage({
                   reasonName="void_reason"
                   reasonLabel="Why is it being voided?"
                   pendingLabel="Voiding…"
+                  choice={rebillQuestion ? {
+                    name: "rebill",
+                    legend: rebillQuestion,
+                    options: [
+                      { value: "yes", label: "Yes — bill the work again" },
+                      { value: "no", label: "No — it should not be billed" },
+                    ],
+                  } : undefined}
                 />
               </form>
             ) : null}

@@ -460,6 +460,32 @@ export function receivedInstant(date: string, existing?: string | null): string 
   return toInstant(date, time);
 }
 
+/**
+ * How far ahead of now a receipt may be (brief 1.5): fifteen minutes, the
+ * drift allowed between a counter tablet's clock and the server's.
+ * `guard_laundry_order_received_at` (0055) is the boundary and uses the same
+ * figure.
+ */
+export const RECEIVED_FUTURE_TOLERANCE_MINUTES = 15;
+
+/**
+ * Whether a receipt is dated in the future — `LJ00031`, created on 17 October
+ * as received on the 19th. Compares instants, so the business timezone only
+ * matters to whoever composed the instant (`receivedInstant`, in Adelaide).
+ */
+export function receivedInFuture(instant: string, now: Date = new Date()): boolean {
+  const at = Date.parse(instant);
+  return Number.isFinite(at) && at > now.getTime() + RECEIVED_FUTURE_TOLERANCE_MINUTES * 60_000;
+}
+
+/** The instant past which a receipt is in the future — what the Data checks report filters on. */
+export function futureReceiptCutoff(now: Date = new Date()): string {
+  return new Date(now.getTime() + RECEIVED_FUTURE_TOLERANCE_MINUTES * 60_000).toISOString();
+}
+
+export const RECEIVED_IN_FUTURE_MESSAGE =
+  "The received date is in the future. Laundry can only be recorded as received today or earlier.";
+
 export const DELIVERY_WINDOWS = ["morning", "afternoon", "specific_time", "no_specific_time"] as const;
 export type DeliveryWindow = (typeof DELIVERY_WINDOWS)[number];
 export const DELIVERY_WINDOW_LABELS: Record<DeliveryWindow, string> = {
