@@ -9,8 +9,9 @@ import { done, fail, returnTo } from "@/lib/actions";
 import { counted, money } from "@/lib/format";
 import { approveJob, priceAndSaveJob } from "@/lib/orders/job-billing";
 import { placeApprovedJobs } from "@/lib/orders/approve";
-import { issueOneInvoice } from "@/lib/invoices/issue";
+import { INVOICE_SETTINGS_LINK, issueOneInvoice, loadIssueReadiness } from "@/lib/invoices/issue";
 import { sendInvoice } from "@/lib/invoices/send";
+import { can } from "@/lib/roles";
 
 /**
  * Bulk billing: approve a selection, invoice a selection, send a selection.
@@ -356,12 +357,21 @@ export async function issueSelectedInvoices(formData: FormData): Promise<void> {
 
   const supabase = await createClient();
 
+  // Once, before the loop (brief 1.1): a laundry with no ABN, address or bank
+  // details cannot issue any of them, and forty identical refusals say less than
+  // one sentence naming what to add.
+  const mayEditSettings = can(session.role, "admin.write");
+  const readiness = await loadIssueReadiness(supabase, session.tenantId, mayEditSettings);
+  if (readiness.blocked) {
+    return fail(back, readiness.blocked, mayEditSettings ? INVOICE_SETTINGS_LINK : undefined);
+  }
+
   const issued: string[] = [];
   const failed: string[] = [];
   let xeroFailures = 0;
 
   for (const id of ids) {
-    const result = await issueOneInvoice(supabase, session, id);
+    const result = await issueOneInvoice(supabase, session, id, readiness);
     if (!result.ok) {
       failed.push(result.error);
       continue;

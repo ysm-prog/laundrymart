@@ -602,6 +602,17 @@ key remains the way to reset or re-assert them through the Auth API, but nothing
   `ready_for_dispatch`, and cannot be reopened once finished (`guard_batch_transition`). Its
   manifest freezes when it leaves receiving — only `rejected_quantity` and notes stay writable
   (`guard_batch_line_change`), because everything else drove a stock movement.
+- **A draft becomes a tax invoice only once the laundry's invoice details are complete**
+  (`guard_invoice_issue`, 0053; brief 1.1). Moving an invoice out of `draft` into anything but
+  `void` needs an ABN that passes the **ATO checksum** (not just eleven digits), a line of
+  business address and **all three** bank details — read from `tenants.abn` and
+  `tenants.settings.invoiceProfile`. INV00008 was issued on 18 October with all of them empty and
+  printed "TAX INVOICE" anyway. `issueGaps` in `lib/domain/invoice-profile.ts` is the same rule in
+  TypeScript, `issueOneInvoice` applies it before it reads or writes anything, and every Issue
+  button is drawn disabled with the remedy beside it, so the trigger is the boundary rather than
+  the message. **An INSERT is not guarded**, deliberately: the MYOB import writes its history
+  straight in as `issued`/`paid`, and every invoice this app raises is opened as a draft. Voiding
+  a draft stays open whatever the settings say.
 
 ## 5. Branch & deploy
 Feature branch → `Dev` → `Prod`. CI (`Prod`/`Dev`) runs verify, gitleaks and the DB job
@@ -1218,7 +1229,7 @@ produce on demand.
   the column *and* 0032's `item_id`, still INVOKER, `anon`/`authenticated` EXECUTE, RLS on and
   no `anon` grant, 0025's restrictive layer present). `laundry_item_ownership.test.sql` (7)
   proves the round trip and was confirmed to fail on a database without 0051.
-  **Written, not applied** (§11).
+  Applied on 2026-10-12 (§11).
 - `0052_invoice_money_guards` — **a credit note counts, and a paid invoice stays paid.**
   From the 2026-10-12 end-to-end test (INV00006, CN00001/CN00002).
   `invoices.amount_credited` (sum of issued/applied credit notes, kept by the
@@ -1238,7 +1249,24 @@ produce on demand.
   admin's**, so Settings › Notifications had been writing zero rows for an Owner and saying
   "saved". **Backfills `amount_credited` from existing credit notes; on the live project that
   is INV00006 alone.** Seven self-assertions; `invoice_money_guards.test.sql` (20).
-  **Written, not applied** (§11).
+  Applied on 2026-10-12 (§11).
+- `0053_tax_invoice_issue_guard` — **a draft becomes a tax invoice only when the laundry's
+  invoice details are complete** (brief 1.1, gap G1). `guard_invoice_issue()` and its BEFORE
+  UPDATE OF status trigger on `invoices`: `draft` → anything but `draft`/`void` is refused unless
+  `tenants.abn` passes the ATO weighted checksum (computed in SQL, nested so no character is cast
+  before the eleven-digit check), `invoiceProfile.addressLines` has a non-blank line and
+  `bankAccountName`, `bsb` and `accountNumber` are all set. Raises **P0001** naming only what is
+  missing, so the toast reads *"INV00008 cannot be issued until the laundry's invoice details are
+  complete: add your bank details in Settings › Invoicing"*. Malformed JSON reads as missing,
+  never as an error. SECURITY DEFINER (reads the tenant row whatever the caller's RLS shows),
+  revoked from `public, anon` **and `authenticated`**. **Adds one function and one trigger; no
+  table, column, policy or capability; changes no row.** Five structural self-assertions plus a
+  behavioural one against a probe laundry where the database can be given one (skipped where
+  0041's single-laundry switch is on, i.e. live), each confirmed to fire by breaking what it
+  guards. `invoice_issue_guard.test.sql` (16) — confirmed to fail on a database without 0053.
+  **Three existing proofs issue drafts** (`charge_accounts`, `gst_inclusive`,
+  `open_draft_invoices`) and now give their laundry a complete invoice profile first, with a
+  comment saying why. **Written, NOT applied** (§11).
 - `0050_pickup_to_job` — **a collection becomes a laundry job, exactly once.**
   `laundry_orders.source_pickup_id` (`on delete set null`),
   `uq_laundry_orders_source_pickup` (partial unique) and
@@ -1523,7 +1551,7 @@ Proofs in `supabase/tests/`: `rls_isolation`, `rls_coverage`, `driver_scope`,
 `audit_log_scope`, `run_sequence`, `accounts_scope`, `open_draft_invoices`,
 `single_laundry`, `charge_accounts`, `gst_inclusive`, `collection_schedule`,
 `customer_record_scope`, `fleet_scope`, `pickup_intake`, `laundry_item_ownership`,
-`invoice_money_guards` (**639 assertions** across 34 files).
+`invoice_money_guards`, `invoice_issue_guard` (**655 assertions** across 35 files).
 
 **Count assertions, not lines starting with `ok`.** pgTAP's function is literally named `ok`, so
 psql prints a centred `ok` **column header** above each result — and `grep -c '^\s*ok '` counts
@@ -2228,6 +2256,17 @@ reports six false gaps.
   `set_records_archived`, `sync_invoice_line_account`, `tenant_members`). That is the 0042 trap
   leaving its usual trace: text typed into `apply_migration` reformatted a little against the file.
   Worth knowing before anybody reads a raw `md5(prosrc)` mismatch as drift.
+
+**`0053_tax_invoice_issue_guard` is NOT applied to `laundrymart-syd`** (2026-10-18), written on
+`claude/relaxed-faraday-4ey58h` under Darshan's instruction not to touch the live database. Unlike
+0051/0052 the code does not *depend* on it — `issueOneInvoice` refuses first — so merging before
+it is applied is safe; what is missing until then is the boundary under a direct
+`update invoices set status = 'issued'`. **Apply it with the SQL editor** (its probe block holds a
+`delete`, which is what times the connector out). Live, the probe is skipped because 0041's
+single-laundry switch is on, and the structural assertions stand alone. After applying, the
+expected live behaviour is the brief's: **every Issue is refused with "add your bank details"**
+until they are entered, because the ABN (`69 892 278 164`, which passes the checksum) and the
+address are set and the bank details are not.
 
 **`0051_laundry_item_ownership` and `0052_invoice_money_guards` were applied on 2026-10-12**
 (`20261012033302`, `20261012033303`) — by Darshan, pasted into the Supabase SQL editor, because
@@ -3442,6 +3481,37 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-10-18 · Darshan's BA review, Phase 1: a valid tax invoice before Issue
+From Darshan's BA review and end-to-end test of `ats.coreit.com.au` on 18 October (test customer
+CUST00515 *ZZ TEST – Claude BA*, job LJ00032, INV00008 issued then voided). Branch
+`claude/relaxed-faraday-4ey58h`, off `Dev`. Gap numbers are the review's.
+
+**1.1 — Issue is blocked until the invoice is a valid tax invoice (G1).** INV00008 was issued and
+its PDF printed "TAX INVOICE" with no ABN, no business address and no bank details, because
+Settings › Invoicing was empty and nothing checked.
+- **One rule, `issueGaps`** (`lib/domain/invoice-profile.ts`): an ABN that passes the **ATO
+  checksum** (the save action now refuses a failing one too — eleven digits was all it checked),
+  an address line, and all three bank details. `issueBlockedReason` is the sentence — *"Add your
+  bank details in Settings › Invoicing before issuing."* — and tells a role that cannot open
+  Settings who can.
+- **Every issue path goes through it.** `issueOneInvoice` checks before it reads or writes
+  anything, so the single Issue, Issue now on the drafts board, Issue Selected and the drafts
+  board's bulk list all refuse; the bulk action checks once, before its loop, rather than
+  reporting forty identical refusals. `issue-gate.test.ts` reads the source and fails if a second
+  module writes an invoice to `issued` or the check moves after the write (both confirmed by
+  mutation).
+- **The buttons are disabled with the reason**, not removed: `IssueControl` on the invoice page,
+  the register's pane and each drafts card; `InvoiceSelection` on both bulk lists. A missing
+  button reads as "this invoice cannot be issued"; a disabled one with the sentence reads as "the
+  laundry is not set up yet", which is the truth. The Owner gets a link to Settings › Invoicing.
+- **`guard_invoice_issue` (0053) is the boundary underneath**, for a direct
+  `update invoices set status = 'issued'` — §4 and §7 have the rule. **Written, NOT applied.**
+- **Issuing now asks first (1.6, done here because it is the same button).** The single control
+  is a `ConfirmSubmit` naming the number and the total — *"Issue INV00008 for $25.08? It can't be
+  undone…"* — and the bulk lists confirm with the count and the total before posting.
+- With today's live settings (ABN and address set, no bank details) every Issue will read *"Add
+  your bank details in Settings › Invoicing before issuing."* — the brief's expected state.
+
 ### 2026-10-12 · Merged and deployed: Jay's ATS changes and the end-to-end gap fixes
 Approved by Darshan. **#77** (`claude/ats-jay-changes`) and **#78** (`claude/e2e-gap-fixes`) were
 merged into `Dev`, and `Dev` was then promoted to `Prod` through #79. Both entries below this one

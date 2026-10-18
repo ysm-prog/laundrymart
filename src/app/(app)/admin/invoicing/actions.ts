@@ -7,6 +7,7 @@ import { createClient } from "@/lib/supabase/server";
 import { recordAudit } from "@/lib/audit";
 import { describeDbError, done, fail, firstIssue, toObject } from "@/lib/actions";
 import { normaliseAbn, normaliseBsb } from "@/lib/domain/invoice-profile";
+import { isValidAbn } from "@/lib/domain/abn";
 
 const BACK = "/admin/invoicing";
 
@@ -32,6 +33,12 @@ export async function saveInvoiceProfile(formData: FormData): Promise<void> {
 
   const abn = d.abn ? normaliseAbn(d.abn) : null;
   if (d.abn && !abn) return fail(BACK, "An ABN is 11 digits — check the number and try again.");
+  // Eleven digits is not enough (brief 1.1): issuing checks the ATO checksum, and
+  // a transposed ABN saved here would block every invoice with nothing on this
+  // screen saying why. Refused at the door instead, in the same words.
+  if (abn && !isValidAbn(abn)) {
+    return fail(BACK, "That ABN does not pass the ATO check — one of the digits is wrong. Check it against the ABN Lookup and try again.");
+  }
   const bsb = d.bsb ? normaliseBsb(d.bsb) : null;
   if (d.bsb && !bsb) return fail(BACK, "A BSB is 6 digits, like 062-000.");
   const accountNumber = d.account_number.replace(/\s/g, "");

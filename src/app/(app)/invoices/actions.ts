@@ -32,7 +32,8 @@ import { generateInvoicesForJobs } from "@/lib/invoices/from-jobs";
 import { describeWorkAwaitingApproval } from "@/lib/domain/billing";
 import { findOrOpenDraft, rebuildJobLines, removeJobFromDraft } from "@/lib/invoices/open-draft";
 import { loadChargesForJobs } from "@/lib/orders/job-billing";
-import { issueOneInvoice } from "@/lib/invoices/issue";
+import { INVOICE_SETTINGS_LINK, issueOneInvoice } from "@/lib/invoices/issue";
+import { can } from "@/lib/roles";
 import {
   releaseVoidedInvoiceJobs, resettleInvoice, sendInvoice,
 } from "@/lib/invoices/send";
@@ -941,6 +942,12 @@ export async function issueInvoice(formData: FormData): Promise<void> {
   revalidatePath(`/invoices/${id.data}`);
   revalidatePath("/invoices");
 
+  // Missing invoice details (brief 1.1) are said as the whole sentence, with the
+  // screen that fixes them for the one role that can open it.
+  if (!issued.ok && issued.blocked) {
+    return fail(backTo, issued.error,
+                can(session.role, "admin.write") ? INVOICE_SETTINGS_LINK : undefined);
+  }
   if (!issued.ok) return fail(backTo, `This invoice could not be issued — ${issued.error}.`);
   if (issued.xero === "pushed") return done(backTo, "Invoice issued and sent to Xero.");
   // A laundry that has not connected Xero is not failing at anything.

@@ -34,6 +34,15 @@ insert into auth.users (id, email) values
 insert into public.tenants (id, name) values
   ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','Laundry A'),
   ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb','Laundry B');
+-- Since 0053 a draft becomes a tax invoice only for a laundry whose ABN, address
+-- and bank details are set (brief 1.1), so this laundry has them: what this file
+-- proves happens after an issue, not whether one is allowed.
+update public.tenants
+   set abn = '51824753556',
+       settings = jsonb_build_object('invoiceProfile', jsonb_build_object(
+         'addressLines', jsonb_build_array('1 Mill Road', 'Adelaide SA 5000'),
+         'bankAccountName', 'Laundry A', 'bsb', '062-000', 'accountNumber', '12345678'))
+ where id in ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb');
 insert into public.memberships (user_id, tenant_id, role) values
   ('11111111-1111-1111-1111-111111111111','aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','super_admin'),
   ('33333333-3333-3333-3333-333333333333','aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','driver'),

@@ -1,5 +1,7 @@
 import { canTakePayment, creditRefusal, voidRefusal } from "@/lib/domain/payment-gate";
-import { invoiceProfileGaps, parseInvoiceProfile } from "@/lib/domain/invoice-profile";
+import {
+  invoiceProfileGaps, issueBlockedReason, issueGaps, parseInvoiceProfile,
+} from "@/lib/domain/invoice-profile";
 import { Suspense } from "react";
 import { notFound } from "next/navigation";
 import { requireCapability } from "@/lib/auth/context";
@@ -23,6 +25,7 @@ import {
 import { ConfirmSubmit } from "@/components/confirm-submit";
 import { Checkbox, Field, Input, Select, SubmitButton } from "@/components/form";
 import { InvoiceLineForm, type LineFormAccount, type LineFormItem } from "./line-form";
+import { IssueControl } from "../issue-control";
 import { LineCode, LineCoding } from "./line-coding";
 import { PrintButton } from "@/components/print-button";
 import { emailIsConfigured } from "@/lib/email/send";
@@ -81,7 +84,12 @@ export default async function InvoiceDetailPage({
     status: invoice.status, amountPaid: Number(invoice.amount_paid),
     paymentCount: paymentCount ?? 0, creditNoteCount: creditNoteCount ?? 0,
   });
-  const profileGaps = invoiceProfileGaps(tenantRow?.abn ?? null, parseInvoiceProfile(tenantRow?.settings));
+  const profile = parseInvoiceProfile(tenantRow?.settings);
+  const profileGaps = invoiceProfileGaps(tenantRow?.abn ?? null, profile);
+  // Brief 1.1: a draft cannot be issued until the laundry's ABN, address and bank
+  // details are set. The same rule `issueOneInvoice` and 0053's guard apply.
+  const mayEditSettings = can(session.role, "admin.write");
+  const issueBlocked = issueBlockedReason(issueGaps(tenantRow?.abn ?? null, profile), mayEditSettings);
   const creditableNow = Math.max(0, Math.round(
     (Number(invoice.total) - Number(invoice.amount_paid) - Number(invoice.amount_credited ?? 0)) * 100) / 100);
   const emailConfigured = emailIsConfigured();
@@ -117,10 +125,16 @@ export default async function InvoiceDetailPage({
         }
       />
 
+      {/* A draft says it cannot be issued yet (brief 1.1); a document already
+          issued — an imported MYOB header, say — says what its print lacks. */}
       {profileGaps.length > 0 && invoice.invoice_type !== "credit" ? (
-        <Notice tone="warning" title="The printed invoice is missing details">
-          It does not yet show {profileGaps.join(", ")}.{" "}
-          {can(session.role, "admin.write")
+        <Notice tone="warning"
+                title={invoice.status === "draft"
+                  ? "This invoice cannot be issued yet"
+                  : "The printed invoice is missing details"}>
+          {invoice.status === "draft" ? "A tax invoice needs" : "It does not yet show"}{" "}
+          {profileGaps.join(", ")}.{" "}
+          {mayEditSettings
             ? <a className="underline" href="/admin/invoicing">Add them in Settings › Invoicing.</a>
             : "Ask the owner to add them in Settings › Invoicing."}
         </Notice>
@@ -235,10 +249,10 @@ export default async function InvoiceDetailPage({
               <Card title="Issue and void">
                 <div className="flex flex-wrap gap-2">
                   {invoice.status === "draft" ? (
-                    <form action={issueInvoice}>
-                      <input type="hidden" name="id" value={id} />
-                      <Button variant="primary">Issue invoice</Button>
-                    </form>
+                    <IssueControl invoiceId={id} invoiceNumber={invoice.invoice_number}
+                                  total={Number(invoice.total)} action={issueInvoice}
+                                  blocked={issueBlocked}
+                                  settingsHref={mayEditSettings ? "/admin/invoicing" : null} />
                   ) : null}
             </div>
             {invoice.status !== "void" && voidBlocked ? (

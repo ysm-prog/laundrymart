@@ -75,6 +75,7 @@ import { money } from "@/lib/format";
 import { QuickActions } from "@/components/quick-actions";
 import { AddPersonCard } from "@/app/(app)/admin/users/page";
 import { DraftCard } from "@/app/(app)/invoices/drafts/draft-card";
+import { issueBlockedReason } from "@/lib/domain/invoice-profile";
 import type { DraftSummary } from "@/lib/invoices/open-draft";
 
 export const metadata = { title: "Design preview" };
@@ -1122,6 +1123,30 @@ export default function DesignPreviewPage() {
                            returnTo="/invoices/drafts" />
               ))}
             </div>
+            {/* Brief 1.1: a laundry missing its bank details cannot issue at all,
+                so Issue is drawn disabled with the remedy beside it rather than
+                left off — which would read as "this draft cannot be issued". */}
+            <div id="issue-blocked-preview" className="grid gap-4 sm:grid-cols-2">
+              {PREVIEW_OPEN_DRAFTS.slice(0, 1).map(({ draft, stage }) => (
+                <DraftCard key={draft.id} draft={draft} stage={stage} mayIssue
+                           issueAction={async () => { "use server"; }}
+                           returnTo="/invoices/drafts"
+                           issueBlocked={issueBlockedReason(["bank"])}
+                           settingsHref="/admin/invoicing" />
+              ))}
+              <Card title="Issue several at once (blocked)">
+                <InvoiceSelection
+                  invoices={PREVIEW_DRAFTS}
+                  returnTo="/invoices/drafts"
+                  action={async () => { "use server"; }}
+                  verb="Issue selected"
+                  pendingLabel="Issuing…"
+                  selectAllLabel="Select every draft on screen"
+                  confirmIssue
+                  blocked={issueBlockedReason(["bank"], false)}
+                />
+              </Card>
+            </div>
           </section>
 
           <section id="billing-review-preview" className="space-y-6 border-t pt-8">
@@ -1157,6 +1182,7 @@ export default function DesignPreviewPage() {
                 verb="Issue selected"
                 pendingLabel="Issuing…"
                 selectAllLabel="Select every draft listed"
+                confirmIssue
               />
             </Card>
 
