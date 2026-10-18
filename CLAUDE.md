@@ -1800,6 +1800,10 @@ saying the gate had stopped running.
   `vi.mock`, `vi.fn` or `vi.spyOn` at all** — 0 files, because every test is over a pure rule; and
   it drops the `sequential` option, which `vitest.config.mts` never set. The one file that touches
   the test runtime at all is `adelaide.test.ts` with `vi.useFakeTimers()`, and it passes.
+  **No longer true of the mocks since 2026-10-18**: four `*-mocked.test.ts` files now use `vi.mock`
+  for the Xero and email boundaries (§18, Phase 3 follow-up). Each calls `vi.clearAllMocks()` in
+  its own `afterEach` and re-arms what it needs in `beforeEach`, so vitest 5's clearing default is
+  what they assume rather than something they trip over.
 - **It is a smaller install, not a larger one.** **576 → 569** packages, measured as package sets
   per the rule below: vitest 5 absorbs `@vitest/expect`, `@vitest/runner`, `@vitest/snapshot`,
   `@vitest/utils` and `@vitest/pretty-format` into itself. `vite` did not move (8.2.2, already
@@ -3645,6 +3649,39 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-10-18 · Xero and email, mocked: the last of the brief's test rules
+Ground rule 5 of Darshan's brief — *"No email and no Xero calls from tests. Mock both"* — and
+section 5's *"the mocked Xero payload has `LineAmountTypes = Inclusive` and the right account
+codes"*. Phase 1 recorded this as not done, because the suite had no fetch mocking. Branch
+`claude/relaxed-faraday-4ey58h-mocks`, stacked on Phase 3. **Tests only: no migration, and no
+change to `src/` outside `src/test-support/` and four test files.**
+
+- **`src/test-support/fake-supabase.ts`** answers each table from a function and records every
+  write and every filter, so a test can assert what the flow stored *and* that each read named its
+  tenant (§23). It does not evaluate filters; it is a recorder, not a database.
+- **`xero/push-mocked.test.ts` (10).** The request `pushInvoiceToXero` really sends, `fetch`
+  stubbed: one ACCREC to `/Invoices` with the bearer token and the Xero org header,
+  `LineAmountTypes: Inclusive`, and each line coded **its own account, then its item's, then the
+  laundry's default** through the real embed shapes (object *and* single-element array). The Xero
+  id and the contact are written back; a retry carries `InvoiceID`; a 400's validation message is
+  written to `xero_push_error`. And four ways **nothing is sent**: an import, a draft or void, no
+  connection (recorded nowhere, because it is not a failure), and an account in use with no Xero
+  code (recorded, because it is).
+- **`xero/push-payment-mocked.test.ts` (3).** A payment posts against the Xero invoice into the
+  chosen bank account with **its own id as the `Idempotency-Key`**; one already in Xero, one whose
+  invoice is not there, and one with no bank account chosen send nothing.
+- **`email/send-mocked.test.ts` (4).** Resend replaced at the module: an unconfigured deployment
+  never constructs the client; a configured one hands it the laundry's name, the reply-to and the
+  PDF; a refusal and a thrown network error both come back as a sentence, not a throw.
+- **`invoices/send-mocked.test.ts` (5).** `sendInvoice` with the transport, PDF and audit
+  mocked: a draft and a void are never emailed; a sent invoice stamps `emailed_to` under its tenant
+  and **only then** moves its jobs to `invoice_sent`, filtered to `invoice_generated` so a paid job
+  is never dragged back; a bounce is audited as `send_failed` and moves nothing.
+- **Each guard was broken on purpose and the right test failed:** `LineAmountTypes` flipped to
+  Exclusive, the import refusal removed, the draft refusal removed, the idempotency key removed.
+- **Still not covered:** the void push (`push-void.ts`) and the token refresh (`tokens.ts`), both
+  still tested as pure rules only, and a real Xero, which no test should reach.
+
 ### 2026-10-18 · Darshan's BA review, Phase 3: fewer screens, one next step
 Items 3.1–3.10 of the brief, on `claude/relaxed-faraday-4ey58h-phase3`, stacked on Phase 2 (#85).
 Written in one pass under the same instruction as Phases 1 and 2: no per-item proofs or browser
@@ -3942,7 +3979,7 @@ invoices never pushed (`invoices.source`, 0055 — the importer now writes `impo
 error on the invoice and on a **Xero problems** list with Retry, and `LineAmountTypes = Inclusive`
 pinned with $25.08 / $2.28. **Not done: a mocked end-to-end push test** — this suite has no fetch
 mocking, so the payload, the gate and the import rule are tested as pure rules and the request
-itself is not.
+itself is not. *(Done on 2026-10-18 — see "Xero and email, mocked" above.)*
 
 **1.8 — A test-data clean-up, dry run first (G10).** On Settings › Your records. The person types
 the customers (exact name or customer number; a hyphen matches an en dash); the dry run lists, per
