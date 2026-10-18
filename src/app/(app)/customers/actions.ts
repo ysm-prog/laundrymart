@@ -238,3 +238,76 @@ export async function archiveCustomer(formData: FormData): Promise<void> {
   revalidatePath("/customers");
   return done("/customers", "Customer archived.");
 }
+
+/* ---------------------------------------------------------- set round, bulk */
+
+/**
+ * Put a selection of customers on a round and a weekday at once (brief 2.2).
+ *
+ * "Ready means assigned" only works for a customer who has a round, and on the
+ * live laundry that was **2 of 513** — so without this the automatic
+ * assignment would have had almost nothing to act on, and setting each one
+ * meant opening 511 edit forms. One request, one UPDATE, capped at 200 like the
+ * billing bulk actions and refused rather than truncated past it.
+ *
+ * `guard_customer_collection_board` (0047) still judges the board — another
+ * laundry's, a retired one or an unknown id is refused out loud. Choosing "No
+ * round" clears both columns, which is how a customer comes off a standing
+ * collection.
+ */
+const MAX_ROUND_SELECTION = 200;
+
+const setRoundSchema = z.object({
+  board_id: z.union([z.literal(""), z.string().uuid("Choose a round.")]),
+  weekday: z.union([z.literal(""), z.coerce.number().int().min(1).max(7)]),
+});
+
+export async function setCustomersRound(formData: FormData): Promise<void> {
+  const session = await assertCapability("customers.write");
+  const back = returnTo(formData, "/customers");
+
+  const ids = z.array(z.string().uuid()).safeParse(
+    formData.getAll("selected").filter((value): value is string => typeof value === "string"),
+  );
+  if (!ids.success) return fail(back, "That selection could not be read. Please try again.");
+  const selected = [...new Set(ids.data)];
+  if (selected.length === 0) return fail(back, "Tick at least one customer.");
+  if (selected.length > MAX_ROUND_SELECTION) {
+    return fail(back, `Set the round for ${MAX_ROUND_SELECTION} customers or fewer at a time.`);
+  }
+
+  const parsed = setRoundSchema.safeParse({
+    board_id: formData.get("board_id") ?? "", weekday: formData.get("weekday") ?? "",
+  });
+  if (!parsed.success) return fail(back, firstIssue(parsed.error));
+  const boardId = parsed.data.board_id || null;
+  const weekday = parsed.data.weekday === "" ? null : parsed.data.weekday;
+  if (boardId && weekday === null) {
+    return fail(back, "Choose the day of the week this round calls.");
+  }
+
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("customers")
+    .update({ collection_board_id: boardId, collection_weekday: boardId ? weekday : null })
+    .in("id", selected)
+    .eq("tenant_id", session.tenantId)
+    .select("id");
+  if (error) return fail(back, describeDbError(error));
+
+  const changed = data?.length ?? 0;
+  await recordAudit(session, {
+    entity: "customer", action: "update",
+    summary: boardId
+      ? `round set for ${changed} customer(s)`
+      : `round cleared for ${changed} customer(s)`,
+    metadata: { boardId, weekday, customers: changed },
+  });
+
+  revalidatePath("/customers");
+  revalidatePath("/runs/collections");
+  if (changed === 0) return fail(back, "None of those customers could be changed.");
+  return done(back, boardId
+    ? `Round set for ${changed} ${changed === 1 ? "customer" : "customers"}. Their jobs now go onto it as soon as they are ready.`
+    : `Round cleared for ${changed} ${changed === 1 ? "customer" : "customers"}.`);
+}

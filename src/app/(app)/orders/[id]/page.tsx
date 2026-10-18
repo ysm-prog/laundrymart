@@ -16,6 +16,7 @@ import {
 import { businessToday } from "@/lib/domain/timezone";
 import { isBillingStatus } from "@/lib/domain/billing";
 import type { LaundryOrder, LaundryOrderActivity, LaundryOrderItem } from "@/lib/db/types";
+import { DeliveryProof } from "@/components/delivery-proof";
 import {
   Badge, ButtonLink, Card, DataTable, EmptyState, Eyebrow,
   Notice, PageHeader, SkeletonRows, StatusBadge, humanise,
@@ -94,6 +95,21 @@ export default async function JobDetailPage({
   // stays readable, because looking is exactly what that role is for; what
   // changes is that it now says so.
   const foreign = order.tenant_id !== session.tenantId;
+
+  // Who handed it over (brief 2.4): the round and the person driving it.
+  const [{ data: deliveredBoardRow }, { data: deliveredDriverRow }] = await Promise.all([
+    order.delivered_board_id
+      ? supabase.from("boards").select("name").eq("tenant_id", order.tenant_id)
+          .eq("id", order.delivered_board_id).maybeSingle<{ name: string }>()
+      : Promise.resolve({ data: null }),
+    order.delivered_driver_id
+      ? supabase.from("drivers").select("full_name").eq("tenant_id", order.tenant_id)
+          .eq("id", order.delivered_driver_id).maybeSingle<{ full_name: string }>()
+      : Promise.resolve({ data: null }),
+  ]);
+  const deliveredBy = {
+    board: deliveredBoardRow?.name ?? null, driver: deliveredDriverRow?.full_name ?? null,
+  };
 
   const [items, activity, members] = await Promise.all([
     supabase.from("laundry_order_items")
@@ -465,6 +481,19 @@ export default async function JobDetailPage({
           </dl>
         )}
       </Card>
+
+      {/* ------------------------------------------------ proof of delivery --- */}
+      <DeliveryProof
+        tenantId={session.tenantId}
+        deliveredAt={order.status === "completed" ? order.delivered_at ?? order.completed_at : null}
+        receivedBy={order.delivery_received_by ?? null}
+        signaturePath={order.delivery_signature_path ?? null}
+        photoPaths={order.delivery_photo_paths ?? null}
+        short={order.delivery_short ?? null}
+        quantities={order.delivery_quantities ?? null}
+        boardName={deliveredBy.board}
+        driverName={deliveredBy.driver}
+      />
 
       {/* --------------------------------------------------------- timeline --- */}
       <Card title="Activity" description="Everything that has happened to this job, newest first.">

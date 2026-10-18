@@ -126,7 +126,7 @@ describe("navigationFor", () => {
     }
 
     const rows = navigationFor("platform_admin");
-    expect(rows).toHaveLength(13);
+    expect(rows).toHaveLength(12);
     const platform = rows.find((item) => item.label === "Platform");
     expect(platform?.href).toBe("/platform");
     expect(platform?.children?.map((child) => child.href)).toEqual([
@@ -205,7 +205,7 @@ describe("navigationFor", () => {
 
   it("orders the rail the way the day runs", () => {
     expect(navigationFor("super_admin").map((item) => item.label)).toEqual([
-      "Today", "My Runs", "Runs", "Fleet", "Driver visits", "Customer laundry", "Customers",
+      "Today", "My Runs", "Runs", "Fleet", "Customer laundry", "Customers",
       "Money", "Linen", "Reports", "Settings", "Help",
     ]);
   });
@@ -330,7 +330,7 @@ describe("sectionFor", () => {
 
   it("resolves a child that is not under the area's own path", () => {
     expect(label("/agreements")).toBe("Customers");
-    expect(label("/operations/exceptions")).toBe("Driver visits");
+    expect(label("/operations/exceptions")).toBe("Runs");
     expect(label("/warehouse/batch-1")).toBe("Linen");
     expect(label("/vehicles")).toBe("Fleet");
     expect(label("/bills")).toBe("Money");
@@ -343,10 +343,10 @@ describe("sectionFor", () => {
   });
 
   it("prefers the longest matching destination", () => {
-    // /orders (Customer laundry) and /operations/* (tabs under Driver visits)
+    // /orders (Customer laundry) and /operations/* (tabs under Runs since 2.1)
     // both exist; the tab strip must not flip areas on the deeper path.
     expect(label("/orders/abc-123/edit")).toBe("Customer laundry");
-    expect(label("/operations/pickups")).toBe("Driver visits");
+    expect(label("/operations/pickups")).toBe("Runs");
   });
 
   it("puts every My Runs path in the one area, and leaves /routes off the map", () => {

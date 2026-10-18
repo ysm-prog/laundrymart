@@ -296,6 +296,9 @@ Resource-scoped beyond tenancy:
   `archivable_tables()`, so the 0028 trap does not apply — asserted rather than
   assumed, because a later migration archiving one of them would silently
   un-hide an archived row through these policies.
+- **A round writes its own job's timeline** (0056). `laundry_order_activity`'s restrictive insert
+  admits the three office roles *or* a job assigned to the caller's own board or driver record.
+  Before it, 0034's office-only restatement refused every row a round wrote, silently.
 - `audit_logs` is **read by four roles and written by everybody** (0035). SELECT needs
   `super_admin`/`operations_manager`/`regional_manager`/`auditor` — the four that hold
   `admin.read`, the auditor being why it is a role list and not `admin.write`. INSERT stays open
@@ -650,6 +653,31 @@ key remains the way to reset or re-assert them through the Auth API, but nothing
   Imported MYOB invoices are marked `import` — backfilled by the importer's note or by a number
   outside the app's `INV` sequence — and are **never pushed to Xero**, whose copy of that history
   was imported separately.
+- **A delivered job finishes its stop, and a run with every stop done is on its way back**
+  (`sync_stop_on_order_finish`, 0056; brief 2.1). An AFTER UPDATE trigger on `laundry_orders`, so
+  it is the same transaction as the delivery **whichever screen wrote it**. A stop completes when
+  every live job on it is finished and one was delivered; a `both` stop with no collection captured
+  is only `delivery_completed`, because half a visit is not a visit; an `in_progress` run with no
+  open stop moves to `returning`. Nothing **closes** a run: that still needs the unload
+  (`guard_route_transition`), which is what sweeps rental linen back into stock.
+- **Ready means assigned** (brief 2.2). A delivery job moved to `ready_for_delivery` whose customer
+  has a round (`collection_board_id`, 0047) goes onto it, for the first day on or after
+  `max(expected, today)` that is not a Sunday or a row in `public_holidays` (`nextDeliveryDay` —
+  no per-board delivery-day model exists, so that is the brief's own fallback). Through
+  `assignOneJobToBoard`, so `guard_laundry_order_assignment` still judges it, on the caller's own
+  client. `settings.automation.autoAssignOnReady`, default on. No round: it waits under Needs a
+  driver, as before.
+- **Delivered means billed** (brief 2.3). After 1.3 prices a finished job in full, it is approved
+  when every line came from a rate card or the price list (not `item_price`, not $0.00) and both
+  `settings.automation.autoApproveCleanJobs` and `customers.auto_approve` (0056) are on. Through
+  `approveAndPlaceJob` — the Approve button's own routine — and "Auto-approved" on the timeline.
+  `autoIssuePerJob` (**default off**) issues a per-job customer's draft on approval; emailing it is
+  `emailOnIssue`, also off.
+- **A delivery proves itself** (0056; brief 2.4). Received-by, the signature and photo keys (the
+  private `run-media` bucket, under `<tenant>/delivery/<order>/`, refused anywhere else by a check
+  constraint), the count per row, a short flag, and **which board and which driver** — not only
+  the shared board login. On `laundry_orders`, not `deliveries`: every `deliveries` row is a
+  `move_inventory()` record against rental stock, and a customer's own linen going home is not one.
 
 ## 5. Branch & deploy
 Feature branch → `Dev` → `Prod`. CI (`Prod`/`Dev`) runs verify, gitleaks and the DB job
@@ -700,6 +728,11 @@ now on each; the month-end question the register could not answer) ·
 `/admin` (redirects) `[/depots|/users|/holidays|/audit|/notifications|/data|/invoicing]` ·
 `/platform[/admins|/settings|/release]` (platform admin only)
 
+**Driver visits is not a rail row any more** (2026-10-18, brief 2.1). Its four screens — the
+visit list, Problems, Collections and Deliveries — are tabs under **Runs**, because since 0056 a
+stop finishes itself with its job and stopped being a place anybody has to go to. The routes are
+unchanged.
+
 **There is no user-facing Runs module.** `/routes/daily`, `/routes/planner` and
 `/routes/templates` still exist, still work and still hold their history, but **no rail row
 points at them** and no office or driver screen links to one. Nobody creates, opens or manages
@@ -735,8 +768,12 @@ so the two sets parting company fails a test rather than offering a link that ca
 
 **"My Runs" (`/my-runs`) is a board's whole workspace**: the jobs assigned to that round for a
 date it chooses, grouped To deliver / Out for delivery / Completed, in the order the office set
-and with each stop's position printed on the card, with Confirm Load and Start Route in front of
-them. Gated on `routes.read` so a manager can open it for a board.
+and with each stop's position printed on the card, with **Start my day** in front of them — one
+button and one confirm since 2026-10-18 (brief 2.4), replacing Confirm Load and Start Route; it
+still stamps `load_confirmed_at` and `started_at` separately and asks **who is driving** for
+`operated_by_driver_id`. Each card carries **Delivered**, which opens the proof sheet (signature,
+photo, received by, counts, short flag): two taps per stop. Gated on `routes.read` so a manager can
+open it for a board.
 **Since 2026-08-26 it also carries Adjust Run**, in a "Run order" card between the day's workflow
 and its job groups — the same `SequenceBoard` the Runs screen draws, so there is one answer to
 "how is a run ordered" rather than two. It renders **only** for a holder of `routes.sequence`
@@ -1320,6 +1357,18 @@ produce on demand.
   0052's body to accept the `receivables` key (brief 1.9). Eight self-assertions, including that
   the backfill left no import marked `app`. `billing_flow_guards.test.sql` (15) proves all of it
   and 0054's policies. **Written, NOT applied** (§11).
+- `0056_flow_runs_itself` — **the database halves of Phase 2.** Proof-of-delivery columns on
+  `laundry_orders` (received by, signature and photo keys under the job's own folder — a check
+  constraint — the counts as jsonb, a short flag, `delivered_board_id`, `delivered_driver_id`);
+  `customers.auto_approve` (default true); `save_tenant_settings` rebuilt from 0055's body with the
+  `automation` key; `sync_stop_on_order_finish()` (SECURITY DEFINER, revoked from `authenticated`)
+  and its AFTER UPDATE OF status trigger; **a backfill that changes rows** — every open stop whose
+  jobs are all finished is completed, and every `in_progress` run left with no open stop moves to
+  `returning` (on live, at least `JOB00025`); and `laundry_order_activity_main_flow_insert`
+  rewritten so a round can write **its own** job's timeline. 0034 had restated that insert as office
+  roles only, so every timeline row a board or driver wrote — "delivered" included — was refused
+  and `logOrderActivity` swallowed it: the job page had never shown who delivered a round's job.
+  Seven self-assertions. `flow_runs_itself.test.sql` (16). **Written, NOT applied** (§11).
 - `0050_pickup_to_job` — **a collection becomes a laundry job, exactly once.**
   `laundry_orders.source_pickup_id` (`on delete set null`),
   `uq_laundry_orders_source_pickup` (partial unique) and
@@ -1604,8 +1653,8 @@ Proofs in `supabase/tests/`: `rls_isolation`, `rls_coverage`, `driver_scope`,
 `audit_log_scope`, `run_sequence`, `accounts_scope`, `open_draft_invoices`,
 `single_laundry`, `charge_accounts`, `gst_inclusive`, `collection_schedule`,
 `customer_record_scope`, `fleet_scope`, `pickup_intake`, `laundry_item_ownership`,
-`invoice_money_guards`, `invoice_issue_guard`, `billing_flow_guards` (**670 assertions** across
-36 files).
+`invoice_money_guards`, `invoice_issue_guard`, `billing_flow_guards`, `flow_runs_itself`
+(**686 assertions** across 37 files).
 
 **Count assertions, not lines starting with `ok`.** pgTAP's function is literally named `ok`, so
 psql prints a centred `ok` **column header** above each result — and `grep -c '^\s*ok '` counts
@@ -2310,6 +2359,15 @@ reports six false gaps.
   `set_records_archived`, `sync_invoice_line_account`, `tenant_members`). That is the 0042 trap
   leaving its usual trace: text typed into `apply_migration` reformatted a little against the file.
   Worth knowing before anybody reads a raw `md5(prosrc)` mismatch as drift.
+
+**`0056_flow_runs_itself` is NOT applied to `laundrymart-syd`** (2026-10-18), written on
+`claude/relaxed-faraday-4ey58h-phase2` under the same instruction. **Apply it after 0053–0055 and
+before Phase 2 merges**: My Runs and both job pages select the proof columns, the billing card
+writes `customers.auto_approve`, and Settings › Invoicing › Automation calls the widened writer.
+**It changes rows**: the backfill completes every open stop whose jobs are all finished and moves
+every `in_progress` run with no open stop to `returning` — expected on live: `JOB00025` (LJ00032's
+stop) at least. Its policy rewrite and trigger function carry no `delete`, but the backfill is an
+`update`; the SQL editor is the safe route, as for 0051/0052.
 
 **`0054_invoice_logo_storage` and `0055_billing_flow_guards` are NOT applied to
 `laundrymart-syd`** (2026-10-18), written on the same branch under the same instruction. **Unlike
@@ -3558,6 +3616,71 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-10-18 · Darshan's BA review, Phase 2: make the flow run itself
+Items 2.1–2.5 of the brief, on `claude/relaxed-faraday-4ey58h-phase2`, stacked on Phase 1 (#82)
+because 2.3 builds on 1.3's pricing and 2.5 on 1.1's gate. Written in one pass under Darshan's
+instruction from Phase 1 — no per-item proofs or browser checks; docs once, verify once. **One
+migration, 0056, written and NOT applied** (§11).
+
+**2.1 — One delivery closes the job and its stop (G6, G7).** After LJ00032 was delivered, Today
+read "Stops 0/1, 1 remaining", Runs read "Already worked 0" and offered to move it, and `JOB00025`
+stayed `assigned`. `sync_stop_on_order_finish` (§4) now finishes the stop in the delivery's own
+transaction and moves an emptied run to `returning`; 0056 backfills the open ones. Runs no longer
+offers a finished job to Move to another board (`MOVABLE_STATUSES`). **Driver visits left the
+rail**: its four screens are tabs under Runs (§6), the routes unchanged.
+
+**2.2 — Ready means assigned.** §4 has the rule (`autoAssignOnReady`, `nextDeliveryDay`,
+`lib/runs/auto-assign.ts`). `advanceOrder` calls it after a move to Ready and the toast says where
+the job went — or that the customer has no round, so it waits under Needs a driver. **Customers
+gained a "Round" column, a No round / On a round filter, and a Set the round panel** that sets the
+round and weekday for every customer ticked on the page in one request (`setCustomersRound`,
+`customers.write`, capped at 200). Only 2 of 513 customers have a round, so this is what makes 2.2
+reach anybody.
+
+**2.3 — Delivered means billed.** `autoApproveIfClean` (`lib/orders/auto-approve.ts`) runs from
+`completeLaundryOrder` after a full price, through `approveAndPlaceJob`; §4 has the rule. The
+customer's Billing & pricing card gains "Approve this customer's jobs automatically…" and
+**Settings › Invoicing gains an Automation card** with the four switches (`settings.automation`).
+The completion toast says it was approved and which draft it is on, instead of "check and approve
+it". A job left for a person says why on its timeline.
+
+**2.4 — Start my day, one tap per stop, proof of delivery (G8, G23).** **Start my day** replaces
+Confirm Load and Start Route: one button, one confirm, "Who is driving" beside it (defaulting to
+whoever operated the round last), stamping the load and the start on the jobs and the day's runs in
+statements that never rewrite a first confirmation or departure. Late work gets "Load and take N
+more". **Delivered** is on every card in My Runs and on the round's job page: a sheet with a
+signature pad (PNG), an optional photo, received-by, notes, the counts prefilled from what was
+taken in (a lower count marks it short), and Confirm — two taps. Files upload through `/api/media`
+first and the action accepts only keys under this job's own folder (`isDeliveryProofPath`); the
+board and the operating driver are recorded beside the signed-in login. **Proof of delivery** shows
+on `/orders/:id` and `/my-runs/jobs/:id`. And because 0034 had been refusing every timeline row a
+round wrote, 0056 widens that insert (§3) — the round's "delivered" now actually reaches the job.
+
+**2.5 — Month-end: Issue and send all ready (G4).** On Open drafts, a **Month end** card states
+the count and total of drafts whose period has ended and that carry lines, and **Issue and send
+all ready** (`issueAndSendAllReady`) confirms first. It re-reads what is ready, refuses the lot once
+while 1.1's invoice details are missing, issues each through `issueOneInvoice` (so the Xero push is
+the single button's), emails only when `emailOnIssue` is on and the caller may send, and reports one
+line per invoice. A second press finds nothing ready and says so; an email goes only for an invoice
+this press issued.
+
+**The end-to-end test (section 5)** is `e2e/golden-path.spec.ts` with `playwright.config.ts` and a
+`workflow_dispatch` workflow (`.github/workflows/e2e.yml`) that takes a Vercel preview URL and the
+seeded branch's logins from secrets. `@playwright/test` 1.56.1 is a new dev dependency. **It has
+never been run**: there is no seeded Supabase branch yet and this container cannot reach one. Two
+things it deliberately does not assert: the intake target of 4 actions (prefilled items and return
+dates are Phase 3.4, so it is measured and annotated instead), and the Xero payload (a test must
+never push to a real Xero; `buildInvoicePayload`'s unit tests prove `Inclusive` and the codes).
+
+- **Checks:** `verify` green once at the end — **1428 unit tests across 92 files**, typecheck,
+  lint, build. All 60 migration files on a fresh Postgres 16: **686 pgTAP assertions across 37
+  files**, 0 failing, no plan mismatch, and `supabase/seed.sql` applying on top. Two existing tests
+  were rewritten to the decision: the platform admin's rail is 12 rows (Driver visits left it), and
+  the pricing wiring test now pins the shared admin client and that approval follows a full price.
+- `npm audit` reports 9 advisories (8 high, 1 critical); **they are there without this branch's
+  dependency change** — checked by stashing it — and are not addressed here.
+- **Not verified behind the auth gate**: no screen was opened with real rows; 0056 is not applied.
+
 ### 2026-10-18 · The PDFs beside the MYOB template, and what that caught
 Brief 1.10's own bar: *"an invoice and a credit note … match the template's layout. Put a
 side-by-side screenshot in the PR."* The Phase 1 pass below skipped it on Darshan's instruction (one

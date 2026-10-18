@@ -19,8 +19,10 @@ import {
 } from "@/lib/domain/laundry-orders";
 import { businessToday, isClockTime, toInstant } from "@/lib/domain/timezone";
 import { logOrderActivity } from "@/lib/orders/activity";
+import { autoAssignOnReady, autoAssignSentence } from "@/lib/runs/auto-assign";
 import { completeLaundryOrder } from "@/lib/orders/complete";
 import { autoPriceSentence } from "@/lib/domain/job-pricing";
+import { autoApproveSentence } from "@/lib/orders/auto-approve";
 import { retireStopIfEmpty } from "@/lib/runs/assign";
 
 /**
@@ -632,17 +634,25 @@ export async function advanceOrder(formData: FormData): Promise<void> {
     summary: `${existing.order_number}: ${existing.status} → ${target}`,
   });
 
+  // Ready means assigned (brief 2.2): a delivery job whose customer has a round
+  // goes onto it now, through the same assignment routine a person would use.
+  // Never fails the move — the job is Ready whatever this makes of it.
+  const autoAssigned = target === "ready_for_delivery"
+    ? await autoAssignOnReady(supabase, session, parsed.data.id)
+    : null;
+
   revalidatePath(LIST);
   revalidatePath(detail);
   // A status move can now take a job off a round, so the round's own day and the
   // driver's copy of the job are stale as well. Same set `removeJobAssignment`
   // refreshes, for the same reason.
-  if (offTheRound) {
+  if (offTheRound || autoAssigned?.state === "assigned") {
     revalidatePath("/my-runs");
     revalidatePath(`/my-runs/jobs/${parsed.data.id}`);
   }
   return done(detail,
-    `Job ${existing.order_number} is now ${ORDER_STATUS_LABELS[target].toLowerCase()}.`);
+    `Job ${existing.order_number} is now ${ORDER_STATUS_LABELS[target].toLowerCase()}.`
+    + (autoAssigned ? autoAssignSentence(autoAssigned) : ""));
 }
 
 /* ------------------------------------------------------------- completion */
@@ -697,8 +707,12 @@ export async function completeOrder(formData: FormData): Promise<void> {
   revalidatePath("/invoices/awaiting");
   // What the automatic pricing made of it (brief 1.3) — said only to somebody
   // who may read a price. The counter's own role does not hold `billing.read`.
-  const priced = can(session.role, "billing.read") && result.pricing
-    ? autoPriceSentence(result.pricing) : "";
+  // Auto-approved (brief 2.3) replaces "check and approve it", which would then be untrue.
+  const priced = !can(session.role, "billing.read") || !result.pricing
+    ? ""
+    : result.approval?.state === "approved"
+      ? autoApproveSentence(result.approval)
+      : autoPriceSentence(result.pricing);
   return done(detail,
     `Job ${existing.order_number} ${delivered ? "delivered" : "collected"} and completed.${priced}`);
 }

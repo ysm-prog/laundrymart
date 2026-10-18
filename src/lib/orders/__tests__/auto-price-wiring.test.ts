@@ -16,7 +16,13 @@ describe("automatic pricing on completion", () => {
     billing.indexOf("export async function priceAndSaveJob"));
 
   it("runs from the single completion implementation", () => {
-    expect(complete).toMatch(/autoPriceCompletedJob\(createAdminClient\(\), session, order\.id\)/);
+    expect(complete).toMatch(/const admin = createAdminClient\(\);/);
+    expect(complete).toMatch(/autoPriceCompletedJob\(admin, session, order\.id\)/);
+  });
+
+  it("approves automatically only a job it priced in full (brief 2.3)", () => {
+    expect(complete).toMatch(
+      /if \(pricing\.state === "priced"\) approval = await autoApproveIfClean\(admin, session, order\.id\)/);
   });
 
   it("never approves", () => {
@@ -28,5 +34,22 @@ describe("automatic pricing on completion", () => {
     const reads = body.match(/admin\s*\.from\("[a-z_]+"\)[\s\S]*?;/g) ?? [];
     expect(reads.length).toBeGreaterThan(0);
     for (const statement of reads) expect(statement).toMatch(/tenant_id/);
+  });
+});
+
+describe("automatic approval (brief 2.3)", () => {
+  const source = read("../auto-approve.ts");
+
+  it("goes through the existing approve routine, never around it", () => {
+    expect(source).toMatch(/approveAndPlaceJob\(admin, session, job\.id\)/);
+    // No write of its own: the freeze, the status and the placement are the
+    // approve routine's, so an automatic approval cannot mean anything else.
+    expect(source).not.toMatch(/freeze_job_charges|\.update\(|\.insert\(/);
+  });
+
+  it("names the tenant on every read it makes with the service role", () => {
+    const reads = source.match(/admin\s*\.from\("[a-z_]+"\)[\s\S]*?(?:;|,\n)/g) ?? [];
+    expect(reads.length).toBeGreaterThanOrEqual(3);
+    for (const statement of reads) expect(statement).toMatch(/tenant_id|eq\("id", session\.tenantId\)/);
   });
 });

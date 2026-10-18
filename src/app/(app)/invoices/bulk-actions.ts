@@ -12,6 +12,11 @@ import { placeApprovedJobs } from "@/lib/orders/approve";
 import { INVOICE_SETTINGS_LINK, issueOneInvoice, loadIssueReadiness } from "@/lib/invoices/issue";
 import { sendInvoice } from "@/lib/invoices/send";
 import { can } from "@/lib/roles";
+import { businessToday } from "@/lib/domain/timezone";
+import { loadOpenDrafts } from "@/lib/invoices/open-draft";
+import {
+  isReadyDraft, monthEndReport, parseAutomation, type MonthEndOutcome,
+} from "@/lib/domain/automation";
 
 /**
  * Bulk billing: approve a selection, invoice a selection, send a selection.
@@ -400,6 +405,92 @@ export async function issueSelectedInvoices(formData: FormData): Promise<void> {
   const failNote = failed.length > 0 ? ` ${failed.length} skipped — ${failed[0]}.` : "";
   return done(back,
     `Issued ${issued.length} invoice(s). They can be sent now.${xeroNote}${failNote}`);
+}
+
+/* ------------------------------------------------- issue and send all ready --- */
+
+/**
+ * Month end, in one press: **Issue and send all ready** (brief 2.5, G2/G4).
+ *
+ * Covers every draft whose billing period has finished and that has something
+ * on it — read here, not from the form, so the press means "what is ready
+ * now" and a stale page cannot issue a draft that has since changed. For each:
+ *
+ *   1. issue it, through `issueOneInvoice` — so brief 1.1's gate refuses the
+ *      lot, once, while the laundry's invoice details are missing, and the Xero
+ *      push and its never-block-the-money contract are the single button's;
+ *   2. email it to the customer's invoice address, **only** when Settings ›
+ *      Automation has emailing on and the caller may send;
+ *   3. report it, one line per invoice.
+ *
+ * **Idempotent.** A second press finds no draft that is ready — they are issued
+ * — and says so. Two presses at once cannot issue one draft twice
+ * (`issueOneInvoice` writes only where the status is still `draft`), and an
+ * email goes only for an invoice *this* press issued.
+ */
+export async function issueAndSendAllReady(formData: FormData): Promise<void> {
+  const session = await assertCapability("invoices.bulk");
+  await assertCapability("invoices.write");
+  const back = returnTo(formData, DRAFTS);
+
+  const supabase = await createClient();
+  const mayEditSettings = can(session.role, "admin.write");
+  const readiness = await loadIssueReadiness(supabase, session.tenantId, mayEditSettings);
+  if (readiness.blocked) {
+    return fail(back, readiness.blocked, mayEditSettings ? INVOICE_SETTINGS_LINK : undefined);
+  }
+
+  const today = businessToday();
+  const ready = (await loadOpenDrafts(supabase, session.tenantId))
+    .filter((draft) => isReadyDraft(draft, today));
+  if (ready.length === 0) {
+    return done(back, "Nothing is ready to issue — every draft from a finished period has gone out.");
+  }
+  if (ready.length > MAX_SELECTION) {
+    return fail(back, `There are ${ready.length} ready drafts. Issue them ${MAX_SELECTION} at a time with Issue selected.`);
+  }
+
+  const { data: tenant } = await supabase
+    .from("tenants").select("settings").eq("id", session.tenantId)
+    .maybeSingle<{ settings: unknown }>();
+  const emailing = parseAutomation(tenant?.settings).emailOnIssue && can(session.role, "invoices.send");
+
+  const outcomes: MonthEndOutcome[] = [];
+  for (const draft of ready) {
+    const issued = await issueOneInvoice(supabase, session, draft.id, readiness);
+    if (!issued.ok) {
+      outcomes.push({
+        invoiceNumber: draft.invoiceNumber,
+        issued: issued.error === "it is no longer a draft" ? "already" : "failed",
+        emailed: "not_issued", xero: "not_issued", note: issued.error,
+      });
+      continue;
+    }
+    let emailed: MonthEndOutcome["emailed"] = "off";
+    if (emailing) {
+      const sent = await sendInvoice(supabase, session, draft.id);
+      emailed = sent.ok ? "sent" : sent.error === "this customer has no billing email" ? "no_address" : "failed";
+    }
+    outcomes.push({ invoiceNumber: draft.invoiceNumber, issued: "issued", emailed, xero: issued.xero });
+  }
+
+  const issuedCount = outcomes.filter((o) => o.issued === "issued").length;
+  await recordAudit(session, {
+    entity: "invoice", action: "status_change",
+    summary: `month end: issued ${issuedCount} of ${outcomes.length} ready drafts`,
+    metadata: {
+      issued: issuedCount,
+      emailed: outcomes.filter((o) => o.emailed === "sent").length,
+      xeroFailed: outcomes.filter((o) => o.xero === "failed").length,
+      invoices: outcomes.map((o) => ({ n: o.invoiceNumber, issued: o.issued, emailed: o.emailed, xero: o.xero })),
+    },
+  });
+
+  revalidatePath(REGISTER);
+  revalidatePath(DRAFTS);
+  revalidatePath("/dashboard");
+  const report = monthEndReport(outcomes);
+  return issuedCount === 0 ? fail(back, report) : done(back, report);
 }
 
 /* ---------------------------------------------------------- send selected --- */

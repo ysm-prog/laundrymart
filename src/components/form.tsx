@@ -285,7 +285,7 @@ export function WeekdayPicker({
 /** Disables itself while the server action is in flight. */
 export function SubmitButton({
   children = "Save", variant = "primary", pendingLabel = "Saving…", size = "lg", formId,
-  className, formAction,
+  className, formAction, disabled = false,
 }: {
   children?: ReactNode;
   variant?: "primary" | "danger" | "secondary" | "ghost" | "dangerGhost";
@@ -304,6 +304,8 @@ export function SubmitButton({
    * request is in flight over this selection.
    */
   formAction?: (formData: FormData) => void | Promise<void>;
+  /** Not pressable yet — nothing is selected. Pending disables it as well. */
+  disabled?: boolean;
 }) {
   const { pending } = useFormStatus();
   // Mirrors BUTTON_VARIANTS in ui.tsx.
@@ -322,7 +324,7 @@ export function SubmitButton({
   } as const;
   const sizes = { md: "min-h-10 px-4", lg: "min-h-11 px-5" } as const;
   return (
-    <button type="submit" disabled={pending} form={formId} formAction={formAction}
+    <button type="submit" disabled={pending || disabled} form={formId} formAction={formAction}
             aria-busy={pending || undefined}
             className={cx(
               "inline-flex items-center justify-center gap-2 rounded-lg text-sm font-medium transition",

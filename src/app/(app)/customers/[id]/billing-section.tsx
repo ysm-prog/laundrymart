@@ -7,7 +7,7 @@ import {
 import { CHARGE_TYPE_LABELS, type ChargeType } from "@/lib/domain/pricing";
 import { ITEM_TYPE_LABELS, type ItemType } from "@/lib/domain/laundry-orders";
 import { Badge, Card, DataTable, EmptyState, Notice } from "@/components/ui";
-import { Field, Input, Select, SubmitButton } from "@/components/form";
+import { Checkbox, Field, Input, Select, SubmitButton } from "@/components/form";
 import { updateCustomerBilling } from "../billing-actions";
 
 /**
@@ -37,12 +37,13 @@ export async function BillingAndPricing({
   const { data: customer } = await supabase
     .from("customers")
     .select("id, billing_method, rate_card_agreement_id, billing_email, payment_terms_days, " +
-            "xero_contact_id, xero_contact_name")
+            "xero_contact_id, xero_contact_name, auto_approve")
     .eq("id", customerId)
     .maybeSingle<{
       id: string; billing_method: string; rate_card_agreement_id: string | null;
       billing_email: string | null; payment_terms_days: number;
       xero_contact_id: string | null; xero_contact_name: string | null;
+      auto_approve: boolean | null;
     }>();
   if (!customer) return null;
 
@@ -92,7 +93,7 @@ export async function BillingAndPricing({
             <Select
               name="rate_card_agreement_id"
               defaultValue={customer.rate_card_agreement_id}
-              placeholder="No rate card — price each job by hand"
+              placeholder="No rate card — priced from your laundry price list"
               options={(agreements ?? []).map((row) => ({
                 value: row.id,
                 label: `${row.agreement_number} v${row.version} · ${row.status}`,
@@ -141,6 +142,13 @@ export async function BillingAndPricing({
                    placeholder="00000000-0000-0000-0000-000000000000" />
           </Field>
 
+          {/* Brief 2.3. Only ever approves a job priced entirely from the rate card
+              or the price list — and only while Settings › Automation has it on. */}
+          <div className="sm:col-span-2">
+            <Checkbox name="auto_approve" defaultChecked={customer.auto_approve !== false}
+                      label="Approve this customer's jobs automatically when every line comes from their rates" />
+          </div>
+
           <div className="sm:col-span-2">
             <SubmitButton size="md">Save billing settings</SubmitButton>
           </div>
@@ -153,6 +161,8 @@ export async function BillingAndPricing({
           <ReadRow label="Invoice email" value={customer.billing_email ?? "—"} />
           <ReadRow label="Payment terms" value={`${customer.payment_terms_days} days`} />
           <ReadRow label="Xero customer" value={customer.xero_contact_name ?? "Not linked"} />
+          <ReadRow label="Automatic approval"
+                   value={customer.auto_approve === false ? "Off — a person approves every job" : "On"} />
         </dl>
       )}
 

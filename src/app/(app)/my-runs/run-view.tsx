@@ -2,9 +2,23 @@ import Link from "next/link";
 import { MapPin, Phone } from "lucide-react";
 import { Badge, ButtonLink, Card, cx, humanise } from "@/components/ui";
 import { formatAdelaideDate, formatAdelaideTime } from "@/lib/domain/timezone";
-import { ORDER_STATUS_LABELS, summariseItems, type OrderStatus } from "@/lib/domain/laundry-orders";
+import {
+  ORDER_STATUS_LABELS, describeItem, summariseItems, type OrderStatus,
+} from "@/lib/domain/laundry-orders";
 import { DriverInstructions } from "@/components/driver-instructions";
 import type { DayJob } from "@/lib/runs/my-runs";
+import { DeliverButton, type DeliverableLine } from "./deliver-sheet";
+
+/** What the Delivered sheet counts back, prefilled with what was taken in (brief 2.4). */
+export function deliverableLines(job: DayJob): DeliverableLine[] {
+  return job.laundry_order_items.flatMap((item) => item.id
+    ? [{
+        id: item.id,
+        description: describeItem(item),
+        takenIn: item.quantity_type === "exact" ? item.exact_quantity : item.estimated_quantity,
+      }]
+    : []);
+}
 
 /**
  * What a round reads: the day's totals, and one card per job.
@@ -97,13 +111,17 @@ function ProgressBar({ done, total }: { done: number; total: number }) {
  * real links, so a tap opens maps or dials rather than selecting text.
  */
 export function JobCard({
-  job, actionable,
+  job, actionable, returnTo = "/my-runs",
 }: {
   job: DayJob;
   /** The round may open and work this job, rather than merely view it. */
   actionable: boolean;
+  /** Where the Delivered sheet comes back to. */
+  returnTo?: string;
 }) {
   const finished = job.status === "completed";
+  const deliverable = actionable && job.delivery_required
+    && (job.status === "assigned" || job.status === "out_for_delivery");
   const address = job.delivery_address;
   const detailHref = `/my-runs/jobs/${job.id}?date=${job.assigned_delivery_date ?? ""}`;
 
@@ -172,6 +190,9 @@ export function JobCard({
           {finished && job.completed_at ? (
             <p className="mt-0.5 text-sm font-medium text-success">
               Completed {formatAdelaideTime(job.completed_at)}
+              {job.delivery_received_by ? ` · received by ${job.delivery_received_by}` : ""}
+              {job.delivery_signature_path ? " · signed" : ""}
+              {job.delivery_short ? " · short" : ""}
             </p>
           ) : null}
         </div>
@@ -189,7 +210,16 @@ export function JobCard({
               <span className="sr-only">Call </span>{job.customers.phone}
             </a>
           ) : null}
-          <ButtonLink href={detailHref} size="md" variant={finished ? "secondary" : "primary"}>
+          {/* Delivered lives on the card (brief 2.4): one tap opens the sheet,
+              one more records it. Opening the job is still there, beside it. */}
+          {deliverable ? (
+            <DeliverButton
+              orderId={job.id} orderNumber={job.order_number}
+              customerName={job.customers?.business_name ?? "Unknown customer"}
+              lines={deliverableLines(job)} returnTo={returnTo}
+            />
+          ) : null}
+          <ButtonLink href={detailHref} size="md" variant="secondary">
             {actionable && !finished ? "Open Job" : "View Job"}
           </ButtonLink>
         </div>
