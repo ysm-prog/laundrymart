@@ -9,7 +9,16 @@ where that is genuinely what it is. The multi-tenancy architecture stays: one op
 fact about today's data, not a reason to drop `tenant_id`, RLS, or §23's rule that a read feeding a
 write names its tenant.
 
-## Latest: Xero and email mocked (2026-10-18), `claude/relaxed-faraday-4ey58h-mocks`
+## Latest: 0053–0057 live, Phases 1–3 released (2026-10-18)
+- **0053–0057 applied** to laundrymart-syd by Darshan via the SQL editor (`20261018105300`…`105700`);
+  the connector's `apply_migration` came back `cancelled` twice. Verified: function bodies match the
+  rehearsal once comments/whitespace are stripped, activity policy byte-identical, 646 imports /
+  7 app invoices, 11 stops completed, 2 runs returning. CLAUDE.md §11 has the record.
+- **#82 merged into Dev** (`e02f7e5`). **Dev → Prod is #95**, waiting on CI at the time of writing.
+- Next for Darshan: bank details, phone, accounts email in Settings › Invoicing (Issue is blocked
+  until then); the three open decisions in #82's description.
+
+## Previously: Xero and email mocked (2026-10-18), `claude/relaxed-faraday-4ey58h-mocks`
 Tests only, stacked on Phase 3. The brief's rule 5 ("mock both") and section 5's mocked Xero payload:
 `push-mocked`, `push-payment-mocked`, `email/send-mocked`, `invoices/send-mocked`, over a recording
 fake client in `src/test-support/`. First `vi.mock` in the suite. The void push and the token
