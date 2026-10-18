@@ -31,9 +31,17 @@ jobs:
       - uses: actions/setup-node@v7
         with: { node-version: "22", cache: "npm" }
       - run: npm ci
-      - name: dependency audit (advisory)
+      # What ships is gated: a high advisory in a runtime dependency fails the job.
+      # Until 2026-10-18 the only audit was advisory, and a critical Next.js
+      # advisory sat under it in a green run (CLAUDE.md §10a).
+      - name: dependency audit (production, blocking)
+        run: npm audit --omit=dev --audit-level=high
+      # The whole tree, dev tools included, is reported but does not block:
+      # `braces` (via eslint-config-next → fast-glob) has a high advisory and no
+      # fixed release, and it never ships. A critical one anywhere still shows red.
+      - name: dependency audit (dev tools, advisory)
         continue-on-error: true
-        run: npm audit --audit-level=high
+        run: npm audit --audit-level=critical
   database:
     name: DB (migrations + RLS proof + seed)
     runs-on: ubuntu-latest
