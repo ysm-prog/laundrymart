@@ -1800,7 +1800,7 @@ saying the gate had stopped running.
   `vi.mock`, `vi.fn` or `vi.spyOn` at all** — 0 files, because every test is over a pure rule; and
   it drops the `sequential` option, which `vitest.config.mts` never set. The one file that touches
   the test runtime at all is `adelaide.test.ts` with `vi.useFakeTimers()`, and it passes.
-  **No longer true of the mocks since 2026-10-18**: four `*-mocked.test.ts` files now use `vi.mock`
+  **No longer true of the mocks since 2026-10-18**: six `*-mocked.test.ts` files now use `vi.mock`
   for the Xero and email boundaries (§18, Phase 3 follow-up). Each calls `vi.clearAllMocks()` in
   its own `afterEach` and re-arms what it needs in `beforeEach`, so vitest 5's clearing default is
   what they assume rather than something they trip over.
@@ -3649,6 +3649,24 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-10-18 · The Xero void and the token refresh, mocked too
+The two gaps the entry below left open, closed on `claude/relaxed-faraday-4ey58h-mocks2`. **Tests
+only: no migration, and no change to `src/` outside two test files.**
+
+- **`xero/push-void-mocked.test.ts` (6).** A void posts `VOIDED` to the invoice's own URL with the
+  bearer token and the Xero org header, and is recorded only once Xero answers `VOIDED`; a 200 that
+  left the invoice `AUTHORISED` is written as a failure naming that state, never as a success; a
+  400's validation text is written to `xero_push_error`. And three ways **nothing is sent**: an
+  invoice that never reached Xero or is already void there (a skip, recorded nowhere), a payment
+  already in Xero (refused before asking, with "a credit note" named), and no connection.
+- **`xero/tokens-mocked.test.ts` (6).** A token with more than a minute left is used without a
+  request; one with less is refreshed with Basic client credentials, and **Xero's rotated refresh
+  token is what gets stored** — or the old one when Xero sends none. A refused refresh answers null
+  and stores nothing; an unconnected laundry and a deployment with no Xero credentials touch
+  nothing at all.
+- **Each guard was broken on purpose and exactly one test failed:** the `VOIDED` check after a 200,
+  the refresh-token fallback, the one-minute skew, and recording skips as errors.
+
 ### 2026-10-18 · Xero and email, mocked: the last of the brief's test rules
 Ground rule 5 of Darshan's brief — *"No email and no Xero calls from tests. Mock both"* — and
 section 5's *"the mocked Xero payload has `LineAmountTypes = Inclusive` and the right account
@@ -3679,8 +3697,8 @@ change to `src/` outside `src/test-support/` and four test files.**
   is never dragged back; a bounce is audited as `send_failed` and moves nothing.
 - **Each guard was broken on purpose and the right test failed:** `LineAmountTypes` flipped to
   Exclusive, the import refusal removed, the draft refusal removed, the idempotency key removed.
-- **Still not covered:** the void push (`push-void.ts`) and the token refresh (`tokens.ts`), both
-  still tested as pure rules only, and a real Xero, which no test should reach.
+- **Still not covered:** a real Xero, which no test should reach. The void push and the token
+  refresh were the two gaps left here; the entry above closes them.
 
 ### 2026-10-18 · Darshan's BA review, Phase 3: fewer screens, one next step
 Items 3.1–3.10 of the brief, on `claude/relaxed-faraday-4ey58h-phase3`, stacked on Phase 2 (#85).
