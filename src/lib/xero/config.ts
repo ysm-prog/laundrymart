@@ -35,11 +35,13 @@ export const XERO_CONNECTIONS_URL = "https://api.xero.com/connections";
  * what makes a refresh token come back at all — without it the connection dies
  * in thirty minutes and somebody has to reconnect by hand.
  * `openid`/`profile`/`email` identify the person who connected it, for the
- * audit row.
+ * audit row. `accounting.settings.read` lets the Xero page list the bank and
+ * income accounts that payments are posted to and invoice lines are coded to.
  */
 export const XERO_SCOPES = [
   "openid", "profile", "email", "offline_access",
   "accounting.invoices", "accounting.payments", "accounting.contacts",
+  "accounting.settings.read",
 ].join(" ");
 
 /**
