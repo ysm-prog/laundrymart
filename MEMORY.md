@@ -12,8 +12,9 @@ write names its tenant.
 ## Latest: Xero and email mocked (2026-10-18), `claude/relaxed-faraday-4ey58h-mocks`
 Tests only, stacked on Phase 3. The brief's rule 5 ("mock both") and section 5's mocked Xero payload:
 `push-mocked`, `push-payment-mocked`, `email/send-mocked`, `invoices/send-mocked`, over a recording
-fake client in `src/test-support/`. First `vi.mock` in the suite. Void push and token refresh are
-still pure-rule tests only.
+fake client in `src/test-support/`. First `vi.mock` in the suite. The void push and the token
+refresh followed on `claude/relaxed-faraday-4ey58h-mocks2` (`push-void-mocked`, `tokens-mocked`),
+so every Xero call the app makes is now driven against a stubbed `fetch`.
 
 ## Previously: Darshan's BA review, Phase 3 (2026-10-18), `claude/relaxed-faraday-4ey58h-phase3`
 Items 3.1–3.10, **stacked on Phase 2** (#85), which is stacked on #82. Same one-pass instruction.
