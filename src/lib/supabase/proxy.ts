@@ -7,7 +7,9 @@ import { env } from "@/lib/env";
 // `/design-preview` is the static component gallery. It holds no data and 404s
 // in production, so it does not need the auth gate — and gating it would make
 // it unreachable from a build box, which is the only place it is any use.
-const PUBLIC = ["/", "/login", "/auth", "/design-preview"];
+// /api/xero/webhook: Xero calls it with no session; the route checks Xero's
+// HMAC signature itself and answers 401 to anything unsigned.
+const PUBLIC = ["/", "/login", "/auth", "/design-preview", "/api/xero/webhook"];
 export async function updateSession(request: NextRequest) {
   let response = NextResponse.next({ request });
   const supabase = createServerClient(
