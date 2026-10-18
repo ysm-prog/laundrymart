@@ -3645,6 +3645,24 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-10-18 · The runtime dependencies Dependabot's #73 had waited on since September
+The rest of #73 (opened 2026-09-30), whose `next` half the advisory fix above had already
+superseded. **No schema, RLS, capability or source change** — `git diff` over `src/` and
+`supabase/` is empty.
+
+- `@supabase/supabase-js` 2.116.0 → 2.118.0 (with its five `@supabase/*` sub-packages; `@supabase/ssr`
+  0.12.7 asks for `^2.114.0`), `lucide-react` 1.43.0 → 1.59.0, `react`/`react-dom` 19.2.8 → 19.3.1
+  (with `scheduler` 0.28.0), `resend` 6.26.0 → 6.34.1, `zod` 4.5.4 → 4.6.7. `@types/react` and
+  `@types/react-dom` 19.3.0 alongside, so the types describe the React that runs.
+- **Package sets, per §10a:** 571 → 571, 16 versions in and 16 out; `resend` brings
+  `postal-mime` 2.7.6 and `standardwebhooks` 1.1.1 at new versions.
+- `@react-pdf/renderer` declares `react ^19.0.0`, so the invoice PDF's renderer is inside its own
+  range. `npm ls` reports no invalid or missing peer.
+- `verify` green: typecheck, lint, **1507 tests across 101 files**, and the production build.
+  `npm audit --omit=dev --audit-level=high`: **0**.
+- **Not verified behind the auth gate**: the PDF and the email templates are covered by their tests
+  and the mocked Resend boundary, not by a render on `ats.coreit.com.au`.
+
 ### 2026-10-18 · A critical Next.js advisory, and the audit step that hid it
 `npm audit --audit-level=high` reported **9** (8 high, 1 critical) on `Prod` — the critical one
 `next` 16.0.0–16.3.7: RCE in `next/og` `ImageResponse`, cache poisoning of SSG/ISR pages, SSRF in
