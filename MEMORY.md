@@ -9,7 +9,15 @@ where that is genuinely what it is. The multi-tenancy architecture stays: one op
 fact about today's data, not a reason to drop `tenant_id`, RLS, or §23's rule that a read feeding a
 write names its tenant.
 
-## Latest: 0058 live (2026-10-19), billing write policies split
+## Latest: 0059 live (2026-10-19), hot foreign keys indexed
+- Four indexes on the FKs real reads use: pickups(route_id), pickups(customer_id, pickup_date desc),
+  invoice_source_jobs(order_id), inventory_pools(vehicle_id). Chosen by matching src/ reads against
+  existing indexes; the other 141 advisor INFOs are audit columns, config refs, or already served by
+  tenant-leading composites. Applied via the connector (`20261019060507`, sorts before 0058's
+  hand-picked version). Advisor: unindexed FKs 145→141; unused indexes 24→28 until the new four see
+  traffic.
+
+## Previously: 0058 live (2026-10-19), billing write policies split
 - The eight money tables' permissive `for all` write policies become explicit INSERT/UPDATE/DELETE,
   predicates copied from the catalogue. No access changes (write set inside read set). Clears 8
   `multiple_permissive_policies` WARNs. **Applied** (`20261019090000`) via the SQL editor after the
