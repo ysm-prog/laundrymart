@@ -9,7 +9,13 @@ where that is genuinely what it is. The multi-tenancy architecture stays: one op
 fact about today's data, not a reason to drop `tenant_id`, RLS, or §23's rule that a read feeding a
 write names its tenant.
 
-## Latest: 0053–0057 live, Phases 1–3 on Prod (2026-10-18)
+## Latest: 0058 written (2026-10-19), billing write policies split
+- The eight money tables' permissive `for all` write policies become explicit INSERT/UPDATE/DELETE,
+  predicates copied from the catalogue. No access changes (write set inside read set). Clears 8
+  `multiple_permissive_policies` WARNs. **Not applied**: the connector timed out; Darshan pastes it.
+- Left on the advisor: memberships/tenants WARNs (needed), 145 unindexed-FK and 24 unused-index INFOs.
+
+## Previously: 0053–0057 live, Phases 1–3 on Prod (2026-10-18)
 - **0053–0057 applied** to laundrymart-syd by Darshan via the SQL editor (`20261018105300`…`105700`);
   the connector's `apply_migration` came back `cancelled` twice. Verified: function bodies match the
   rehearsal once comments/whitespace are stripped, activity policy byte-identical, 646 imports /

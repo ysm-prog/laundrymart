@@ -1397,6 +1397,27 @@ produce on demand.
   as plant off and two days). Adds no table, column, policy, trigger or capability; changes no row.
   Five self-assertions, including that every earlier key is still admitted.
   `operations_settings.test.sql` (7). **Applied 2026-10-18** (§11).
+- `0058_billing_write_policies` — **the billing tables' write policies name their verbs.** The
+  eight money tables (`invoices`, `invoice_lines`, `payments`, `credit_notes`, `credit_note_lines`,
+  `invoice_source_jobs`, `job_charge_snapshots`, `service_agreement_lines`) each carried 0017's
+  `<t>_read` and a permissive `<t>_write` **`for all`**, whose USING half is a second SELECT policy.
+  The Supabase performance advisor reported it once per table (`multiple_permissive_policies`,
+  WARN). `<t>_write` becomes `<t>_write_insert`/`_update`/`_delete`.
+  - **No access changes, checked against the live helper bodies first:** every write role is
+    already a read role (`can_write_billing` ⊂ `can_read_billing`; the agreement-line write list
+    ⊂ `can_read_pricing`), so the dropped SELECT only ever repeated `<t>_read`.
+  - **The predicates are read out of the catalogue, not restated**, 0017's reasoning: six of the
+    eight carry the archive clause and two do not, and hand-writing them is how the 0028 hole
+    happened. The old text is held in a temporary table and every new policy is compared to it.
+  - Adds no table, column, function or capability; changes no row; idempotent. 0025's restrictive
+    layer untouched. Six assertion classes, four confirmed to fire by breaking the migration
+    (archive clause dropped, delete policy missing, `for all` left standing, delete widened to any
+    member). `billing_write_policies.test.sql` (17), which fails 3 on a database without 0058.
+  - `memberships` and `tenants` keep their two permissive SELECT paths deliberately: an
+    administrator reads the tenant's people through `memberships_admin`, and a platform admin
+    reads every laundry through `tenants_platform` — those SELECTs are not redundant.
+  - **Written, not applied** — the connector timed out on its confirmation prompt (§11). Safe to
+    apply before or after the merge: no code reads a policy name.
 - `0050_pickup_to_job` — **a collection becomes a laundry job, exactly once.**
   `laundry_orders.source_pickup_id` (`on delete set null`),
   `uq_laundry_orders_source_pickup` (partial unique) and
@@ -1682,7 +1703,7 @@ Proofs in `supabase/tests/`: `rls_isolation`, `rls_coverage`, `driver_scope`,
 `single_laundry`, `charge_accounts`, `gst_inclusive`, `collection_schedule`,
 `customer_record_scope`, `fleet_scope`, `pickup_intake`, `laundry_item_ownership`,
 `invoice_money_guards`, `invoice_issue_guard`, `billing_flow_guards`, `flow_runs_itself`,
-`operations_settings` (**693 assertions** across 38 files).
+`operations_settings`, `billing_write_policies` (**710 assertions** across 39 files).
 
 **Count assertions, not lines starting with `ok`.** pgTAP's function is literally named `ok`, so
 psql prints a centred `ok` **column header** above each result — and `grep -c '^\s*ok '` counts
@@ -3650,6 +3671,27 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-10-19 · The billing tables stop asking two policies every read
+The next item from the live performance advisor, which reports 145 unindexed foreign keys (INFO),
+24 unused indexes (INFO) and 10 `multiple_permissive_policies` (WARN). This takes the eight WARNs
+on the money tables. **One migration, `0058`, written and NOT yet applied; no `src/` change.**
+
+- §7 has the design. The split cannot change who reads or writes anything, because each table's
+  write set is inside its read set (checked against the live function bodies, not the repo's).
+  The one thing it changes is that a read of the ledger evaluates one permissive policy, not two.
+- The proof reads as the write set (finance and sales, who lost the redundant SELECT) as well as
+  writing as the Owner, because a split that dropped the wrong half would show up there first.
+- **The two remaining WARNs are kept on purpose**: `memberships` and `tenants` genuinely need both
+  SELECT paths (§7).
+- **The 145 foreign-key INFOs are not taken here.** Most are `created_by`-style audit columns on
+  small tables. An index each is write cost for a lookup nothing runs, so they want choosing, not
+  bulk-adding.
+- The connector's `execute_sql` timed out at 60 s on the rehearsal (the confirmation prompt that
+  gates `drop`/`delete`), and a read-back confirmed nothing was written: 8 `for all`, 0 new
+  policies. Same path as 0051–0057: Darshan pastes it into the SQL editor.
+- Checks: all 59 migrations applied to a fresh Postgres 16, **710 pgTAP assertions across 39
+  files**, 0 failing, the seed on top; `verify` green.
+
 ### 2026-10-18 · The test-login password leaves the public repository
 `scripts/role-profiles.mjs` carried the shared test-profile password as a constant in a **public**
 repository, and `npm run seed:roles` printed it on every run. MEMORY.md had flagged it as open since
