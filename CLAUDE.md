@@ -1416,8 +1416,7 @@ produce on demand.
   - `memberships` and `tenants` keep their two permissive SELECT paths deliberately: an
     administrator reads the tenant's people through `memberships_admin`, and a platform admin
     reads every laundry through `tenants_platform` — those SELECTs are not redundant.
-  - **Written, not applied** — the connector timed out on its confirmation prompt (§11). Safe to
-    apply before or after the merge: no code reads a policy name.
+  - **Applied 2026-10-19** (`20261019090000`), pasted into the SQL editor (§11).
 - `0050_pickup_to_job` — **a collection becomes a laundry job, exactly once.**
   `laundry_orders.source_pickup_id` (`on delete set null`),
   `uq_laundry_orders_source_pickup` (partial unique) and
@@ -2412,6 +2411,22 @@ reports six false gaps.
   `set_records_archived`, `sync_invoice_line_account`, `tenant_members`). That is the 0042 trap
   leaving its usual trace: text typed into `apply_migration` reformatted a little against the file.
   Worth knowing before anybody reads a raw `md5(prosrc)` mismatch as drift.
+
+**`0058_billing_write_policies` was applied on 2026-10-19** (`20261019090000`), pasted into the
+Supabase SQL editor after the connector's `apply_migration` timed out on its confirmation prompt
+twice with nothing written. The ledger is **63** entries.
+
+- **A second run of the paste failed with `23505` on `schema_migrations_pkey`, and that is
+  harmless.** The script is one transaction, so the duplicate ledger row rolled the whole second
+  run back; the first run had already committed. Worth knowing before somebody reads that error
+  as a failed apply.
+- **Read back over the connector:** **0** permissive `for all` left on the eight money tables,
+  **24** verb policies, exactly **1** permissive SELECT path per table, the archive clause on all
+  three verbs of the six archivable tables and on none of `invoice_source_jobs` /
+  `job_charge_snapshots` (which never carried it), and 0025's **3** restrictive policies still on
+  the five tables that have them.
+- **Advisors:** the `multiple_permissive_policies` WARN now names only `memberships` and
+  `tenants`, the two kept on purpose (§7).
 
 **`0053`–`0057` were applied on 2026-10-18** (`20261018105300` … `20261018105700`) — by Darshan,
 pasted into the Supabase SQL editor as one transaction (`apply-0053-0057.sql`: the five files
@@ -3688,7 +3703,9 @@ on the money tables. **One migration, `0058`, written and NOT yet applied; no `s
   bulk-adding.
 - The connector's `execute_sql` timed out at 60 s on the rehearsal (the confirmation prompt that
   gates `drop`/`delete`), and a read-back confirmed nothing was written: 8 `for all`, 0 new
-  policies. Same path as 0051–0057: Darshan pastes it into the SQL editor.
+  policies. A second attempt through `apply_migration` timed out the same way.
+- **Applied 2026-10-19** (`20261019090000`) from the paste script in the SQL editor; §11 has the
+  read-back.
 - Checks: all 59 migrations applied to a fresh Postgres 16, **710 pgTAP assertions across 39
   files**, 0 failing, the seed on top; `verify` green.
 
