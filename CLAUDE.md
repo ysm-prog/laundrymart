@@ -1417,6 +1417,31 @@ produce on demand.
     administrator reads the tenant's people through `memberships_admin`, and a platform admin
     reads every laundry through `tenants_platform` — those SELECTs are not redundant.
   - **Applied 2026-10-19** (`20261019090000`), pasted into the SQL editor (§11).
+- `0059_hot_foreign_key_indexes` — **the foreign keys the app reads through get an index.** Four
+  indexes: `pickups (route_id)`, `pickups (customer_id, pickup_date desc)`,
+  `invoice_source_jobs (order_id)` and `inventory_pools (vehicle_id)`, the first and last partial on
+  `is not null`.
+  - **Four of the advisor's 145, picked by reading `src/` rather than by count.** Each `.from()`
+    chain filtering on one of the 145 columns was matched against the existing indexes. Most of
+    the rest are audit columns (`created_by`, `approved_by`) nothing looks up by, or references to
+    small configuration tables. Several the app *does* filter on are already served by a
+    tenant-leading composite the advisor does not count (`idx_laundry_orders_board_day`,
+    `idx_laundry_prices_customer`, `uq_production_batches_route`). An index on every one would be
+    write cost for reads nobody runs.
+  - **The four that had no usable index at all:**
+    - the plant's return count reads a run's collections;
+    - month end sums one customer's weighed collections over a period, and the planner reads them
+      newest first;
+    - the billing screens ask which invoice carries a job — the only index there is partial on
+      `invoice_id is not null`, which the read does not state, and the FK is `restrict`;
+    - the unload sweep reads what is on the van, where the uniqueness index has `vehicle_id`
+      seventh, inside a `coalesce`.
+  - Adds four indexes and nothing else; `if not exists`, so idempotent. Self-asserting with the
+    advisor's own covering test plus the date column's order, and confirmed to fire by building a
+    wrong index for two of them.
+  - `hot_foreign_key_indexes.test.sql` (8) plans the real queries with sequential scans off and
+    asserts each reaches its index. **It fails 8 of 8 on a database without 0059.**
+  - **Applied 2026-10-19** (`20261019060507`) through the connector (§11).
 - `0050_pickup_to_job` — **a collection becomes a laundry job, exactly once.**
   `laundry_orders.source_pickup_id` (`on delete set null`),
   `uq_laundry_orders_source_pickup` (partial unique) and
@@ -1702,7 +1727,8 @@ Proofs in `supabase/tests/`: `rls_isolation`, `rls_coverage`, `driver_scope`,
 `single_laundry`, `charge_accounts`, `gst_inclusive`, `collection_schedule`,
 `customer_record_scope`, `fleet_scope`, `pickup_intake`, `laundry_item_ownership`,
 `invoice_money_guards`, `invoice_issue_guard`, `billing_flow_guards`, `flow_runs_itself`,
-`operations_settings`, `billing_write_policies` (**710 assertions** across 39 files).
+`operations_settings`, `billing_write_policies`, `hot_foreign_key_indexes` (**718 assertions** across
+40 files).
 
 **Count assertions, not lines starting with `ok`.** pgTAP's function is literally named `ok`, so
 psql prints a centred `ok` **column header** above each result — and `grep -c '^\s*ok '` counts
@@ -2411,6 +2437,23 @@ reports six false gaps.
   `set_records_archived`, `sync_invoice_line_account`, `tenant_members`). That is the 0042 trap
   leaving its usual trace: text typed into `apply_migration` reformatted a little against the file.
   Worth knowing before anybody reads a raw `md5(prosrc)` mismatch as drift.
+
+**`0059_hot_foreign_key_indexes` was applied on 2026-10-19** (`20261019060507`) through the
+connector's `apply_migration`, first attempt. It contains no `drop` or `delete`, so the confirmation
+prompt that timed out 0051–0058 never fired. The ledger is **64** entries.
+
+- **Its version sorts before 0058's.** `20261019090000` was hand-picked for the 0058 paste, and the
+  connector stamps the real clock. Filename order is what CI uses, so nothing depends on this.
+  Worth knowing before somebody reads the ledger's last row as the latest migration.
+- **The ledger's stored text has a two-line header** pointing at the repo file, not the file's
+  full comment. The SQL statements and the assertion block are the file's.
+- **Pre-flight:** none of the four indexes existed, and all four foreign keys did. **0** pickups,
+  **0** inventory pools and **7** invoice-to-job links, so the build was instant.
+- **Read back:** all four index definitions exactly as written.
+- **Advisors:** `unindexed_foreign_keys` 145 → **141**, none of them naming the four. Expect
+  `unused_index` at 24 → **28** until the reads run: a new index is "unused" by definition.
+- **Unchanged:** **0** `anon` table grants, **0** tables without RLS; 654 invoices and 26 laundry
+  jobs.
 
 **`0058_billing_write_policies` was applied on 2026-10-19** (`20261019090000`), pasted into the
 Supabase SQL editor after the connector's `apply_migration` timed out on its confirmation prompt
@@ -3686,6 +3729,21 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-10-19 · The foreign keys the app reads through get an index
+The next advisor item: 145 unindexed foreign keys (INFO). **One migration, `0059`, applied live the
+same day; no `src/` change.**
+
+- **Four, not 145, and the choice is the work.** Every `.from()` chain in `src/` filtering on one of
+  the 145 columns was matched against the existing indexes. Four reads had no usable index; §7 has
+  them and why the other 141 stay as they are.
+- **Proved by plan, not by existence.** The proof plans each real query with sequential scans off
+  and asserts it reaches the new index. It fails 8 of 8 without the migration.
+- **Applied through the connector, first attempt**: no `drop` or `delete`, so no confirmation
+  prompt. §11 has the read-back. The advisor now reports 141 unindexed foreign keys, and 28 unused
+  indexes until the four new ones see traffic.
+- Checks: all 60 migrations applied to a fresh Postgres 16, **718 pgTAP assertions across 40
+  files**, 0 failing, the seed on top; `verify` green.
+
 ### 2026-10-19 · The billing tables stop asking two policies every read
 The next item from the live performance advisor, which reports 145 unindexed foreign keys (INFO),
 24 unused indexes (INFO) and 10 `multiple_permissive_policies` (WARN). This takes the eight WARNs
