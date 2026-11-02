@@ -2,7 +2,10 @@
 
 import { useMemo, useState } from "react";
 import { Trash2 } from "lucide-react";
-import { CHARGE_TYPES, CHARGE_TYPE_LABELS, round2, type ChargeType } from "@/lib/domain/pricing";
+import {
+  CHARGE_TYPES, CHARGE_TYPE_LABELS, gstPhrase, gstWithin, inclusiveTotals, lineAmount,
+  rateForGstTick, type ChargeType, type GstTickMemo,
+} from "@/lib/domain/pricing";
 import { formatMoney } from "@/lib/domain/pricing";
 import { chargeSourceLabel, type JobChargeInput } from "../job-charges";
 import { chargePatchForItem } from "@/lib/domain/coding";
@@ -78,19 +81,34 @@ export function JobChargesEditor({
   accounts?: readonly CodingAccount[];
   /**
    * The laundry's own GST rate, for grossing an item's price up when the item
-   * states it GST-exclusive. It matters more here than on an invoice line:
-   * approval **freezes** these numbers, so a rate short by the GST is short on a
-   * row nobody can edit afterwards.
+   * states it GST-exclusive, and for the "GST applies" tick adding or taking out
+   * the GST. It matters more here than on an invoice line: approval **freezes**
+   * these numbers, so a rate short by the GST is short on a row nobody can edit
+   * afterwards.
    */
   gstRate?: number;
 }) {
   const [rows, setRows] = useState<EditableCharge[]>(initial);
+  // Held beside the rows rather than on them: the rows are what gets posted, and
+  // a tick's memo is about this editing session, not about the charge.
+  const [gstMemos, setGstMemos] = useState<Record<string, GstTickMemo | null>>({});
 
   const itemsById = useMemo(() => new Map(items.map((one) => [one.id, one])), [items]);
   const accountsById = useMemo(() => new Map(accounts.map((one) => [one.id, one])), [accounts]);
 
   const update = (key: string, patch: Partial<EditableCharge>) =>
     setRows((current) => current.map((row) => (row.key === key ? { ...row, ...patch } : row)));
+
+  // The tick moves the money, not just the flag: a line amount is GST-inclusive
+  // (0043), so a tick that left the rate alone changed nothing the customer pays.
+  // The rule is pure and tested; this only carries its memo for the row.
+  const setRowTaxable = (row: EditableCharge, taxable: boolean) => {
+    const next = rateForGstTick({
+      rate: row.unit_price, taxable, gstRate, memo: gstMemos[row.key],
+    });
+    setGstMemos((current) => ({ ...current, [row.key]: next.memo }));
+    update(row.key, { taxable, unit_price: next.rate });
+  };
 
   // Unique per editor, not just per row: a row key is unique inside one editor
   // and two editors on one page (the gallery renders three) would otherwise
@@ -117,8 +135,13 @@ export function JobChargesEditor({
       gstRate,
     });
 
-  const subtotal = round2(
-    rows.reduce((sum, row) => sum + Number(row.quantity ?? 0) * Number(row.unit_price ?? 0), 0),
+  const amountOf = (row: EditableCharge) =>
+    lineAmount(Number(row.quantity ?? 0), Number(row.unit_price ?? 0));
+
+  // The same sum `recalculate_invoice` will do, so the preview says what the
+  // invoice will say, and "GST included" is no longer printed over a job with none.
+  const totals = inclusiveTotals(
+    rows.map((row) => ({ amount: amountOf(row), taxable: row.taxable })), gstRate,
   );
 
   return (
@@ -194,7 +217,7 @@ export function JobChargesEditor({
 
             <div className="flex items-center justify-between gap-2 sm:col-span-1 sm:justify-end">
               <span className="text-sm font-medium tabular-nums sm:hidden">
-                {formatMoney(round2(Number(row.quantity ?? 0) * Number(row.unit_price ?? 0)))}
+                {formatMoney(amountOf(row))}
               </span>
               <IconButton
                 label={`Remove charge ${index + 1}`}
@@ -215,7 +238,7 @@ export function JobChargesEditor({
                   type="checkbox"
                   className="size-[1.15rem] shrink-0 rounded border-strong accent-primary"
                   checked={row.taxable !== false}
-                  onChange={(event) => update(row.key, { taxable: event.target.checked })}
+                  onChange={(event) => setRowTaxable(row, event.target.checked)}
                 />
                 GST applies
               </label>
@@ -224,8 +247,14 @@ export function JobChargesEditor({
                 {chargeSourceLabel(row) !== "Added by hand" && row.source_laundry_item_type
                   ? ` · ${row.source_laundry_item_type.replace(/_/g, " ")}` : ""}
               </span>
-              <span className="ml-auto hidden text-sm font-medium tabular-nums sm:inline">
-                {formatMoney(round2(Number(row.quantity ?? 0) * Number(row.unit_price ?? 0)))}
+              <span className="ml-auto text-right tabular-nums">
+                <span className="hidden text-sm font-medium sm:inline">{formatMoney(amountOf(row))}</span>
+                <span className="block text-xs text-muted-foreground">
+                  {gstPhrase(
+                    row.taxable !== false ? gstWithin(amountOf(row), gstRate) : 0,
+                    row.taxable !== false,
+                  )}
+                </span>
               </span>
             </div>
 
@@ -261,8 +290,8 @@ export function JobChargesEditor({
         </Button>
         <div className="flex flex-wrap items-center gap-4">
           <span className="text-sm text-muted-foreground">
-            Subtotal <span className="font-semibold text-foreground tabular-nums">{formatMoney(subtotal)}</span>
-            {" "}GST included
+            Total <span className="font-semibold text-foreground tabular-nums">{formatMoney(totals.total)}</span>
+            {" "}{gstPhrase(totals.gst, totals.anyTaxable)}
           </span>
           <SubmitButton size="md">Save charges</SubmitButton>
         </div>
