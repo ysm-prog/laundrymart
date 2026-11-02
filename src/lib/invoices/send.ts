@@ -8,6 +8,12 @@ import { buildInvoiceEmail } from "@/lib/email/invoice-email";
 import { sendEmail } from "@/lib/email/send";
 import { logOrderActivity } from "@/lib/orders/activity";
 import { settledStatus } from "@/lib/domain/payment-gate";
+import { buildInvoiceSms, displayMobile, normaliseMobile } from "@/lib/domain/sms";
+import { formatMoney } from "@/lib/domain/pricing";
+import { auDate } from "@/lib/pdf/line-display";
+import { sendSms } from "@/lib/sms/send";
+import { invoiceLink } from "@/lib/invoices/link";
+import { requestOrigin } from "@/lib/auth/request-origin";
 
 /**
  * Emailing one invoice, with the PDF attached — the single implementation.
@@ -94,6 +100,106 @@ export async function sendInvoice(
   await advanceJobsToSent(supabase, session, invoiceId, invoiceNumber);
 
   return { ok: true, invoiceNumber, recipient };
+}
+
+/**
+ * The first number on a customer's record that a text can reach: their own phone,
+ * then their contacts', primary first. Most of these are landlines, which is why
+ * each is tested rather than the first one taken.
+ */
+export async function loadCustomerMobile(
+  supabase: Client, tenantId: string, customerId: string,
+): Promise<string | null> {
+  const [{ data: customer }, { data: contacts }] = await Promise.all([
+    supabase.from("customers").select("phone")
+      .eq("tenant_id", tenantId).eq("id", customerId)
+      .maybeSingle<{ phone: string | null }>(),
+    supabase.from("customer_contacts").select("phone")
+      .eq("tenant_id", tenantId).eq("customer_id", customerId).is("deleted_at", null)
+      .order("is_primary", { ascending: false })
+      .returns<Array<{ phone: string | null }>>(),
+  ]);
+  for (const candidate of [customer?.phone, ...(contacts ?? []).map((row) => row.phone)]) {
+    const mobile = normaliseMobile(candidate);
+    if (mobile) return mobile;
+  }
+  return null;
+}
+
+/**
+ * Text a customer the link to one invoice. The twin of `sendInvoice`, and held to
+ * the same rules: a draft or a void is never sent, the number it went to is stamped
+ * on the invoice, a failed attempt is recorded, and sending is what moves the jobs on.
+ */
+export async function sendInvoiceSms(
+  supabase: Client,
+  session: Session,
+  invoiceId: string,
+  overrideMobile?: string | null,
+): Promise<SendResult> {
+  const data = await loadInvoiceForPdf(invoiceId, session.tenantId);
+  if (!data) return { ok: false, invoiceNumber: null, error: "that invoice could not be found" };
+
+  const invoiceNumber = data.invoice.invoice_number;
+  if (data.invoice.status === "draft") {
+    return { ok: false, invoiceNumber, error: "issue it before sending — a draft can still change" };
+  }
+  if (data.invoice.status === "void") {
+    return { ok: false, invoiceNumber, error: "this invoice is void and cannot be sent" };
+  }
+
+  const typed = overrideMobile?.trim();
+  const { data: owner } = await supabase
+    .from("invoices").select("customer_id")
+    .eq("tenant_id", session.tenantId).eq("id", invoiceId)
+    .maybeSingle<{ customer_id: string }>();
+  const mobile = typed
+    ? normaliseMobile(typed)
+    : owner ? await loadCustomerMobile(supabase, session.tenantId, owner.customer_id) : null;
+  if (!mobile) {
+    return {
+      ok: false, invoiceNumber,
+      error: typed ? "that is not an Australian mobile number" : "this customer has no mobile number on file",
+    };
+  }
+
+  const body = buildInvoiceSms({
+    business: data.tenant.name,
+    invoiceNumber,
+    amount: formatMoney(Number(data.invoice.balance ?? 0), data.invoice.currency || "AUD"),
+    due: data.invoice.due_date ? auDate(data.invoice.due_date) : null,
+    link: invoiceLink(await requestOrigin(), invoiceId),
+  });
+
+  const result = await sendSms({ to: mobile, body });
+  const shown = displayMobile(mobile);
+
+  if (!result.ok) {
+    await recordAudit(session, {
+      entity: "invoice", entityId: invoiceId, action: "send_failed",
+      summary: `text to ${shown}: ${result.error}`,
+    });
+    return { ok: false, invoiceNumber, error: result.error };
+  }
+
+  // A stamp that fails does not fail the send, for `advanceJobsToSent`'s reason:
+  // the text has gone, and reporting a failure would invite a second one. The
+  // audit row below still says where it went.
+  const { error } = await supabase
+    .from("invoices")
+    .update({ sms_sent_at: new Date().toISOString(), sms_sent_to: mobile })
+    .eq("id", invoiceId).eq("tenant_id", session.tenantId);
+  if (error) console.error("invoice text stamp failed", { invoiceId, error: error.message });
+
+  await recordAudit(session, {
+    entity: "invoice", entityId: invoiceId, action: "send",
+    summary: `texted to ${shown}`,
+    metadata: { providerId: result.id },
+  });
+
+  await advanceJobsToSent(supabase, session, invoiceId, invoiceNumber);
+
+  return { ok: true, invoiceNumber, recipient: shown };
 }
 
 /**

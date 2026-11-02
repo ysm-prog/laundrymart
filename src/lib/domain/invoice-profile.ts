@@ -70,22 +70,21 @@ export function normaliseWebsite(raw: string): string | null {
 }
 
 /**
- * The one-line payment instruction the PDF prints under **Notes**, in the
- * format of the laundry's own MYOB invoice (brief 1.10), character for
- * character — no space after `BSB:` or `No.`, because that is the line ATS's
- * customers already read on every MYOB invoice:
- *
- *     Banking Details: BSB:062-000 Account No.12345678 Account Name: Example Laundry
- *
- * Built from the profile and gated by `paymentInstructions` — all three bank
- * details or nothing — so the PDF and the email cannot disagree about whether
- * the laundry can be paid. Never hard-coded: Darshan enters the details in
- * Settings › Invoicing.
+ * The Bank Deposit block on the standard invoice, as Xero's template words it.
+ * Empty unless all three bank details are there, the same gate as
+ * `paymentInstructions`, so the PDF and the email cannot disagree about whether
+ * the laundry can be paid. Never hard-coded: it comes from Settings › Invoicing.
  */
-export function bankingDetailsLine(profile: InvoiceProfile): string | null {
-  if (paymentInstructions(profile, "X").length === 0) return null;
-  return `Banking Details: BSB:${profile.bsb} Account No.${profile.accountNumber} `
-    + `Account Name: ${profile.bankAccountName}`;
+export function bankDepositLines(profile: InvoiceProfile): string[] {
+  if (paymentInstructions(profile, "X").length === 0) return [];
+  return [
+    "Bank Deposit",
+    `Name: ${profile.bankAccountName}`,
+    `BSB: ${profile.bsb}`,
+    `Account Number: ${profile.accountNumber}`,
+    "Please add invoice number as reference",
+    ...(profile.email ? [`Send Remittance To: ${profile.email}`] : []),
+  ];
 }
 
 /** `062000` / `062-000` / `062 000` → `062-000`; anything else is refused. */

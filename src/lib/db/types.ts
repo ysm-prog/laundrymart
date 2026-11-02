@@ -428,6 +428,9 @@ export type Invoice = {
   emailed_at: string | null;
   /** Address the PDF was last sent to, stamped at send time. */
   emailed_to: string | null;
+  /** When a text carrying the invoice's link last went, and to which mobile (0061). */
+  sms_sent_at: string | null;
+  sms_sent_to: string | null;
 };
 
 export type InvoiceLine = {

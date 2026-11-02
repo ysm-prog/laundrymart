@@ -8,6 +8,7 @@
  * Server-only: reaches for the request's cookies.
  */
 
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 import type { ChargeType } from "@/lib/domain/pricing";
 import { loadInvoiceBreakdown, type InvoiceBreakdown } from "@/lib/invoices/breakdown";
@@ -48,8 +49,12 @@ export type InvoicePdfData = {
     abn: string | null;
     billing_email: string | null;
     address: string[];
-    /** The contact the invoice is addressed to, in italics above the business (MYOB's layout). */
+    /** The contact the invoice is addressed to, printed "Attn:" above the business. */
     contact_name?: string | null;
+    /** `customers.phone`, printed in the Bill to block and where a text is sent. */
+    phone?: string | null;
+    /** Where it was delivered: the customer's delivery site, else the billing address. */
+    ship_to?: string[] | null;
   };
   invoice: {
     id: string;
@@ -83,26 +88,34 @@ export type InvoicePdfData = {
   breakdown: InvoiceBreakdown;
 };
 
+/**
+ * @param client The service-role client, for the one reader with no session: the
+ * signed invoice link a text message carries (`lib/invoices/link.ts`). Every other
+ * caller leaves it out and reads through RLS. Tenant is filtered by hand either
+ * way (§2), so that client cannot reach another laundry's invoice.
+ */
 export async function loadInvoiceForPdf(
   invoiceId: string,
   tenantId: string,
+  client?: SupabaseClient,
 ): Promise<InvoicePdfData | null> {
-  const supabase = await createClient();
+  const supabase = (client ?? await createClient()) as Awaited<ReturnType<typeof createClient>>;
 
   const { data: invoice } = await supabase
     .from("invoices")
     .select("id, customer_id, invoice_number, invoice_type, status, issue_date, due_date, period_start, period_end, " +
             "purchase_order_number, payment_terms_days, subtotal, tax_amount, total, " +
             "amount_paid, amount_credited, balance, currency, notes, " +
-            "customers(business_name, customer_number, abn, billing_email, " +
+            "customers(business_name, customer_number, abn, billing_email, phone, " +
             "billing_address_line1, billing_address_line2, billing_suburb, billing_state, " +
             "billing_postcode)")
     .eq("id", invoiceId)
+    .eq("tenant_id", tenantId)
     .maybeSingle<InvoicePdfData["invoice"] & {
       customer_id: string;
       customers: {
         business_name: string; customer_number: string; abn: string | null;
-        billing_email: string | null; billing_address_line1: string | null;
+        billing_email: string | null; phone: string | null; billing_address_line1: string | null;
         billing_address_line2: string | null; billing_suburb: string | null;
         billing_state: string | null; billing_postcode: string | null;
       } | null;
@@ -110,7 +123,7 @@ export async function loadInvoiceForPdf(
 
   if (!invoice) return null;
 
-  const [{ data: lineRows }, { data: tenant }, contactName] = await Promise.all([
+  const [{ data: lineRows }, { data: tenant }, contactName, shipTo] = await Promise.all([
     supabase
       .from("invoice_lines")
       // The item is embedded for its code and name, which are the Item ID and
@@ -130,6 +143,7 @@ export async function loadInvoiceForPdf(
       .eq("id", tenantId)
       .maybeSingle<{ name: string; abn: string | null; gst_rate: number; settings: unknown }>(),
     loadContactName(supabase, tenantId, invoice.customer_id),
+    loadDeliveryAddress(supabase, tenantId, invoice.customer_id),
   ]);
 
   const c = invoice.customers;
@@ -158,6 +172,8 @@ export async function loadInvoiceForPdf(
         [c?.billing_suburb, c?.billing_state, c?.billing_postcode].filter(Boolean).join(" "),
       ].filter((part): part is string => Boolean(part && part.trim())),
       contact_name: contactName,
+      phone: c?.phone ?? null,
+      ship_to: shipTo,
     },
     invoice,
     lines,
@@ -185,4 +201,30 @@ export async function loadContactName(
     .returns<Array<{ name: string | null }>>();
   const name = data?.[0]?.name?.trim();
   return name ? name : null;
+}
+
+/** The customer's delivery site as printed lines, or null to fall back on the billing address. */
+export async function loadDeliveryAddress(
+  supabase: Awaited<ReturnType<typeof createClient>>, tenantId: string, customerId: string,
+): Promise<string[] | null> {
+  const { data } = await supabase
+    .from("customer_locations")
+    .select("address_line1, address_line2, suburb, state, postcode")
+    .eq("tenant_id", tenantId)
+    .eq("customer_id", customerId)
+    .eq("is_delivery", true)
+    .is("deleted_at", null)
+    .order("is_primary", { ascending: false })
+    .order("created_at", { ascending: true })
+    .limit(1)
+    .returns<Array<{
+      address_line1: string | null; address_line2: string | null; suburb: string | null;
+      state: string | null; postcode: string | null;
+    }>>();
+  const site = data?.[0];
+  if (!site) return null;
+  const lines = [site.address_line1, site.address_line2,
+    [site.suburb, site.state, site.postcode].filter(Boolean).join(" ")]
+    .filter((part): part is string => Boolean(part && part.trim()));
+  return lines.length ? lines : null;
 }

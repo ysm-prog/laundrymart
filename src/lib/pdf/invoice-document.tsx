@@ -1,36 +1,37 @@
 /**
- * The tax-invoice PDF (spec §7.14, §18), drawn to the layout of the laundry's
- * own MYOB invoice (brief 1.10, template `Invoice-00321043.pdf`).
+ * The tax-invoice PDF (spec §7.14, §18), drawn on the standard template
+ * (`standard-layout.tsx`, from Xero's `INV-0015359`).
  *
  * Rendered server-side so a customer, a mailbox and an auditor all get
- * identical bytes. The page is built from `myob-layout.tsx`, which the credit
- * note shares, so the two documents a customer keeps are drawn one way.
+ * identical bytes. The page is built from the same blocks as the credit note and
+ * the statement, so every document a customer keeps is drawn one way.
  *
  * The data rules did not move with the layout:
- *  - **Line amounts are GST-inclusive** (0043), so the money columns say
- *    "including tax" and the Tax row is the GST *within* the total, not added
- *    to it.
- *  - "Tax invoice" only where GST is charged (the ATO's wording), "Draft
- *    invoice" on a draft, "Adjustment note" on a credit (`invoiceDocumentTitle`).
+ *  - **Line amounts are GST-inclusive** (0043), so the subtotal and the total are
+ *    the same figure and the GST is stated as what it is, a part of it.
+ *  - "Tax Invoice" only where GST is charged (the ATO's wording), a Draft prefix
+ *    on a draft, "Adjustment Note" on a credit (`invoiceDocumentTitle`).
  *  - The void banner stays.
  *  - **No ledger code and no internal charge type** (2026-10-12): `4-1100` and
- *    "Wash only" are the laundry's bookkeeping vocabulary. The Item ID column is
+ *    "Wash only" are the laundry's bookkeeping vocabulary. The Item Code column is
  *    the *item* code the customer also uses (`T35`), never the GL code.
- *  - The payment line is built from the invoice profile Darshan fills in on
- *    Settings › Invoicing — never written here.
+ *  - The Bank Deposit block is built from the invoice profile filled in on
+ *    Settings › Invoicing, never written here.
+ *  - **A purchase order prints**, because a government customer's accounts team
+ *    matches on it.
  */
 
 import { Document, Page, StyleSheet, Text, View } from "@react-pdf/renderer";
 import { formatMoney } from "@/lib/domain/pricing";
 import {
-  bankingDetailsLine, formatAbn, invoiceTotalsRows,
+  bankDepositLines, formatAbn, invoiceTotalsRows,
 } from "@/lib/domain/invoice-profile";
-import { auDate, invoiceDocumentTitle, pdfLineCells } from "./line-display";
+import { auDate, gstPercent, invoiceDocumentTitle, longDate, pdfLineCells } from "./line-display";
 import {
-  BillToRow, DocFooter, DocHeader, LineTable, NotesAndTotals, TitleRow,
+  Addresses, DocFooter, DocHeader, LineTable, LowerBlock, SummaryStrip,
   formatAmount, formatQty, s,
-  type Detail, type TableLine, type TotalRow,
-} from "./myob-layout";
+  type Party, type StripColumn, type TableLine, type TotalRow,
+} from "./standard-layout";
 import type { InvoicePdfData } from "./invoice-data";
 
 /** What the importer writes into `notes`; it describes our import, not the customer's invoice. */
@@ -57,85 +58,92 @@ export function InvoiceDocument({ data }: { data: InvoicePdfData }) {
   const { tenant, customer, invoice, lines, breakdown } = data;
   const currency = invoice.currency || "AUD";
   const cash = (value: number) => formatMoney(Number(value ?? 0), currency);
+  const plain = (value: number) => formatAmount(Number(value ?? 0));
   const title = invoiceDocumentTitle(invoice);
   const isCredit = invoice.invoice_type === "credit" || Number(invoice.total) < 0;
 
-  const tableLines: TableLine[] = lines.map((line) => {
-    const cells = pdfLineCells(line);
-    return {
-      ...cells,
-      qty: formatQty(line.quantity),
-      unitPrice: formatAmount(line.unit_price, 4),
-      amount: formatAmount(line.amount),
-    };
-  });
+  const tableLines: TableLine[] = lines.map((line) => ({
+    ...pdfLineCells(line, tenant.gstRate),
+    qty: formatQty(line.quantity),
+    unitPrice: formatAmount(line.unit_price, 4),
+    amount: formatAmount(line.amount),
+  }));
 
   // A draft can still change and a void is not payable; a credit is money owed
   // the other way. None of them carries a way to pay.
   const payable = invoice.status !== "draft" && invoice.status !== "void" && !isCredit;
-  const banking = payable ? bankingDetailsLine(tenant.profile) : null;
-  const notes = [
-    ...(banking ? [banking, `Please quote ${invoice.invoice_number} as the payment reference.`] : []),
-    ...(invoice.notes && !IMPORT_NOTE.test(invoice.notes.trim()) ? [invoice.notes.trim()] : []),
-  ];
+  const banking = payable ? bankDepositLines(tenant.profile) : [];
+  const notes = invoice.notes && !IMPORT_NOTE.test(invoice.notes.trim()) ? [invoice.notes.trim()] : [];
 
   // Paid, credited and the balance — the 0052 rows, from the same rule the
   // invoice page and the email use, so the three cannot disagree.
-  const settlement: TotalRow[] = invoiceTotalsRows({
+  const settlement = invoiceTotalsRows({
     total: invoice.total, taxAmount: invoice.tax_amount, amountPaid: invoice.amount_paid,
     amountCredited: invoice.amount_credited ?? 0, balance: invoice.balance,
-  })
-    .filter((row) => row.label === "Paid" || row.label === "Credited" || row.label === "Balance due")
-    .map((row) => ({ label: row.label, value: cash(row.value), strong: row.strong }));
+  }).filter((row) => row.label === "Paid" || row.label === "Credited");
 
-  const details: Detail[] = [
-    ...(customer.customer_number ? [{ label: "Customer", value: customer.customer_number }] : []),
-    ...(invoice.period_start
-      ? [{ label: "Period", value: `${auDate(invoice.period_start)} – ${auDate(invoice.period_end)}` }]
+  const amountDue = invoice.status === "void" ? 0 : invoice.balance;
+  const totals: TotalRow[] = [
+    { label: "Subtotal", value: plain(invoice.subtotal) },
+    ...(Number(invoice.tax_amount) > 0
+      ? [{ label: `Includes GST ${gstPercent(tenant.gstRate)} of`, value: plain(invoice.tax_amount), note: true }]
       : []),
-    ...(invoice.purchase_order_number ? [{ label: "Your order", value: invoice.purchase_order_number }] : []),
-    { label: "Terms", value: `${invoice.payment_terms_days} days` },
+    { label: "Total", value: plain(invoice.total), rule: true },
+    ...settlement.map((row) => ({ label: `Less ${row.label.toLowerCase()}`, value: plain(row.value) })),
+    { label: "Amount due", value: cash(amountDue), rule: true, strong: true },
+  ];
+
+  const billTo: Party = {
+    contact: customer.contact_name ?? null,
+    business: customer.business_name,
+    lines: customer.address,
+    details: [
+      ...(customer.billing_email ? [customer.billing_email] : []),
+      ...(customer.phone ? [customer.phone] : []),
+      ...(customer.abn ? [`ABN: ${formatAbn(customer.abn)}`] : []),
+    ],
+  };
+  const shipTo: Party = {
+    business: customer.business_name,
+    lines: customer.ship_to?.length ? customer.ship_to : customer.address,
+  };
+
+  const strip: StripColumn[] = [
+    { label: "Amount due", value: cash(amountDue), strong: true },
+    ...(invoice.due_date && !isCredit
+      ? [{ label: "Due date", value: longDate(invoice.due_date), strong: true }]
+      : []),
+    { label: "Issue date", value: invoice.status === "draft" ? "Not issued yet" : longDate(invoice.issue_date) },
+    { label: "Invoice number", value: invoice.invoice_number },
+    ...(invoice.purchase_order_number ? [{ label: "Reference", value: invoice.purchase_order_number }] : []),
+    ...(invoice.period_start
+      ? [{ label: "Period", value: `${longDate(invoice.period_start)} – ${longDate(invoice.period_end)}` }]
+      : []),
   ];
 
   return (
     <Document title={`${title} ${invoice.invoice_number}`} author={tenant.name}>
       <Page size="A4" style={s.page}>
-        <DocHeader business={{
-          name: tenant.name, abn: tenant.abn, addressLines: tenant.profile.addressLines,
-          phone: tenant.profile.phone, email: tenant.profile.email,
-          website: tenant.profile.website, logo: tenant.logo ?? null,
-        }} />
+        <DocHeader title={title} logo={tenant.logo ?? null} />
 
-        <TitleRow title={title} columns={[
-          { label: "Invoice number", value: invoice.invoice_number, strong: true },
-          { label: "Issue date", value: invoice.status === "draft" ? "Not issued yet" : auDate(invoice.issue_date) },
-          ...(invoice.due_date && !isCredit ? [{ label: "Due date", value: auDate(invoice.due_date) }] : []),
-        ]} />
+        <Addresses
+          billTo={billTo}
+          shipTo={shipTo}
+          business={{
+            name: tenant.name, abn: tenant.abn, addressLines: tenant.profile.addressLines,
+            phone: tenant.profile.phone, email: tenant.profile.email, website: tenant.profile.website,
+          }}
+        />
+
+        <SummaryStrip columns={strip} />
 
         {invoice.status === "void" ? (
           <Text style={s.banner}>This invoice has been voided and is not payable.</Text>
         ) : null}
 
-        <BillToRow
-          billTo={{
-            contact: customer.contact_name ?? null,
-            business: customer.business_name,
-            lines: [
-              ...customer.address,
-              ...(customer.abn ? [`ABN: ${formatAbn(customer.abn)}`] : []),
-            ],
-          }}
-          details={details}
-        />
-
         <LineTable lines={tableLines} empty="No lines on this invoice." />
 
-        <NotesAndTotals
-          notes={notes}
-          tax={cash(invoice.tax_amount)}
-          total={cash(invoice.total)}
-          after={settlement}
-        />
+        <LowerBlock sections={banking.length ? [banking] : []} notes={notes} totals={totals} />
 
         {/* What was processed, job by job. Printed whenever the invoice bills
             jobs — one or many — because the line now carries the item's name
@@ -151,7 +159,7 @@ export function InvoiceDocument({ data }: { data: InvoicePdfData }) {
               <View key={week.weekStart ?? "undated"} style={b.week} wrap={false}>
                 <View style={b.weekHead}>
                   <Text style={b.head}>
-                    {week.weekStart ? `Week of ${auDate(week.weekStart)}` : "No completion date"}
+                    {week.weekStart ? `Week of ${longDate(week.weekStart)}` : "No completion date"}
                   </Text>
                   <Text style={b.head}>{cash(week.total)}</Text>
                 </View>
@@ -186,7 +194,7 @@ export function InvoiceDocument({ data }: { data: InvoicePdfData }) {
           </View>
         ) : null}
 
-        <DocFooter numberLabel="Invoice no" number={invoice.invoice_number} total={cash(invoice.total)} />
+        <DocFooter numberLabel="Invoice" number={invoice.invoice_number} />
       </Page>
     </Document>
   );

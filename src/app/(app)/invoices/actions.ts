@@ -36,7 +36,9 @@ import { INVOICE_SETTINGS_LINK, issueOneInvoice } from "@/lib/invoices/issue";
 import { voidOneInvoice } from "@/lib/invoices/void";
 import { parseRebill } from "@/lib/domain/confirmations";
 import { can } from "@/lib/roles";
-import { resettleInvoice, sendInvoice } from "@/lib/invoices/send";
+import { resettleInvoice, sendInvoice, sendInvoiceSms } from "@/lib/invoices/send";
+import { normaliseMobile } from "@/lib/domain/sms";
+import { smsIsConfigured } from "@/lib/sms/send";
 
 /**
  * Generate recurring invoices for a billing period — **one invoice per
@@ -1393,13 +1395,17 @@ export async function createCreditNote(formData: FormData): Promise<void> {
 }
 
 /**
- * Email the invoice to the customer with the rendered PDF attached (§7.14).
+ * Send the invoice to the customer: the PDF by email, a link by text, or both.
  *
  * Two rules the customer's inbox depends on:
  *  - a draft is never sent. Draft lines are still editable, so sending one
  *    means a customer holding a document the system may contradict tomorrow;
  *  - the address the invoice actually went to is stamped on the invoice, not
  *    inferred later from the customer record, which can change.
+ *
+ * **Everything that can be refused is refused before anything leaves.** With
+ * Both chosen, a bad mobile found after the email had gone would leave somebody
+ * deciding whether to press Send again and double the email.
  */
 export async function emailInvoice(formData: FormData): Promise<void> {
   const session = await assertCapability("invoices.write");
@@ -1409,23 +1415,35 @@ export async function emailInvoice(formData: FormData): Promise<void> {
       (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
       z.string().email("That is not a valid email address").optional(),
     ),
+    channel: z.enum(["email", "sms", "both"]).catch("email"),
+    mobile: z.string().trim().optional(),
   }).safeParse(toObject(formData));
   if (!parsed.success) return fail("/invoices", firstIssue(parsed.error));
 
+  const { channel, mobile } = parsed.data;
+  const emails = channel !== "sms";
+  const texts = channel !== "email";
   const backTo = returnTo(formData, `/invoices/${parsed.data.id}`);
+
+  if (texts && !smsIsConfigured()) {
+    return fail(backTo, "Text messages are not set up yet. Add the ClickSend keys in Vercel, or send by email.");
+  }
+  if (texts && mobile && !normaliseMobile(mobile)) {
+    return fail(backTo, "That is not an Australian mobile number. Check it and try again.");
+  }
 
   const data = await loadInvoiceForPdf(parsed.data.id, session.tenantId);
   if (!data) return fail(backTo, "That invoice could not be found.");
 
   if (data.invoice.status === "draft") {
-    return fail(backTo, "Issue the invoice before emailing it — a draft can still change.");
+    return fail(backTo, "Issue the invoice before sending it — a draft can still change.");
   }
   if (data.invoice.status === "void") {
     return fail(backTo, "This invoice is void and cannot be sent.");
   }
 
   const recipient = parsed.data.to ?? data.customer.billing_email;
-  if (!recipient) {
+  if (emails && !recipient) {
     // The fix is one click away (design B4): the toast links the customer form.
     const supabase = await createClient();
     const { data: owner } = await supabase
@@ -1440,12 +1458,23 @@ export async function emailInvoice(formData: FormData): Promise<void> {
   // one implementation of putting a document in front of a customer, and one
   // place where every job on the invoice moves to `invoice_sent`.
   const supabase = await createClient();
-  const result = await sendInvoice(supabase, session, parsed.data.id, recipient);
-  if (!result.ok) return fail(backTo, `The invoice could not be sent. ${result.error}`);
+  const email = emails ? await sendInvoice(supabase, session, parsed.data.id, recipient) : null;
+  const text = texts ? await sendInvoiceSms(supabase, session, parsed.data.id, mobile) : null;
 
   revalidatePath(`/invoices/${parsed.data.id}`);
   revalidatePath("/invoices");
-  return done(backTo, `Invoice emailed to ${result.recipient}.`);
+
+  // Each channel is reported on its own: one going through must never read as
+  // both, and one failing must never hide that the other has already gone.
+  if (email?.ok && text?.ok) {
+    return done(backTo, `Invoice emailed to ${email.recipient} and texted to ${text.recipient}.`);
+  }
+  if (email?.ok && text) return fail(backTo, `Invoice emailed to ${email.recipient}, but the text could not be sent. ${text.ok ? "" : text.error}`);
+  if (text?.ok && email) return fail(backTo, `Invoice texted to ${text.recipient}, but the email could not be sent. ${email.ok ? "" : email.error}`);
+  if (email?.ok) return done(backTo, `Invoice emailed to ${email.recipient}.`);
+  if (text?.ok) return done(backTo, `Invoice texted to ${text.recipient}.`);
+  const reason = email && !email.ok ? email.error : text && !text.ok ? text.error : "";
+  return fail(backTo, `The invoice could not be sent. ${reason}`);
 }
 
 /** Marks overdue anything past its due date that is still unpaid. */

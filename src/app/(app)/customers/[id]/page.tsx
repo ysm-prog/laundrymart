@@ -19,6 +19,7 @@ import {
 import { Checkbox, Field, Input, SubmitButton } from "@/components/form";
 import { addContact, addLocation } from "../actions";
 import { BillingAndPricing } from "./billing-section";
+import { StatementCard } from "./statement-card";
 
 export const dynamic = "force-dynamic";
 
@@ -133,6 +134,12 @@ export default async function CustomerDetailPage({
       {can(session.role, "billing.read") ? (
         <Suspense fallback={<SkeletonRows rows={3} />}>
           <BillingAndPricing customerId={id} writable={can(session.role, "billing.write")} />
+        </Suspense>
+      ) : null}
+
+      {can(session.role, "invoices.read") ? (
+        <Suspense fallback={<SkeletonRows rows={2} />}>
+          <StatementCard customerId={id} canSend={can(session.role, "invoices.send")} />
         </Suspense>
       ) : null}
 

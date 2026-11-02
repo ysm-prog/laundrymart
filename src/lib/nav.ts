@@ -245,6 +245,12 @@ export const NAVIGATION: NavItem[] = [
         blurb: "Invoices still collecting this period\u2019s approved jobs. Issue one when you are ready.",
       },
       {
+        // Beside the invoices because a statement is those invoices, totalled
+        // and aged for one customer. Everything else on it is on the customer.
+        label: "Statements", href: "/invoices/statements", capability: "invoices.read",
+        blurb: "What each customer owes, aged, and a statement to send them.",
+      },
+      {
         // The price list belongs to billing, not to Settings: it is what the
         // monthly run charges for the laundry taken in at the counter, and it
         // is gated on the same capability as the invoices it produces.
