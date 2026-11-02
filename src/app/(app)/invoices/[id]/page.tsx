@@ -30,6 +30,9 @@ import { IssueControl } from "../issue-control";
 import { LineCode, LineCoding } from "./line-coding";
 import { PrintButton } from "@/components/print-button";
 import { emailIsConfigured } from "@/lib/email/send";
+import { smsIsConfigured } from "@/lib/sms/send";
+import { loadCustomerMobile } from "@/lib/invoices/send";
+import { displayMobile } from "@/lib/domain/sms";
 import {
   addInvoiceLine, createCreditNote, emailInvoice, issueInvoice, recordPayment,
   removeInvoiceLine, removeJobFromInvoice, retryXeroPush, reversePayment, setInvoiceLineAccount, voidInvoice,
@@ -51,6 +54,20 @@ type InvoiceDetail = Invoice & {
     billing_state: string | null; billing_postcode: string | null; billing_email: string | null;
   } | null;
 };
+
+/** What has already gone to the customer, by each channel it can go by. */
+function sentSummary(
+  invoice: InvoiceDetail,
+  texted: { sms_sent_at: string | null; sms_sent_to: string | null } | null,
+): string {
+  const sent = [
+    invoice.emailed_at
+      ? `Last emailed ${date(invoice.emailed_at)} to ${invoice.emailed_to ?? "the customer"}.` : null,
+    texted?.sms_sent_at
+      ? `Last texted ${date(texted.sms_sent_at)} to ${texted.sms_sent_to ? displayMobile(texted.sms_sent_to) : "the customer"}.` : null,
+  ].filter(Boolean);
+  return sent.length ? sent.join(" ") : "Emails the PDF as an attachment, or texts a private link to it.";
+}
 
 export default async function InvoiceDetailPage({
   params,
@@ -111,6 +128,16 @@ export default async function InvoiceDetailPage({
   const creditableNow = Math.max(0, Math.round(
     (Number(invoice.total) - Number(invoice.amount_paid) - Number(invoice.amount_credited ?? 0)) * 100) / 100);
   const emailConfigured = emailIsConfigured();
+  const textConfigured = smsIsConfigured();
+  // Read apart from the invoice, and any error ignored: this line is a courtesy,
+  // and a database that has not had 0061 must still draw the invoice.
+  const { data: texted } = await supabase
+    .from("invoices").select("sms_sent_at, sms_sent_to")
+    .eq("tenant_id", session.tenantId).eq("id", id)
+    .maybeSingle<{ sms_sent_at: string | null; sms_sent_to: string | null }>();
+  const mobile = writable
+    ? await loadCustomerMobile(supabase, session.tenantId, invoice.customer_id)
+    : null;
 
   // The running draft, told apart from every other draft the same way
   // `uq_invoices_open_draft` tells them apart: a consolidated draft carrying a
@@ -256,38 +283,53 @@ export default async function InvoiceDetailPage({
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-1 print:hidden">
               <Card
                 title="Send to customer"
-                description={invoice.emailed_at
-                  ? `Last sent ${date(invoice.emailed_at)} to ${invoice.emailed_to ?? "the customer"}.`
-                  : "Emails the PDF as an attachment."}
+                description={sentSummary(invoice, texted)}
               >
                 {invoice.status === "draft" ? (
                   <Notice tone="info">Issue the invoice before sending — a draft can still change.</Notice>
                 ) : invoice.status === "void" ? (
                   <Notice tone="warning">A void invoice cannot be sent.</Notice>
-                ) : !emailConfigured ? (
+                ) : !emailConfigured && !textConfigured ? (
                   <Notice tone="warning" title="No email provider configured">
                     Set <code>RESEND_API_KEY</code> and <code>INVOICE_FROM_EMAIL</code> to send from
                     the app. The PDF can still be downloaded and attached by hand.
                   </Notice>
                 ) : (
-                  <form action={emailInvoice} className="flex flex-wrap items-end gap-3">
+                  <form action={emailInvoice} className="space-y-3">
                     <input type="hidden" name="id" value={id} />
-                    <Field label="Send to" name="to"
+                    <Field label="Send by" name="channel"
+                           hint={textConfigured
+                             ? "A text carries a private link to the PDF."
+                             : "Text messages are not set up yet. Choosing one will say so, and nothing is sent."}>
+                      <Select name="channel" defaultValue="email" options={[
+                        { value: "email", label: "Email" },
+                        { value: "sms", label: textConfigured ? "Text message" : "Text message (not set up)" },
+                        { value: "both", label: textConfigured ? "Email and text" : "Email and text (not set up)" },
+                      ]} />
+                    </Field>
+                    <Field label="Email to" name="to"
                            hint={invoice.customers?.billing_email
                              ? "Leave blank to use the customer's billing email."
                              : "This customer has no billing email on file."}>
                       <Input name="to" type="email"
                              placeholder={invoice.customers?.billing_email ?? "accounts@customer.com.au"} />
                     </Field>
-                    {/* The email leaves at once (brief 1.6 — the Help page promised a
+                    <Field label="Text to" name="mobile"
+                           hint={mobile
+                             ? "Leave blank to use the mobile on the customer's record."
+                             : "No mobile on file. Most customer numbers are landlines, so type one to text."}>
+                      <Input name="mobile" type="tel" inputMode="tel"
+                             placeholder={mobile ? displayMobile(mobile) : "0412 345 678"} />
+                    </Field>
+                    {/* It leaves at once (brief 1.6 — the Help page promised a
                         confirmation here before there was one). */}
                     <ConfirmSubmit
-                      label="Email invoice"
+                      label="Send invoice"
                       variant="primary"
-                      eyebrow="The email leaves straight away"
-                      consequence={`Send ${invoice.invoice_number} to ${invoice.customers?.billing_email
-                        ? `${invoice.customers.billing_email}, or the address above if you typed one`
-                        : "the address above"}? Once it has gone it cannot be called back.`}
+                      eyebrow="It leaves straight away"
+                      consequence={`Send ${invoice.invoice_number} the way you chose above${invoice.customers?.billing_email
+                        ? `, to ${invoice.customers.billing_email} unless you typed another address`
+                        : ""}? Once it has gone it cannot be called back.`}
                       cancelLabel="Not yet"
                       pendingLabel="Sending…"
                     />
