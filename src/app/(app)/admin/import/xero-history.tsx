@@ -17,18 +17,19 @@ import { invoicesToSettle } from "@/lib/domain/xero-history";
 type Tally = {
   drafts: Set<string>; openings: Set<string>; lines: number; awaitingCount: number; awaitingDue: number;
   newInvoices: number; existingInvoices: number; appRowsLeftAlone: number;
-  unmatched: Map<string, number>; written: Record<string, number>;
+  similar: Map<string, string>; unmatched: Map<string, number>; written: Record<string, number>;
 };
 
 const emptyTally = (): Tally => ({
   drafts: new Set(), openings: new Set(), lines: 0, awaitingCount: 0, awaitingDue: 0,
-  newInvoices: 0, existingInvoices: 0, appRowsLeftAlone: 0, unmatched: new Map(), written: {},
+  newInvoices: 0, existingInvoices: 0, appRowsLeftAlone: 0, similar: new Map(), unmatched: new Map(), written: {},
 });
 
 type Page = {
   ok: boolean; error?: string; retryAfter?: number; returned: number; drafts: string[]; openings: string[];
   lines: number; awaitingCount: number; awaitingDue: number; newInvoices: number; existingInvoices: number;
-  appRowsLeftAlone: number; unmatched: Array<{ number: string; customer: string }>;
+  appRowsLeftAlone: number; similar: Array<{ contact: string; customer: string }>;
+  unmatched: Array<{ number: string; customer: string }>;
   written: Record<string, number>;
 };
 
@@ -78,6 +79,7 @@ export function XeroHistory() {
           tally.newInvoices += answer.newInvoices;
           tally.existingInvoices += answer.existingInvoices;
           tally.appRowsLeftAlone += answer.appRowsLeftAlone;
+          for (const row of answer.similar) tally.similar.set(row.contact, row.customer);
           for (const row of answer.unmatched) {
             tally.unmatched.set(row.customer, (tally.unmatched.get(row.customer) ?? 0) + 1);
           }
@@ -112,6 +114,7 @@ export function XeroHistory() {
   const tally = result?.tally;
   const unmatched = tally ? [...tally.unmatched.entries()].sort((a, b) => b[1] - a[1]) : [];
   const unmatchedInvoices = unmatched.reduce((sum, [, count]) => sum + count, 0);
+  const similar = tally ? [...tally.similar.entries()].sort((a, b) => a[0].localeCompare(b[0])) : [];
 
   return (
     <Card
@@ -153,7 +156,8 @@ export function XeroHistory() {
                 ["App invoices left alone", tally.appRowsLeftAlone.toLocaleString()],
                 ["Open here, settled in MYOB", result.settle.length.toLocaleString()],
                 ["Open here, not in Xero", result.unknown.length.toLocaleString()],
-                ["No matching customer", `${unmatchedInvoices.toLocaleString()} invoices`],
+                ["Matched by a similar name", `${similar.length.toLocaleString()} contacts`],
+                ["New inactive customers", `${unmatched.length.toLocaleString()}, for ${unmatchedInvoices.toLocaleString()} invoices`],
                 ...(result.settled ? [["Marked paid", `${result.settled.invoices}, ${formatMoney(result.settled.amount)}`]] : []),
                 ...Object.entries(tally.written).map(([key, value]) => [key.replace(/_/g, " "), value.toLocaleString()]),
               ] as Array<[string, string]>).map(([label, value]) => (
@@ -163,11 +167,28 @@ export function XeroHistory() {
                 </div>
               ))}
             </dl>
+            {similar.length > 0 ? (
+              <div className="text-sm" data-testid="xero-history-similar">
+                <p className="font-medium">Matched by a similar name</p>
+                <ul className="mt-1 divide-y">
+                  {similar.map(([contact, customer]) => (
+                    <li key={contact} className="grid gap-x-4 py-1 sm:grid-cols-2">
+                      <span>{contact}</span>
+                      <span className="text-muted-foreground">{customer}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
             {unmatched.length > 0 ? (
-              <Notice tone="warning" title="These Xero contacts match no customer, so their invoices are skipped">
-                {unmatched.slice(0, 40).map(([name, count]) => `${name} (${count})`).join(", ")}
-                {unmatched.length > 40 ? `, and ${unmatched.length - 40} more` : ""}
-              </Notice>
+              <div className="text-sm" data-testid="xero-history-unmatched">
+                <p className="font-medium">
+                  {result.wrote ? "Added as inactive customers" : "These come in as inactive customers"}
+                </p>
+                <p className="mt-1 text-muted-foreground">
+                  {unmatched.map(([name, count]) => `${name} (${count})`).join(", ")}
+                </p>
+              </div>
             ) : null}
           </>
         ) : null}

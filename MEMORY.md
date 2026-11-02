@@ -9,10 +9,10 @@ where that is genuinely what it is. The multi-tenancy architecture stays: one op
 fact about today's data, not a reason to drop `tenant_id`, RLS, or §23's rule that a read feeding a
 write names its tenant.
 
-## Latest: MYOB history from Xero (2026-11-03), built, not run
-- Settings › Bring in your books gains Check first (writes nothing) and Bring them in, driven a page
-  at a time. Reads Xero's MYOB drafts with lines; the `-OB` invoices say what is owed.
-- **0062 needs Darshan's approval before Bring them in can write.** After importing, tie the open
+## Latest: MYOB history from Xero (2026-11-03), live, not yet imported
+- Settings › Bring in your books has Check first (writes nothing) and Bring them in, driven a page at
+  a time. Reads Xero's MYOB drafts with lines; the `-OB` invoices say what is owed. **0062 applied.**
+- Darshan reviews the similar-name pairs before anything is imported. After importing, tie the open
   total to Xero's receivables before moving the trusted date on Settings › Invoicing.
 - The app's next number collides with Xero's: `INV-00415360` onward already exist there.
 
