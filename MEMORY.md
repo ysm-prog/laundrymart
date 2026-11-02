@@ -9,11 +9,12 @@ where that is genuinely what it is. The multi-tenancy architecture stays: one op
 fact about today's data, not a reason to drop `tenant_id`, RLS, or §23's rule that a read feeding a
 write names its tenant.
 
-## Latest: MYOB history from Xero (2026-11-03), live, not yet imported
-- Settings › Bring in your books has Check first (writes nothing) and Bring them in, driven a page at
-  a time. Reads Xero's MYOB drafts with lines; the `-OB` invoices say what is owed. **0062 applied.**
-- Darshan reviews the similar-name pairs before anything is imported. After importing, tie the open
-  total to Xero's receivables before moving the trusted date on Settings › Invoicing.
+## Latest: MYOB history from Xero (2026-11-03), imported and tied
+- 18,656 MYOB invoices are in the app with their lines, through Settings › Bring in your books. Running
+  it again refreshes balances and duplicates nothing. **0062 applied.**
+- Tied to Xero's Awaiting Payment to the cent. The gap is 34 invoices Xero holds twice, plain and
+  `-OB`, $2,739.17, for the bookkeeper. The trusted date has not moved: statements still leave off
+  imports before 1 October until Darshan decides.
 - The app's next number collides with Xero's: `INV-00415360` onward already exist there.
 
 ## Previously: standard template, statements, text option (2026-11-02)

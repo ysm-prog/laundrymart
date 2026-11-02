@@ -54,7 +54,8 @@ export type XeroInvoice = {
 export type HistoryKind = "history" | "opening" | "approved" | "other";
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
-const OPENING = /^(.+)-OB$/i;
+/** `-OB2` is a reissued opening balance. Xero lists it after the first, so it has the last word. */
+const OPENING = /^(.+)-OB\d*$/i;
 
 export function classifyXeroInvoice(invoice: XeroInvoice): HistoryKind {
   if (invoice.Type && invoice.Type !== "ACCREC") return "other";
