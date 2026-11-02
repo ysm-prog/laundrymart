@@ -9,7 +9,12 @@ where that is genuinely what it is. The multi-tenancy architecture stays: one op
 fact about today's data, not a reason to drop `tenant_id`, RLS, or §23's rule that a read feeding a
 write names its tenant.
 
-## Latest: the GST tick moves the money (2026-11-02)
+## Latest: 0060 live (2026-11-02), Send back for review works
+- `reopenJobCharges` was refused by the charge guard after moving the job, so a sent-back job sat in
+  review with charges nobody could change. A frozen charge may now be deleted while its job is back
+  in `awaiting_review`, and at no other time. Found by a live dry run on test job `LJ00033`.
+
+## Previously: the GST tick moves the money (2026-11-02)
 - Unticking **GST applies** strips the GST from the rate and ticking grosses it back up, on the
   charge editor and the invoice line composer (`rateForGstTick`). Totals say `including $x GST` or
   `no GST` (`inclusiveTotals`, `gstPhrase`). No migration. See the changelog.
