@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { Card, PageHeader } from "@/components/ui";
 import { MYOB_FILES, MYOB_KINDS, REDUNDANT_FILES } from "@/lib/domain/myob";
 import { ImportUploader } from "./import-uploader";
+import { XeroHistory } from "./xero-history";
 
 export const metadata = { title: "Bring in your books · LaundryMart" };
 
@@ -34,7 +35,10 @@ export default async function ImportPage() {
       />
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
-        <ImportUploader tenantName={tenant?.name ?? "this business"} />
+        <div className="space-y-4">
+          <XeroHistory />
+          <ImportUploader tenantName={tenant?.name ?? "this business"} />
+        </div>
 
         <div className="space-y-4">
           <Card

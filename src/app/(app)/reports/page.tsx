@@ -225,13 +225,25 @@ async function Operations({ from, to }: { from: string; to: string }) {
 
 async function Revenue({ from, to }: { from: string; to: string }) {
   const supabase = await createClient();
-  const { data } = await supabase
-    .from("invoices")
-    .select("issue_date, status, tax_amount, total, customers(business_name)")
-    .gte("issue_date", from).lte("issue_date", to).neq("status", "void")
-    .returns<Array<{ issue_date: string; status: string; tax_amount: number; total: number; customers: { business_name: string } | null }>>();
+  type RevenueRow = {
+    issue_date: string; status: string; tax_amount: number; total: number;
+    customers: { business_name: string } | null;
+  };
+  // Page by page: the server stops a read at 1,000 rows without saying so, and with
+  // the MYOB history here a year is several times that. A total that quietly covers
+  // part of the period is the worst thing a report can print.
+  const rows: RevenueRow[] = [];
+  for (let start = 0; ; start += 1000) {
+    const { data } = await supabase
+      .from("invoices")
+      .select("id, issue_date, status, tax_amount, total, customers(business_name)")
+      .gte("issue_date", from).lte("issue_date", to).neq("status", "void")
+      .order("id").range(start, start + 999)
+      .returns<Array<RevenueRow & { id: string }>>();
+    rows.push(...(data ?? []));
+    if (!data || data.length < 1000) break;
+  }
 
-  const rows = data ?? [];
   // `invoices.subtotal` is deliberately not read here. Since 0043 a line amount is
   // GST-inclusive, so `recalculate_invoice` stores `subtotal = total` and extracts the
   // tax from inside it — no stored column holds an ex-GST figure, and reading `subtotal`
