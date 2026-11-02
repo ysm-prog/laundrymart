@@ -278,6 +278,19 @@ export function creditRow(note: XeroCreditNote): CreditRow | null {
 }
 
 /**
+ * Whether a credit note may write to the row holding its number: only a credit does.
+ *
+ * MYOB numbered a credit after the invoice it came from, so `00414407-OB` the credit
+ * note and `00414407` the invoice can both exist, and the invoice can still be owed.
+ * Writing to it closed two open invoices on the first run. An invoice's balance
+ * comes from its opening balance and nothing else; an invoice this app raised is
+ * never touched.
+ */
+export function creditWritesTo(row: { invoice_type: string; source: string }): boolean {
+  return row.source !== "app" && row.invoice_type === "credit";
+}
+
+/**
  * The paid figure that leaves this much credit, because `balance` is generated as
  * total less paid less credited, and a customer's credit is a negative balance.
  */

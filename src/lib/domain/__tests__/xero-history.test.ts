@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  classifyXeroInvoice, creditRow, historyLine, historyRow, invoicesToSettle, looseName, normaliseName,
+  classifyXeroInvoice, creditRow, creditWritesTo, historyLine, historyRow, invoicesToSettle, looseName, normaliseName,
   openingBaseNumber, openingRow, paidForCredit, similarCustomer, taxCodeFor, usedCredits, xeroDay,
   type HistoryLookups, type XeroCreditNote, type XeroInvoice,
 } from "../xero-history";
@@ -184,6 +184,11 @@ describe("MYOB credits", () => {
   it("leaves nothing owing either way once a credit is used", () => {
     expect(paidForCredit(42, 0, 0)).toBe(42);
     expect(paidForCredit(42, 2, 0)).toBe(40);
+  });
+  it("writes only to a credit, never to an invoice sharing the number", () => {
+    expect(creditWritesTo({ invoice_type: "credit", source: "import" })).toBe(true);
+    expect(creditWritesTo({ invoice_type: "manual", source: "import" })).toBe(false);
+    expect(creditWritesTo({ invoice_type: "credit", source: "app" })).toBe(false);
   });
   it("finds the app's credits Xero no longer holds", () => {
     expect(usedCredits(["B", "A", "C"], ["C"])).toEqual(["A", "B"]);
