@@ -2,7 +2,7 @@ import "server-only";
 import type { createClient } from "@/lib/supabase/server";
 import { describeDbError } from "@/lib/actions";
 import {
-  classifyXeroInvoice, historyRow, normaliseName, openingRow,
+  classifyXeroInvoice, historyRow, normaliseName, openingRow, similarCustomer,
   type HistoryLookups, type HistoryRow, type OpeningRow, type XeroInvoice,
 } from "@/lib/domain/xero-history";
 import { OPEN_INVOICE_STATUSES } from "@/lib/domain/statement";
@@ -45,6 +45,9 @@ export type PageResult = {
   newInvoices: number;
   existingInvoices: number;
   appRowsLeftAlone: number;
+  /** Contacts matched only by a similar name, for a person to read. */
+  similar: Array<{ contact: string; customer: string }>;
+  /** Contacts with no customer, who come in as inactive customers. */
   unmatched: Array<{ number: string; customer: string }>;
   written: Record<string, number>;
 } | { ok: false; error: string; retryAfter?: number };
@@ -65,6 +68,7 @@ async function loadLookups(supabase: Client, tenantId: string): Promise<HistoryL
     customerByContact: new Map((customers ?? []).filter((c) => c.xero_contact_id)
       .map((c) => [c.xero_contact_id!, c.id])),
     customerByName: new Map((customers ?? []).map((c) => [normaliseName(c.business_name), c.id])),
+    customers: (customers ?? []).map((c) => ({ id: c.id, name: c.business_name })),
     itemByCode: new Map((items ?? []).filter((i) => i.item_code)
       .map((i) => [i.item_code!.toLowerCase(), i.id])),
     accountByCode: new Map((accounts ?? []).map((a) => [a.xero_account_code ?? a.code, a.id])),
@@ -84,6 +88,33 @@ export async function loadOpenImportNumbers(supabase: Client, tenantId: string):
     numbers.push(...(data ?? []).map((row) => row.invoice_number));
     if (!data || data.length < 1000) return numbers;
   }
+}
+
+/**
+ * A contact Xero has and the app does not comes in as an inactive customer, as the
+ * MYOB importer does for a party named only by its documents: their history has to
+ * belong to somebody, and it should not be offered in a picker as a live account.
+ * The Xero contact id goes on the row, so the next page finds them without a second.
+ */
+async function addCustomer(
+  supabase: Client, tenantId: string, contact: { id: string | null; name: string },
+): Promise<{ id: string } | { error: string }> {
+  const { data: number, error: numberError } = await supabase
+    .rpc("next_number", { t: tenantId, k: "customer", p: "CUST" });
+  if (numberError) return { error: describeDbError(numberError) };
+  const { data, error } = await supabase
+    .from("customers")
+    .insert({
+      tenant_id: tenantId,
+      customer_number: number as string,
+      business_name: contact.name,
+      status: "inactive",
+      xero_contact_id: contact.id,
+      xero_contact_name: contact.name,
+      notes: "Carried in with the MYOB invoice history from Xero; not on the customer list then.",
+    })
+    .select("id").single<{ id: string }>();
+  return error ? { error: describeDbError(error) } : data;
 }
 
 function chunk<T>(rows: T[], size: number): T[][] {
@@ -162,21 +193,44 @@ export async function runHistoryPage(
 
   // A new invoice needs a customer. One already here does not, so a contact Xero
   // spells differently only matters for the rows it would have to create.
-  const nameOf = new Map(invoices.map((invoice) =>
-    [invoice.InvoiceNumber?.trim() ?? "", invoice.Contact?.Name ?? "Unknown contact"]));
-  const needsCustomer = (row: { number: string; customer_id: string | null }, key: string) => {
-    if (existing.has(row.number) || row.customer_id) return false;
-    unmatched.push({ number: row.number, customer: nameOf.get(key) ?? "Unknown contact" });
-    return true;
-  };
-  const historyToWrite = history.filter((row) => !needsCustomer(row, row.number));
-  const openingsToWrite = openings.filter((row) => !needsCustomer(row, `${row.number}-OB`));
+  const contactOf = new Map(invoices.map((invoice) => [invoice.InvoiceNumber?.trim() ?? "", invoice.Contact]));
+  const similar = new Map<string, string>();
+  for (const invoice of invoices) {
+    const contact = invoice.Contact;
+    if (!contact?.Name || lookups.customerByContact.has(contact.ContactID ?? "")) continue;
+    if (lookups.customerByName.has(normaliseName(contact.Name))) continue;
+    const match = similarCustomer(contact.Name, lookups.customers);
+    if (match) similar.set(contact.Name, match.name);
+  }
+
+  const waiting = [
+    ...history.map((row) => ({ row, key: row.number })),
+    ...openings.map((row) => ({ row, key: `${row.number}-OB` })),
+  ].filter(({ row }) => !existing.has(row.number) && !row.customer_id);
+  for (const { row, key } of waiting) {
+    unmatched.push({ number: row.number, customer: contactOf.get(key)?.Name ?? "Unknown contact" });
+  }
+
+  const added: Record<string, string> = {};
+  if (input.write) {
+    for (const { row, key } of waiting) {
+      const contact = contactOf.get(key);
+      const name = contact?.Name?.trim();
+      if (!name) continue;
+      if (!added[name]) {
+        const outcome = await addCustomer(supabase, tenantId, { id: contact?.ContactID ?? null, name });
+        if ("error" in outcome) return { ok: false, error: outcome.error };
+        added[name] = outcome.id;
+      }
+      row.customer_id = added[name]!;
+    }
+  }
 
   const written: Record<string, number> = {};
   if (input.write) {
     const [rpc, rows] = input.phase === "history"
-      ? ["import_invoice_history", historyToWrite] as const
-      : ["apply_invoice_openings", openingsToWrite] as const;
+      ? ["import_invoice_history", history] as const
+      : ["apply_invoice_openings", openings] as const;
     for (const batch of chunk<HistoryRow | OpeningRow>(rows, WRITE_BATCH)) {
       const { data, error } = await supabase.rpc(rpc, { p_tenant: tenantId, p_rows: batch });
       if (error) return { ok: false, error: describeDbError(error) };
@@ -185,6 +239,9 @@ export async function runHistoryPage(
       }
     }
   }
+
+  const customersAdded = Object.keys(added).length;
+  if (customersAdded) written.customers_added = customersAdded;
 
   const awaiting = openings.filter((row) => row.due > 0);
   const rowsSeen = [...history, ...openings];
@@ -200,6 +257,7 @@ export async function runHistoryPage(
     newInvoices: rowsSeen.filter((row) => !existing.has(row.number)).length,
     existingInvoices: rowsSeen.filter((row) => existing.has(row.number)).length,
     appRowsLeftAlone: rowsSeen.filter((row) => existing.get(row.number) === "app").length,
+    similar: [...similar.entries()].map(([contact, customer]) => ({ contact, customer })),
     unmatched,
     written,
   };
