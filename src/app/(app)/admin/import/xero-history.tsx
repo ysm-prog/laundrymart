@@ -18,11 +18,15 @@ type Tally = {
   drafts: Set<string>; openings: Set<string>; lines: number; awaitingCount: number; awaitingDue: number;
   newInvoices: number; existingInvoices: number; appRowsLeftAlone: number;
   similar: Map<string, string>; unmatched: Map<string, number>; written: Record<string, number>;
+  credits: Set<string>; stillCredit: number; stillCreditAmount: number; newCredits: number;
+  creditsWritten: number; creditsUsed: number; creditsUsedAmount: number;
 };
 
 const emptyTally = (): Tally => ({
   drafts: new Set(), openings: new Set(), lines: 0, awaitingCount: 0, awaitingDue: 0,
   newInvoices: 0, existingInvoices: 0, appRowsLeftAlone: 0, similar: new Map(), unmatched: new Map(), written: {},
+  credits: new Set(), stillCredit: 0, stillCreditAmount: 0, newCredits: 0,
+  creditsWritten: 0, creditsUsed: 0, creditsUsedAmount: 0,
 });
 
 type Page = {
@@ -31,6 +35,11 @@ type Page = {
   appRowsLeftAlone: number; similar: Array<{ contact: string; customer: string }>;
   unmatched: Array<{ number: string; customer: string }>;
   written: Record<string, number>;
+};
+
+type CreditPage = {
+  ok: boolean; error?: string; retryAfter?: number; returned: number; numbers: string[];
+  stillCredit: number; stillCreditAmount: number; newCredits: number; written: number;
 };
 
 type Result = {
@@ -88,6 +97,31 @@ export function XeroHistory() {
           }
         }
       }
+
+      for (let page = 1; ; page += 1) {
+        if (stop.current) throw new Error("Stopped. Run it again to carry on; finished work is skipped.");
+        setProgress(`Credit notes: page ${page}`);
+        const answer = await post<CreditPage>({ step: "credits", page, write });
+        if (!answer.ok && answer.retryAfter) {
+          setProgress(`Xero asked us to wait ${answer.retryAfter} seconds`);
+          await wait(answer.retryAfter);
+          page -= 1;
+          continue;
+        }
+        if (!answer.ok) throw new Error(answer.error ?? "The credit notes could not be read.");
+        if (answer.returned === 0) break;
+        answer.numbers.forEach((number) => tally.credits.add(number));
+        tally.stillCredit += answer.stillCredit;
+        tally.stillCreditAmount += answer.stillCreditAmount;
+        tally.newCredits += answer.newCredits;
+        tally.creditsWritten += answer.written;
+      }
+      const used = await post<{ ok: boolean; error?: string; count?: number; amount?: number }>({
+        step: "credits-used", numbers: [...tally.credits], write,
+      });
+      if (!used.ok) throw new Error(used.error ?? "The credits could not be finished.");
+      tally.creditsUsed = used.count ?? 0;
+      tally.creditsUsedAmount = used.amount ?? 0;
 
       setProgress("Working out what has been settled");
       const open = await post<{ ok: boolean; numbers?: string[] }>({ step: "open" });
@@ -158,6 +192,11 @@ export function XeroHistory() {
                 ["Open here, not in Xero", result.unknown.length.toLocaleString()],
                 ["Matched by a similar name", `${similar.length.toLocaleString()} contacts`],
                 ["New inactive customers", `${unmatched.length.toLocaleString()}, for ${unmatchedInvoices.toLocaleString()} invoices`],
+                ["Credit notes from MYOB", tally.credits.size.toLocaleString()],
+                ["Credit left on them", `${tally.stillCredit.toLocaleString()}, ${formatMoney(tally.stillCreditAmount)}`],
+                ["Credits new to the app", tally.newCredits.toLocaleString()],
+                ["Credits here, used up in Xero", `${tally.creditsUsed.toLocaleString()}, ${formatMoney(tally.creditsUsedAmount)}`],
+                ...(result.wrote ? [["Credits updated", tally.creditsWritten.toLocaleString()]] : []),
                 ...(result.settled ? [["Marked paid", `${result.settled.invoices}, ${formatMoney(result.settled.amount)}`]] : []),
                 ...Object.entries(tally.written).map(([key, value]) => [key.replace(/_/g, " "), value.toLocaleString()]),
               ] as Array<[string, string]>).map(([label, value]) => (
