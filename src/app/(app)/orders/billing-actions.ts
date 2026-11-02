@@ -244,7 +244,9 @@ export async function reopenJobCharges(formData: FormData): Promise<void> {
   // refuses to overwrite a frozen row, so leaving them would make the job
   // un-repriceable and stick it in review forever. Deleting them is safe
   // precisely because nothing has been invoiced yet — that is what
-  // `approved → awaiting_review` means.
+  // `approved → awaiting_review` means, and it is why this runs after the status
+  // change: since 0060 the guard allows this delete only while the job is back
+  // in review. A job left stuck before that clears the same way on its next save.
   const { error: clearError } = await supabase
     .from("job_charge_snapshots")
     .delete()
