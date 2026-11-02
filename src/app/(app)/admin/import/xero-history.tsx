@@ -20,13 +20,14 @@ type Tally = {
   similar: Map<string, string>; unmatched: Map<string, number>; written: Record<string, number>;
   credits: Set<string>; stillCredit: number; stillCreditAmount: number; newCredits: number;
   creditsWritten: number; creditsUsed: number; creditsUsedAmount: number;
+  sharedNumber: number; sharedNumberLeft: number;
 };
 
 const emptyTally = (): Tally => ({
   drafts: new Set(), openings: new Set(), lines: 0, awaitingCount: 0, awaitingDue: 0,
   newInvoices: 0, existingInvoices: 0, appRowsLeftAlone: 0, similar: new Map(), unmatched: new Map(), written: {},
   credits: new Set(), stillCredit: 0, stillCreditAmount: 0, newCredits: 0,
-  creditsWritten: 0, creditsUsed: 0, creditsUsedAmount: 0,
+  creditsWritten: 0, creditsUsed: 0, creditsUsedAmount: 0, sharedNumber: 0, sharedNumberLeft: 0,
 });
 
 type Page = {
@@ -39,7 +40,8 @@ type Page = {
 
 type CreditPage = {
   ok: boolean; error?: string; retryAfter?: number; returned: number; numbers: string[];
-  stillCredit: number; stillCreditAmount: number; newCredits: number; written: number;
+  stillCredit: number; stillCreditAmount: number; newCredits: number;
+  sharedNumber: number; sharedNumberLeft: number; written: number;
 };
 
 type Result = {
@@ -114,6 +116,8 @@ export function XeroHistory() {
         tally.stillCredit += answer.stillCredit;
         tally.stillCreditAmount += answer.stillCreditAmount;
         tally.newCredits += answer.newCredits;
+        tally.sharedNumber += answer.sharedNumber;
+        tally.sharedNumberLeft += answer.sharedNumberLeft;
         tally.creditsWritten += answer.written;
       }
       const used = await post<{ ok: boolean; error?: string; count?: number; amount?: number }>({
@@ -195,6 +199,7 @@ export function XeroHistory() {
                 ["Credit notes from MYOB", tally.credits.size.toLocaleString()],
                 ["Credit left on them", `${tally.stillCredit.toLocaleString()}, ${formatMoney(tally.stillCreditAmount)}`],
                 ["Credits new to the app", tally.newCredits.toLocaleString()],
+                ["Credits on an invoice's number, left off it", `${tally.sharedNumber.toLocaleString()}, ${formatMoney(tally.sharedNumberLeft)} left`],
                 ["Credits here, used up in Xero", `${tally.creditsUsed.toLocaleString()}, ${formatMoney(tally.creditsUsedAmount)}`],
                 ...(result.wrote ? [["Credits updated", tally.creditsWritten.toLocaleString()]] : []),
                 ...(result.settled ? [["Marked paid", `${result.settled.invoices}, ${formatMoney(result.settled.amount)}`]] : []),
