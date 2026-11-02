@@ -153,6 +153,90 @@ export function summariseInvoice(
   return { subtotal, taxAmount, total: round2(subtotal + taxAmount) };
 }
 
+/**
+ * The GST sitting inside a GST-inclusive amount.
+ *
+ * `recalculate_invoice`'s own formula (0043) in TypeScript, for the screens that
+ * have to preview what the database will total. A rate of zero or a rate nobody
+ * could read holds no GST at all.
+ */
+export function gstWithin(amount: number, gstRate: number): number {
+  if (!Number.isFinite(gstRate) || gstRate <= 0) return 0;
+  return round2(amount * (gstRate / (1 + gstRate)));
+}
+
+/**
+ * Lines that add up the way an invoice will: the total is the sum of the amounts,
+ * and the GST is extracted from the taxable part of that sum — once, over the
+ * sum, because that is how `recalculate_invoice` rounds it.
+ */
+export function inclusiveTotals(
+  lines: readonly { amount: number; taxable?: boolean | null }[],
+  gstRate: number,
+): { total: number; gst: number; anyTaxable: boolean } {
+  const total = round2(lines.reduce((sum, line) => sum + Number(line.amount ?? 0), 0));
+  const taxed = lines.filter((line) => line.taxable !== false);
+  const taxableBase = round2(taxed.reduce((sum, line) => sum + Number(line.amount ?? 0), 0));
+  return { total, gst: gstWithin(taxableBase, gstRate), anyTaxable: taxed.length > 0 };
+}
+
+/**
+ * The words beside a total: never "GST included" over a figure holding none.
+ *
+ * Goes on what is taxable rather than on the GST being above zero, because a
+ * five-cent taxable line rounds to $0.00 of GST and is still not GST-free.
+ */
+export function gstPhrase(gst: number, anyTaxable: boolean): string {
+  return anyTaxable ? `including ${formatMoney(gst)} GST` : "no GST";
+}
+
+/** What a GST tick did to a rate, kept so that undoing it puts the rate back exactly. */
+export type GstTickMemo = {
+  /** The rate before the tick changed. */
+  before: number;
+  /** The rate the tick produced. */
+  after: number;
+  /** The state of the tick that produced `after`. */
+  taxable: boolean;
+};
+
+/**
+ * The rate on a line once its "GST applies" tick has changed (2026-11-02).
+ *
+ * **A line amount is GST-inclusive (0043), so the tick has to move the rate.**
+ * Before this it changed only `taxable`, and the customer paid the same figure
+ * either way: `TW` is $0.20 ex GST and $0.22 inclusive, and unticking GST on a
+ * $0.22 line left $0.22 on the job with nothing on the screen moving — Jay's
+ * report, and the owner's instruction is that the tick adds or subtracts the
+ * value. So unticking takes the GST out of the rate and ticking puts it in.
+ *
+ * **The memo is what makes that reversible.** Rates are stored to the cent, so
+ * the conversion loses information: $0.05 has less than half a cent of GST in it,
+ * strips to $0.05 and would come back as $0.06. A tick reversed straight
+ * away restores the exact rate it replaced. The memo is ignored once somebody has
+ * typed over the rate, or if the tick is not actually being reversed.
+ *
+ * A rate of nothing stays nothing, and a rate nobody could read is left alone.
+ */
+export function rateForGstTick(input: {
+  rate: number | string | null | undefined;
+  taxable: boolean;
+  gstRate: number;
+  memo?: GstTickMemo | null;
+}): { rate: number; memo: GstTickMemo | null } {
+  const { taxable, gstRate, memo } = input;
+  const rate = Number(input.rate ?? 0);
+  if (!Number.isFinite(rate) || rate <= 0) return { rate: 0, memo: null };
+  if (!Number.isFinite(gstRate) || gstRate <= 0) return { rate, memo: null };
+
+  if (memo && memo.after === rate && memo.taxable !== taxable) {
+    return { rate: memo.before, memo: null };
+  }
+
+  const next = round2(taxable ? rate * (1 + gstRate) : rate / (1 + gstRate));
+  return { rate: next, memo: { before: rate, after: next, taxable } };
+}
+
 export type ServiceChargeInput = {
   /** Per-item service lines already priced. */
   items: ReadonlyArray<{
