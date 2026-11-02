@@ -19,6 +19,10 @@
  * migration was done, chosen by Darshan and checked against Xero's receivables
  * after the import rather than taken on trust.
  *
+ * Credits are the same idea on the other side. An invoice the customer overpaid
+ * came across as a credit note numbered `00413522-OB`, and what is left of the credit
+ * is its `RemainingCredit`. A credit Xero no longer holds as one has been used.
+ *
  * Anything else in Xero, such as an `INV-` invoice raised there since cut-over, is
  * not MYOB history and is left alone.
  *
@@ -237,4 +241,52 @@ export function invoicesToSettle(input: {
     (drafts.has(number) ? settle : unknown).push(number);
   }
   return { settle: settle.sort(), unknown: unknown.sort() };
+}
+
+export type XeroCreditNote = {
+  CreditNoteID: string;
+  CreditNoteNumber?: string | null;
+  Type?: string;
+  Status?: string;
+  Contact?: { ContactID?: string; Name?: string | null } | null;
+  DateString?: string | null;
+  Total?: number | null;
+  RemainingCredit?: number | null;
+};
+
+export type CreditRow = {
+  number: string; contact: string; contact_id: string | null; issue_date: string | null;
+  total: number; remaining: number;
+};
+
+/**
+ * What a MYOB credit stands at in Xero, or null for anything else. A credit note
+ * raised in Xero itself has no `-OB` and is left alone, like an `INV-` invoice.
+ */
+export function creditRow(note: XeroCreditNote): CreditRow | null {
+  if (note.Type && note.Type !== "ACCRECCREDIT") return null;
+  const number = openingBaseNumber(note.CreditNoteNumber);
+  if (!number || (note.Status !== "AUTHORISED" && note.Status !== "PAID")) return null;
+  return {
+    number,
+    contact: note.Contact?.Name ?? "Unknown contact",
+    contact_id: note.Contact?.ContactID ?? null,
+    issue_date: xeroDay(note.DateString),
+    total: r2(Number(note.Total ?? 0)),
+    remaining: note.Status === "PAID" ? 0 : r2(Number(note.RemainingCredit ?? 0)),
+  };
+}
+
+/**
+ * The paid figure that leaves this much credit, because `balance` is generated as
+ * total less paid less credited, and a customer's credit is a negative balance.
+ */
+export function paidForCredit(total: number, credited: number, remaining: number): number {
+  return r2(total - credited + remaining);
+}
+
+/** The app's open credits that Xero no longer holds, which have been used. */
+export function usedCredits(appCredits: Iterable<string>, inXero: Iterable<string>): string[] {
+  const held = new Set(inXero);
+  return [...new Set(appCredits)].filter((number) => !held.has(number)).sort();
 }

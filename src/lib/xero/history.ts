@@ -2,8 +2,9 @@ import "server-only";
 import type { createClient } from "@/lib/supabase/server";
 import { describeDbError } from "@/lib/actions";
 import {
-  classifyXeroInvoice, historyRow, normaliseName, openingBaseNumber, openingRow, similarCustomer,
-  type HistoryLookups, type HistoryRow, type OpeningRow, type XeroInvoice,
+  classifyXeroInvoice, creditRow, customerFor, historyRow, normaliseName, openingBaseNumber,
+  openingRow, paidForCredit, similarCustomer, usedCredits,
+  type HistoryLookups, type HistoryRow, type OpeningRow, type XeroCreditNote, type XeroInvoice,
 } from "@/lib/domain/xero-history";
 import { OPEN_INVOICE_STATUSES } from "@/lib/domain/statement";
 import { XERO_API } from "./config";
@@ -265,5 +266,163 @@ export async function runHistoryPage(
     similar: [...similar.entries()].map(([contact, customer]) => ({ contact, customer })),
     unmatched,
     written,
+  };
+}
+
+export type CreditPageResult = {
+  ok: true;
+  returned: number;
+  /** The invoice numbers of the MYOB credits on this page, for `settleUsedCredits`. */
+  numbers: string[];
+  stillCredit: number;
+  stillCreditAmount: number;
+  newCredits: number;
+  written: number;
+} | { ok: false; error: string; retryAfter?: number };
+
+/**
+ * One page of Xero's credit notes. A credit's balance is set straight on the row:
+ * no guard stands in the way of it, and unlike a line on a closed invoice this is
+ * an ordinary write the owner's own client is allowed to make.
+ */
+export async function runCreditPage(
+  supabase: Client, tenantId: string, input: { page: number; write: boolean },
+): Promise<CreditPageResult> {
+  const tokens = await getXeroTokens(tenantId);
+  if (!tokens) return { ok: false, error: "Xero is not connected for this laundry." };
+
+  const query = new URLSearchParams({
+    page: String(input.page),
+    pageSize: String(PAGE_SIZE),
+    order: "CreditNoteNumber",
+    where: 'Type=="ACCRECCREDIT"',
+  });
+
+  let response: Response;
+  try {
+    response = await fetch(`${XERO_API}/CreditNotes?${query}`, {
+      headers: {
+        Authorization: `Bearer ${tokens.accessToken}`,
+        "Xero-tenant-id": tokens.xeroTenantId,
+        Accept: "application/json",
+      },
+      cache: "no-store",
+    });
+  } catch (cause) {
+    return { ok: false, error: `Xero could not be reached. ${cause instanceof Error ? cause.message : ""}`.trim() };
+  }
+  if (response.status === 429) {
+    return {
+      ok: false, error: "Xero asked us to slow down.",
+      retryAfter: Number(response.headers.get("retry-after")) || 60,
+    };
+  }
+  if (!response.ok) {
+    const detail = summariseXeroError(await response.text().catch(() => ""));
+    return { ok: false, error: `Xero refused the credit notes (${response.status}). ${detail}`.trim() };
+  }
+
+  const notes = ((await response.json()) as { CreditNotes?: XeroCreditNote[] }).CreditNotes ?? [];
+  const rows = notes.flatMap((note) => {
+    const row = creditRow(note);
+    return row ? [row] : [];
+  });
+
+  const here = new Map<string, {
+    id: string; total: number; amount_credited: number; source: string;
+  }>();
+  for (const batch of chunk(rows.map((row) => row.number), 200)) {
+    const { data } = await supabase
+      .from("invoices").select("id, invoice_number, total, amount_credited, source")
+      .eq("tenant_id", tenantId).in("invoice_number", batch)
+      .returns<Array<{
+        id: string; invoice_number: string; total: number; amount_credited: number; source: string;
+      }>>();
+    for (const row of data ?? []) here.set(row.invoice_number, row);
+  }
+
+  const lookups = await loadLookups(supabase, tenantId);
+  let written = 0;
+  if (input.write) {
+    for (const row of rows) {
+      const invoice = here.get(row.number);
+      if (invoice?.source === "app") continue;
+      if (invoice) {
+        const { error } = await supabase
+          .from("invoices")
+          .update({
+            ...(row.remaining > 0 ? { invoice_type: "credit" } : {}),
+            amount_paid: paidForCredit(
+              Number(invoice.total), Number(invoice.amount_credited ?? 0), row.remaining,
+            ),
+            status: row.remaining > 0 ? "issued" : "paid",
+          })
+          .eq("id", invoice.id).eq("tenant_id", tenantId);
+        if (error) return { ok: false, error: describeDbError(error) };
+        written += 1;
+        continue;
+      }
+
+      // A credit newer than the August export, so the app has never seen it.
+      const contact = { id: row.contact_id, name: row.contact };
+      const customerId = customerFor(
+        { InvoiceID: "", Contact: { ContactID: row.contact_id ?? undefined, Name: row.contact } }, lookups,
+      );
+      const customer = customerId ? { id: customerId } : await addCustomer(supabase, tenantId, contact);
+      if ("error" in customer) return { ok: false, error: customer.error };
+      const { error } = await supabase.from("invoices").insert({
+        tenant_id: tenantId, customer_id: customer.id, invoice_number: row.number,
+        invoice_type: "credit", source: "import", status: row.remaining > 0 ? "issued" : "paid",
+        issue_date: row.issue_date ?? undefined, subtotal: row.total, total: row.total,
+        amount_paid: paidForCredit(row.total, 0, row.remaining),
+        notes: "Imported from a Xero credit note (MYOB).",
+      });
+      if (error) return { ok: false, error: describeDbError(error) };
+      written += 1;
+    }
+  }
+
+  const open = rows.filter((row) => row.remaining > 0);
+  return {
+    ok: true,
+    returned: notes.length,
+    numbers: rows.map((row) => row.number),
+    stillCredit: open.length,
+    stillCreditAmount: Math.round(open.reduce((sum, row) => sum + row.remaining, 0) * 100) / 100,
+    newCredits: rows.filter((row) => !here.has(row.number)).length,
+    written,
+  };
+}
+
+/** Close the app's open credits that Xero no longer holds. Only reports, unless `write`. */
+export async function settleUsedCredits(
+  supabase: Client, tenantId: string, input: { inXero: string[]; write: boolean },
+): Promise<{ count: number; amount: number } | { error: string }> {
+  const { data } = await supabase
+    .from("invoices").select("id, invoice_number, total, amount_credited, balance")
+    .eq("tenant_id", tenantId).eq("source", "import").eq("invoice_type", "credit")
+    .in("status", [...OPEN_INVOICE_STATUSES]).is("deleted_at", null)
+    .limit(1000)
+    .returns<Array<{
+      id: string; invoice_number: string; total: number; amount_credited: number; balance: number;
+    }>>();
+  const rows = data ?? [];
+  const used = new Set(usedCredits(rows.map((row) => row.invoice_number), input.inXero));
+  const closing = rows.filter((row) => used.has(row.invoice_number));
+  if (input.write) {
+    for (const row of closing) {
+      const { error } = await supabase
+        .from("invoices")
+        .update({
+          amount_paid: paidForCredit(Number(row.total), Number(row.amount_credited ?? 0), 0),
+          status: "paid",
+        })
+        .eq("id", row.id).eq("tenant_id", tenantId);
+      if (error) return { error: describeDbError(error) };
+    }
+  }
+  return {
+    count: closing.length,
+    amount: Math.round(closing.reduce((sum, row) => sum + Number(row.balance), 0) * 100) / 100,
   };
 }

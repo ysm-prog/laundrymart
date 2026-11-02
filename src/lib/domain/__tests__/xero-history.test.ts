@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
-  classifyXeroInvoice, historyLine, historyRow, invoicesToSettle, looseName, normaliseName,
-  openingBaseNumber, openingRow, similarCustomer, taxCodeFor, xeroDay, type HistoryLookups, type XeroInvoice,
+  classifyXeroInvoice, creditRow, historyLine, historyRow, invoicesToSettle, looseName, normaliseName,
+  openingBaseNumber, openingRow, paidForCredit, similarCustomer, taxCodeFor, usedCredits, xeroDay,
+  type HistoryLookups, type XeroCreditNote, type XeroInvoice,
 } from "../xero-history";
 import { isHeaderOnly } from "../payment-gate";
 
@@ -155,6 +156,37 @@ describe("invoicesToSettle", () => {
     expect(invoicesToSettle({
       openInApp: ["A", "B", "C"], drafts: ["A", "B"], openings: ["B"],
     })).toEqual({ settle: ["A"], unknown: ["C"] });
+  });
+});
+
+describe("MYOB credits", () => {
+  const note: XeroCreditNote = {
+    CreditNoteID: "cn-1", CreditNoteNumber: "00413522-OB", Type: "ACCRECCREDIT", Status: "AUTHORISED",
+    Contact: { ContactID: "contact-1", Name: "Sloth Cafe" }, DateString: "2026-08-06T00:00:00",
+    Total: 42, RemainingCredit: 12.5,
+  };
+  it("reads what is left of a credit under the invoice it belongs to", () => {
+    expect(creditRow(note)).toMatchObject({ number: "00413522", total: 42, remaining: 12.5 });
+  });
+  it("says a credit Xero calls paid has nothing left, whatever else it reports", () => {
+    expect(creditRow({ ...note, Status: "PAID", RemainingCredit: 3 })?.remaining).toBe(0);
+  });
+  it("leaves alone a credit raised in Xero, a voided one and a supplier's", () => {
+    expect(creditRow({ ...note, CreditNoteNumber: "CN-0007" })).toBeNull();
+    expect(creditRow({ ...note, Status: "VOIDED" })).toBeNull();
+    expect(creditRow({ ...note, Type: "ACCPAYCREDIT" })).toBeNull();
+  });
+  it("sets the paid figure so the balance reads minus the credit left", () => {
+    const paid = paidForCredit(42, 0, 12.5);
+    expect(paid).toBe(54.5);
+    expect(42 - paid).toBe(-12.5);
+  });
+  it("leaves nothing owing either way once a credit is used", () => {
+    expect(paidForCredit(42, 0, 0)).toBe(42);
+    expect(paidForCredit(42, 2, 0)).toBe(40);
+  });
+  it("finds the app's credits Xero no longer holds", () => {
+    expect(usedCredits(["B", "A", "C"], ["C"])).toEqual(["A", "B"]);
   });
 });
 
