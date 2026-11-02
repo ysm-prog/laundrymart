@@ -53,7 +53,7 @@ describe("email branding", () => {
     // below pass over an empty list and report success — the vacuous-pass trap
     // this repo has recorded twice.
     expect(TEMPLATES.map((t) => t.name).sort()).toEqual([
-      "auth-email.ts", "delivery-email.ts", "invoice-email.ts", "overdue-email.ts",
+      "auth-email.ts", "delivery-email.ts", "invoice-email.ts", "overdue-email.ts", "statement-email.ts",
     ]);
   });
 
