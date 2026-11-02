@@ -2,8 +2,8 @@ import "server-only";
 import type { createClient } from "@/lib/supabase/server";
 import { describeDbError } from "@/lib/actions";
 import {
-  classifyXeroInvoice, creditRow, customerFor, historyRow, normaliseName, openingBaseNumber,
-  openingRow, paidForCredit, similarCustomer, usedCredits,
+  classifyXeroInvoice, creditRow, creditWritesTo, customerFor, historyRow, normaliseName,
+  openingBaseNumber, openingRow, paidForCredit, similarCustomer, usedCredits,
   type HistoryLookups, type HistoryRow, type OpeningRow, type XeroCreditNote, type XeroInvoice,
 } from "@/lib/domain/xero-history";
 import { OPEN_INVOICE_STATUSES } from "@/lib/domain/statement";
@@ -277,6 +277,9 @@ export type CreditPageResult = {
   stillCredit: number;
   stillCreditAmount: number;
   newCredits: number;
+  /** Credit notes sharing a number with an invoice, which are left off it. */
+  sharedNumber: number;
+  sharedNumberLeft: number;
   written: number;
 } | { ok: false; error: string; retryAfter?: number };
 
@@ -329,14 +332,15 @@ export async function runCreditPage(
   });
 
   const here = new Map<string, {
-    id: string; total: number; amount_credited: number; source: string;
+    id: string; total: number; amount_credited: number; source: string; invoice_type: string;
   }>();
   for (const batch of chunk(rows.map((row) => row.number), 200)) {
     const { data } = await supabase
-      .from("invoices").select("id, invoice_number, total, amount_credited, source")
+      .from("invoices").select("id, invoice_number, total, amount_credited, source, invoice_type")
       .eq("tenant_id", tenantId).in("invoice_number", batch)
       .returns<Array<{
         id: string; invoice_number: string; total: number; amount_credited: number; source: string;
+        invoice_type: string;
       }>>();
     for (const row of data ?? []) here.set(row.invoice_number, row);
   }
@@ -346,12 +350,11 @@ export async function runCreditPage(
   if (input.write) {
     for (const row of rows) {
       const invoice = here.get(row.number);
-      if (invoice?.source === "app") continue;
+      if (invoice && !creditWritesTo(invoice)) continue;
       if (invoice) {
         const { error } = await supabase
           .from("invoices")
           .update({
-            ...(row.remaining > 0 ? { invoice_type: "credit" } : {}),
             amount_paid: paidForCredit(
               Number(invoice.total), Number(invoice.amount_credited ?? 0), row.remaining,
             ),
@@ -383,6 +386,10 @@ export async function runCreditPage(
   }
 
   const open = rows.filter((row) => row.remaining > 0);
+  const shared = rows.filter((row) => {
+    const invoice = here.get(row.number);
+    return invoice && invoice.source !== "app" && !creditWritesTo(invoice);
+  });
   return {
     ok: true,
     returned: notes.length,
@@ -390,6 +397,8 @@ export async function runCreditPage(
     stillCredit: open.length,
     stillCreditAmount: Math.round(open.reduce((sum, row) => sum + row.remaining, 0) * 100) / 100,
     newCredits: rows.filter((row) => !here.has(row.number)).length,
+    sharedNumber: shared.length,
+    sharedNumberLeft: Math.round(shared.reduce((sum, row) => sum + row.remaining, 0) * 100) / 100,
     written,
   };
 }

@@ -155,6 +155,9 @@ The master spec names a .NET 9 Web API; this build follows the supplied skeleton
   **Credits follow the same rule from Xero's credit notes**: an `-OB` credit note's `RemainingCredit`
   is the credit left, set as a negative balance, and an open MYOB credit Xero no longer holds has been
   used. Running the pull again is how a credit stays current, because no webhook reaches a credit note.
+  **A credit note writes only to a credit** (`creditWritesTo`): MYOB numbered a credit after its
+  invoice, so a credit note and an open invoice can share a number, and the invoice keeps the balance
+  its opening gave it.
 - **A person is shown by name, and the directory is one read** (`src/lib/directory.ts` over
   `tenant_members()`, 0030). Every `assigned_to`, `created_by`, `actor_id` and `delivered_by`
   column holds an `auth.users` id; the screens used to resolve those through the GoTrue admin
@@ -3808,6 +3811,14 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-11-03 · A credit note no longer closes an invoice
+Found checking the credit run against Xero. **No migration.** 20 of the 67 MYOB credit notes share a
+number with an ordinary invoice, and the step wrote to those rows too. On a used credit that meant
+paid in full, which closed `00414407` ($69.40) and `00414424` ($34.70), both Awaiting Payment in
+Xero: $104.10 the app stopped showing as owed. `creditWritesTo` now keeps a credit note to credit
+rows, and the invoice-type flip is gone with it, having changed no row. Check first reports how many
+credit notes share a number and what is left on them. Bring them in put the two invoices back.
+
 ### 2026-11-03 · MYOB credits read from Xero
 Darshan's call on the last open item. **No migration.** The app's 46 MYOB credits still read
 -$1,930.43, the August figure, against -$1,479.55 in Xero, so a statement could show a customer the
