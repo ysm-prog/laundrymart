@@ -10,6 +10,10 @@
  *    on that invoice at cut-over, for however much. Its status and amount due are
  *    the live answer, because that is what gets paid in Xero.
  *
+ *  - **an approved invoice numbered as MYOB numbered it**, `00414464` with the same
+ *    reference and no `-OB`: the last few days of MYOB, brought across whole. It is
+ *    both of the above at once, the invoice with its lines and what is owed on it.
+ *
  * So what is owed is read from the opening balance, and **a draft with no opening
  * balance was settled in MYOB**. That second half is an inference from how the
  * migration was done, chosen by Darshan and checked against Xero's receivables
@@ -47,7 +51,7 @@ export type XeroInvoice = {
   AmountDue?: number | null;
 };
 
-export type HistoryKind = "history" | "opening" | "other";
+export type HistoryKind = "history" | "opening" | "approved" | "other";
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
 const OPENING = /^(.+)-OB$/i;
@@ -58,8 +62,9 @@ export function classifyXeroInvoice(invoice: XeroInvoice): HistoryKind {
   if (OPENING.test(number)) {
     return invoice.Status === "AUTHORISED" || invoice.Status === "PAID" ? "opening" : "other";
   }
-  const fromMyob = /^\d+$/.test(number) && /^MYOB\b/i.test(invoice.Reference?.trim() ?? "");
-  return fromMyob && invoice.Status === "DRAFT" ? "history" : "other";
+  if (!/^\d+$/.test(number) || !/^MYOB\b/i.test(invoice.Reference?.trim() ?? "")) return "other";
+  if (invoice.Status === "DRAFT") return "history";
+  return invoice.Status === "AUTHORISED" || invoice.Status === "PAID" ? "approved" : "other";
 }
 
 /** `00318792-OB` → `00318792`: the invoice an opening balance belongs to. */
@@ -199,7 +204,7 @@ export type OpeningRow = {
 
 /** The row `apply_invoice_openings` takes. A paid opening balance owes nothing. */
 export function openingRow(invoice: XeroInvoice, lookups: HistoryLookups): OpeningRow | null {
-  const number = openingBaseNumber(invoice.InvoiceNumber);
+  const number = openingBaseNumber(invoice.InvoiceNumber) ?? invoice.InvoiceNumber?.trim();
   const issue = xeroDay(invoice.DateString);
   if (!number || !issue) return null;
   const due = xeroDay(invoice.DueDateString);
