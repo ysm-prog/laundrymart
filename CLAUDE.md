@@ -152,6 +152,9 @@ The master spec names a .NET 9 Web API; this build follows the supplied skeleton
   customer whose name holds it in whole words and refuses two. Check first lists every such pair.
   Anybody left comes in as an **inactive** customer, the MYOB importer's rule for a party named only
   by its documents, and carries the Xero contact id so the next page finds them.
+  **Credits follow the same rule from Xero's credit notes**: an `-OB` credit note's `RemainingCredit`
+  is the credit left, set as a negative balance, and an open MYOB credit Xero no longer holds has been
+  used. Running the pull again is how a credit stays current, because no webhook reaches a credit note.
 - **A person is shown by name, and the directory is one read** (`src/lib/directory.ts` over
   `tenant_members()`, 0030). Every `assigned_to`, `created_by`, `actor_id` and `delivered_by`
   column holds an `auth.users` id; the screens used to resolve those through the GoTrue admin
@@ -3805,6 +3808,14 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-11-03 · MYOB credits read from Xero
+Darshan's call on the last open item. **No migration.** The app's 46 MYOB credits still read
+-$1,930.43, the August figure, against -$1,479.55 in Xero, so a statement could show a customer the
+wrong credit. Bring in your books now reads `/CreditNotes` as a third phase, and Check first reports
+it like the rest. The invoice numbering clash with Xero (`INV-00415360` on) is left as it is, also his
+call. A credit is set on the row with the owner's own client, because no guard stands in the way and
+it adds no lines.
+
 ### 2026-11-03 · The MYOB invoice history, from Xero
 "All invoice make it available in the app from MYOB." **One migration, `0062`, applied (§11).**
 

@@ -15,7 +15,8 @@ write names its tenant.
 - Tied to Xero's Awaiting Payment to the cent. The gap is 34 invoices Xero holds twice, plain and
   `-OB`, $2,739.17, for the bookkeeper. The trusted date has not moved: statements still leave off
   imports before 1 October until Darshan decides.
-- The app's next number collides with Xero's: `INV-00415360` onward already exist there.
+- MYOB credits now come from Xero's credit notes too. Darshan said the number clash with Xero's
+  `INV-00415360` on is not to be changed.
 
 ## Previously: standard template, statements, text option (2026-11-02)
 - Invoice and credit note redrawn from Xero's `INV-0015359` in `standard-layout.tsx`. Statements on the
