@@ -1464,8 +1464,8 @@ produce on demand.
   connector (§11).
 - `0061_invoice_sms` — **a text is recorded on the invoice, as an email is.** `invoices.sms_sent_at`
   and `sms_sent_to`, both nullable. Adds no table, policy, function or trigger; changes no row.
-  Three self-assertions. `invoice_sms.test.sql` (7). **Not yet applied to the hosted project**
-  (§11); the code runs without it.
+  Three self-assertions. `invoice_sms.test.sql` (7). **Applied 2026-11-02** (§11). The invoice page
+  reads the columns in a query of its own, so that screen never depended on this order.
 - `0050_pickup_to_job` — **a collection becomes a laundry job, exactly once.**
   `laundry_orders.source_pickup_id` (`on delete set null`),
   `uq_laundry_orders_source_pickup` (partial unique) and
@@ -2471,12 +2471,11 @@ reports six false gaps.
   leaving its usual trace: text typed into `apply_migration` reformatted a little against the file.
   Worth knowing before anybody reads a raw `md5(prosrc)` mismatch as drift.
 
-**`0061_invoice_sms` is not applied yet.** The connector's `apply_migration` was refused on
-2026-11-02 by the session's permission check as a production change needing the owner's explicit
-say-so, so it waits for that. Nothing depends on it until texting is switched on: the invoice page
-reads the two columns in a query of their own and ignores an error, and a failed stamp does not fail
-a send. **Apply it before adding the ClickSend keys**, or a text goes out with only the audit row to
-say where. It is additive and has run on a fresh Postgres 16 under the whole suite.
+**`0061_invoice_sms` was applied on 2026-11-02** (`20261102052427`) through the connector, after CI
+passed on the Prod pull request. The first attempt was refused by the session's permission check as
+a production change, so it waited for Darshan's explicit approval. Read back: both columns present
+and nullable, and none of the 656 invoices stamped. **Applied before ClickSend's keys exist**, which
+is the order §10 needs. Until then no text can go, so the columns stay empty.
 
 **`0060_reopen_job_charges` was applied on 2026-11-02** (`20261102035318`) through the connector,
 first attempt, after CI passed on the pull request. Read back: the delete is conditional on
@@ -3777,7 +3776,7 @@ invoice goes, because this app has no counter-cash concept.
 ## 18. Changelog
 ### 2026-11-02 · The standard invoice, statements and a text option
 Jaimin's list by WhatsApp and Outlook, with the Xero invoice `INV-0015359` as the template and the
-logo. **One migration, `0061`, not yet applied (§11); the code runs without it.**
+logo. **One migration, `0061`, applied the same day (§11).**
 
 - **Template.** `myob-layout.tsx` is replaced by `standard-layout.tsx`, and the invoice and credit
   note are redrawn on it (§2). Titles are now "Tax Invoice", "Invoice", "Draft Tax Invoice" and
@@ -3789,8 +3788,8 @@ logo. **One migration, `0061`, not yet applied (§11); the code runs without it.
   sent by Resend one at a time or in a selection of up to 200. Capabilities are the invoice ones:
   `invoices.read` to view, `invoices.send` to send, plus `invoices.bulk` for a selection.
 - **The figure is honest about what it is not.** The app holds 4 open invoices since cut-over
-  ($219.60) and 600 MYOB imports ($132,991.67, back to 2011), while Xero shows 848 items worth
-  $197,436.04. So the imports stay off, staff are told the count and the amount, and the PDF tells the
+  ($219.60) and 646 open MYOB imports back to 2011, net $131,061.24 (600 balances of $132,991.67 and
+  46 credits of $1,930.43), while Xero shows 848 items worth $197,436.04. So the imports stay off, staff are told the count and the amount, and the PDF tells the
   customer the date it starts from. **A statement here is not yet a customer's whole balance**: most
   of what ATS is owed lives in Xero, because invoices have been entered there by hand.
 - **Text.** The invoice's send card gains Send by (email, text, or both) and Text to, prefilled from
@@ -3809,6 +3808,11 @@ logo. **One migration, `0061`, not yet applied (§11); the code runs without it.
 - Unit tests: statement, SMS rules, the signed link, ClickSend's answer, the mocked text flow, and
   statement rendering. Checks: **1,575 tests**, typecheck and lint clean, every migration on a fresh
   Postgres 16, **738 pgTAP assertions across 42 files**, 0 failing.
+- **Checked on live after the deploy:** `00415359`'s PDF and Barbers Of Mitcham's statement both
+  rendered from real data with the logo and bank details, the Statements screen read 4 customers and
+  $219.60, the customer card and the send card drew, and `/i/` with a bad token answered 404 with no
+  session while `/invoices` still redirected to sign-in. **Not exercised:** a statement email and a
+  text, because neither should go to a real customer as a test, and ClickSend has no account yet.
 
 ### 2026-11-02 · Send back for review works
 Found by a dry run on the live app with a marked test job, `LJ00033`. **One migration, `0060`;

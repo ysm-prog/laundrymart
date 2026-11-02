@@ -13,8 +13,8 @@ write names its tenant.
 - Invoice and credit note redrawn from Xero's `INV-0015359` in `standard-layout.tsx`. Statements on the
   customer and Billing › Statements. Email, text or both on the invoice, by ClickSend, through a signed
   `/i/:token` link.
-- **0061 is not applied**: the permission check refused it as a production change needing Darshan's
-  explicit approval. Code runs without it. Apply it before the ClickSend keys go into Vercel.
+- **0061 applied** (`20261102052427`) with Darshan's explicit approval, before any ClickSend key exists.
+- Texting waits on Darshan: create the ClickSend account and add its keys in Vercel.
 - ClickSend has never met a real account, so the first real text is the proof.
 - Statements leave off MYOB imports and most of the real balance is in Xero, so a statement is not yet
   a customer's whole balance. See the changelog.
