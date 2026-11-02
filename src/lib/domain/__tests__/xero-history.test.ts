@@ -36,6 +36,7 @@ describe("telling Xero's invoices apart", () => {
   it("knows an opening balance, paid or not", () => {
     expect(classifyXeroInvoice(opening)).toBe("opening");
     expect(classifyXeroInvoice({ ...opening, Status: "PAID" })).toBe("opening");
+    expect(classifyXeroInvoice({ ...opening, InvoiceNumber: "00415203-OB2" })).toBe("opening");
   });
   it("knows the last of MYOB, approved in Xero with no -OB", () => {
     expect(classifyXeroInvoice({ ...draft, Status: "AUTHORISED" })).toBe("approved");
@@ -50,6 +51,7 @@ describe("telling Xero's invoices apart", () => {
   });
   it("reads the invoice an opening balance belongs to", () => {
     expect(openingBaseNumber("00318792-OB")).toBe("00318792");
+    expect(openingBaseNumber("00415203-OB2")).toBe("00415203");
     expect(openingBaseNumber("00318792")).toBeNull();
     expect(openingBaseNumber(null)).toBeNull();
   });
