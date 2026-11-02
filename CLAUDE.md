@@ -3753,6 +3753,9 @@ nothing on the screen. **No migration; `src/` only.**
   `ChargesCard` now reads the GST rate on every view, frozen jobs included, to do it.
 - **The `tax_code` trigger cannot undo a tick**: `sync_tax_code_taxable` only overrides `taxable`
   when a line carries a code, and nothing in `src/` writes `tax_code` to a line or a charge.
+- **CI's DB job is pinned to `ubuntu-24.04`.** `ubuntu-latest` moved to Ubuntu 26.04 from
+  2026-10-19 and its apt has no `postgresql-16`, so the job died at install on every run since,
+  whatever the change. Found on this PR, and unrelated to it.
 
 ### 2026-10-19 · The foreign keys the app reads through get an index
 The next advisor item: 145 unindexed foreign keys (INFO). **One migration, `0059`, applied live the
