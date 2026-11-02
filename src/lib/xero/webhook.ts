@@ -1,6 +1,6 @@
 import "server-only";
 import type { Session } from "@/lib/auth/context";
-import { settleHeaderOnly } from "@/lib/domain/payment-gate";
+import { isHeaderOnly, settleHeaderOnly } from "@/lib/domain/payment-gate";
 import { resettleInvoice } from "@/lib/invoices/send";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { XERO_API } from "./config";
@@ -13,9 +13,10 @@ type Admin = ReturnType<typeof createAdminClient>;
  * Apply Xero invoice events: when an invoice this app sent is paid (or part
  * paid) in Xero, record the payment here so the register shows it.
  *
- * - Only invoices this app pushed are touched (matched on `xero_invoice_id`
- *   within the laundry that owns the Xero organisation). MYOB history and
- *   opening-balance items in Xero have no match and are ignored.
+ * - Only invoices the app knows are touched (matched on `xero_invoice_id` within
+ *   the laundry that owns the Xero organisation). That is what it pushed, and since
+ *   0062 the MYOB history too, whose id is the opening balance's where one exists,
+ *   so a payment on it in Xero reaches the balance here.
  * - A payment carries the Xero PaymentID in `xero_payment_id`, which is both
  *   what makes a repeated delivery a no-op and what stops `pushPaymentToXero`
  *   sending the money back to Xero.
@@ -44,10 +45,12 @@ async function applyOne(admin: Admin, event: XeroWebhookEvent): Promise<void> {
 
   const { data: invoice } = await admin
     .from("invoices")
-    .select("id, customer_id, status, total, amount_paid")
+    .select("id, customer_id, status, total, amount_paid, source")
     .eq("tenant_id", tenantId)
     .eq("xero_invoice_id", event.resourceId)
-    .maybeSingle<{ id: string; customer_id: string; status: string; total: number; amount_paid: number }>();
+    .maybeSingle<{
+      id: string; customer_id: string; status: string; total: number; amount_paid: number; source: string;
+    }>();
   if (!invoice || invoice.status === "void" || invoice.status === "draft") return;
 
   const tokens = await getXeroTokens(tenantId);
@@ -85,6 +88,7 @@ async function applyOne(admin: Admin, event: XeroWebhookEvent): Promise<void> {
     .eq("tenant_id", tenantId)
     .eq("invoice_id", invoice.id);
 
+  const headerOnly = isHeaderOnly({ source: invoice.source, lineCount });
   let amountPaid = Number(invoice.amount_paid);
   let recorded = 0;
   for (const payment of fresh) {
@@ -105,7 +109,7 @@ async function applyOne(admin: Admin, event: XeroWebhookEvent): Promise<void> {
       continue;
     }
     recorded += 1;
-    if (!lineCount) {
+    if (headerOnly) {
       amountPaid = settleHeaderOnly(Number(invoice.total), amountPaid, payment.amount).amountPaid;
     }
     await admin.from("audit_logs").insert({
@@ -120,7 +124,7 @@ async function applyOne(admin: Admin, event: XeroWebhookEvent): Promise<void> {
   }
   if (recorded === 0) return;
 
-  if (lineCount && lineCount > 0) {
+  if (!headerOnly) {
     const { error } = await admin.rpc("recalculate_invoice", { p_invoice: invoice.id });
     if (error) {
       // Fall back to the payments themselves so the balance is still right.
