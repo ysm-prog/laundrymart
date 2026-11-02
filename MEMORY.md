@@ -9,7 +9,17 @@ where that is genuinely what it is. The multi-tenancy architecture stays: one op
 fact about today's data, not a reason to drop `tenant_id`, RLS, or §23's rule that a read feeding a
 write names its tenant.
 
-## Latest: 0060 live (2026-11-02), Send back for review works
+## Latest: standard template, statements, text option (2026-11-02)
+- Invoice and credit note redrawn from Xero's `INV-0015359` in `standard-layout.tsx`. Statements on the
+  customer and Billing › Statements. Email, text or both on the invoice, by ClickSend, through a signed
+  `/i/:token` link.
+- **0061 is not applied**: the permission check refused it as a production change needing Darshan's
+  explicit approval. Code runs without it. Apply it before the ClickSend keys go into Vercel.
+- ClickSend has never met a real account, so the first real text is the proof.
+- Statements leave off MYOB imports and most of the real balance is in Xero, so a statement is not yet
+  a customer's whole balance. See the changelog.
+
+## Previously: 0060 live (2026-11-02), Send back for review works
 - `reopenJobCharges` was refused by the charge guard after moving the job, so a sent-back job sat in
   review with charges nobody could change. A frozen charge may now be deleted while its job is back
   in `awaiting_review`, and at no other time. Found by a live dry run on test job `LJ00033`.
