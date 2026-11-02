@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { CHARGE_TYPE_LABELS } from "@/lib/domain/pricing";
+import { CHARGE_TYPE_LABELS, rateForGstTick, type GstTickMemo } from "@/lib/domain/pricing";
 import { accountLabel, taxableFromTaxCode } from "@/lib/domain/accounts";
 import { priceBasisHint } from "@/lib/domain/items";
 import { liveItemRate } from "@/lib/domain/laundry-prices";
@@ -52,7 +52,8 @@ export function InvoiceLineForm({
   accounts: readonly LineFormAccount[];
   /**
    * The laundry's own GST rate, for grossing an item's price up when the item
-   * states it GST-exclusive. Passed in rather than assumed at 10%: this number
+   * states it GST-exclusive and for the "GST applies" tick adding or taking out
+   * the GST. Passed in rather than assumed at 10%: this number
    * decides what a customer is billed, and a constant here would be a second
    * answer to a question `tenants.gst_rate` already holds.
    */
@@ -93,6 +94,7 @@ export function InvoiceLineForm({
   const [typed, setTyped] = useState(false);
   const [unitPrice, setUnitPrice] = useState("0");
   const [taxable, setTaxable] = useState(true);
+  const [gstMemo, setGstMemo] = useState<GstTickMemo | null>(null);
 
   const byAccountId = useMemo(
     () => new Map(accounts.map((account) => [account.id, account])), [accounts],
@@ -105,6 +107,18 @@ export function InvoiceLineForm({
    * has written "Replacement tablecloth — damaged in transit" and then realises
    * they want a code on it should not lose the sentence to get one.
    */
+  /*
+   * The tick moves the rate, the same rule as the job's charge editor: a line
+   * amount is GST-inclusive (0043), so a tick that only changed the flag left the
+   * customer paying exactly the same. A rate nobody could read is left as typed.
+   */
+  function chooseTaxable(next: boolean) {
+    const moved = rateForGstTick({ rate: unitPrice, taxable: next, gstRate, memo: gstMemo });
+    setTaxable(next);
+    setGstMemo(moved.memo);
+    if (moved.rate > 0) setUnitPrice(moved.rate.toFixed(2));
+  }
+
   function chooseMode(next: Mode) {
     setMode(next);
     setItemId(null);
@@ -118,6 +132,7 @@ export function InvoiceLineForm({
 
   function chooseItem(chosen: LineFormItem) {
     setItemId(chosen.id);
+    setGstMemo(null);
     if (!typed) setDescription(chosen.name);
     // The item's own account is the whole reason picking an item produces a code.
     setAccountId(chosen.income_account_id);
@@ -341,7 +356,7 @@ export function InvoiceLineForm({
                             transition hover:bg-surface-muted/60">
             <input
               id="taxable" name="taxable" type="checkbox" checked={taxable}
-              onChange={(event) => setTaxable(event.target.checked)}
+              onChange={(event) => chooseTaxable(event.target.checked)}
               className="size-[1.15rem] shrink-0 rounded border-control-border accent-primary"
             />
             GST applies
