@@ -26,7 +26,7 @@ describe("the invoice lifecycle, as wired", () => {
 
   it("a payment on an invoice with lines recalculates; a bare header is added to", () => {
     const actions = code(read("app/(app)/invoices/actions.ts"));
-    expect(actions).toMatch(/lineCount && lineCount > 0[\s\S]{0,120}recalculate_invoice/);
+    expect(actions).toMatch(/!isHeaderOnly\(\{ source: current\.source, lineCount \}\)[\s\S]{0,120}recalculate_invoice/);
     expect(actions).toMatch(/settleHeaderOnly\(/);
   });
 

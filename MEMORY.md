@@ -9,7 +9,14 @@ where that is genuinely what it is. The multi-tenancy architecture stays: one op
 fact about today's data, not a reason to drop `tenant_id`, RLS, or §23's rule that a read feeding a
 write names its tenant.
 
-## Latest: standard template, statements, text option (2026-11-02)
+## Latest: MYOB history from Xero (2026-11-03), built, not run
+- Settings › Bring in your books gains Check first (writes nothing) and Bring them in, driven a page
+  at a time. Reads Xero's MYOB drafts with lines; the `-OB` invoices say what is owed.
+- **0062 needs Darshan's approval before Bring them in can write.** After importing, tie the open
+  total to Xero's receivables before moving the trusted date on Settings › Invoicing.
+- The app's next number collides with Xero's: `INV-00415360` onward already exist there.
+
+## Previously: standard template, statements, text option (2026-11-02)
 - Invoice and credit note redrawn from Xero's `INV-0015359` in `standard-layout.tsx`. Statements on the
   customer and Billing › Statements. Email, text or both on the invoice, by ClickSend, through a signed
   `/i/:token` link.

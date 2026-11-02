@@ -16,7 +16,7 @@ import {
 } from "@/lib/domain/invoicing";
 import { businessToday, toInstant } from "@/lib/domain/timezone";
 import {
-  creditRefusal, paymentRefusal, reversalRefusal, settleHeaderOnly, unsettleHeaderOnly,
+  creditRefusal, isHeaderOnly, paymentRefusal, reversalRefusal, settleHeaderOnly, unsettleHeaderOnly,
 } from "@/lib/domain/payment-gate";
 import {
   count, describeDbError, done, fail, firstIssue, money, optionalText,
@@ -1022,7 +1022,7 @@ export async function recordPayment(formData: FormData): Promise<void> {
   // customer is taken from the invoice rather than from a hidden field.
   const { data: current } = await supabase
     .from("invoices")
-    .select("status, invoice_type, total, amount_paid, balance, customer_id")
+    .select("status, invoice_type, total, amount_paid, balance, customer_id, source")
     .eq("tenant_id", session.tenantId)
     .eq("id", parsed.data.invoice_id)
     .maybeSingle();
@@ -1052,11 +1052,11 @@ export async function recordPayment(formData: FormData): Promise<void> {
   }).select("id").single<{ id: string }>();
   if (error) return fail(backTo, describeDbError(error));
 
-  if (lineCount && lineCount > 0) {
+  if (!isHeaderOnly({ source: current.source, lineCount })) {
     await supabase.rpc("recalculate_invoice", { p_invoice: parsed.data.invoice_id });
   } else {
-    // An imported header (no lines): recalculating would zero its total and
-    // forget what MYOB recorded as paid. Add this payment to it instead.
+    // An imported invoice: recalculating would forget what MYOB recorded as paid
+    // and, with no lines, zero its total. Add this payment to it instead.
     const settled = settleHeaderOnly(Number(current.total), Number(current.amount_paid),
                                      parsed.data.amount);
     await supabase.from("invoices").update({ amount_paid: settled.amountPaid })
@@ -1150,15 +1150,15 @@ export async function reversePayment(formData: FormData): Promise<void> {
   if (!payment) return fail(backTo, "That payment could not be found on this invoice.");
 
   const { data: invoice } = await supabase
-    .from("invoices").select("status, invoice_number, amount_paid")
+    .from("invoices").select("status, invoice_number, amount_paid, source")
     .eq("id", parsed.data.invoice_id).eq("tenant_id", session.tenantId)
-    .maybeSingle<{ status: string; invoice_number: string; amount_paid: number }>();
+    .maybeSingle<{ status: string; invoice_number: string; amount_paid: number; source: string }>();
   if (!invoice) return fail(backTo, "That invoice could not be found.");
 
   const { count: lineCount } = await supabase
     .from("invoice_lines").select("id", { count: "exact", head: true })
     .eq("tenant_id", session.tenantId).eq("invoice_id", parsed.data.invoice_id);
-  const headerOnly = !lineCount;
+  const headerOnly = isHeaderOnly({ source: invoice.source, lineCount });
 
   const refusal = reversalRefusal({
     headerOnly, amountPaid: Number(invoice.amount_paid), amount: Number(payment.amount),
