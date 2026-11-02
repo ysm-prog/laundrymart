@@ -8,14 +8,14 @@ import { money, dateTime } from "@/lib/format";
 import {
   BILLING_STATUS_BLURBS, BILLING_STATUS_LABELS, chargesAreEditable, type BillingStatus,
 } from "@/lib/domain/billing";
-import { CHARGE_TYPE_LABELS, type ChargeType } from "@/lib/domain/pricing";
+import { CHARGE_TYPE_LABELS, gstPhrase, inclusiveTotals, type ChargeType } from "@/lib/domain/pricing";
 import { jobChargeSubtotal } from "@/lib/domain/job-pricing";
 import { loadJobCharges, loadRateCard } from "@/lib/orders/job-billing";
 import { Badge, Card, DataTable, EmptyState, Notice } from "@/components/ui";
 import { ConfirmSubmit } from "@/components/confirm-submit";
 import { SubmitButton } from "@/components/form";
 import { JobChargesEditor } from "./job-charges-editor";
-import { GST_RATE_FALLBACK, tenantGstRate } from "@/lib/gst";
+import { tenantGstRate } from "@/lib/gst";
 import {
   approveJobCharges, markJobNotBillable, priceJobCharges, reopenJobCharges, updateJobCharges,
 } from "../billing-actions";
@@ -51,19 +51,21 @@ export async function ChargesCard({
   const supabase = await createClient();
   const editable = chargesAreEditable(billingStatus) && can(role, "billing.write");
 
+  // Fetched on every view since the total stopped saying "GST included" blindly:
+  // the read-only record has to work out how much GST it holds too.
   const [charges, rateCard, items, accounts, gstRate] = await Promise.all([
     loadJobCharges(supabase, orderId),
     loadRateCard(supabase, customerId),
     // Only when the charges can still be changed. A frozen job is a record, and
-    // fetching an item list, a chart of accounts and the GST rate to render one
-    // would be a few hundred rows read for nothing on every view of every
-    // historical job.
+    // fetching an item list and a chart of accounts to render one would be a few
+    // hundred rows read for nothing on every view of every historical job.
     editable ? loadCodingItems(supabase, tenantId, customerId) : Promise.resolve([]),
     editable ? loadCodingAccounts(supabase, tenantId) : Promise.resolve([]),
-    editable ? tenantGstRate(supabase, tenantId) : Promise.resolve(GST_RATE_FALLBACK),
+    tenantGstRate(supabase, tenantId),
   ]);
 
   const subtotal = jobChargeSubtotal(charges);
+  const totals = inclusiveTotals(charges, gstRate);
   const canApprove = can(role, "invoices.approve");
 
   return (
@@ -237,9 +239,9 @@ export async function ChargesCard({
           {charges.length > 0 ? (
             <div className="mt-4 flex justify-end border-t pt-4 text-sm">
               <span className="text-muted-foreground">
-                Subtotal{" "}
+                Total{" "}
                 <span className="ml-2 font-semibold text-foreground tabular-nums">{money(subtotal)}</span>
-                <span className="ml-1">GST included</span>
+                <span className="ml-1">{gstPhrase(totals.gst, totals.anyTaxable)}</span>
               </span>
             </div>
           ) : null}

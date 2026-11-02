@@ -44,7 +44,10 @@ jobs:
         run: npm audit --audit-level=critical
   database:
     name: DB (migrations + RLS proof + seed)
-    runs-on: ubuntu-latest
+    # Pinned, not `ubuntu-latest`: that label moved to Ubuntu 26.04 from
+    # 2026-10-19 and its apt has no postgresql-16, which is the major the hosted
+    # project and the step below name. 24.04 ships it, and postgresql-16-pgtap.
+    runs-on: ubuntu-24.04
     timeout-minutes: 12
     env: { PGHOST: localhost, PGUSER: postgres, PGPASSWORD: postgres, PGDATABASE: postgres }
     steps:
