@@ -1442,6 +1442,14 @@ produce on demand.
   - `hot_foreign_key_indexes.test.sql` (8) plans the real queries with sequential scans off and
     asserts each reaches its index. **It fails 8 of 8 on a database without 0059.**
   - **Applied 2026-10-19** (`20261019060507`) through the connector (§11).
+- `0060_reopen_job_charges` — **Send back for review works.** `guard_job_charge_snapshot` rebuilt
+  from 0044's body with one change: a frozen charge may be deleted while its job is back in
+  `awaiting_review`, so `reopenJobCharges` and `save_job_charge_snapshot` can both finish. The
+  billing status is read first now, because the delete turns on it. **Adds no table, column or
+  policy; changes no row.** A frozen row still cannot be updated in any state, and SECURITY DEFINER
+  and the revoke from `authenticated` are carried across and asserted. Seven self-assertions.
+  `reopen_job_charges.test.sql` (13), which fails without it. **Applied 2026-11-02** through the
+  connector (§11).
 - `0050_pickup_to_job` — **a collection becomes a laundry job, exactly once.**
   `laundry_orders.source_pickup_id` (`on delete set null`),
   `uq_laundry_orders_source_pickup` (partial unique) and
@@ -1727,8 +1735,8 @@ Proofs in `supabase/tests/`: `rls_isolation`, `rls_coverage`, `driver_scope`,
 `single_laundry`, `charge_accounts`, `gst_inclusive`, `collection_schedule`,
 `customer_record_scope`, `fleet_scope`, `pickup_intake`, `laundry_item_ownership`,
 `invoice_money_guards`, `invoice_issue_guard`, `billing_flow_guards`, `flow_runs_itself`,
-`operations_settings`, `billing_write_policies`, `hot_foreign_key_indexes` (**718 assertions** across
-40 files).
+`operations_settings`, `billing_write_policies`, `hot_foreign_key_indexes`, `reopen_job_charges`
+(**731 assertions** across 41 files).
 
 **Count assertions, not lines starting with `ok`.** pgTAP's function is literally named `ok`, so
 psql prints a centred `ok` **column header** above each result — and `grep -c '^\s*ok '` counts
@@ -2437,6 +2445,12 @@ reports six false gaps.
   `set_records_archived`, `sync_invoice_line_account`, `tenant_members`). That is the 0042 trap
   leaving its usual trace: text typed into `apply_migration` reformatted a little against the file.
   Worth knowing before anybody reads a raw `md5(prosrc)` mismatch as drift.
+
+**`0060_reopen_job_charges` was applied on 2026-11-02** (`20261102035318`) through the connector,
+first attempt, after CI passed on the pull request. Read back: the delete is conditional on
+`awaiting_review`, the function is still SECURITY DEFINER with its `search_path` pinned,
+`authenticated` cannot execute it, and it is attached once. Proved live the same day on test job
+`LJ00033`, then voided (`INV00010`).
 
 **`0059_hot_foreign_key_indexes` was applied on 2026-10-19** (`20261019060507`) through the
 connector's `apply_migration`, first attempt. It contains no `drop` or `delete`, so the confirmation
@@ -3729,6 +3743,30 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-11-02 · Send back for review works
+Found by a dry run on the live app with a marked test job, `LJ00033`. **One migration, `0060`;
+the only `src/` change is a comment.**
+
+- **The bug.** `reopenJobCharges` moved an approved job to `awaiting_review` and then deleted its
+  frozen charges, and `guard_job_charge_snapshot` refused that delete in every state. So the action
+  failed after the status had moved: the job sat in review with charges nobody could edit or
+  re-price, and only Approve got it out, at the same numbers. It has never worked.
+- **Why nothing caught it.** `job_billing.test.sql` proves the refusal on a job still `approved`,
+  which is correct. Nothing ran the action's two halves together, on any layer. Automatic approval
+  (brief 2.3) is what made it matter: Send back is now how a person corrects a job nobody reviewed.
+- **The rule:** a frozen charge may be deleted while its job is back in `awaiting_review`, and at no
+  other time. A frozen row still cannot be updated in any state. An approved, invoiced or paid job
+  refuses the delete as before, and an invoiced job cannot be sent back to reach it.
+- **Proved on live.** `LJ00033` for `ZZ TEST – Claude BA`: priced and auto-approved at $25.08 with
+  $2.28 GST, sent back, GST unticked on one line, saved at $23.08 with $0.28 GST, approved onto draft
+  `INV00010`, whose line and header totals matched the editor. A $10.00 no-GST line added through the
+  composer took it to $33.08. Then voided with the work written off. Nothing reached Xero or email.
+- `reopen_job_charges.test.sql` (13) runs the action as it runs, recovers a job the bug left stuck,
+  and carries a corrected GST-free charge through a second approval to an invoice. It fails without
+  0060. Live, `LJ00033` was the only job in that state.
+- Checks: all 61 migrations on a fresh Postgres 16, **731 pgTAP assertions across 41 files**,
+  0 failing, the seed on top.
+
 ### 2026-11-02 · The GST tick moves the money
 Jay's report, with a screenshot: on `TW` at $0.22, ticking and unticking **GST applies** changed
 nothing on the screen. **No migration; `src/` only.**
