@@ -3729,6 +3729,31 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-11-02 · The GST tick moves the money
+Jay's report, with a screenshot: on `TW` at $0.22, ticking and unticking **GST applies** changed
+nothing on the screen. **No migration; `src/` only.**
+
+- **Why nothing moved.** A line amount is GST-inclusive (0043), so `taxable` only decided how much
+  tax was extracted from a figure that stayed put, and the editor printed "GST included" over the
+  total either way. The customer paid $0.22 ticked or not.
+- **The owner's decision: the tick adds or subtracts the GST.** `rateForGstTick` in
+  `domain/pricing.ts`: unticking strips it from the rate ($0.22 → $0.20, which is `TW`'s ex-GST
+  $0.20) and ticking grosses it back up. Both the job's charge editor and the invoice line composer
+  use it. The credit-note tick, the price list and the contract form are deliberately unchanged:
+  those state a figure the customer pays, and a tick there is about what is inside it.
+- **A reversed tick restores the exact rate**, through a memo held in the browser, because rates are
+  stored to the cent and the conversion is not reversible on its own: $0.05 strips to $0.05 and
+  would come back as $0.06.
+- **Known limit, stated:** the strip is per unit, to the cent, because `unit_price` is
+  `numeric(12,2)` and the server recomputes `quantity × unit_price`. 1,000 × $0.24 unticked is
+  1,000 × $0.22 = $220.00, not $218.18. On live 0 of 17 charges are GST-free today.
+- **`inclusiveTotals` and `gstPhrase`** make the totals say what is true: `Total $0.20 no GST`,
+  `Total $0.22 including $0.02 GST`, per line, on the editor, on the read-only card and in the save
+  toast. The sum is `recalculate_invoice`'s: extracted once, over the taxable sum, not per line.
+  `ChargesCard` now reads the GST rate on every view, frozen jobs included, to do it.
+- **The `tax_code` trigger cannot undo a tick**: `sync_tax_code_taxable` only overrides `taxable`
+  when a line carries a code, and nothing in `src/` writes `tax_code` to a line or a charge.
+
 ### 2026-10-19 · The foreign keys the app reads through get an index
 The next advisor item: 145 unindexed foreign keys (INFO). **One migration, `0059`, applied live the
 same day; no `src/` change.**
