@@ -27,6 +27,12 @@ const schema = z.object({
   // Signs Xero webhook deliveries (Xero app > Webhooks). Without it the
   // webhook answers 401 to everything, which is safe but delivers nothing.
   XERO_WEBHOOK_KEY: z.string().min(10).optional(),
+  // Text messages, via ClickSend. Optional like the mail provider: until both are
+  // set the send card says texting is not set up, and nothing else changes.
+  // CLICKSEND_FROM is optional on top of that; see `lib/sms/send.ts`.
+  CLICKSEND_USERNAME: z.string().min(1).optional(),
+  CLICKSEND_API_KEY: z.string().min(10).optional(),
+  CLICKSEND_FROM: z.string().min(1).optional(),
   // Shared secret for the notification sweep, which runs without a session.
   // Optional for the same reason the mail provider is: a deployment with no
   // cron configured should boot and work, minus the swept notifications. The

@@ -1,14 +1,16 @@
 import { describe, expect, it } from "vitest";
 import { Font } from "@react-pdf/renderer";
 import { auDate, imageFormat, invoiceDocumentTitle, pdfLineCells } from "../line-display";
-import { formatAmount, formatQty } from "../myob-layout";
-import { renderCreditNotePdf } from "../render";
+import { formatAmount, formatQty } from "../standard-layout";
+import { renderCreditNotePdf, renderStatementPdf, statementFileName } from "../render";
+import type { StatementPdfData } from "../statement-document";
+import { buildStatement } from "@/lib/domain/statement";
 import type { CreditNotePdfData } from "../credit-note-data";
 import {
   BRANDING_BUCKET, LOGO_MAX_BYTES, isTenantLogoPath, logoObjectPath, logoRefusal,
 } from "@/lib/branding";
 import {
-  EMPTY_PROFILE, bankingDetailsLine, normaliseWebsite, parseInvoiceProfile,
+  EMPTY_PROFILE, bankDepositLines, normaliseWebsite, parseInvoiceProfile,
 } from "@/lib/domain/invoice-profile";
 
 const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0]);
@@ -20,7 +22,7 @@ describe("pdfLineCells — what one line prints (brief 1.10)", () => {
     expect(pdfLineCells({
       description: "LJ00032 — Towels — 10", taxable: true, origin: "job",
       item_code: "T35", item_name: "Towels - Black", tax_code: "GST",
-    })).toEqual({ itemId: "T35", description: "Towels - Black", tax: "GST" });
+    })).toEqual({ itemId: "T35", description: "Towels - Black", tax: "10%" });
   });
 
   it("keeps the words somebody typed on a manual or contract line", () => {
@@ -36,28 +38,35 @@ describe("pdfLineCells — what one line prints (brief 1.10)", () => {
     expect(cells.description).toBe("Fuel levy");
   });
 
-  it("prints the tax code, and answers from the GST flag when there is none", () => {
-    expect(pdfLineCells({ description: "x", taxable: false, tax_code: "n-t" }).tax).toBe("N-T");
-    expect(pdfLineCells({ description: "x", taxable: true }).tax).toBe("GST");
-    expect(pdfLineCells({ description: "x", taxable: false }).tax).toBe("FRE");
+  it("prints the item's name where a line's description is only its code", () => {
+    expect(pdfLineCells({
+      description: "T35", taxable: true, origin: "manual", item_code: "T35", item_name: "Towels - Black",
+    }).description).toBe("Towels - Black");
+  });
+
+  it("prints the rate of GST the line carries, as Xero's Tax column does", () => {
+    expect(pdfLineCells({ description: "x", taxable: true }).tax).toBe("10%");
+    expect(pdfLineCells({ description: "x", taxable: false }).tax).toBe("0%");
+    expect(pdfLineCells({ description: "x", taxable: true }, 0.15).tax).toBe("15%");
   });
 });
 
 describe("invoiceDocumentTitle", () => {
   const base = { invoice_type: "consolidated", status: "issued", tax_amount: 2.28, total: 25.08 };
-  it("says Tax invoice only where GST is charged", () => {
-    expect(invoiceDocumentTitle(base)).toBe("Tax invoice");
+  it("says Tax Invoice only where GST is charged", () => {
+    expect(invoiceDocumentTitle(base)).toBe("Tax Invoice");
     expect(invoiceDocumentTitle({ ...base, tax_amount: 0 })).toBe("Invoice");
   });
-  it("never lets a draft look final, and calls a credit MYOB's word", () => {
-    expect(invoiceDocumentTitle({ ...base, status: "draft" })).toBe("Draft invoice");
-    expect(invoiceDocumentTitle({ ...base, invoice_type: "credit" })).toBe("Adjustment note");
-    expect(invoiceDocumentTitle({ ...base, total: -10 })).toBe("Adjustment note");
+  it("never lets a draft look final, and keeps the laundry's word for a credit", () => {
+    expect(invoiceDocumentTitle({ ...base, status: "draft" })).toBe("Draft Tax Invoice");
+    expect(invoiceDocumentTitle({ ...base, status: "draft", tax_amount: 0 })).toBe("Draft Invoice");
+    expect(invoiceDocumentTitle({ ...base, invoice_type: "credit" })).toBe("Adjustment Note");
+    expect(invoiceDocumentTitle({ ...base, total: -10 })).toBe("Adjustment Note");
   });
 });
 
 describe("the table's number formats", () => {
-  it("prints dates the way MYOB does", () => {
+  it("keeps the numeric date for the service breakdown", () => {
     expect(auDate("2026-10-18")).toBe("18/10/2026");
     expect(auDate("2026-10-18T04:00:00Z")).toBe("18/10/2026");
     expect(auDate(null)).toBe("—");
@@ -73,15 +82,24 @@ describe("the table's number formats", () => {
   });
 });
 
-describe("the payment line is built from Settings › Invoicing, never written in code", () => {
-  const profile = { ...EMPTY_PROFILE, bankAccountName: "Example Laundry", bsb: "062-000", accountNumber: "12345678" };
-  it("prints MYOB's one-line format, spacing included", () => {
-    expect(bankingDetailsLine(profile))
-      .toBe("Banking Details: BSB:062-000 Account No.12345678 Account Name: Example Laundry");
+describe("the payment block is built from Settings › Invoicing, never written in code", () => {
+  const profile = {
+    ...EMPTY_PROFILE, bankAccountName: "Example Laundry", bsb: "062-000", accountNumber: "12345678",
+    email: "accounts@example.com.au",
+  };
+  it("prints the bank deposit block the way the standard template does", () => {
+    expect(bankDepositLines(profile)).toEqual([
+      "Bank Deposit",
+      "Name: Example Laundry",
+      "BSB: 062-000",
+      "Account Number: 12345678",
+      "Please add invoice number as reference",
+      "Send Remittance To: accounts@example.com.au",
+    ]);
   });
   it("prints nothing unless all three details are there", () => {
-    expect(bankingDetailsLine({ ...profile, bsb: null })).toBeNull();
-    expect(bankingDetailsLine(EMPTY_PROFILE)).toBeNull();
+    expect(bankDepositLines({ ...profile, bsb: null })).toEqual([]);
+    expect(bankDepositLines(EMPTY_PROFILE)).toEqual([]);
   });
 });
 
@@ -125,7 +143,7 @@ describe("the logo is the tenant's data (0054)", () => {
   });
 });
 
-describe("words wrap whole, as they do on the MYOB invoice", () => {
+describe("words wrap whole", () => {
   // The first side-by-side render printed the bank account name as "Ex-ample":
   // react-pdf hyphenates by default, and a hyphenated account or customer name
   // reads as a typo on a document somebody pays from. Importing the layout is
@@ -140,7 +158,7 @@ describe("words wrap whole, as they do on the MYOB invoice", () => {
 describe("the PDF sources carry no identity of their own", () => {
   it("writes no bank detail, phone or email literal into the templates", async () => {
     const { readFileSync } = await import("node:fs");
-    for (const file of ["../invoice-document.tsx", "../credit-note.tsx", "../myob-layout.tsx"]) {
+    for (const file of ["../invoice-document.tsx", "../credit-note.tsx", "../standard-layout.tsx", "../statement-document.tsx"]) {
       const source = readFileSync(new URL(file, import.meta.url), "utf8");
       expect(source, file).not.toMatch(/\b\d{3}-\d{3}\b/);          // a BSB
       expect(source, file).not.toMatch(/@[a-z0-9-]+\.[a-z]/i);      // an email address
@@ -177,4 +195,33 @@ describe("renderCreditNotePdf", () => {
     const buffer = await renderCreditNotePdf({ ...credit, lines: [], note: { ...credit.note, reason: null } });
     expect(buffer.subarray(0, 5).toString("latin1")).toBe("%PDF-");
   }, 30_000);
+});
+
+describe("renderStatementPdf", () => {
+  const base: StatementPdfData = {
+    tenant: credit.tenant,
+    customer: {
+      id: "c", business_name: "Bondi Bistro", customer_number: "CUST00042", abn: null,
+      billing_email: "accounts@example.com.au", address: ["12 Campbell Parade"],
+    },
+    statement: buildStatement([{
+      id: "i", invoice_number: "00415360", invoice_type: "consolidated", status: "issued",
+      issue_date: "2026-10-20", due_date: "2026-11-03", purchase_order_number: "PO1", total: 80.2,
+      amount_paid: 0, amount_credited: 0, balance: 80.2, source: "app",
+    }], { asAt: "2026-11-02", trustedFrom: "2026-10-01" }),
+  };
+
+  it("renders a complete statement", async () => {
+    const buffer = await renderStatementPdf(base);
+    expect(buffer.subarray(0, 5).toString("latin1")).toBe("%PDF-");
+  }, 30_000);
+
+  it("renders with nothing on it rather than failing", async () => {
+    const buffer = await renderStatementPdf({ ...base, statement: buildStatement([], base.statement) });
+    expect(buffer.subarray(0, 5).toString("latin1")).toBe("%PDF-");
+  }, 30_000);
+
+  it("names the file for the customer and the day", () => {
+    expect(statementFileName("CUST00042", "2026-11-02")).toBe("Statement-CUST00042-2026-11-02.pdf");
+  });
 });

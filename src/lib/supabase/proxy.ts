@@ -9,7 +9,9 @@ import { env } from "@/lib/env";
 // it unreachable from a build box, which is the only place it is any use.
 // /api/xero/webhook: Xero calls it with no session; the route checks Xero's
 // HMAC signature itself and answers 401 to anything unsigned.
-const PUBLIC = ["/", "/login", "/auth", "/design-preview", "/api/xero/webhook"];
+// /i: the invoice link in a text message. A customer has no login; the route
+// checks the signed token itself and refuses anything else.
+const PUBLIC = ["/", "/login", "/auth", "/design-preview", "/api/xero/webhook", "/i"];
 export async function updateSession(request: NextRequest) {
   let response = NextResponse.next({ request });
   const supabase = createServerClient(

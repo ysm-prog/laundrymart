@@ -108,23 +108,33 @@ The master spec names a .NET 9 Web API; this build follows the supplied skeleton
     currently needs it is a constant somebody has to re-derive later.
 - Invoice PDFs render server-side with `@react-pdf/renderer` (`src/lib/pdf/`), streamed from
   `/api/invoices/:id/pdf` and attached to the Resend email. `serverExternalPackages` keeps the
-  renderer out of the client bundle. **Since 2026-10-18 both the tax invoice and the credit note
-  (MYOB's "Adjustment note") are drawn to the laundry's own MYOB invoice** (brief 1.10, template
-  `Invoice-00321043.pdf`) from one set of blocks in `myob-layout.tsx`: logo top-left, the business
-  right-aligned, Bill-to in a grey panel, **Item ID | Description | Qty | Unit price | Tax |
-  Amount** with "including tax" under the money headers, Notes with MYOB's one-line banking
-  details, a boxed Total amount, and `Page n of N` / `Invoice no … Total amount …` on every page.
-  **Checked against the template side by side**
-  (`docs/screenshots/2026-10-18-invoice-pdf-vs-myob.png`): every rule, box and line of text sits
-  within half a point of it vertically; text widths differ slightly because Helvetica is not MYOB's
-  Arial. Two rules came out of that comparison: **words never hyphenate** (react-pdf splits them by
-  default, and printed the account name as "Ex-ample"), and the payment line is MYOB's character
-  for character — `BSB:062-000 Account No.12345678`, no space after either label.
-  `pdfLineCells` is the rule for a line (item code, the item's name on a job line, the tax code);
-  the job number now lives only in the service breakdown, which prints for any job-billed
-  invoice. **The logo is the tenant's data**: uploaded on Settings › Invoicing into the private
-  `tenant-branding` bucket (0054) and embedded at render time — no logo file is in the code (the
-  screenshot shows ATS's, taken out of the template PDF to test with, as the brief asked).
+  renderer out of the client bundle. **Since 2026-11-02 the tax invoice, the credit note and the
+  statement are drawn on one standard template** (`standard-layout.tsx`), taken from the Xero
+  invoice `INV-0015359` Jaimin sent as the model: title top-left, logo top-right, Bill to, Ship to
+  and the business in three columns, an Amount due / Due date / Issue date / Invoice number strip,
+  **Item Code | Description | Quantity | Price | Tax | Amount** with the tax as `10%`/`0%`,
+  Subtotal / Includes GST / Total / Amount due on the right and the Bank Deposit block on the left.
+  It replaced the MYOB layout of 2026-10-18. Xero's View and pay link, QR code and card logos are
+  left out: they are Xero's hosted page, which an invoice from this app has no link to. Two rules
+  carry over: **words never hyphenate** (react-pdf splits them by default, and printed an account
+  name as "Ex-ample"), and nothing on a template is written in code. The payment block is
+  `bankDepositLines`, and `pdfLineCells` is the rule for a line: the item code, and the item's name
+  on a job line or where the description is only the code. The job number lives only in the service
+  breakdown. **The logo is the tenant's data**: uploaded on Settings › Invoicing into the private
+  `tenant-branding` bucket (0054) and embedded at render time, so no logo file is in the code.
+- **A customer's statement is a view of their invoices, not a document** (2026-11-02).
+  `lib/domain/statement.ts` is the pure rule, `lib/invoices/statement.ts` reads and sends, and it
+  appears as a card on the customer and as Billing › Statements for a bulk send. It has no number
+  and no table: sending writes only the audit row. **It leaves off unreconciled MYOB imports** by
+  the rule Today uses (`isUnreconciledImport`), counts what it left off for the staff member sending
+  it, and tells the customer the date it starts from.
+- **An invoice can go by email, by text, or both** (2026-11-02). A text cannot carry an attachment
+  and a customer has no login, so it carries a link to `/i/:token`, a signed token naming one invoice
+  for 30 days (`lib/invoices/link-token.ts`). That route is the one reader of an invoice with no
+  session: the service-role client, with the tenant taken from the invoice's own row, and it refuses
+  a draft or a void however good the token. The token is signed rather than stored, so there is no
+  table of links. `/i` is in the proxy's `PUBLIC` list, matched as `/i` or `/i/…` and so not
+  `/invoices`. Bulk Send Selected stays email only.
 - **A person is shown by name, and the directory is one read** (`src/lib/directory.ts` over
   `tenant_members()`, 0030). Every `assigned_to`, `created_by`, `actor_id` and `delivered_by`
   column holds an `auth.users` id; the screens used to resolve those through the GoTrue admin
@@ -714,7 +724,8 @@ passed* are two separate facts. CI is what actually holds the gate; read it rath
 
 ## 6. Routes
 `/` landing · `/login` · `/auth/callback` · `/auth/invite` · `/offline` · `/api/sync` ·
-`/api/media` · `/api/invoices/:id/pdf` ·
+`/api/media` · `/api/invoices/:id/pdf` · `/api/customers/:id/statement` ·
+`/i/:token` (a text's invoice link: signed token, no session) ·
 `/api/notifications/sweep` (cron, bearer-token authed, no session)
 `(app)`: `/dashboard` · `/my-runs[/jobs/:id]` · `/runs[/collections]` · `/boards` ·
 `/billing[/:customerId]` ·
@@ -724,6 +735,7 @@ billing one; `sectionFor` takes the longest match so it lands there rather than 
 Price Selected → Approve Selected → Add to Draft) ·
 `/invoices/drafts` (the open-drafts board — one card per customer's running invoice, with Issue
 now on each; the month-end question the register could not answer) ·
+`/invoices/statements` (who owes what, aged, and a bulk statement send) ·
 `/orders[/new|/board|/:id|/:id/edit|/:id/docket]` ·
 `/items[/:id]` · `/drivers` · `/vehicles` · `/routes/templates[/:id]` ·
 `/routes/daily[/:id|/:id/sheet]` · `/routes/planner` · `/jobs[/:id]` ·
@@ -1450,6 +1462,10 @@ produce on demand.
   and the revoke from `authenticated` are carried across and asserted. Seven self-assertions.
   `reopen_job_charges.test.sql` (13), which fails without it. **Applied 2026-11-02** through the
   connector (§11).
+- `0061_invoice_sms` — **a text is recorded on the invoice, as an email is.** `invoices.sms_sent_at`
+  and `sms_sent_to`, both nullable. Adds no table, policy, function or trigger; changes no row.
+  Three self-assertions. `invoice_sms.test.sql` (7). **Not yet applied to the hosted project**
+  (§11); the code runs without it.
 - `0050_pickup_to_job` — **a collection becomes a laundry job, exactly once.**
   `laundry_orders.source_pickup_id` (`on delete set null`),
   `uq_laundry_orders_source_pickup` (partial unique) and
@@ -1735,8 +1751,8 @@ Proofs in `supabase/tests/`: `rls_isolation`, `rls_coverage`, `driver_scope`,
 `single_laundry`, `charge_accounts`, `gst_inclusive`, `collection_schedule`,
 `customer_record_scope`, `fleet_scope`, `pickup_intake`, `laundry_item_ownership`,
 `invoice_money_guards`, `invoice_issue_guard`, `billing_flow_guards`, `flow_runs_itself`,
-`operations_settings`, `billing_write_policies`, `hot_foreign_key_indexes`, `reopen_job_charges`
-(**731 assertions** across 41 files).
+`operations_settings`, `billing_write_policies`, `hot_foreign_key_indexes`, `reopen_job_charges`,
+`invoice_sms` (**738 assertions** across 42 files).
 
 **Count assertions, not lines starting with `ok`.** pgTAP's function is literally named `ok`, so
 psql prints a centred `ok` **column header** above each result — and `grep -c '^\s*ok '` counts
@@ -1835,6 +1851,15 @@ entry lives in `vercel.json` and its schedule is **UTC** — the five daily hits
 14:30 Adelaide (ACST; an hour later in wall-clock terms under ACDT, still inside the working
 day). The schedule itself did not move when the business timezone did: it is five hits across a
 working day, not a promise about a particular clock time.
+
+Text messages (`CLICKSEND_USERNAME`, `CLICKSEND_API_KEY`, optional `CLICKSEND_FROM`) are optional on
+the same principle: without them the send card marks the text options as not set up and the action
+refuses them in a sentence. **Leave `CLICKSEND_FROM` blank unless a name is on the ACMA SMS Sender ID
+Register**: since 1 July 2026 an unregistered alphanumeric sender arrives marked Unverified or is
+blocked, while a numeric sender is unaffected. The body of `/v3/sms/send` and its per-message `status`
+were written from ClickSend's published API and have **never met a real account**, because none
+exists yet. `readClickSendResponse` is tested against the documented shapes, so the first real text
+is the proof.
 
 ## 10a. Toolchain pins
 Next 16 (Turbopack), React 19, Tailwind 4 (CSS-first — no `tailwind.config.ts`), Zod 4,
@@ -2445,6 +2470,13 @@ reports six false gaps.
   `set_records_archived`, `sync_invoice_line_account`, `tenant_members`). That is the 0042 trap
   leaving its usual trace: text typed into `apply_migration` reformatted a little against the file.
   Worth knowing before anybody reads a raw `md5(prosrc)` mismatch as drift.
+
+**`0061_invoice_sms` is not applied yet.** The connector's `apply_migration` was refused on
+2026-11-02 by the session's permission check as a production change needing the owner's explicit
+say-so, so it waits for that. Nothing depends on it until texting is switched on: the invoice page
+reads the two columns in a query of their own and ignores an error, and a failed stamp does not fail
+a send. **Apply it before adding the ClickSend keys**, or a text goes out with only the audit row to
+say where. It is additive and has run on a fresh Postgres 16 under the whole suite.
 
 **`0060_reopen_job_charges` was applied on 2026-11-02** (`20261102035318`) through the connector,
 first attempt, after CI passed on the pull request. Read back: the delete is conditional on
@@ -3743,6 +3775,41 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-11-02 · The standard invoice, statements and a text option
+Jaimin's list by WhatsApp and Outlook, with the Xero invoice `INV-0015359` as the template and the
+logo. **One migration, `0061`, not yet applied (§11); the code runs without it.**
+
+- **Template.** `myob-layout.tsx` is replaced by `standard-layout.tsx`, and the invoice and credit
+  note are redrawn on it (§2). Titles are now "Tax Invoice", "Invoice", "Draft Tax Invoice" and
+  "Adjustment Note". `bankingDetailsLine` becomes `bankDepositLines`. The bank's "Send Remittance To"
+  is the invoice profile's email. A line whose description is only its item code now prints the item's
+  name, which is the `T35` against "Towels - Black" difference between the two copies of `00415359`.
+- **Statements.** A card on the customer and Billing › Statements (§2): a PDF on the same template
+  with every open invoice, its payments and credits, five ageing buckets and the Bank Deposit block,
+  sent by Resend one at a time or in a selection of up to 200. Capabilities are the invoice ones:
+  `invoices.read` to view, `invoices.send` to send, plus `invoices.bulk` for a selection.
+- **The figure is honest about what it is not.** The app holds 4 open invoices since cut-over
+  ($219.60) and 600 MYOB imports ($132,991.67, back to 2011), while Xero shows 848 items worth
+  $197,436.04. So the imports stay off, staff are told the count and the amount, and the PDF tells the
+  customer the date it starts from. **A statement here is not yet a customer's whole balance**: most
+  of what ATS is owed lives in Xero, because invoices have been entered there by hand.
+- **Text.** The invoice's send card gains Send by (email, text, or both) and Text to, prefilled from
+  the first number on the customer's record that is a mobile, since most are landlines
+  (`normaliseMobile`). ClickSend, optional (§10). Everything that can be refused is refused before
+  anything leaves, so a bad mobile cannot strand a Both after the email has gone, and each channel is
+  reported on its own. A text moves the jobs to `invoice_sent` as an email does. `sendInvoiceSms`
+  sits beside `sendInvoice` and holds to its rules. A failed stamp does not fail a send.
+- **Government customers** need nothing new: their AP inbox is a billing email and the PDF goes
+  there. The TAFE SA billing and contact addresses had a typo, corrected in the data, and a
+  purchase order prints in the Reference column.
+- **Item 4 needed nothing**: the sequence already continues from `00415360`.
+- **Data changed on live, by hand and not by this commit:** invoice profile phone and accounts email,
+  the bank account name now `Adelaide Towel Service`, the logo uploaded, and the two TAFE addresses.
+- `0061` adds `invoices.sms_sent_at` and `sms_sent_to`. `invoice_sms.test.sql` (7).
+- Unit tests: statement, SMS rules, the signed link, ClickSend's answer, the mocked text flow, and
+  statement rendering. Checks: **1,575 tests**, typecheck and lint clean, every migration on a fresh
+  Postgres 16, **738 pgTAP assertions across 42 files**, 0 failing.
+
 ### 2026-11-02 · Send back for review works
 Found by a dry run on the live app with a marked test job, `LJ00033`. **One migration, `0060`;
 the only `src/` change is a comment.**
