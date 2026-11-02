@@ -37,10 +37,14 @@ describe("telling Xero's invoices apart", () => {
     expect(classifyXeroInvoice(opening)).toBe("opening");
     expect(classifyXeroInvoice({ ...opening, Status: "PAID" })).toBe("opening");
   });
+  it("knows the last of MYOB, approved in Xero with no -OB", () => {
+    expect(classifyXeroInvoice({ ...draft, Status: "AUTHORISED" })).toBe("approved");
+    expect(classifyXeroInvoice({ ...draft, Status: "PAID" })).toBe("approved");
+  });
   it("leaves alone what is not MYOB history", () => {
     expect(classifyXeroInvoice({ ...draft, InvoiceNumber: "INV-00415360", Reference: "", Status: "AUTHORISED" })).toBe("other");
     expect(classifyXeroInvoice({ ...draft, Reference: "Somebody's order" })).toBe("other");
-    expect(classifyXeroInvoice({ ...draft, Status: "AUTHORISED" })).toBe("other");
+    expect(classifyXeroInvoice({ ...draft, Status: "VOIDED" })).toBe("other");
     expect(classifyXeroInvoice({ ...opening, Status: "VOIDED" })).toBe("other");
     expect(classifyXeroInvoice({ ...draft, Type: "ACCPAY" })).toBe("other");
   });
@@ -101,6 +105,10 @@ describe("the rows the database takes", () => {
   it("reads what is owed from an opening balance, and nothing from a paid one", () => {
     expect(openingRow(opening, lookups)).toMatchObject({ number: "00318792", due: 0.5, xero_invoice_id: "x-2" });
     expect(openingRow({ ...opening, Status: "PAID", AmountDue: 0 }, lookups)?.due).toBe(0);
+  });
+  it("reads what is owed on an approved invoice, under its own number", () => {
+    expect(openingRow({ ...draft, Status: "AUTHORISED", AmountDue: 33.5 }, lookups))
+      .toMatchObject({ number: "00414447", due: 33.5, total: 48.4 });
   });
   it("compares names the way the MYOB importer does", () => {
     expect(normaliseName("  Barber  Boys x Anthony ")).toBe("barber boys x anthony");

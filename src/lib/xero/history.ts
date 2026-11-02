@@ -2,7 +2,7 @@ import "server-only";
 import type { createClient } from "@/lib/supabase/server";
 import { describeDbError } from "@/lib/actions";
 import {
-  classifyXeroInvoice, historyRow, normaliseName, openingRow, similarCustomer,
+  classifyXeroInvoice, historyRow, normaliseName, openingBaseNumber, openingRow, similarCustomer,
   type HistoryLookups, type HistoryRow, type OpeningRow, type XeroInvoice,
 } from "@/lib/domain/xero-history";
 import { OPEN_INVOICE_STATUSES } from "@/lib/domain/statement";
@@ -169,19 +169,20 @@ export async function runHistoryPage(
   const history: HistoryRow[] = [];
   const openings: OpeningRow[] = [];
   const unmatched: Array<{ number: string; customer: string }> = [];
-  const wanted = input.phase === "history" ? "history" : "opening";
   for (const invoice of invoices) {
-    if (classifyXeroInvoice(invoice) !== wanted) continue;
-    if (input.phase === "history") {
+    const kind = classifyXeroInvoice(invoice);
+    // An approved MYOB invoice is both: its lines, and what is owed on it.
+    if (input.phase === "history" ? kind === "history" : kind === "approved") {
       const row = historyRow(invoice, lookups);
       if (row) history.push(row);
-    } else {
+    }
+    if (input.phase === "opening" && (kind === "opening" || kind === "approved")) {
       const row = openingRow(invoice, lookups);
       if (row) openings.push(row);
     }
   }
 
-  const numbers = [...history.map((row) => row.number), ...openings.map((row) => row.number)];
+  const numbers = [...new Set([...history, ...openings].map((row) => row.number))];
   const existing = new Map<string, string>();
   for (const batch of chunk(numbers, 200)) {
     const { data } = await supabase
@@ -193,7 +194,9 @@ export async function runHistoryPage(
 
   // A new invoice needs a customer. One already here does not, so a contact Xero
   // spells differently only matters for the rows it would have to create.
-  const contactOf = new Map(invoices.map((invoice) => [invoice.InvoiceNumber?.trim() ?? "", invoice.Contact]));
+  const contactOf = new Map(invoices.map((invoice) => [
+    openingBaseNumber(invoice.InvoiceNumber) ?? invoice.InvoiceNumber?.trim() ?? "", invoice.Contact,
+  ]));
   const similar = new Map<string, string>();
   for (const invoice of invoices) {
     const contact = invoice.Contact;
@@ -203,18 +206,15 @@ export async function runHistoryPage(
     if (match) similar.set(contact.Name, match.name);
   }
 
-  const waiting = [
-    ...history.map((row) => ({ row, key: row.number })),
-    ...openings.map((row) => ({ row, key: `${row.number}-OB` })),
-  ].filter(({ row }) => !existing.has(row.number) && !row.customer_id);
-  for (const { row, key } of waiting) {
-    unmatched.push({ number: row.number, customer: contactOf.get(key)?.Name ?? "Unknown contact" });
+  const waiting = [...history, ...openings].filter((row) => !existing.has(row.number) && !row.customer_id);
+  for (const number of new Set(waiting.map((row) => row.number))) {
+    unmatched.push({ number, customer: contactOf.get(number)?.Name ?? "Unknown contact" });
   }
 
   const added: Record<string, string> = {};
   if (input.write) {
-    for (const { row, key } of waiting) {
-      const contact = contactOf.get(key);
+    for (const row of waiting) {
+      const contact = contactOf.get(row.number);
       const name = contact?.Name?.trim();
       if (!name) continue;
       if (!added[name]) {
@@ -228,14 +228,19 @@ export async function runHistoryPage(
 
   const written: Record<string, number> = {};
   if (input.write) {
-    const [rpc, rows] = input.phase === "history"
-      ? ["import_invoice_history", history] as const
-      : ["apply_invoice_openings", openings] as const;
-    for (const batch of chunk<HistoryRow | OpeningRow>(rows, WRITE_BATCH)) {
-      const { data, error } = await supabase.rpc(rpc, { p_tenant: tenantId, p_rows: batch });
-      if (error) return { ok: false, error: describeDbError(error) };
-      for (const [key, value] of Object.entries((data ?? {}) as Record<string, number>)) {
-        written[key] = (written[key] ?? 0) + value;
+    // The invoice first and what is owed on it second, because the second finds
+    // the first by its number.
+    const steps = [
+      ["import_invoice_history", history],
+      ["apply_invoice_openings", openings],
+    ] as const;
+    for (const [rpc, rows] of steps) {
+      for (const batch of chunk<HistoryRow | OpeningRow>([...rows], WRITE_BATCH)) {
+        const { data, error } = await supabase.rpc(rpc, { p_tenant: tenantId, p_rows: batch });
+        if (error) return { ok: false, error: describeDbError(error) };
+        for (const [key, value] of Object.entries((data ?? {}) as Record<string, number>)) {
+          written[key] = (written[key] ?? 0) + value;
+        }
       }
     }
   }
@@ -244,13 +249,13 @@ export async function runHistoryPage(
   if (customersAdded) written.customers_added = customersAdded;
 
   const awaiting = openings.filter((row) => row.due > 0);
-  const rowsSeen = [...history, ...openings];
+  const rowsSeen = numbers.map((number) => ({ number }));
   return {
     ok: true,
     returned: invoices.length,
     drafts: history.map((row) => row.number),
     openings: openings.map((row) => row.number),
-    rows: rowsSeen.length,
+    rows: numbers.length,
     lines: history.reduce((sum, row) => sum + row.lines.length, 0),
     awaitingCount: awaiting.length,
     awaitingDue: Math.round(awaiting.reduce((sum, row) => sum + row.due, 0) * 100) / 100,

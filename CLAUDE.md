@@ -137,8 +137,9 @@ The master spec names a .NET 9 Web API; this build follows the supplied skeleton
   `/invoices`. Bulk Send Selected stays email only.
 - **The MYOB history comes from Xero, not from MYOB** (2026-11-03). The app held only the 646
   invoices unpaid in August, as headers. Xero holds what the September migration put there: drafts
-  numbered as MYOB numbered them, with lines, from July 2017, and an approved `-OB` invoice for
-  whatever was owed at cut-over. `lib/domain/xero-history.ts` is the rule, `lib/xero/history.ts`
+  numbered as MYOB numbered them, with lines, an approved `-OB` invoice for whatever was owed at
+  cut-over, and from 25 September a few approved invoices numbered as MYOB numbered them, which are
+  both at once. `lib/domain/xero-history.ts` is the rule, `lib/xero/history.ts`
   reads one page, `/api/xero/history` is the door, and Settings › Bring in your books drives it one
   page at a time from the browser, so a dropped connection costs a page. **Check first writes
   nothing.** What is owed comes from the opening balance, and a draft with no opening balance was
@@ -3808,8 +3809,11 @@ invoice goes, because this app has no counter-cash concept.
 "All invoice make it available in the app from MYOB." **One migration, `0062`, applied (§11).**
 
 - **What was there.** 646 headers with no lines, because `--invoices outstanding` was the default
-  in August. Xero held far more than the app: on 3 November, 17,957 drafts worth $3,007,821.63, from
-  31 July 2017 to 25 September 2026, with 906 awaiting payment worth $201,399.54 and 463 paid.
+  in August. Xero held far more than the app: on 3 November, 17,957 drafts worth $3,007,821.63, up to
+  25 September 2026, with 906 awaiting payment worth $201,399.54 and 463 paid. Nearly all of it is
+  from 2024 on: 2017 to 2023 is 278 invoices. That is MYOB's own shape and not a hole, because the app
+  now holds 17,106 up to 13 August against 17,183 in MYOB's export that day. The 77 between them are
+  not identified.
 - **Why Xero and not a MYOB export.** The app's own connection reads it in the cloud with nobody
   signing in, and the export has totals and no lines. The price is that nothing older than July 2017
   comes, and that a draft says nothing about payment.
@@ -3832,6 +3836,10 @@ invoice goes, because this app has no counter-cash concept.
   match was too strict: Xero's `Salty Coconut` is the app's `Prohaul Logistic Services P/L T/As Salty
   Coconut`. So a similar-name match went in, with the pairs printed for a person to read, and whoever
   is left comes in inactive (§2). No invoice is skipped.
+- **Tying the first import to Xero is what found a third shape.** Open here came to 787 invoices,
+  $192,768.36, against Xero's 884 and $195,311.41. Seven of the gap were `INV-` invoices, and the
+  rest were approved invoices numbered as MYOB numbered them, with no `-OB`, which the first
+  classifier called neither. A sum that did not tie, not a failed test, is what showed it.
 - `xero-history.test.ts` and `invoice_history_import.test.sql` (24). **1,594 tests** at the first
   ship, typecheck and lint clean, every migration on a fresh Postgres 16, **762 pgTAP assertions
   across 43 files**, 0 failing.
