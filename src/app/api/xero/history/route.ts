@@ -5,7 +5,9 @@ import { recordAudit } from "@/lib/audit";
 import { can } from "@/lib/roles";
 import { createClient } from "@/lib/supabase/server";
 import { describeDbError } from "@/lib/actions";
-import { loadOpenImportNumbers, runHistoryPage } from "@/lib/xero/history";
+import {
+  loadOpenImportNumbers, runCreditPage, runHistoryPage, settleUsedCredits,
+} from "@/lib/xero/history";
 
 /**
  * The MYOB history out of Xero, one step at a time, for the screen on Settings ›
@@ -24,6 +26,12 @@ const body = z.discriminatedUnion("step", [
     step: z.literal("page"),
     phase: z.enum(["history", "opening"]),
     page: z.number().int().min(1).max(500),
+    write: z.boolean(),
+  }),
+  z.object({ step: z.literal("credits"), page: z.number().int().min(1).max(500), write: z.boolean() }),
+  z.object({
+    step: z.literal("credits-used"),
+    numbers: z.array(z.string().min(1).max(40)).max(5000),
     write: z.boolean(),
   }),
   z.object({ step: z.literal("open") }),
@@ -50,6 +58,19 @@ export async function POST(request: NextRequest) {
 
   if (input.step === "open") {
     return NextResponse.json({ ok: true, numbers: await loadOpenImportNumbers(supabase, session.tenantId) });
+  }
+
+  if (input.step === "credits") {
+    const result = await runCreditPage(supabase, session.tenantId, input);
+    return NextResponse.json(result, { status: result.ok ? 200 : result.retryAfter ? 429 : 502 });
+  }
+
+  if (input.step === "credits-used") {
+    const result = await settleUsedCredits(supabase, session.tenantId, {
+      inXero: input.numbers, write: input.write,
+    });
+    if ("error" in result) return NextResponse.json({ ok: false, error: result.error }, { status: 500 });
+    return NextResponse.json({ ok: true, ...result });
   }
 
   if (input.step === "settle") {
