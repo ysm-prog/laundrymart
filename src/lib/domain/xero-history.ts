@@ -91,6 +91,8 @@ export type HistoryLookups = {
   /** Xero's contact id, then the normalised name, to a customer's id. */
   customerByContact: Map<string, string>;
   customerByName: Map<string, string>;
+  /** Every customer, for a name that is only similar. */
+  customers: Array<{ id: string; name: string }>;
   /** `item_code`, lower case, to an item's id. */
   itemByCode: Map<string, string>;
   /** The Xero account code to a chart row's id. */
@@ -127,9 +129,42 @@ export function historyLine(
   };
 }
 
+/**
+ * A name reduced to its words: punctuation gone and a trailing company ending
+ * dropped, so `Crown Barbers Pty Ltd` and `Crown Barbers` are compared as equals.
+ */
+export function looseName(name: string): string {
+  return ` ${name.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()} `
+    .replace(/( pty)?( ltd| limited)? $/, " ")
+    .replace(/ p l $/, " ");
+}
+
+/** Short names are too easily found inside somebody else's. */
+const SIMILAR_MINIMUM = 9;
+
+/**
+ * The one customer whose name holds this name, or is held by it, in whole words.
+ * `Salty Coconut` is `Prohaul Logistic Services P/L T/As Salty Coconut`. Two or more
+ * candidates means no match, because a guess here puts one customer's invoices on
+ * another's account. Check first lists every pair for a person to read.
+ */
+export function similarCustomer(
+  name: string | null | undefined, customers: HistoryLookups["customers"],
+): { id: string; name: string } | null {
+  const wanted = looseName(name ?? "");
+  if (wanted.trim().length < SIMILAR_MINIMUM) return null;
+  const found = customers.filter((customer) => {
+    const theirs = looseName(customer.name);
+    if (theirs.trim().length < SIMILAR_MINIMUM) return false;
+    return theirs.includes(wanted) || wanted.includes(theirs);
+  });
+  return found.length === 1 ? found[0]! : null;
+}
+
 export function customerFor(invoice: XeroInvoice, lookups: HistoryLookups): string | null {
   return lookups.customerByContact.get(invoice.Contact?.ContactID ?? "")
     ?? lookups.customerByName.get(normaliseName(invoice.Contact?.Name))
+    ?? similarCustomer(invoice.Contact?.Name, lookups.customers)?.id
     ?? null;
 }
 

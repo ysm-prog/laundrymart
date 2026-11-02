@@ -147,6 +147,10 @@ The master spec names a .NET 9 Web API; this build follows the supplied skeleton
   MYOB history and stays out. **An import keeps its paid figure in `amount_paid`, lines or not**,
   so `isHeaderOnly` keeps `recalculate_invoice` off every `source = 'import'` row, on all three
   payment paths. Line amounts are converted to GST-inclusive (0043): Xero's drafts are exclusive.
+  A contact is matched by Xero's id, then by name, then by `similarCustomer`, which takes one
+  customer whose name holds it in whole words and refuses two. Check first lists every such pair.
+  Anybody left comes in as an **inactive** customer, the MYOB importer's rule for a party named only
+  by its documents, and carries the Xero contact id so the next page finds them.
 - **A person is shown by name, and the directory is one read** (`src/lib/directory.ts` over
   `tenant_members()`, 0030). Every `assigned_to`, `created_by`, `actor_id` and `delivered_by`
   column holds an `auth.users` id; the screens used to resolve those through the GoTrue admin
@@ -1486,7 +1490,7 @@ produce on demand.
   invoice is taken through `draft` inside one transaction here, so the guard still stands for every
   other writer, and a proof says so. `source = 'app'` rows are never touched, and a credit stays as
   MYOB left it. Safe to run twice: lines go only on an invoice with none.
-  `invoice_history_import.test.sql` (24). **Not yet applied** (§11).
+  `invoice_history_import.test.sql` (24). **Applied 2026-11-02** (§11).
 - `0050_pickup_to_job` — **a collection becomes a laundry job, exactly once.**
   `laundry_orders.source_pickup_id` (`on delete set null`),
   `uq_laundry_orders_source_pickup` (partial unique) and
@@ -2492,9 +2496,10 @@ reports six false gaps.
   leaving its usual trace: text typed into `apply_migration` reformatted a little against the file.
   Worth knowing before anybody reads a raw `md5(prosrc)` mismatch as drift.
 
-**`0062_invoice_history_import` is not applied yet.** It waits for Darshan's explicit approval, and
-until then Bring them in stops at its first write with the function missing. Check first needs no
-migration.
+**`0062_invoice_history_import` was applied on 2026-11-02** (`20261102063238`) through the
+connector, with Darshan's explicit approval, after CI passed on the Prod pull request. Read back: all
+three functions are SECURITY DEFINER, and 656 invoices and 20 lines stood unchanged. Xero's date for
+the same work reads 3 November, because Adelaide was a day ahead of the database's UTC.
 
 **`0061_invoice_sms` was applied on 2026-11-02** (`20261102052427`) through the connector, after CI
 passed on the Prod pull request. The first attempt was refused by the session's permission check as
@@ -3800,8 +3805,7 @@ invoice goes, because this app has no counter-cash concept.
 
 ## 18. Changelog
 ### 2026-11-03 · The MYOB invoice history, from Xero
-"All invoice make it available in the app from MYOB." **One migration, `0062`, not yet applied
-(§11).** No row has changed: the screen ships first, and Check first reads the real numbers.
+"All invoice make it available in the app from MYOB." **One migration, `0062`, applied (§11).**
 
 - **What was there.** 646 headers with no lines, because `--invoices outstanding` was the default
   in August. Xero held far more than the app: on 3 November, 17,957 drafts worth $3,007,821.63, from
@@ -3822,10 +3826,15 @@ invoice goes, because this app has no counter-cash concept.
   numbers had already reached `INV-00415360` by 2 November, the number the app issues next, and were
   at `INV-00415365` a day later. The two sequences are running side by side while invoices are
   entered in Xero by hand.
-- `xero-history.test.ts` and `invoice_history_import.test.sql` (24). Checks: **1,594 tests**,
-  typecheck and lint clean, every migration on a fresh Postgres 16, **762 pgTAP assertions across 43
-  files**, 0 failing. **Not exercised against Xero**, because no session here can call it: the page
-  read and the paging are first run for real by Check first.
+- **Check first's real numbers, before anything was written:** 17,905 MYOB invoices with 29,815 lines;
+  1,240 opening balances, 797 of them owing $193,826.22; 250 invoices open here and settled in MYOB; 2
+  open here and not in Xero. **1,447 invoices named 87 contacts with no customer**, because the exact
+  match was too strict: Xero's `Salty Coconut` is the app's `Prohaul Logistic Services P/L T/As Salty
+  Coconut`. So a similar-name match went in, with the pairs printed for a person to read, and whoever
+  is left comes in inactive (§2). No invoice is skipped.
+- `xero-history.test.ts` and `invoice_history_import.test.sql` (24). **1,594 tests** at the first
+  ship, typecheck and lint clean, every migration on a fresh Postgres 16, **762 pgTAP assertions
+  across 43 files**, 0 failing.
 
 ### 2026-11-02 · The standard invoice, statements and a text option
 Jaimin's list by WhatsApp and Outlook, with the Xero invoice `INV-0015359` as the template and the

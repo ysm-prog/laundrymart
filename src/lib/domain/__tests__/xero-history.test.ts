@@ -1,13 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
-  classifyXeroInvoice, historyLine, historyRow, invoicesToSettle, normaliseName, openingBaseNumber,
-  openingRow, taxCodeFor, xeroDay, type HistoryLookups, type XeroInvoice,
+  classifyXeroInvoice, historyLine, historyRow, invoicesToSettle, looseName, normaliseName,
+  openingBaseNumber, openingRow, similarCustomer, taxCodeFor, xeroDay, type HistoryLookups, type XeroInvoice,
 } from "../xero-history";
 import { isHeaderOnly } from "../payment-gate";
 
 const lookups: HistoryLookups = {
   customerByContact: new Map([["contact-1", "customer-1"]]),
   customerByName: new Map([["sloth cafe", "customer-2"]]),
+  customers: [],
   itemByCode: new Map([["gc", "item-1"]]),
   accountByCode: new Map([["4-6000", "account-1"]]),
 };
@@ -103,6 +104,39 @@ describe("the rows the database takes", () => {
   });
   it("compares names the way the MYOB importer does", () => {
     expect(normaliseName("  Barber  Boys x Anthony ")).toBe("barber boys x anthony");
+  });
+});
+
+describe("a customer whose name is only similar", () => {
+  const customers = [
+    { id: "a", name: "Prohaul Logistic Services P/L T/As Salty Coconut" },
+    { id: "b", name: "Soonta - Port Adelaide Plaza" },
+    { id: "c", name: "Fandi Scissor Hands - Elizabeth" },
+    { id: "d", name: "Fandi Scissor Hands - Kilburn" },
+    { id: "e", name: "Crown Barbers Pty Ltd" },
+    { id: "f", name: "Hair Co" },
+  ];
+  it("finds a trading name inside the legal one", () => {
+    expect(similarCustomer("Salty Coconut", customers)?.id).toBe("a");
+  });
+  it("finds the app's name inside Xero's", () => {
+    expect(similarCustomer("Long Rain Pty Ltd Soonta - Port Adelaide Plaza", customers)?.id).toBe("b");
+  });
+  it("ignores punctuation and a company ending", () => {
+    expect(similarCustomer("Crown Barbers", customers)?.id).toBe("e");
+    expect(looseName("Crown Barbers Pty Ltd")).toBe(" crown barbers ");
+  });
+  it("will not guess between two candidates", () => {
+    expect(similarCustomer("Fandi Scissor Hands", customers)).toBeNull();
+    expect(similarCustomer("Fandi Scissor Hands - Newton", customers)).toBeNull();
+  });
+  it("matches whole words only", () => {
+    expect(similarCustomer("Own Barbers Pty", [{ id: "x", name: "Crown Barbers Pty Ltd" }])).toBeNull();
+  });
+  it("leaves a short name alone, which is too easily found in somebody else's", () => {
+    expect(similarCustomer("Hair Co", customers)).toBeNull();
+    expect(similarCustomer("The Hair Co Norwood", customers)).toBeNull();
+    expect(similarCustomer(null, customers)).toBeNull();
   });
 });
 
