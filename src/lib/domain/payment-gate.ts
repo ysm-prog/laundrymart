@@ -48,6 +48,16 @@ export function paymentRefusal(input: PaymentGateInput): string | null {
   return null;
 }
 
+/**
+ * Whether an invoice keeps its paid-up figure in `amount_paid` rather than in
+ * payment rows. Every MYOB import does, lines or not: what MYOB recorded as paid
+ * never became rows here, so `recalculate_invoice` would forget it. Lines used to be
+ * the test, and stopped being enough when the history came in with its lines.
+ */
+export function isHeaderOnly(invoice: { source?: string | null; lineCount: number | null }): boolean {
+  return invoice.source === "import" || !invoice.lineCount;
+}
+
 /** Status and paid-up figure after a payment, for an invoice with no lines. */
 export function settleHeaderOnly(total: number, amountPaid: number, amount: number) {
   const newPaid = Math.round((amountPaid + amount) * 100) / 100;
