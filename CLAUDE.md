@@ -3840,6 +3840,15 @@ invoice goes, because this app has no counter-cash concept.
   $192,768.36, against Xero's 884 and $195,311.41. Seven of the gap were `INV-` invoices, and the
   rest were approved invoices numbered as MYOB numbered them, with no `-OB`, which the first
   classifier called neither. A sum that did not tie, not a failed test, is what showed it.
+- **It then tied to the cent, and what is left is in Xero.** Xero's Awaiting Payment read $195,113.41
+  on 883 lines: 822 `-OB` at $192,400.36, 51 plain MYOB numbers at $3,607.80, three `-OB2` at $232.90,
+  seven `INV-` at $351.90, and **38 opening credit notes at -$1,479.55**, which are why the header is
+  lower than the rows. The app stood at $193,438.99, of which $170.00 is the two invoices not in Xero.
+  The whole remaining $2,739.17 is **34 invoices Xero holds twice**, as `0041xxxx` and as
+  `0041xxxx-OB`: 25 paid under `-OB` and still awaiting payment under the plain number ($2,340.82),
+  and 9 open under both ($398.35). The app counts each once. Those are for the bookkeeper in Xero,
+  not for this importer. The `-OB2` shape, a reissued opening balance, is now read as an opening
+  balance.
 - `xero-history.test.ts` and `invoice_history_import.test.sql` (24). **1,594 tests** at the first
   ship, typecheck and lint clean, every migration on a fresh Postgres 16, **762 pgTAP assertions
   across 43 files**, 0 failing.
