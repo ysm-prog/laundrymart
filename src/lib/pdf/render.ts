@@ -13,6 +13,7 @@ import { InvoiceDocument } from "./invoice-document";
 import type { InvoicePdfData } from "./invoice-data";
 import { CreditNoteDocument } from "./credit-note";
 import type { CreditNotePdfData } from "./credit-note-data";
+import { StatementDocument, type StatementPdfData } from "./statement-document";
 
 export async function renderInvoicePdf(data: InvoicePdfData): Promise<Buffer> {
   // renderToBuffer is typed against the <Document> element rather than the
@@ -29,4 +30,14 @@ export function invoiceFileName(invoiceNumber: string): string {
 export async function renderCreditNotePdf(data: CreditNotePdfData): Promise<Buffer> {
   const document = createElement(CreditNoteDocument, { data }) as ReactElement<DocumentProps>;
   return Buffer.from(await renderToBuffer(document));
+}
+
+export async function renderStatementPdf(data: StatementPdfData): Promise<Buffer> {
+  const document = createElement(StatementDocument, { data }) as ReactElement<DocumentProps>;
+  return Buffer.from(await renderToBuffer(document));
+}
+
+/** `Statement-CUST00042-2026-11-02.pdf`. */
+export function statementFileName(customerNumber: string, asAt: string): string {
+  return `Statement-${customerNumber.replace(/[^A-Za-z0-9_-]/g, "") || "customer"}-${asAt}.pdf`;
 }
