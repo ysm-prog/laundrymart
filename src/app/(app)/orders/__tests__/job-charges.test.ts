@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { parseJobCharges } from "../job-charges";
 import { priceJob, type RateLine } from "@/lib/domain/job-pricing";
+import { rateForGstTick } from "@/lib/domain/pricing";
 
 /**
  * Tests written against the payload `JobChargesEditor` actually builds.
@@ -215,5 +216,18 @@ describe("parseJobCharges · the account code (0039)", () => {
     expect(parsed.ok).toBe(false);
     if (parsed.ok) return;
     expect(parsed.problem).toContain("Charge 2");
+  });
+});
+
+describe("an unticked GST line, as the editor posts it", () => {
+  it("is saved at the rate the tick produced, so the customer pays the lower figure", () => {
+    const rate = rateForGstTick({ rate: 0.22, taxable: false, gstRate: 0.1 }).rate;
+    const parsed = parseJobCharges(JSON.stringify([{
+      ...SOURCED, description: "Towels - Wash & Dry Only", charge_type: "fuel_levy",
+      quantity: 1, unit_price: rate, taxable: false,
+    }]));
+    expect(parsed).toMatchObject({
+      ok: true, lines: [{ unit_price: 0.2, amount: 0.2, taxable: false }],
+    });
   });
 });

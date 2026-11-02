@@ -4,7 +4,11 @@ import {
   buildReplacementCharges,
   buildServiceCharges,
   formatMoney,
+  gstPhrase,
+  gstWithin,
+  inclusiveTotals,
   lineAmount,
+  rateForGstTick,
   resolvePrice,
   round2,
   summariseInvoice,
@@ -216,5 +220,98 @@ describe("buildReplacementCharges", () => {
 describe("formatMoney", () => {
   it("formats AUD", () => {
     expect(formatMoney(1234.5).replace(/ /g, " ")).toContain("1,234.50");
+  });
+});
+
+describe("the GST tick moves the money", () => {
+  it("takes the GST out of a rate when unticked: Jay's report, TW at $0.22", () => {
+    const { rate } = rateForGstTick({ rate: 0.22, taxable: false, gstRate: 0.1 });
+    expect(rate).toBe(0.2);
+  });
+
+  it("puts the GST into a rate when ticked", () => {
+    const { rate } = rateForGstTick({ rate: 0.2, taxable: true, gstRate: 0.1 });
+    expect(rate).toBe(0.22);
+  });
+
+  it("accepts the string an <input type=number> hands back", () => {
+    expect(rateForGstTick({ rate: "72.70", taxable: false, gstRate: 0.1 }).rate).toBe(66.09);
+  });
+
+  it("restores the exact rate when the tick is reversed, on a rate that cannot round-trip", () => {
+    const off = rateForGstTick({ rate: 0.05, taxable: false, gstRate: 0.1 });
+    expect(off.rate).toBe(0.05);
+    // Without the memo $0.05 comes back as $0.06.
+    expect(rateForGstTick({ rate: off.rate, taxable: true, gstRate: 0.1 }).rate).toBe(0.06);
+    const on = rateForGstTick({ rate: off.rate, taxable: true, gstRate: 0.1, memo: off.memo });
+    expect(on.rate).toBe(0.05);
+    expect(on.memo).toBeNull();
+  });
+
+  it("does not drift over repeated ticks on any cent from $0.01 to $5.00", () => {
+    for (let cents = 1; cents <= 500; cents += 1) {
+      const start = cents / 100;
+      let state = { rate: start, memo: null as ReturnType<typeof rateForGstTick>["memo"] };
+      for (const taxable of [false, true, false, true]) {
+        state = rateForGstTick({ rate: state.rate, taxable, gstRate: 0.1, memo: state.memo });
+      }
+      expect(state.rate).toBe(start);
+    }
+  });
+
+  it("forgets the memo once somebody has typed over the rate", () => {
+    const off = rateForGstTick({ rate: 0.22, taxable: false, gstRate: 0.1 });
+    const on = rateForGstTick({ rate: 0.3, taxable: true, gstRate: 0.1, memo: off.memo });
+    expect(on.rate).toBe(0.33);
+  });
+
+  it("ignores a memo when the tick is not being reversed", () => {
+    // An item chosen on the row set the tick without going through this rule.
+    const off = rateForGstTick({ rate: 0.22, taxable: false, gstRate: 0.1 });
+    const again = rateForGstTick({ rate: off.rate, taxable: false, gstRate: 0.1, memo: off.memo });
+    expect(again.rate).toBe(0.18);
+  });
+
+  it("leaves a zero rate at zero, and a laundry with no GST alone", () => {
+    expect(rateForGstTick({ rate: 0, taxable: false, gstRate: 0.1 })).toEqual({ rate: 0, memo: null });
+    expect(rateForGstTick({ rate: "", taxable: true, gstRate: 0.1 })).toEqual({ rate: 0, memo: null });
+    expect(rateForGstTick({ rate: 5, taxable: false, gstRate: 0 })).toEqual({ rate: 5, memo: null });
+  });
+});
+
+describe("GST inside a total", () => {
+  it("matches the worked example 0043 asserts on itself", () => {
+    expect(gstWithin(72.7, 0.1)).toBe(6.61);
+    expect(gstWithin(0.22, 0.1)).toBe(0.02);
+  });
+
+  it("holds none at a rate of zero or a rate nobody could read", () => {
+    expect(gstWithin(100, 0)).toBe(0);
+    expect(gstWithin(100, Number.NaN)).toBe(0);
+  });
+
+  it("extracts from the taxable part only, once, over the sum", () => {
+    const totals = inclusiveTotals([
+      { amount: 72.7, taxable: true },
+      { amount: 20, taxable: false },
+    ], 0.1);
+    expect(totals).toEqual({ total: 92.7, gst: 6.61, anyTaxable: true });
+  });
+
+  it("rounds over the sum the way recalculate_invoice does, not line by line", () => {
+    const lines = [{ amount: 0.05, taxable: true }, { amount: 0.05, taxable: true }, { amount: 0.05, taxable: true }];
+    expect(inclusiveTotals(lines, 0.1).gst).toBe(0.01);
+    expect(lines.reduce((sum, line) => sum + gstWithin(line.amount, 0.1), 0)).toBe(0);
+  });
+
+  it("counts a line with no flag as taxable, the app's default", () => {
+    expect(inclusiveTotals([{ amount: 11 }], 0.1).gst).toBe(1);
+  });
+
+  it("never says GST is included in a figure holding none", () => {
+    expect(gstPhrase(0, false)).toBe("no GST");
+    expect(gstPhrase(0.02, true)).toBe("including $0.02 GST");
+    // Taxable, and too small to hold a cent of it: still not GST-free.
+    expect(gstPhrase(0, true)).toBe("including $0.00 GST");
   });
 });

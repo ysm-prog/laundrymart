@@ -10,6 +10,8 @@ import {
 } from "@/lib/actions";
 import { checkBillingTransition } from "@/lib/domain/billing";
 import { jobChargeSubtotal } from "@/lib/domain/job-pricing";
+import { gstPhrase, inclusiveTotals } from "@/lib/domain/pricing";
+import { tenantGstRate } from "@/lib/gst";
 import { money } from "@/lib/format";
 import { logOrderActivity } from "@/lib/orders/activity";
 import {
@@ -152,7 +154,8 @@ export async function updateJobCharges(formData: FormData): Promise<void> {
   revalidatePath(LIST);
   // "before GST" until 2026-09-01, which was wrong: a charge amount becomes an
   // invoice line amount unchanged, and since 0043 a line amount is GST-inclusive.
-  return done(back, `Charges saved — ${money(jobChargeSubtotal(charges.lines))}, GST included.`);
+  const totals = inclusiveTotals(charges.lines, await tenantGstRate(supabase, session.tenantId));
+  return done(back, `Charges saved — ${money(totals.total)}, ${gstPhrase(totals.gst, totals.anyTaxable)}.`);
 }
 
 /* ----------------------------------------------------------- approve it --- */
