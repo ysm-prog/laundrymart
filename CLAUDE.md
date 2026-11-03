@@ -3848,7 +3848,7 @@ migration**: the new switch rides the `automation` key 0056 already admits.
   (`monthlyStatementDue`, `monthlyStatementSkip`), at most 500 a run. A failed send writes no marker
   and is retried. Not turned on: most of what customers owe still lives in Xero, so it is
   Darshan's decision.
-- **The statement reads, hardened for the service-role client**: the's invoice, customer and contact
+- **The statement reads, hardened for the service-role client**: the invoice, customer and contact
   reads now name `archived_at`, since RLS is what hid archived rows and the monthly run bypasses it.
 - `statement-list.test.ts` (20), `monthly-statements-mocked.test.ts` (4), `statement-seam.test.ts`
   (7, and it fails when a posted field is renamed). **1,640 tests across 108 files**, typecheck, lint
