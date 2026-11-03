@@ -8,6 +8,7 @@ import { Checkbox, Field, FormActions, Input, SubmitButton } from "@/components/
 import { BRANDING_BUCKET, isTenantLogoPath } from "@/lib/branding";
 import { arTrustedFrom } from "@/lib/domain/receivables";
 import { parseAutomation } from "@/lib/domain/automation";
+import { MONTHLY_STATEMENT_WHEN } from "@/lib/domain/statement";
 import {
   removeInvoiceLogo, saveAutomationSettings, saveInvoiceProfile, saveReceivablesSettings,
   uploadInvoiceLogo,
@@ -145,9 +146,13 @@ export default async function InvoicingSettingsPage() {
                       label="Issue a per-job customer's invoice as soon as the job is approved (and send it to Xero)" />
             <Checkbox name="emailOnIssue" defaultChecked={automation.emailOnIssue}
                       label="Email those invoices, and the ones Issue and send all issues, to the customer's invoice email" />
+            <Checkbox name="monthlyStatements" defaultChecked={automation.monthlyStatements}
+                      label={`Email every customer who owes something their statement ${MONTHLY_STATEMENT_WHEN}`} />
             <p className="text-sm text-muted-foreground">
               A customer can be kept out of automatic approval on their Billing &amp; pricing card.
-              Issuing stays blocked until your invoice details above are complete.
+              Issuing stays blocked until your invoice details above are complete. A monthly statement
+              is made up to the last day of the month before, leaves off older MYOB balances, and skips a
+              customer with no billing email or who has asked not to be sent reminders.
             </p>
             <SubmitButton variant="secondary" size="md" pendingLabel="Saving…">Save automation</SubmitButton>
           </FormSection>

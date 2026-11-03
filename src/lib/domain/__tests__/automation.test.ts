@@ -15,6 +15,7 @@ describe("the automation switches (Phase 2)", () => {
     expect(parseAutomation(undefined)).toEqual(DEFAULT_AUTOMATION);
     expect(DEFAULT_AUTOMATION).toEqual({
       autoAssignOnReady: true, autoApproveCleanJobs: true, autoIssuePerJob: false, emailOnIssue: false,
+      monthlyStatements: false,
     });
   });
   it("keeps what is stored and ignores what is not a boolean", () => {

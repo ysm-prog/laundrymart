@@ -9,7 +9,15 @@ where that is genuinely what it is. The multi-tenancy architecture stays: one op
 fact about today's data, not a reason to drop `tenant_id`, RLS, or §23's rule that a read feeding a
 write names its tenant.
 
-## Latest: MYOB history from Xero (2026-11-03), imported and tied
+## Latest: Statements like ysm-hub (2026-11-03)
+- Billing › Statements has a statement date (invoices after it left off by default), View /
+  Download / Send per customer, contact and phone, search and order, and a confirm counting who has
+  no email. Sends report skipped apart from failed.
+- Monthly statements: Settings › Invoicing › Automation, **off**. The sweep sends on the 1st–3rd,
+  dated the last day of the month before, once per customer per month. Turning it on is Darshan's
+  call while most of the balance is in Xero. No migration.
+
+## Previously: MYOB history from Xero (2026-11-03), imported and tied
 - 18,656 MYOB invoices are in the app with their lines, through Settings › Bring in your books. Running
   it again refreshes balances and duplicates nothing. **0062 applied.**
 - Tied to Xero's Awaiting Payment to the cent. The gap is 34 invoices Xero holds twice, plain and

@@ -128,6 +128,16 @@ The master spec names a .NET 9 Web API; this build follows the supplied skeleton
   and no table: sending writes only the audit row. **It leaves off unreconciled MYOB imports** by
   the rule Today uses (`isUnreconciledImport`), counts what it left off for the staff member sending
   it, and tells the customer the date it starts from.
+  **Since 2026-11-03 it works the way ysm-hub's Customer statements does**: a statement date
+  (today unless chosen, never in the future), invoices issued after it left off unless asked for
+  and counted when they are, search and order in the URL, View / Download / Send on every row,
+  and a confirm naming the date and how many of those chosen have no billing email. A send reports
+  skips (owed nothing, no email) apart from failures (`summariseStatementSends`). **The monthly
+  run** is `automation.monthlyStatements`, **off by default**: on the first three days of a month
+  the notification sweep emails each customer the statement made up to the last day of the month
+  before, once, marked by `monthlyStatement` in the audit row. It skips a customer with no billing
+  email or who has `reminders_enabled = false`. It reads on the service-role client, which is why
+  every statement read names `archived_at` as well as the tenant.
 - **An invoice can go by email, by text, or both** (2026-11-02). A text cannot carry an attachment
   and a customer has no login, so it carries a link to `/i/:token`, a signed token naming one invoice
   for 30 days (`lib/invoices/link-token.ts`). That route is the one reader of an invoice with no
@@ -747,7 +757,7 @@ passed* are two separate facts. CI is what actually holds the gate; read it rath
 
 ## 6. Routes
 `/` landing · `/login` · `/auth/callback` · `/auth/invite` · `/offline` · `/api/sync` ·
-`/api/media` · `/api/invoices/:id/pdf` · `/api/customers/:id/statement` ·
+`/api/media` · `/api/invoices/:id/pdf` · `/api/customers/:id/statement[?as_at=&upto=0&download=1]` ·
 `/api/xero/history` (one page of the MYOB history, `admin.write`) ·
 `/i/:token` (a text's invoice link: signed token, no session) ·
 `/api/notifications/sweep` (cron, bearer-token authed, no session)
@@ -759,7 +769,8 @@ billing one; `sectionFor` takes the longest match so it lands there rather than 
 Price Selected → Approve Selected → Add to Draft) ·
 `/invoices/drafts` (the open-drafts board — one card per customer's running invoice, with Issue
 now on each; the month-end question the register could not answer) ·
-`/invoices/statements` (who owes what, aged, and a bulk statement send) ·
+`/invoices/statements[?as_at=&later=1&q=&sort=]` (who owes what as at a date, aged, with View /
+Download / Send per customer and a bulk send) ·
 `/orders[/new|/board|/:id|/:id/edit|/:id/docket]` ·
 `/items[/:id]` · `/drivers` · `/vehicles` · `/routes/templates[/:id]` ·
 `/routes/daily[/:id|/:id/sheet]` · `/routes/planner` · `/jobs[/:id]` ·
@@ -3811,6 +3822,41 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-11-03 · Statements work like ysm-hub's
+Asked as "use statement functionality as ysm-hub". The Statements screen of 2 November listed who
+owed what and offered one bulk send; ysm-hub's has a statement date, per-customer View, Download and
+Send, contact details, sorting, a confirm that counts who has no email, and a monthly send. **No
+migration**: the new switch rides the `automation` key 0056 already admits.
+
+- **Statement date.** Chosen on the screen, posted with every send, and passed to the PDF as
+  `?as_at=`; a future or unreadable date is today. Invoices issued after it are left off by default
+  (`Statement.later` counts them, the screen says so, the PDF tells the customer they come next
+  time); "Include invoices issued after the statement date" keeps them. The balance shown is still
+  each invoice's balance today, as in ysm-hub: a statement is not a reconstruction of a past day.
+- **The list.** One row per customer with something on their statement: number, invoice count,
+  overdue amount, first contact (one read per hundred customers), phone and billing email, or "no
+  billing email". View, Download (`?download=1`) and Send on the row; a row with no email cannot be
+  sent. Search covers name, number, contact and email; order is largest balance (default), most
+  overdue, or name. `statementListView` is the rule.
+- **Sending.** Both kinds ask first, naming the date and the total and how many will be skipped for
+  want of an email. A row's Send posts the one-customer action through `formAction` from the same
+  form. The result counts sent, owed nothing, no email and failed separately; nothing sent is a
+  failure toast. `sendStatement` is now `deliverStatement` (no session, writes nothing) plus the
+  audit, so the monthly run shares the delivery.
+- **Monthly statements**, Settings › Invoicing › Automation, **off**. The sweep sends on the 1st to
+  3rd of a month, dated the last day of the month before, once per customer per month
+  (`monthlyStatementDue`, `monthlyStatementSkip`), at most 500 a run. A failed send writes no marker
+  and is retried. Not turned on: most of what customers owe still lives in Xero, so it is
+  Darshan's decision.
+- **The statement reads, hardened for the service-role client**: the's invoice, customer and contact
+  reads now name `archived_at`, since RLS is what hid archived rows and the monthly run bypasses it.
+- `statement-list.test.ts` (20), `monthly-statements-mocked.test.ts` (4), `statement-seam.test.ts`
+  (7, and it fails when a posted field is renamed). **1,640 tests across 108 files**, typecheck, lint
+  and build green. The list was driven in Chromium at 320/390/768/1440 in both themes: no overflow
+  inside it, nothing under 36px, 0 console errors, both confirms and the posted fields as written.
+- **Not exercised:** a real statement email or the monthly run against live data, for the reason the
+  2 November entry gives.
+
 ### 2026-11-03 · A credit note no longer closes an invoice
 Found checking the credit run against Xero. **No migration.** 20 of the 67 MYOB credit notes share a
 number with an ordinary invoice, and the step wrote to those rows too. On a used credit that meant
