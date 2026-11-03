@@ -7,17 +7,19 @@
 -- customer numbering, where the failure mode is a duplicate number handed out
 -- months later, long after anyone would connect it to an import.
 begin;
-select plan(8);
+select plan(11);
 
 insert into auth.users (id, email) values
   ('11111111-1111-1111-1111-111111111111','a@example.com'),
-  ('22222222-2222-2222-2222-222222222222','b@example.com');
+  ('22222222-2222-2222-2222-222222222222','b@example.com'),
+  ('33333333-3333-3333-3333-333333333333','counter@example.com');
 insert into public.tenants (id, name) values
   ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','Laundry A'),
   ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb','Laundry B');
 insert into public.memberships (user_id, tenant_id, role) values
   ('11111111-1111-1111-1111-111111111111','aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','super_admin'),
-  ('22222222-2222-2222-2222-222222222222','bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb','super_admin');
+  ('22222222-2222-2222-2222-222222222222','bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb','super_admin'),
+  ('33333333-3333-3333-3333-333333333333','aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','customer_service');
 
 -- Two customers in A: one whose debt an invoice now carries, one whose does not.
 insert into public.customers (id, tenant_id, customer_number, business_name,
@@ -95,6 +97,29 @@ select public.park_number_sequence('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'cust
 -- handed out, or the app reissues a customer number that is already in use.
 select is(public.park_number_sequence('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'customer', 'CUST', 12), 509,
           'a later, smaller import cannot wind a number sequence backwards');
+
+-- 0063: a member who is not the owner cannot move the numbering. Before it, any
+-- member could jump the invoice sequence and leave a gap in the tax invoices.
+reset role;
+set local role authenticated;
+set local "request.jwt.claim.sub" = '33333333-3333-3333-3333-333333333333';
+select throws_ok(
+  $$select public.park_number_sequence('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'invoice', 'INV', 900000)$$,
+  '42501',
+  null,
+  'the counter cannot move the invoice numbering (0063)');
+select throws_ok(
+  $$select public.park_number_sequence('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'customer', 'CUST', 900000)$$,
+  '42501',
+  null,
+  'nor the customer numbering');
+
+reset role;
+select is(
+  (select next_value from public.number_sequences
+    where tenant_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' and kind = 'customer'),
+  509::bigint,
+  'and the refused call left the sequence where the owner put it');
 
 select * from finish();
 rollback;

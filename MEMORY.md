@@ -9,7 +9,12 @@ where that is genuinely what it is. The multi-tenancy architecture stays: one op
 fact about today's data, not a reason to drop `tenant_id`, RLS, or §23's rule that a read feeding a
 write names its tenant.
 
-## Latest: Statements like ysm-hub (2026-11-03)
+## Latest: number sequences are Owner-only (2026-11-03)
+- `0063` makes `park_number_sequence` Owner-only; before it any member could jump the invoice
+  numbering through the REST API. Applied live and probed: boards and the Office manager refused,
+  Owner allowed, invoice sequence still 15360. No `src/` change.
+
+## Previously: Statements like ysm-hub (2026-11-03)
 - Billing › Statements has a statement date (invoices after it left off by default), View /
   Download / Send per customer, contact and phone, search and order, and a confirm counting who has
   no email. Sends report skipped apart from failed.
