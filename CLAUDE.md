@@ -1509,6 +1509,17 @@ produce on demand.
   other writer, and a proof says so. `source = 'app'` rows are never touched, and a credit stays as
   MYOB left it. Safe to run twice: lines go only on an invoice with none.
   `invoice_history_import.test.sql` (24). **Applied 2026-11-02** (§11).
+- `0063_park_number_sequence_owner` — **only the Owner can move a number sequence.**
+  `park_number_sequence` (0023) is SECURITY DEFINER and checked only `is_member(t)`, so any member
+  (a board, a driver, the counter) could jump the invoice or customer numbering from
+  `/rest/v1/rpc/park_number_sequence` and leave gaps in tax-invoice numbers nobody can take back. Its
+  one caller is the MYOB importer (`lib/import/commit.ts`), behind `/api/import`, which is gated on
+  `admin.write`; the check is now `has_role(t, array['super_admin'])` (a platform admin passes through
+  `has_role`), raising **42501**. The rest of 0023's body is unchanged: the `greatest()` upsert still
+  never moves a sequence backwards. `clear_superseded_openings` is left alone: it is SECURITY INVOKER,
+  so 0036 and 0048 already confine it. **Adds no table, column, policy or trigger; changes no row.**
+  Seven self-assertions. `import_helpers.test.sql` (8 → 11), which fails 3 against 0023's body.
+  **Applied 2026-11-03** (§11).
 - `0050_pickup_to_job` — **a collection becomes a laundry job, exactly once.**
   `laundry_orders.source_pickup_id` (`on delete set null`),
   `uq_laundry_orders_source_pickup` (partial unique) and
@@ -1795,7 +1806,7 @@ Proofs in `supabase/tests/`: `rls_isolation`, `rls_coverage`, `driver_scope`,
 `customer_record_scope`, `fleet_scope`, `pickup_intake`, `laundry_item_ownership`,
 `invoice_money_guards`, `invoice_issue_guard`, `billing_flow_guards`, `flow_runs_itself`,
 `operations_settings`, `billing_write_policies`, `hot_foreign_key_indexes`, `reopen_job_charges`,
-`invoice_sms`, `invoice_history_import` (**762 assertions** across 43 files).
+`invoice_sms`, `invoice_history_import` (**765 assertions** across 43 files).
 
 **Count assertions, not lines starting with `ok`.** pgTAP's function is literally named `ok`, so
 psql prints a centred `ok` **column header** above each result — and `grep -c '^\s*ok '` counts
@@ -2513,6 +2524,12 @@ reports six false gaps.
   `set_records_archived`, `sync_invoice_line_account`, `tenant_members`). That is the 0042 trap
   leaving its usual trace: text typed into `apply_migration` reformatted a little against the file.
   Worth knowing before anybody reads a raw `md5(prosrc)` mismatch as drift.
+
+**`0063_park_number_sequence_owner` was applied on 2026-11-03** (`20261103072853`) through the
+connector. Before it: the function was SECURITY DEFINER with `search_path = public`, the invoice
+sequence stood at 15360 and the customer one at 596. Read back as real sessions in a block that ended
+by raising: all four boards and the Office manager were refused **42501**, the Owner was allowed, and
+the invoice sequence still read 15360 afterwards.
 
 **`0062_invoice_history_import` was applied on 2026-11-02** (`20261102063238`) through the
 connector, with Darshan's explicit approval, after CI passed on the Prod pull request. Read back: all
@@ -3822,6 +3839,13 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-11-03 · Only the Owner can move a number sequence
+`park_number_sequence` let any member of the laundry jump the invoice or customer numbering through
+the REST API, which leaves gaps in tax-invoice numbers. Only the MYOB importer calls it, and only the
+Owner can run that, so `0063` makes it Owner-only (§7). **Applied live (§11)**: boards and the Office
+manager are refused, the Owner is allowed, and the invoice sequence is still 15360. No `src/` change.
+765 pgTAP assertions across 43 files; the three new ones fail against 0023's body.
+
 ### 2026-11-03 · Statements work like ysm-hub's
 Asked as "use statement functionality as ysm-hub". The Statements screen of 2 November listed who
 owed what and offered one bulk send; ysm-hub's has a statement date, per-customer View, Download and
