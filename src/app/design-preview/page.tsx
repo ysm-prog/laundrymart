@@ -38,6 +38,8 @@ import {
   InvoiceSelection, type SelectableInvoice,
 } from "@/app/(app)/invoices/invoice-selection";
 import { ItemPriceTable } from "@/app/(app)/invoices/prices/item-price-table";
+import { StatementSelection } from "@/app/(app)/invoices/statements/statement-selection";
+import type { StatementListRow } from "@/lib/domain/statement";
 import { AddItemCard } from "@/app/(app)/invoices/prices/add-item-card";
 import { StatusTrack } from "@/app/(app)/orders/[id]/status-track";
 import type { LaundryPriceRow } from "@/lib/domain/laundry-billing";
@@ -1713,6 +1715,25 @@ export default function DesignPreviewPage() {
             </Card>
           </section>
 
+          {/* Statements, after ysm-hub: per-row View / Download / Send and a
+              selection. One row has no billing email, so its Send is disabled
+              and the confirm counts it as skipped. */}
+          <section id="statements-preview" className="space-y-4 border-t pt-8">
+            <Eyebrow>Statements</Eyebrow>
+            <Card title="Statements as at 31 October 2026">
+              <StatementSelection
+                rows={PREVIEW_STATEMENT_ROWS}
+                asAt="2026-10-31"
+                asAtLabel="31 October 2026"
+                upToAsAt
+                returnTo="/invoices/statements"
+                sendOne={async () => { "use server"; }}
+                sendSelected={async () => { "use server"; }}
+                canSend
+              />
+            </Card>
+          </section>
+
           <section id="route-boundaries-preview" className="space-y-4 border-t pt-8">
             <PageHeader
               title="When a screen cannot be drawn"
@@ -2029,6 +2050,17 @@ const PREVIEW_OPEN_DRAFTS: Array<{
       createdAt: "2026-08-22T01:00:00Z", updatedAt: null,
     },
   },
+];
+
+const PREVIEW_STATEMENT_ROWS: StatementListRow[] = [
+  { customerId: "00000000-0000-4000-8000-0000000005a1", name: "Barbers Of Mitcham", customerNumber: "CUST00041",
+    contactName: "Jill La Pira", phone: "08 8271 0000", billingEmail: "accounts@barbers.example.com",
+    total: 128.4, overdue: 54.2, invoices: 3 },
+  { customerId: "00000000-0000-4000-8000-0000000005a2", name: "TAFE SA Regency", customerNumber: "CUST00212",
+    contactName: null, phone: "08 8348 4000", billingEmail: "ap@tafesa.example.edu.au",
+    total: 72.7, overdue: 0, invoices: 1 },
+  { customerId: "00000000-0000-4000-8000-0000000005a3", name: "Sueno Hair", customerNumber: "CUST00387",
+    contactName: "Maria", phone: null, billingEmail: null, total: 18.6, overdue: 18.6, invoices: 1 },
 ];
 
 const PREVIEW_DRAFTS: SelectableInvoice[] = [

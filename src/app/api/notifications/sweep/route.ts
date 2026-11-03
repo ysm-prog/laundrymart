@@ -38,6 +38,7 @@ import {
 } from "@/lib/notifications/sweep-rules";
 import { sendEmail, emailIsConfigured } from "@/lib/email/send";
 import { buildOverdueEmail } from "@/lib/email/overdue-email";
+import { sendMonthlyStatements } from "@/lib/invoices/monthly-statements";
 
 /** Never prerendered, never cached: it is a scheduled side effect. */
 export const dynamic = "force-dynamic";
@@ -305,6 +306,10 @@ export async function GET(request: NextRequest) {
       const settings = parseSettings(tenant.settings);
       await sweepOverdueInvoices(admin, tenant, settings, businessDay, tally);
       await sweepLateRuns(admin, tenant, settings, businessDay, nowMinutes, tally);
+      // Off unless the laundry turns it on, and a no-op outside the first days of a month.
+      const statements = await sendMonthlyStatements(admin, tenant, businessDay);
+      tally.emails += statements.sent;
+      tally.emailFailures += statements.failed;
       swept += 1;
     } catch (cause) {
       // One tenant's bad data must not cost every other tenant their sweep.

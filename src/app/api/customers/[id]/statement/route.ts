@@ -4,14 +4,22 @@ import { requireSession } from "@/lib/auth/context";
 import { can } from "@/lib/roles";
 import { createClient } from "@/lib/supabase/server";
 import { loadStatement } from "@/lib/invoices/statement";
+import { parseStatementDate } from "@/lib/domain/statement";
+import { businessToday } from "@/lib/domain/timezone";
 import { renderStatementPdf, statementFileName } from "@/lib/pdf/render";
 
-/** Streams a customer's statement, as `/api/invoices/:id/pdf` streams an invoice. */
+/**
+ * Streams a customer's statement, as `/api/invoices/:id/pdf` streams an invoice.
+ *
+ * `?as_at=` dates it (a future or unreadable date is today), `?upto=0` keeps
+ * invoices issued after that date, and `?download=1` asks the browser to save it
+ * rather than show it — the Statements screen's View and Download.
+ */
 
 export const dynamic = "force-dynamic";
 
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const session = await requireSession();
@@ -25,7 +33,11 @@ export async function GET(
   }
 
   const supabase = await createClient();
-  const data = await loadStatement(supabase, session.tenantId, id);
+  const query = request.nextUrl.searchParams;
+  const data = await loadStatement(supabase, session.tenantId, id, {
+    asAt: parseStatementDate(query.get("as_at"), businessToday()),
+    upToAsAt: query.get("upto") !== "0",
+  });
   if (!data) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   const pdf = await renderStatementPdf(data);
@@ -33,7 +45,8 @@ export async function GET(
     headers: {
       "content-type": "application/pdf",
       "content-disposition":
-        `inline; filename="${statementFileName(data.customer.customer_number, data.statement.asAt)}"`,
+        `${query.get("download") === "1" ? "attachment" : "inline"}; ` +
+        `filename="${statementFileName(data.customer.customer_number, data.statement.asAt)}"`,
       "cache-control": "private, no-store",
     },
   });
