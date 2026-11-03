@@ -201,9 +201,9 @@ export async function saveReceivablesSettings(formData: FormData): Promise<void>
 }
 
 /**
- * What the app does on its own (Darshan's BA review, Phase 2). Four switches
+ * What the app does on its own (Darshan's BA review, Phase 2). Five switches
  * under the `automation` key, which 0056 adds to `save_tenant_settings`. The
- * form always renders all four, so an absent box means unticked. Defaults —
+ * form always renders all five, so an absent box means unticked. Defaults —
  * what an unset key reads as — are in `DEFAULT_AUTOMATION`.
  */
 export async function saveAutomationSettings(formData: FormData): Promise<void> {

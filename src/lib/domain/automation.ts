@@ -35,6 +35,13 @@ export type AutomationSettings = {
    * separately from issuing, because mail leaves the building.
    */
   emailOnIssue: boolean;
+  /**
+   * Email every customer with something owing their statement, made up to the
+   * last day of the month before, on the 1st (ysm-hub's partner statements).
+   * **Default off**: it puts the laundry's balances in front of every customer
+   * at once, and that is the owner's decision.
+   */
+  monthlyStatements: boolean;
 };
 
 export const DEFAULT_AUTOMATION: AutomationSettings = {
@@ -42,10 +49,11 @@ export const DEFAULT_AUTOMATION: AutomationSettings = {
   autoApproveCleanJobs: true,
   autoIssuePerJob: false,
   emailOnIssue: false,
+  monthlyStatements: false,
 };
 
 export const AUTOMATION_KEYS = [
-  "autoAssignOnReady", "autoApproveCleanJobs", "autoIssuePerJob", "emailOnIssue",
+  "autoAssignOnReady", "autoApproveCleanJobs", "autoIssuePerJob", "emailOnIssue", "monthlyStatements",
 ] as const satisfies readonly (keyof AutomationSettings)[];
 
 export function parseAutomation(settings: unknown): AutomationSettings {

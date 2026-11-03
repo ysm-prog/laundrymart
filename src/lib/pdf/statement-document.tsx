@@ -62,9 +62,16 @@ export function StatementDocument({ data }: { data: StatementPdfData }) {
     ].filter((line): line is string => Boolean(line)),
   };
 
-  const notes = statement.excluded.count > 0
-    ? [`This statement lists invoices from ${longDate(statement.trustedFrom)}. Please contact us if you would like details of anything earlier.`]
-    : [];
+  const notes = [
+    ...(statement.excluded.count > 0
+      ? [`This statement lists invoices from ${longDate(statement.trustedFrom)}. Please contact us if you would like details of anything earlier.`]
+      : []),
+    // Said only when something was actually left off for being newer, so the
+    // customer is not puzzled by an invoice they hold that is not on the page.
+    ...(statement.later.count > 0
+      ? [`Invoices issued after ${longDate(statement.asAt)} will appear on your next statement.`]
+      : []),
+  ];
 
   return (
     <Document title={`Statement ${customer.customer_number}`} author={tenant.name}>
