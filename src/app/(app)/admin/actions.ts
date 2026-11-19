@@ -491,6 +491,72 @@ export async function sendMemberSignInLink(formData: FormData): Promise<void> {
   return done(PEOPLE, `A sign-in link is on its way to ${member.email}.`);
 }
 
+/**
+ * Set a new password for one of your people.
+ *
+ * The rung the shared logins need. The Manager login and the four Board
+ * logins are on `@ats.example.com`, which is reserved (RFC 2606) and can never
+ * receive mail — so "Email sign-in link" cannot reach them, and before this the
+ * only way to reset one was a developer at the database. It is equally how a
+ * shared password is changed when somebody who knew it leaves.
+ *
+ * Three refusals, each for a reason:
+ *   - **yourself** — you know your own password; changing it from an
+ *     administrator's screen while signed in is a different act, and the
+ *     sign-in page's link is the way to do it;
+ *   - **a platform administrator** — that login reaches every laundry on the
+ *     deployment (0019), so one laundry's Owner must not be able to take it;
+ *   - **anybody not on this laundry's list** — the target is resolved from
+ *     `tenant_members()` rather than trusted from the posted id, exactly as
+ *     `sendMemberSignInLink` does.
+ *
+ * The password goes to the Auth admin API and nowhere else: not the flash
+ * message (a non-httpOnly cookie, §2) and not the audit row.
+ */
+export async function setMemberPassword(formData: FormData): Promise<void> {
+  const session = await assertCapability("admin.write");
+  const parsed = z.object({
+    user_id: z.string().uuid(),
+    password: z.preprocess((v) => (typeof v === "string" ? v : ""), z.string()),
+  }).safeParse(toObject(formData));
+  if (!parsed.success) return fail(PEOPLE, firstIssue(parsed.error));
+  const { user_id, password } = parsed.data;
+
+  if (user_id === session.userId) {
+    return fail(PEOPLE, "Change your own password from the sign-in page — "
+      + "sign out and press “No password, or forgotten it?”.");
+  }
+
+  const problem = passwordProblem(password);
+  if (problem) return fail(PEOPLE, problem);
+
+  const member = (await listMembers()).find((row) => row.id === user_id);
+  if (!member) {
+    return fail(PEOPLE, "That person is not on this laundry's list, so nothing was changed.");
+  }
+  if (member.isPlatformAdmin) {
+    return fail(PEOPLE, "That login is managed by the platform administrator, not from this screen.");
+  }
+
+  let admin: ReturnType<typeof createAdminClient>;
+  try {
+    admin = createAdminClient();
+  } catch {
+    return fail(PEOPLE, "This deployment has no service key set up, so passwords cannot be set here yet.");
+  }
+
+  const { error } = await admin.auth.admin.updateUserById(user_id, { password });
+  if (error) return fail(PEOPLE, `That password could not be saved. ${error.message}`);
+
+  await recordAudit(session, {
+    entity: "membership", entityId: user_id, action: "update",
+    summary: `password set for ${member.email ?? member.label}`,
+  });
+
+  return done(PEOPLE, `${member.label} can sign in with the new password now. `
+    + "Anyone already signed in on that login stays signed in until they sign out.");
+}
+
 export async function removeMember(formData: FormData): Promise<void> {
   const session = await assertCapability("admin.write");
   const parsed = z.object({ user_id: z.string().uuid() })
