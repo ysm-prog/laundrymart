@@ -339,6 +339,10 @@ Resource-scoped beyond tenancy:
   `archivable_tables()`, so the 0028 trap does not apply — asserted rather than
   assumed, because a later migration archiving one of them would silently
   un-hide an archived row through these policies.
+- **A board reads only its own board row, and only the office changes one; only the Owner changes
+  who is in the laundry** (0064). `boards.user_id` is what `current_board_id()` matches, so a
+  writable `boards` was a way for one round to take over another; membership writes were open to the
+  Office manager, who could make themselves Owner. Both now match `roles.ts`.
 - **A round writes its own job's timeline** (0056). `laundry_order_activity`'s restrictive insert
   admits the three office roles *or* a job assigned to the caller's own board or driver record.
   Before it, 0034's office-only restatement refused every row a round wrote, silently.
@@ -1520,6 +1524,21 @@ produce on demand.
   so 0036 and 0048 already confine it. **Adds no table, column, policy or trigger; changes no row.**
   Seven self-assertions. `import_helpers.test.sql` (8 → 11), which fails 3 against 0023's body.
   **Applied 2026-11-03** (§11).
+- `0064_board_and_people_write` — **a round cannot take another round, and only the Owner changes
+  who is in the laundry.** Two holes found by probing the handover accounts as real sessions:
+  - `boards` carried 0031's permissive `for all … is_member`, **the seventh table family on that
+    shape**. `boards.user_id` is the board-scoped RLS boundary (`current_board_id()` matches it), so
+    Board 2's own login re-pointed Board 1 at itself, then read all 15 of Board 1's jobs, and
+    retired Board 4. The 0049 escalation, one table over.
+  - `memberships_admin` (0001) admitted `operations_manager` to every verb while `admin.write` is the
+    Owner's alone, so both Office-manager logins could set their own role to `super_admin`.
+  - Now: board writes are `can_write_fleet()` (what `/boards` was always gated on); a board-only
+    member reads **only its own** `boards` row; membership writes are `super_admin` only, the Office
+    manager keeps the read, and `memberships_self` is untouched. Every writer in `src/` was already
+    gated on those capabilities, so no screen loses anything.
+  - Adds no table, column or function; changes no row. Eight self-assertions.
+    `board_and_people_write.test.sql` (18), which fails 12 on a database without 0064.
+    **Applied 2026-11-19** (§11).
 - `0050_pickup_to_job` — **a collection becomes a laundry job, exactly once.**
   `laundry_orders.source_pickup_id` (`on delete set null`),
   `uq_laundry_orders_source_pickup` (partial unique) and
@@ -1806,7 +1825,7 @@ Proofs in `supabase/tests/`: `rls_isolation`, `rls_coverage`, `driver_scope`,
 `customer_record_scope`, `fleet_scope`, `pickup_intake`, `laundry_item_ownership`,
 `invoice_money_guards`, `invoice_issue_guard`, `billing_flow_guards`, `flow_runs_itself`,
 `operations_settings`, `billing_write_policies`, `hot_foreign_key_indexes`, `reopen_job_charges`,
-`invoice_sms`, `invoice_history_import` (**765 assertions** across 43 files).
+`invoice_sms`, `invoice_history_import`, `board_and_people_write` (**783 assertions** across 44 files).
 
 **Count assertions, not lines starting with `ok`.** pgTAP's function is literally named `ok`, so
 psql prints a centred `ok` **column header** above each result — and `grep -c '^\s*ok '` counts
@@ -2524,6 +2543,18 @@ reports six false gaps.
   `set_records_archived`, `sync_invoice_line_account`, `tenant_members`). That is the 0042 trap
   leaving its usual trace: text typed into `apply_migration` reformatted a little against the file.
   Worth knowing before anybody reads a raw `md5(prosrc)` mismatch as drift.
+
+**`0064_board_and_people_write` was applied on 2026-11-19** through the connector, first attempt;
+its self-assertions passed. Proved afterwards as each real login, rolled back: every board reads 1
+board row and only its own runs and jobs, and its takeover, retirement, cross-board edit and
+self-promotion all touch 0 rows; Christian and the shared Manager read everything they did and edit
+items and boards (1 row) but change no membership (0 rows); the Owner still does. Advisors unchanged
+(0064 adds no function).
+
+**The handover accounts were set up the same day** (§24): Christian's password reset, a shared
+`manager@ats.example.com` (`operations_manager`), Board 1 moved from Mario Forte to `board1@`,
+Boards 1–4 re-passworded at bcrypt cost 10, and the 11 `@roles.example.com` logins banned
+(`banned_until` 2999, reversible). Nine memberships, all in Adelaide.
 
 **`0063_park_number_sequence_owner` was applied on 2026-11-03** (`20261103072853`) through the
 connector. Before it: the function was SECURITY DEFINER with `search_path = public`, the invoice
@@ -3839,6 +3870,34 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-11-19 · Handover accounts, and two access holes closed
+The developer's pre-handover checklist: test every login, fix Christian's, create a shared Manager
+and four Board logins, check each board sees only its own run. **One migration, `0064`, applied.**
+
+- **Christian's "password error" was the password, not the account.** His row matched Angelo's (who
+  signs in) column for column, but he had **never** signed in, and the only sign-in link he held was
+  from 12 October and long expired. New password, stale link cleared. Auth audit logging is off on
+  this project and the log stream keeps a day, so his failed attempt itself left no trace to read.
+- **Accounts** (§24): shared `manager@ats.example.com` (Office manager) written in GoTrue's shape and
+  matching Angelo's on every column GoTrue reads; Board 1 moved to the generic `board1@`; new
+  passwords for Christian, the Manager and Boards 1–4 (bcrypt cost 10, verified with `crypt()`); the
+  11 `@roles.example.com` logins banned. Rehearsed in a transaction ending in `raise` first.
+- **Two holes found by testing, closed by 0064** (§7): a board could take over another board's round,
+  and an Office manager could make themselves Owner.
+- **People › Set new password** (`setMemberPassword`, `admin.write`): the only way to reset a login
+  that cannot receive email. Four seam tests in `people-form.test.ts`, two confirmed to fail when the
+  gate or the platform-admin refusal is removed.
+- **Handover page** published privately (not in the repo, since it lists staff addresses).
+- **Not done here:** signing in through the website. This container cannot reach
+  `ats.coreit.com.au` or `*.supabase.co`, so sign-in was proved by hash and by matching a login
+  GoTrue accepts, not by a browser. **Before trusting it: sign in once as Christian, the Manager and
+  each Board.**
+- **Found, not fixed:** 10 of the 11 open board jobs are dated in the past, several against test
+  customers (Test1, Jay, Core IT), and Test1 and Core IT are weekly-round customers on Boards 1 and 2.
+  Office tidy-up before go-live. `npm audit` reports one moderate Next.js advisory (16.2.0–16.4.4,
+  `use cache` only, which `src/` does not use).
+- 1,644 tests across 108 files; typecheck, lint and build green; 783 pgTAP assertions across 44 files.
+
 ### 2026-11-03 · Only the Owner can move a number sequence
 `park_number_sequence` let any member of the laundry jump the invoice or customer numbering through
 the REST API, which leaves gaps in tax-invoice numbers. Only the MYOB importer calls it, and only the
@@ -11580,6 +11639,17 @@ warned that every "site" picker in the app (customer, contract, driver, board, v
 route template, invitation) therefore offered nothing, since all eight filter `status = 'active'`.
 Re-read on 2026-08-27: `ADL` / Adelaide is **active**, so that warning is spent and the pickers
 work. Left here rather than deleted, because the trap is real and one press away from returning.
+
+**Handover accounts, 2026-11-19.** Every board has a **generic** login: `board1@`…`board4@ats.example.com`,
+each linked to its own board and nothing else. Board 1 had been Mario Forte's personal login; his
+membership is removed and his login kept (it signed records; his `drivers` row still names him). The
+office has a shared `manager@ats.example.com` with the Office-manager role. None of these addresses
+can receive mail, so their passwords are reset by the Owner from **People › Set new password**
+(`setMemberPassword`), which refuses the caller's own row, a platform administrator, and any id not
+on this laundry's list. Passwords are not in the repository; the handover page says how they are
+shared. **A board is not strictly read-only, by the owner's decision**: it sees only its own round
+and records its own deliveries, collections and problems, because that is what drives proof of
+delivery and auto-billing.
 
 **What genuinely remains: Adelaide's own laundry prices, of which it still holds none.** Until a
 price list is entered, "Price this job" can only ever answer *nothing came back priced* — correct,

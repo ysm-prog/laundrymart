@@ -145,3 +145,48 @@ describe("the members list", () => {
     }
   });
 });
+
+describe("set a new password for somebody", () => {
+  // The shared Manager and Board logins are on a reserved domain and can never
+  // receive a sign-in link, so this control is the only way an Owner can reset
+  // one without a developer. Added for the 2026-11-19 handover.
+  const set = actions.slice(
+    actions.indexOf("export async function setMemberPassword"),
+    actions.indexOf("export async function removeMember"),
+  );
+
+  it("exists, and the row form posts what it reads", () => {
+    expect(set).not.toBe("");
+    expect(page).toMatch(/action=\{setMemberPassword\}/);
+    const form = page.slice(page.indexOf("action={setMemberPassword}"));
+    expect(form).toMatch(/name="user_id"/);
+    expect(form).toMatch(/<PasswordInput\s+name="password"\s+id=\{`password-\$\{row\.id\}`\}/);
+    expect(set).toMatch(/user_id:\s*z\.string\(\)\.uuid\(\)/);
+    expect(set).toMatch(/password:/);
+  });
+
+  it("is the Owner's, and checks the password by the same rule as creation", () => {
+    expect(set).toMatch(/assertCapability\(["']admin\.write["']\)/);
+    expect(set).toMatch(/passwordProblem\(password\)/);
+  });
+
+  it("resolves the person from this laundry's list and refuses a platform administrator", () => {
+    // A posted id is not evidence: resolving it from `tenant_members()` is what
+    // makes an id from another laundry resolve to nothing. And a platform
+    // administrator reaches every laundry, so one Owner must not take it over.
+    expect(set).toMatch(/listMembers\(\)/);
+    expect(set).toMatch(/isPlatformAdmin/);
+    expect(set).toMatch(/session\.userId/);
+  });
+
+  it("never puts the password into the flash message or the audit trail", () => {
+    const done = set.match(/return done\([\s\S]*?\);/)?.[0] ?? "";
+    const audit = set.match(/recordAudit\([\s\S]*?\}\);/)?.[0] ?? "";
+    expect(done).not.toBe("");
+    expect(audit).not.toBe("");
+    for (const block of [done, audit]) {
+      expect(block).not.toMatch(/\$\{\s*password\s*[}.]/);
+      expect(block).not.toMatch(/[+,]\s*password\b/);
+    }
+  });
+});
