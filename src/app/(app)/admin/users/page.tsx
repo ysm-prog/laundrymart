@@ -17,7 +17,8 @@ import { FilterChips, FilterSummary } from "@/components/filters";
 import { isFiltered } from "@/lib/filters";
 import { Field, Input, PasswordInput, Select, SubmitButton } from "@/components/form";
 import {
-  createMemberWithPassword, inviteMember, removeMember, sendMemberSignInLink, updateMembership,
+  createMemberWithPassword, inviteMember, removeMember, sendMemberSignInLink, setMemberPassword,
+  updateMembership,
 } from "../actions";
 import { FormDisclosure } from "@/app/(app)/customers/customer-form";
 import { MIN_PASSWORD_LENGTH } from "@/lib/auth/passwords";
@@ -387,6 +388,29 @@ async function MembershipList({
                     Email sign-in link
                   </SubmitButton>
                 </form>
+                {/* For a login that cannot receive mail — the shared Manager
+                    and the four Board logins are on a reserved domain — this
+                    is the only way to reset it without a developer. Behind a
+                    disclosure so it is never one stray tap away, and the
+                    password box is not `required`, because a required control
+                    inside a closed <details> fails validation with nothing to
+                    focus. Ids are per row, like the form beside it. */}
+                {row.isPlatformAdmin ? null : (
+                  <details className="w-full sm:w-auto">
+                    <summary className="flex min-h-9 items-center rounded-lg px-3 text-sm font-medium
+                                        text-foreground hover:bg-surface-muted">
+                      Set new password
+                    </summary>
+                    <form action={setMemberPassword} className="mt-2 space-y-2 text-left sm:w-72">
+                      <input type="hidden" name="user_id" value={row.id} />
+                      <Field label={`New password for ${row.label}`} name={`password-${row.id}`}
+                             hint={`At least ${MIN_PASSWORD_LENGTH} characters. Tell them by phone or in person, not by email.`}>
+                        <PasswordInput name="password" id={`password-${row.id}`} autoComplete="new-password" />
+                      </Field>
+                      <SubmitButton variant="secondary" pendingLabel="Saving…">Save password</SubmitButton>
+                    </form>
+                  </details>
+                )}
                 <form action={removeMember}>
                   <input type="hidden" name="user_id" value={row.id} />
                   <ConfirmSubmit

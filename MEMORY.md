@@ -9,7 +9,17 @@ where that is genuinely what it is. The multi-tenancy architecture stays: one op
 fact about today's data, not a reason to drop `tenant_id`, RLS, or §23's rule that a read feeding a
 write names its tenant.
 
-## Latest: number sequences are Owner-only (2026-11-03)
+## Latest: handover accounts and 0064 (2026-11-19)
+- Nine logins on Adelaide: Angelo (Owner), Christian + shared `manager@ats.example.com` (Office
+  manager), `board1@`–`board4@ats.example.com` (one per board), Darshan and Jay (Core IT). Mario
+  Forte's access removed (login kept); 11 `@roles.example.com` logins banned.
+- Christian had never signed in (stale October link); new password set. The new passwords live only
+  in the developer's hands, never in the repo.
+- `0064` applied: a board can no longer take over another board's round, and an Office manager can
+  no longer make themselves Owner. People › Set new password resets logins that cannot get email.
+- Still to do: one browser sign-in per account; office to clear 10 stale past-dated board jobs.
+
+## Previously: number sequences are Owner-only (2026-11-03)
 - `0063` makes `park_number_sequence` Owner-only; before it any member could jump the invoice
   numbering through the REST API. Applied live and probed: boards and the Office manager refused,
   Owner allowed, invoice sequence still 15360. No `src/` change.
