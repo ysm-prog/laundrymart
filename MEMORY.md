@@ -10,8 +10,9 @@ fact about today's data, not a reason to drop `tenant_id`, RLS, or §23's rule t
 write names its tenant.
 
 ## Latest: Next.js 16.4.6 (2026-11-23)
-- `next` 16.4.3 → 16.4.6 for a moderate advisory; no source change. Done in a worktree, on the work
-  branch only; not yet on `Dev`/`Prod`. Dependabot #142 overlaps (bumps next to 16.4.5).
+- `next` 16.4.3 → 16.4.6 for a moderate advisory; no source change. Done in a worktree, then on the work
+  branch. Merged to `Dev` and `Prod` (`deff08c`), CI green on both (runs 474, 475).
+  Dependabot #142 overlaps (bumps next to 16.4.5).
 
 ## Previously: backdated jobs and Take laundry (2026-11-23)
 - Any role with `orders.write` can record a job received on an earlier day; future days still

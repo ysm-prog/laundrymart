@@ -3887,6 +3887,14 @@ apps. The build also stopped once on Next's own security warning. **No migration
 - `verify` green: typecheck, lint, 1651 tests across 109 files, production build. `npm audit --omit=dev`
   **0**. The built app served `/login` and `/design-preview` 200, and an app route redirected to sign-in.
 
+**Merged to `Dev` and `Prod` on 2026-11-23** (`deff08c`), both clean fast-forwards from `35a383a`,
+so nothing was reconciled and `Prod` was never force-pushed. **CI green on all three jobs for both**
+(run 474 `Dev`, run 475 `Prod`): Verify (typecheck, lint, tests, build), Security (gitleaks strict and
+the blocking production audit) and the DB job (migrations, the pgTAP suite and the seed on a fresh
+Postgres 16). `verify.sh` ran 23:05:15 → 23:06:11 on `Prod`, its ordinary duration, read off the
+runner's step timestamps. **Nothing to apply**: no migration. **The Vercel production deploy is not
+confirmable from this session** (§5).
+
 ### 2026-11-23 · Backdated laundry jobs, and Take laundry on a customer
 From the client's fix notes. **No migration; no schema, RLS or policy change.**
 - **A job can be received on any earlier day, by anybody who takes laundry in.** Two things refused
