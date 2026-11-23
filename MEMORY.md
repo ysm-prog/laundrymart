@@ -12,7 +12,8 @@ write names its tenant.
 ## Latest: review fixes for backdated jobs (2026-11-23)
 - A refused save carries `?received=` back, so a backdated job is not reset to today; the suggested
   return date counts from the received date (`returnDateFrom`); collection date capped at received.
-- Merged to `Dev` and `Prod` after the simplified workflow. No migration.
+- Merged to `Dev` and `Prod` (`698b1a9`) after the simplified workflow; CI green on both
+  (runs 486, 487). No migration. Still to check live: a refused backdated save keeps its date.
 
 ## Previously: simplified workflow (2026-11-23)
 - Settings › How you work › Workflow: Simplified (default) / Full. Simplified completes a new job

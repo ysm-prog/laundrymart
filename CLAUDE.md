@@ -3920,6 +3920,17 @@ capability or policy change.**
 - `backdated-jobs.test.ts` gains the seams (received date carried, passed to the pages, to the intake
   read, and the pickup cap); `returnDateFrom` has its own tests.
 
+**Merged to `Dev` and `Prod` on 2026-11-23** (`698b1a9`). Both had moved while this was in flight
+(the simplified workflow and `0065`, merged as `bf14cbb` with two record commits after it), so
+`Prod` was merged in rather than overwritten; only `CLAUDE.md` and `MEMORY.md` conflicted, both
+entries kept. `verify` re-run green on the merged tree, **1675 tests** (the simplified workflow's
+1669 plus these 6), then a fast-forward to both. `Prod` never force-pushed. **CI green on all three
+jobs for both** (run 486 `Dev`, run 487 `Prod`); on `Prod` `verify.sh` ran 23:29:35 → 23:30:59 and
+the DB suite 23:29:29 → 23:29:41, read off the step timestamps. **Nothing to apply**: no migration
+of this change's own. **The Vercel production deploy is not confirmable from this session** (§5).
+The two changes meet at one point worth checking live: in the simplified workflow a new job is
+completed as at its received date on save, so a refused save keeping that date now matters more.
+
 ### 2026-11-23 · Simplified workflow: a new job is completed and ready to invoice on save
 The client's change request 3. **One migration, `0065`, applied live on 2026-11-23 before the merge (§11).**
 - **The setting.** Settings › How you work › Workflow: *Simplified* (default) or *Full*. Stored as
