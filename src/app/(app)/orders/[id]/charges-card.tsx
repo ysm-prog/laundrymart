@@ -11,7 +11,7 @@ import {
 import { CHARGE_TYPE_LABELS, gstPhrase, inclusiveTotals, type ChargeType } from "@/lib/domain/pricing";
 import { jobChargeSubtotal } from "@/lib/domain/job-pricing";
 import { loadJobCharges, loadRateCard } from "@/lib/orders/job-billing";
-import { Badge, Card, DataTable, EmptyState, Notice } from "@/components/ui";
+import { Badge, ButtonLink, Card, DataTable, EmptyState, Notice } from "@/components/ui";
 import { ConfirmSubmit } from "@/components/confirm-submit";
 import { SubmitButton } from "@/components/form";
 import { JobChargesEditor } from "./job-charges-editor";
@@ -53,7 +53,9 @@ export async function ChargesCard({
 
   // Fetched on every view since the total stopped saying "GST included" blindly:
   // the read-only record has to work out how much GST it holds too.
-  const [charges, rateCard, items, accounts, gstRate] = await Promise.all([
+  const onInvoice = billingStatus === "invoice_generated"
+    || billingStatus === "invoice_sent" || billingStatus === "paid";
+  const [charges, rateCard, items, accounts, gstRate, invoice] = await Promise.all([
     loadJobCharges(supabase, orderId),
     loadRateCard(supabase, customerId),
     // Only when the charges can still be changed. A frozen job is a record, and
@@ -62,6 +64,7 @@ export async function ChargesCard({
     editable ? loadCodingItems(supabase, tenantId, customerId) : Promise.resolve([]),
     editable ? loadCodingAccounts(supabase, tenantId) : Promise.resolve([]),
     tenantGstRate(supabase, tenantId),
+    onInvoice ? loadJobInvoice(supabase, tenantId, orderId) : Promise.resolve(null),
   ]);
 
   const subtotal = jobChargeSubtotal(charges);
@@ -79,6 +82,24 @@ export async function ChargesCard({
           This job is priced once the work is finished. Completing it puts it in the review
           queue — it never generates an invoice on its own.
         </Notice>
+      ) : null}
+
+      {/* The way from a job to its invoice (change request 3): approving puts
+          the charges on the customer's draft, and the draft is where Issue and
+          Send are. Linked rather than duplicated here, so creating and sending
+          an invoice stays the one implementation the invoice page carries —
+          with its own confirm, its Xero push and its duplicate controls. */}
+      {invoice ? (
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-surface-sunken px-4 py-3">
+          <p className="text-sm">
+            {invoice.status === "draft"
+              ? <>On draft invoice <span className="font-medium">{invoice.invoice_number}</span>. Open it to issue and send the invoice.</>
+              : <>Billed on invoice <span className="font-medium">{invoice.invoice_number}</span>.</>}
+          </p>
+          <ButtonLink href={`/invoices/${invoice.id}`} variant={invoice.status === "draft" ? "primary" : "secondary"}>
+            {invoice.status === "draft" ? "Open the draft invoice" : "View invoice"}
+          </ButtonLink>
+        </div>
       ) : null}
 
       {billingStatus === "not_billable" ? (
@@ -329,6 +350,26 @@ async function loadCodingItems(
   // says, so a stale rate here is one the customer is billed at on a row nobody
   // can edit afterwards.
   return attachListPrices(supabase, tenantId, customerId, data ?? []);
+}
+
+/**
+ * The live invoice carrying this job, if any. A void invoice's link is deleted
+ * when it releases its jobs, so the newest link is the one that bills it.
+ */
+async function loadJobInvoice(
+  supabase: Awaited<ReturnType<typeof createClient>>, tenantId: string, orderId: string,
+): Promise<{ id: string; invoice_number: string; status: string } | null> {
+  const { data } = await supabase
+    .from("invoice_source_jobs")
+    .select("invoices(id, invoice_number, status)")
+    .eq("tenant_id", tenantId)
+    .eq("order_id", orderId)
+    .order("created_at", { ascending: false })
+    .limit(5)
+    .returns<Array<{ invoices: { id: string; invoice_number: string; status: string } | null }>>();
+  return (data ?? []).map((row) => row.invoices)
+    .find((row): row is { id: string; invoice_number: string; status: string } =>
+      Boolean(row) && row!.status !== "void") ?? null;
 }
 
 async function loadCodingAccounts(

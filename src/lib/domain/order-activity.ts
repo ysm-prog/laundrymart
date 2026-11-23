@@ -67,6 +67,11 @@ export function describeOrderActivity(entry: ActivityRecord, lookups: ActivityLo
         return `confirmed the load${board ? ` on ${board}` : ""}${date ? ` for ${date}` : ""}`
           + `${driver ? `, driven by ${driver}` : ""}, and it went out for delivery.`;
       }
+      // The simplified workflow's completion on save (0065): nothing was
+      // handed over through the app, so the sentence says what was decided.
+      if (next.status === "completed" && next.workflow === "simplified") {
+        return "marked it completed and ready to invoice (simplified workflow).";
+      }
       return `moved it from ${word(previous.status)} to ${word(next.status)}.`;
     }
     case "run_assigned": {
