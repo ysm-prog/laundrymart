@@ -28,6 +28,7 @@ import { ChargesCard } from "./charges-card";
 import { DispatchCard } from "./dispatch-card";
 import { StatusTrack } from "./status-track";
 import { advanceOrder, cancelOrder, completeOrder } from "../actions";
+import { laundryWorkflow } from "@/lib/orders/workflow";
 
 export const dynamic = "force-dynamic";
 
@@ -162,7 +163,10 @@ export default async function JobDetailPage({
   // over and when, and cancelling one carries a reason. The plain status moves
   // are steps on the track, so a button for each of them here would be the same
   // choice offered twice — and with free movement there can be four at once.
-  const available = foreign ? [] : actionsFor(order.status, delivery)
+  // Which workflow decides what this job may do next (change request 3). The
+  // job's own laundry's setting, which is the one 0065's trigger reads.
+  const simplified = await laundryWorkflow(supabase, order.tenant_id) === "simplified";
+  const available = foreign ? [] : actionsFor(order.status, delivery, { simplified })
     .filter((action) => action.confirms && can(session.role, action.capability));
 
   // The track. `foreign` stops it rather than a capability check, because the
@@ -171,7 +175,7 @@ export default async function JobDetailPage({
   // else's job would match no row and report success. (Before the track, the
   // status buttons did exactly that.)
   const track = buildStatusTrack(
-    { status: order.status, deliveryRequired: delivery },
+    { status: order.status, deliveryRequired: delivery, simplified },
     (capability) => can(session.role, capability),
     foreign
       ? "This job belongs to another laundry — switch laundry in the account menu to move it."
@@ -186,6 +190,7 @@ export default async function JobDetailPage({
     boardName: order.assigned_board?.name ?? null,
     deliveryDay: order.assigned_delivery_date ? formatAdelaideDate(order.assigned_delivery_date, "medium") : null,
     needsPrice: order.billing_hold_reason === "needs_price",
+    simplified,
   });
   const nextAllowed = next && (next.kind === "wait" || can(session.role, next.capability));
 

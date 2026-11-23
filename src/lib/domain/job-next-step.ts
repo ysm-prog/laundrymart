@@ -25,6 +25,11 @@ export function nextStepFor(job: {
   /** "Tue 21 Oct" when the job is on a round. */
   deliveryDay: string | null;
   needsPrice: boolean;
+  /**
+   * The simplified workflow (0065): a delivery job is finished straight from
+   * the shelf, so "put it on a round" is not the next step for one.
+   */
+  simplified?: boolean;
 }): NextStep | null {
   switch (job.status) {
     case "new":
@@ -32,6 +37,9 @@ export function nextStepFor(job: {
     case "in_progress":
       return { kind: "advance", label: "Mark it ready", to: "ready_for_delivery", capability: "orders.status" };
     case "ready_for_delivery":
+      if (job.deliveryRequired && job.simplified) {
+        return { kind: "complete", label: "Mark it completed", capability: "orders.status" };
+      }
       return job.deliveryRequired
         ? { kind: "assign", label: "Put it on a round", capability: "routes.write" }
         : { kind: "complete", label: "Customer has collected it", capability: "orders.status" };

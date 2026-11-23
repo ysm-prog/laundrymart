@@ -165,12 +165,12 @@ describe("Settings › How you work (3.4, 3.9)", () => {
     expect(parseOperations({ operations: { plantStages: "yes", defaultTurnaroundDays: 99 } }))
       .toEqual(DEFAULT_OPERATIONS);
     expect(parseOperations({ operations: { plantStages: true, defaultTurnaroundDays: 4 } }))
-      .toEqual({ plantStages: true, defaultTurnaroundDays: 4 });
+      .toEqual({ workflow: "simplified", plantStages: true, defaultTurnaroundDays: 4 });
   });
 
   it("reads the form, and refuses a turnaround that is not a whole day count", () => {
     expect(readOperationsForm({ plantStages: "on", defaultTurnaroundDays: "3" }))
-      .toEqual({ ok: true, value: { plantStages: true, defaultTurnaroundDays: 3 } });
+      .toEqual({ ok: true, value: { workflow: "simplified", plantStages: true, defaultTurnaroundDays: 3 } });
     expect(readOperationsForm({ plantStages: null, defaultTurnaroundDays: "1.5" }).ok).toBe(false);
     expect(readOperationsForm({ plantStages: null, defaultTurnaroundDays: "45" }).ok).toBe(false);
   });

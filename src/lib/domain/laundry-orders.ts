@@ -80,7 +80,16 @@ export function isOrderStatus(value: string): value is OrderStatus {
  *
  * Mirrored exactly by `guard_laundry_order_transition()` in migration 0042 —
  * the database is the boundary, this is the explanation.
+ *
+ * **Rule 4 is relaxed in the simplified workflow** (0065, change request 3): a
+ * laundry that does not run deliveries through the app completes a delivery job
+ * straight from the plant. Only from the plant — a job already on a round still
+ * goes out first, because then the round *is* in use and its run sheet would
+ * otherwise show a stop that was never left for.
  */
+
+/** Which workflow a move is judged under. Absent means the full process. */
+export type TransitionOptions = { simplified?: boolean };
 
 /** Statuses that only a delivery job ever reaches. A pickup never leaves the shop. */
 const DELIVERY_ONLY: readonly OrderStatus[] = ["assigned", "out_for_delivery"];
@@ -119,6 +128,7 @@ export function stagesFor(deliveryRequired: boolean): OrderStatus[] {
  */
 function refuseTransition(
   from: OrderStatus, to: OrderStatus, deliveryRequired: boolean,
+  options: TransitionOptions = {},
 ): string | null {
   if (from === to) return `This job is already ${ORDER_STATUS_LABELS[to].toLowerCase()}.`;
 
@@ -145,8 +155,9 @@ function refuseTransition(
     return "Assign this job to a round and a delivery date before it goes out.";
   }
 
-  // Rule 4.
-  if (to === "completed" && deliveryRequired && from !== "out_for_delivery") {
+  // Rule 4 — relaxed from the plant in the simplified workflow (0065).
+  if (to === "completed" && deliveryRequired && from !== "out_for_delivery"
+      && !(options.simplified && PLANT_STAGES.includes(from))) {
     return "A delivery job is completed once it has gone out — assign it to a round and "
       + "send it out first.";
   }
@@ -161,9 +172,11 @@ function refuseTransition(
  * offers `new`, `ready_for_delivery` and `cancelled`, and from
  * `ready_for_delivery` it adds `assigned`.
  */
-export function nextStatuses(from: OrderStatus, deliveryRequired: boolean): OrderStatus[] {
+export function nextStatuses(
+  from: OrderStatus, deliveryRequired: boolean, options: TransitionOptions = {},
+): OrderStatus[] {
   return ORDER_STATUSES.filter(
-    (to) => refuseTransition(from, to, deliveryRequired) === null,
+    (to) => refuseTransition(from, to, deliveryRequired, options) === null,
   );
 }
 
@@ -173,8 +186,9 @@ export function nextStatuses(from: OrderStatus, deliveryRequired: boolean): Orde
  */
 export function checkTransition(
   from: OrderStatus, to: OrderStatus, deliveryRequired: boolean,
+  options: TransitionOptions = {},
 ): { ok: true } | { ok: false; reason: string } {
-  const reason = refuseTransition(from, to, deliveryRequired);
+  const reason = refuseTransition(from, to, deliveryRequired, options);
   return reason === null ? { ok: true } : { ok: false, reason };
 }
 
@@ -219,8 +233,10 @@ export const ORDER_ACTIONS: readonly OrderAction[] = [
  * to four at once. The rest is kept because it is where each move's capability
  * is declared, and `roles.test.ts` and the tests below read it from here.
  */
-export function actionsFor(status: OrderStatus, deliveryRequired: boolean): OrderAction[] {
-  const reachable = nextStatuses(status, deliveryRequired);
+export function actionsFor(
+  status: OrderStatus, deliveryRequired: boolean, options: TransitionOptions = {},
+): OrderAction[] {
+  const reachable = nextStatuses(status, deliveryRequired, options);
   return ORDER_ACTIONS.filter((action) => {
     if (!reachable.includes(action.to)) return false;
     if (action.key === "deliver") return deliveryRequired;
@@ -333,7 +349,7 @@ export type StatusStep = {
  * the banner above the track is what says what happened to it.
  */
 export function buildStatusTrack(
-  job: { status: OrderStatus; deliveryRequired: boolean },
+  job: { status: OrderStatus; deliveryRequired: boolean; simplified?: boolean },
   allows: (capability: Capability) => boolean,
   /**
    * One sentence that stops the whole track and replaces every note, for the
@@ -358,7 +374,8 @@ export function buildStatusTrack(
       return { status, label: ORDER_STATUS_LABELS[status], state, jump: false, note: blocked };
     }
 
-    const refusal = refuseTransition(job.status, status, job.deliveryRequired);
+    const refusal = refuseTransition(
+      job.status, status, job.deliveryRequired, { simplified: job.simplified });
     const missing = capabilitiesForMove(job.status, status).some((c) => !allows(c));
     const note = refusal
       ?? (missing ? "Your role cannot make this change." : control.where);

@@ -24,6 +24,7 @@ import { completeLaundryOrder } from "@/lib/orders/complete";
 import { autoPriceSentence } from "@/lib/domain/job-pricing";
 import { autoApproveSentence } from "@/lib/orders/auto-approve";
 import { retireStopIfEmpty } from "@/lib/runs/assign";
+import { laundryWorkflow } from "@/lib/orders/workflow";
 
 /**
  * Writes for the laundry-jobs module.
@@ -320,7 +321,8 @@ export async function createOrder(formData: FormData): Promise<void> {
   // and refusing a past date refused exactly that work. A later day never is,
   // for anybody (brief 1.5). 0055's trigger is the boundary; this is the
   // sentence in front of it.
-  if (receivedInFuture(receivedInstant(parsed.data.received_date))) {
+  const receivedAt = receivedInstant(parsed.data.received_date);
+  if (receivedInFuture(receivedAt)) {
     return fail(backToForm, RECEIVED_IN_FUTURE_MESSAGE);
   }
 
@@ -353,7 +355,7 @@ export async function createOrder(formData: FormData): Promise<void> {
   const { data: order, error } = await supabase
     .from("laundry_orders")
     .insert({
-      ...toRow(parsed.data, deliveryAddress, receivedInstant(parsed.data.received_date)),
+      ...toRow(parsed.data, deliveryAddress, receivedAt),
       tenant_id: session.tenantId,
       depot_id: session.depotId ?? customer.depot_id,
       created_by: session.userId,
@@ -406,6 +408,47 @@ export async function createOrder(formData: FormData): Promise<void> {
   });
 
   revalidatePath(LIST);
+
+  // **The simplified workflow** (change request 3, Settings › How you work):
+  // the laundry is not running deliveries through the app yet, so a new job is
+  // finished the moment it is saved and goes straight to the billing queue —
+  // no round, no delivery stage, no completion form. Through the one completion
+  // routine, so it is priced (and, where the customer's rates price it cleanly,
+  // approved onto their draft) exactly as a job finished any other way. It
+  // never issues or sends an invoice: issuing the draft stays a person's act.
+  //
+  // Completed *as at the day it was received*, so a job typed in after the fact
+  // bills to the month its work belongs to rather than the month it was keyed.
+  // No handover is recorded — see `recordHandover`. A role that may take laundry
+  // in but not move it on is left at New rather than refused; every role that
+  // holds `orders.write` today also holds `orders.status`.
+  if (can(session.role, "orders.status")
+      && await laundryWorkflow(supabase, session.tenantId) === "simplified") {
+    const finished = await completeLaundryOrder(supabase, session, {
+      id: order.id, order_number: order.order_number, status: "new",
+      delivery_required: parsed.data.delivery_required,
+    }, {
+      at: receivedAt, handledBy: session.userId,
+      simplified: true, recordHandover: false,
+    });
+    if (!finished.ok) {
+      // The job exists and its laundry is saved, so this is not a failed
+      // creation — it is a job left at New, which the person needs to know.
+      return fail(`/orders/${order.id}`,
+        `Job ${order.order_number} was created but could not be marked completed: ${finished.error}`);
+    }
+    revalidatePath("/invoices/awaiting");
+    revalidatePath("/invoices/drafts");
+    const priced = !can(session.role, "billing.read") || !finished.pricing
+      ? ""
+      : finished.approval?.state === "approved"
+        ? autoApproveSentence(finished.approval)
+        : autoPriceSentence(finished.pricing);
+    return done(`/orders/${order.id}`,
+      `Job ${order.order_number} created and completed — it is ready to invoice.${priced}`,
+      { href: `/orders/${order.id}/docket`, label: "Print the docket" });
+  }
+
   return done(`/orders/${order.id}`, parsed.data.source_pickup_id
     // Says the link landed, which is the one thing the counter cannot see on the
     // job they are about to be shown and the thing that stops it being taken in
@@ -690,6 +733,10 @@ export async function completeOrder(formData: FormData): Promise<void> {
     at: toInstant(parsed.data.completed_date, parsed.data.completed_time),
     handledBy: parsed.data.handled_by,
     note: parsed.data.note ?? null,
+    // In the simplified workflow a delivery job already finished on the shelf
+    // may be marked delivered from there (0065). This is a real handover — who
+    // and when are on the form — so it is recorded as one.
+    simplified: await laundryWorkflow(supabase, session.tenantId) === "simplified",
   });
   if (!result.ok) return fail(detail, result.error);
   const { delivered } = result;

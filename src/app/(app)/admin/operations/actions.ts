@@ -9,12 +9,13 @@ import { describeDbError, done, fail } from "@/lib/actions";
 
 const BACK = "/admin/operations";
 
-/** Settings › How you work (brief 3.4, 3.9). The Owner's, like every settings key. */
+/** Settings › How you work (brief 3.4, 3.9, change request 3). The Owner's, like every settings key. */
 export async function saveOperationsSettings(formData: FormData): Promise<void> {
   const session = await assertCapability("admin.write");
   const read = readOperationsForm({
     plantStages: formData.get("plantStages"),
     defaultTurnaroundDays: formData.get("defaultTurnaroundDays"),
+    workflow: formData.get("workflow"),
   });
   if (!read.ok) return fail(BACK, read.error);
 
@@ -32,7 +33,8 @@ export async function saveOperationsSettings(formData: FormData): Promise<void> 
     entity: "tenant_settings", entityId: session.tenantId, action: "update",
     summary: "operations settings changed", metadata: read.value,
   });
-  // The plant switch changes the rail count, Today and Linen, so everything.
+  // The plant switch changes the rail count, Today and Linen, and the workflow
+  // changes what every job page offers, so everything.
   revalidatePath("/", "layout");
   return done(BACK, "Saved.");
 }

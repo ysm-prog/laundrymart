@@ -9,7 +9,16 @@ where that is genuinely what it is. The multi-tenancy architecture stays: one op
 fact about today's data, not a reason to drop `tenant_id`, RLS, or §23's rule that a read feeding a
 write names its tenant.
 
-## Latest: backdated jobs and Take laundry (2026-11-23)
+## Latest: simplified workflow (2026-11-23)
+- Settings › How you work › Workflow: Simplified (default) / Full. Simplified completes a new job
+  on save (as at its received instant, no handover recorded), priced and auto-approved onto the
+  draft where clean. Never issues/sends. Job Charges card links to its draft invoice.
+- `0065` relaxes rule 4 from plant stages when simplified. **Written, not applied** — apply before
+  the code reaches Prod. Live guard was hash-identical to 0042 (checked).
+- Next.js 16.4.3 has moderate advisories (fixed in 16.4.5+); the build only stops on it under an
+  AI-agent environment. Not taken here.
+
+## Previously: backdated jobs and Take laundry (2026-11-23)
 - Any role with `orders.write` can record a job received on an earlier day; future days still
   refused. Return-date `min` is now the received date, not today. No migration.
 - Take laundry button on a customer's record opens `/orders/new?customer=<id>`.

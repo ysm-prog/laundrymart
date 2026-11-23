@@ -17,9 +17,13 @@ select plan(39);
 insert into auth.users (id, email) values
   ('11111111-1111-1111-1111-111111111111','a@example.com'),
   ('22222222-2222-2222-2222-222222222222','b@example.com');
-insert into public.tenants (id, name) values
-  ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','Laundry A'),
-  ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb','Laundry B');
+-- Both laundries run the **full** workflow, said explicitly: since 0065 an
+-- absent setting means the simplified one, which completes a delivery job
+-- straight off the shelf, and this file is the proof of the full process.
+-- `simplified_workflow.test.sql` proves the other.
+insert into public.tenants (id, name, settings) values
+  ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','Laundry A', '{"operations":{"workflow":"full"}}'),
+  ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb','Laundry B', '{"operations":{"workflow":"full"}}');
 insert into public.memberships (user_id, tenant_id, role) values
   ('11111111-1111-1111-1111-111111111111','aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','super_admin'),
   ('22222222-2222-2222-2222-222222222222','bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb','super_admin');

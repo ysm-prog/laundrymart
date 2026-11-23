@@ -647,6 +647,15 @@ key remains the way to reset or re-assert them through the Auth API, but nothing
   asked, where `due_date` is a generated column (delivery date, or collection date for a
   pickup job). A job's laundry list is replaced through `save_laundry_order_items()`, one
   transaction, because a delete-then-insert over PostgREST has a window with no items in it.
+- **In the simplified workflow a new job is finished as it is saved** (0065, change request 3,
+  2026-11-23). `settings.operations.workflow` — `simplified` (the default, and what an absent key
+  means in both the app and the database) or `full`, on Settings › How you work. Simplified:
+  `createOrder` completes the job through `completeLaundryOrder` as at its received instant, so it
+  is priced, auto-approved where clean, and bills to the month it was received; it records **no
+  handover** (`recordHandover: false` — no `delivered_*`/`collected_*`, a `status_changed` timeline
+  row), and it never issues or sends an invoice. 0065 relaxes 0042's rule 4 **only from a plant
+  stage**: a delivery job already on a round still goes out first. Full is 0042 unchanged. Nothing
+  about rounds, drivers or delivery is removed, and switching moves no existing job.
 - **A job is assigned to a Board and a Delivery Date, and the two records of that cannot
   disagree** (`guard_laundry_order_assignment`, 0016 retargeted by 0031). Eligibility first: a
   customer pickup is refused outright, so is a job still in the plant and a completed or
@@ -1541,6 +1550,14 @@ produce on demand.
   - Adds no table, column or function; changes no row. Eight self-assertions.
     `board_and_people_write.test.sql` (18), which fails 12 on a database without 0064.
     **Applied 2026-11-19** (§11).
+- `0065_simplified_workflow` — **a delivery job may be completed off the shelf, when the laundry
+  says so.** `guard_laundry_order_transition` rebuilt from **0042's** body (the latest ancestor;
+  the live body was hash-identical to it, checked before writing), rule 4 skipped when the job is in
+  a plant stage and `tenants.settings.operations.workflow` is `simplified` or absent. Read inline
+  through the caller's RLS (the guard stays SECURITY INVOKER); a tenant row the caller cannot see
+  reads as *not* simplified. Adds no table, column, function, policy or capability; changes no row.
+  Six self-assertions. `simplified_workflow.test.sql` (13), which fails 9 without it;
+  `laundry_orders.test.sql` now states `full` for its two laundries, because it proves that process.
 - `0050_pickup_to_job` — **a collection becomes a laundry job, exactly once.**
   `laundry_orders.source_pickup_id` (`on delete set null`),
   `uq_laundry_orders_source_pickup` (partial unique) and
@@ -1827,7 +1844,7 @@ Proofs in `supabase/tests/`: `rls_isolation`, `rls_coverage`, `driver_scope`,
 `customer_record_scope`, `fleet_scope`, `pickup_intake`, `laundry_item_ownership`,
 `invoice_money_guards`, `invoice_issue_guard`, `billing_flow_guards`, `flow_runs_itself`,
 `operations_settings`, `billing_write_policies`, `hot_foreign_key_indexes`, `reopen_job_charges`,
-`invoice_sms`, `invoice_history_import`, `board_and_people_write` (**783 assertions** across 44 files).
+`invoice_sms`, `invoice_history_import`, `board_and_people_write`, `simplified_workflow` (**796 assertions** across 45 files).
 
 **Count assertions, not lines starting with `ok`.** pgTAP's function is literally named `ok`, so
 psql prints a centred `ok` **column header** above each result — and `grep -c '^\s*ok '` counts
@@ -3872,6 +3889,36 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-11-23 · Simplified workflow: a new job is completed and ready to invoice on save
+The client's change request 3. **One migration, `0065`, written and NOT yet applied.**
+- **The setting.** Settings › How you work › Workflow: *Simplified* (default) or *Full*. Stored as
+  `operations.workflow`; absent means simplified, which is the live laundry's state today (it has
+  never saved `operations`). Saving the form now always writes the field.
+- **Creating a job** (the job form and the customer's Take laundry, which is the same form) in the
+  simplified workflow completes it through the shared completion routine, as at its received
+  instant. It is priced at once and, where the customer's rates price it cleanly, approved onto the
+  customer's draft; otherwise it waits in Money › Awaiting invoice. The toast says "created and
+  completed — it is ready to invoice". **No invoice is issued or sent**: that stays the draft
+  invoice's Issue and Send. If completion is refused, the job is still created and the toast says
+  why it was left at New.
+- **No handover is recorded** on that completion, so Reports' delivered counts and the job's
+  "delivered by" stay true; the timeline says "marked it completed and ready to invoice (simplified
+  workflow)".
+- **Existing jobs are not moved.** In the simplified workflow a delivery job still in the plant can
+  be marked delivered by hand from the job page (the track, Mark as delivered and the next-step
+  button all follow the setting). A job already on a round still goes out first.
+- **Job → invoice.** The job's Charges card now links straight to the draft invoice carrying it
+  ("Open the draft invoice"), where Issue and Send already are, with their confirm and the
+  existing duplicate controls; issued jobs link to their invoice.
+- **Full workflow** is 0042 unchanged, in the app and the database.
+- Checks: 1669 unit tests (18 new in `simplified-workflow.test.ts`, one mutation confirmed caught),
+  typecheck, lint, build; all 65 migrations on a fresh Postgres 16, **796 pgTAP assertions across
+  45 files**, 0 failing.
+- **Order matters:** apply `0065` before this code reaches `Prod`. Without it a *delivery* job is
+  created but refused completion (left at New with an error toast); pickups complete either way.
+- **Not verified behind the auth gate.** Before trusting it: as Angela, take a job in for a
+  customer, check it opens Completed, open its draft invoice from the Charges card, issue and send.
+
 ### 2026-11-23 · Backdated laundry jobs, and Take laundry on a customer
 From the client's fix notes. **No migration; no schema, RLS or policy change.**
 - **A job can be received on any earlier day, by anybody who takes laundry in.** Two things refused

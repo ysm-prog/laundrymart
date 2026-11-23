@@ -61,6 +61,21 @@ export type CompletionInput = {
    * boundary under that.
    */
   proof?: DeliveryProof;
+  /**
+   * Judge the move under the simplified workflow (0065): a delivery job may be
+   * completed straight from the plant. The caller reads the laundry's setting
+   * (`laundryWorkflow`); the trigger reads the same key and is the boundary.
+   */
+  simplified?: boolean;
+  /**
+   * Whether this completion is a record of somebody handing the laundry over.
+   * True everywhere except the simplified workflow's completion on save, which
+   * records that the job is finished and ready to invoice and nothing more: no
+   * one delivered it *through the app*, so stamping `delivered_by` with whoever
+   * typed the job in would put a handover on the record that nobody witnessed,
+   * and the Delivered figures on Reports would count it.
+   */
+  recordHandover?: boolean;
 };
 
 export type DeliveryProof = {
@@ -90,18 +105,22 @@ export async function completeLaundryOrder(
     status = "out_for_delivery";
   }
 
-  const allowed = checkTransition(status, "completed", order.delivery_required);
+  const allowed = checkTransition(
+    status, "completed", order.delivery_required, { simplified: input.simplified });
   if (!allowed.ok) return { ok: false, error: allowed.reason };
 
   const delivered = order.delivery_required;
+  const handover = input.recordHandover !== false;
   const { error } = await supabase
     .from("laundry_orders")
     .update({
       status: "completed",
       completed_at: input.at,
-      ...(delivered
-        ? { delivered_at: input.at, delivered_by: input.handledBy }
-        : { collected_at: input.at, collected_by: input.handledBy }),
+      ...(!handover
+        ? {}
+        : delivered
+          ? { delivered_at: input.at, delivered_by: input.handledBy }
+          : { collected_at: input.at, collected_by: input.handledBy }),
       ...(delivered && input.proof
         ? {
             delivery_received_by: input.proof.receivedBy,
@@ -120,10 +139,13 @@ export async function completeLaundryOrder(
   if (error) return { ok: false, error: describeDbError(error) };
 
   await logOrderActivity(supabase, session, order.id, {
-    activity_type: delivered ? "delivered" : "collected",
+    // A completion that hands nothing over is a status change, not a delivery
+    // or a collection — the timeline must not claim either happened.
+    activity_type: !handover ? "status_changed" : delivered ? "delivered" : "collected",
     previous: { status },
     next: {
       status: "completed", at: input.at, by: input.handledBy,
+      ...(!handover ? { workflow: "simplified" } : {}),
       ...(input.proof
         ? {
             board: input.proof.boardId, driver: input.proof.driverId,
