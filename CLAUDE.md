@@ -3931,6 +3931,14 @@ The client's change request 3. **One migration, `0065`, applied live on 2026-11-
 - **Not verified behind the auth gate.** Before trusting it: as Angela, take a job in for a
   customer, check it opens Completed, open its draft invoice from the Charges card, issue and send.
 
+**Merged to `Dev` and `Prod` on 2026-11-23** (`bf14cbb`), after `0065` was applied live. Both had
+moved while this was in flight (the Next.js 16.4.6 upgrade below), so `Prod` was merged in rather
+than overwritten; only `CLAUDE.md` and `MEMORY.md` conflicted, both entries kept, and `verify` was
+re-run green on the merged tree with 16.4.6 installed. Then a fast-forward to both, `Prod` never
+force-pushed. **CI green on all three jobs for both** (run 480 `Dev`, run 481 `Prod`); on `Prod`
+`verify.sh` ran 23:13:02 → 23:13:52 and the DB suite with 0065 in it 23:13:32 → 23:13:42, read off
+the step timestamps. **The Vercel production deploy is not confirmable from this session** (§5).
+
 ### 2026-11-23 · Next.js 16.4.3 → 16.4.6, for a moderate advisory
 `npm audit --omit=dev` reported one moderate advisory on `next` 16.0.0–16.4.4: seven issues, mostly
 `use cache` and Cache Components leaks (which `src/` does not use), plus an SVG bypass in image
