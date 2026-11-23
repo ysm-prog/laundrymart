@@ -3894,6 +3894,14 @@ From the client's fix notes. **No migration; no schema, RLS or policy change.**
   open a customer, press Take laundry, set the received date to three days ago, save, and repeat
   for two more days.
 
+**Merged to `Dev` and `Prod` on 2026-11-23** (`0d95bc3`), both clean fast-forwards: neither branch
+held a commit this one lacked, so nothing was reconciled and `Prod` was never force-pushed. **CI
+green on all three jobs for both** — run 470 (`Dev`) and 471 (`Prod`): Verify (typecheck, lint,
+tests, production build), Security (gitleaks strict and the dependency audit) and the DB job
+(migrations, the pgTAP suite and the seed on a fresh Postgres 16). Read off the runner's step
+timestamps: `verify.sh` ran 01:33:46 → 01:34:40 on `Prod`, its ordinary duration. **Nothing to
+apply**: no migration. **The Vercel production deploy is not confirmable from this session** (§5).
+
 ### 2026-11-19 · Handover accounts, and two access holes closed
 The developer's pre-handover checklist: test every login, fix Christian's, create a shared Manager
 and four Board logins, check each board sees only its own run. **One migration, `0064`, applied.**

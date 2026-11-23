@@ -13,6 +13,7 @@ write names its tenant.
 - Any role with `orders.write` can record a job received on an earlier day; future days still
   refused. Return-date `min` is now the received date, not today. No migration.
 - Take laundry button on a customer's record opens `/orders/new?customer=<id>`.
+- Merged to `Dev` and `Prod` (`0d95bc3`), CI green on both (runs 470, 471).
 - Still to check live: enter three backdated jobs as the counter.
 
 ## Previously: handover accounts and 0064 (2026-11-19)
