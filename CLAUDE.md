@@ -3872,6 +3872,25 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-11-23 · Review fixes for the backdated jobs
+Five findings from a review of the backdated-jobs and Next.js work. **No migration; no schema, RLS,
+capability or policy change.**
+- **A refused save no longer resets the received date to today.** `fail()` redirects, so the browser's
+  copy of the form is gone, and the form opened on today again; a backdated job retried after one
+  refusal was then saved as received today. `backWithCustomer` now carries `?received=` beside
+  `?customer=`, both pages pass it to `JobForm` as `defaultReceivedDate`, and the form adopts it the
+  way it adopts the customer. Only a plain date no later than the form's own cap is taken.
+- **The suggested return date counts from the received date, not from today.** `intakeDefaultsFor`
+  and `loadIntakeDefaults` take the received date (`returnDateFrom`, pure and tested: a valid past
+  date, otherwise today), and the form asks again when the received date changes while nobody has set
+  a return date. Without it a job received last Tuesday was offered a return date after today.
+- **The collection date is capped at the received date** in the browser, which the server already
+  required.
+- **§26 still said backdating was `orders.manage`'s**, and one comment said "a manager backdating";
+  both now match the decision.
+- `backdated-jobs.test.ts` gains the seams (received date carried, passed to the pages, to the intake
+  read, and the pickup cap); `returnDateFrom` has its own tests.
+
 ### 2026-11-23 · Next.js 16.4.3 → 16.4.6, for a moderate advisory
 `npm audit --omit=dev` reported one moderate advisory on `next` 16.0.0–16.4.4: seven issues, mostly
 `use cache` and Cache Components leaks (which `src/` does not use), plus an SVG bypass in image
@@ -11893,8 +11912,9 @@ rather than merely did not raise. Anyone widening a role on these tables again n
 **What deliberately did not move.** Only three of 0025's nine tables were widened —
 `laundry_orders` and its items and activity. `invoices`, `invoice_lines`, `payments`,
 `credit_notes`, `credit_note_lines` and `laundry_prices` are untouched, and 0034 asserts by name
-that the counter did not reach them. `orders.manage` was not granted: cancelling a job, backdating
-a receipt and editing a completed one are the supervisor's set. DELETE on `laundry_orders` was not
+that the counter did not reach them. `orders.manage` was not granted: cancelling a job and
+editing a completed one are the supervisor's set. (So was backdating a receipt until 2026-11-23,
+when it moved to `orders.write` because jobs are entered after the fact — §3, §18.) DELETE on `laundry_orders` was not
 granted either — nothing in the app deletes one — while DELETE on `laundry_order_items` was,
 because `save_laundry_order_items()` is SECURITY INVOKER and replaces the child set by deleting
 and re-inserting, so without it the counter could take a job in and never correct what is on it.

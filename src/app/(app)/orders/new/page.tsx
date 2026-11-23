@@ -37,7 +37,7 @@ export const dynamic = "force-dynamic";
 export default async function NewJobPage({
   searchParams,
 }: {
-  searchParams: Promise<{ customer?: string; pickup?: string; via?: string }>;
+  searchParams: Promise<{ customer?: string; pickup?: string; via?: string; received?: string }>;
 }) {
   const params = await searchParams;
   const session = await requireCapability("orders.write");
@@ -96,7 +96,7 @@ export default async function NewJobPage({
   // server, so the form arrives filled rather than filling a moment later. A
   // collection already carries its own laundry, so it is not prefilled.
   const initialDefaults = chosenCustomer && !collection
-    ? await intakeDefaultsFor(session.tenantId, chosenCustomer)
+    ? await intakeDefaultsFor(session.tenantId, chosenCustomer, params.received)
     : null;
 
   // Back to *this* form, seed and all. A rejection redirects, so the browser's
@@ -154,6 +154,8 @@ export default async function NewJobPage({
           source_pickup_id: collection.id,
         } : undefined}
         defaultCustomerId={chosenCustomer}
+        // A refused save comes back with the received date it posted.
+        defaultReceivedDate={params.received}
         returnPath={returnPath}
         // The counter's own screen is a drop-off (the column's default); a
         // collection or a `?via=driver_pickup` link is a driver pickup.

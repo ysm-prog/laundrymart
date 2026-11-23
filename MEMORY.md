@@ -9,7 +9,12 @@ where that is genuinely what it is. The multi-tenancy architecture stays: one op
 fact about today's data, not a reason to drop `tenant_id`, RLS, or §23's rule that a read feeding a
 write names its tenant.
 
-## Latest: Next.js 16.4.6 (2026-11-23)
+## Latest: review fixes for backdated jobs (2026-11-23)
+- A refused save carries `?received=` back, so a backdated job is not reset to today; the suggested
+  return date counts from the received date (`returnDateFrom`); collection date capped at received.
+- On the work branch only; not merged to `Dev`/`Prod` yet. No migration.
+
+## Previously: Next.js 16.4.6 (2026-11-23)
 - `next` 16.4.3 → 16.4.6 for a moderate advisory; no source change. Done in a worktree, then on the work
   branch. Merged to `Dev` and `Prod` (`deff08c`), CI green on both (runs 474, 475).
   Dependabot #142 overlaps (bumps next to 16.4.5).

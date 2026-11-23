@@ -5,7 +5,7 @@ import {
   boardBillingLabel, boardColumn, canApprove, canAssign, canMarkReady, normaliseDocket,
 } from "@/lib/domain/laundry-board";
 import {
-  defaultReturnDate, matchQuoteLines, prefillFromLastJob, stepQuantity,
+  defaultReturnDate, returnDateFrom, matchQuoteLines, prefillFromLastJob, stepQuantity,
 } from "@/lib/domain/intake";
 import {
   DEFAULT_OPERATIONS, parseOperations, readOperationsForm,
@@ -278,5 +278,17 @@ describe("a draft's date (3.10)", () => {
     expect(issueDateText("draft", "2026-10-03", (d) => d)).toBe(DRAFT_DATE_TEXT);
     expect(issueDateText("issued", "2026-10-03", (d) => `on ${d}`)).toBe("on 2026-10-03");
     expect(issueDateText("issued", null, (d) => d)).toBe("—");
+  });
+});
+
+describe("returnDateFrom (2026-11-23)", () => {
+  it("counts from an earlier received date", () => {
+    expect(returnDateFrom("2026-11-17", "2026-11-23")).toBe("2026-11-17");
+  });
+  it("counts from today when the received date is today, later, missing or malformed", () => {
+    expect(returnDateFrom("2026-11-23", "2026-11-23")).toBe("2026-11-23");
+    expect(returnDateFrom("2026-11-30", "2026-11-23")).toBe("2026-11-23");
+    expect(returnDateFrom(undefined, "2026-11-23")).toBe("2026-11-23");
+    expect(returnDateFrom("17/11/2026", "2026-11-23")).toBe("2026-11-23");
   });
 });

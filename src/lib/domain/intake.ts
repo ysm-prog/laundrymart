@@ -12,6 +12,17 @@ import type { OrderItemInput } from "./laundry-orders";
  */
 
 /**
+ * The day a job's return date is counted from: the day the laundry arrived.
+ * Usually today, but a job entered after the fact (2026-11-23) arrived earlier,
+ * and counting its turnaround from today would promise it back days late. A
+ * received date that is not a plain date, or is in the future, counts from today.
+ */
+export function returnDateFrom(received: string | null | undefined, today: string): string {
+  if (!received || !/^\d{4}-\d{2}-\d{2}$/.test(received)) return today;
+  return received < today ? received : today;
+}
+
+/**
  * When a job taken in today is promised back.
  *
  * **A customer on a round** gets that round's next visit: the first day

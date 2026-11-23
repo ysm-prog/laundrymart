@@ -68,3 +68,31 @@ describe("Take laundry on a customer's record", () => {
     expect(newPage).toMatch(/defaultCustomerId=\{chosenCustomer\}/);
   });
 });
+
+describe("a refused save keeps the received date", () => {
+  const actions = code(read("orders/actions.ts"));
+  const form = code(read("orders/job-form.tsx"));
+  const create = code(read("orders/new/page.tsx"));
+  const edit = code(read("orders/[id]/edit/page.tsx"));
+
+  it("carries the posted received date back through the redirect", () => {
+    expect(actions).toMatch(/formData\.get\("received_date"\)/);
+    expect(actions).toMatch(/query\.set\("received"/);
+  });
+
+  it("hands it to the form on both pages", () => {
+    expect(create).toMatch(/defaultReceivedDate=\{params\.received\}/);
+    expect(edit).toMatch(/defaultReceivedDate=\{received\}/);
+    expect(form).toMatch(/defaultReceivedDate/);
+  });
+
+  it("counts the suggested return date from the received date", () => {
+    expect(create).toMatch(/intakeDefaultsFor\(session\.tenantId, chosenCustomer, params\.received\)/);
+    expect(form).toMatch(/intake\.load\(id, received\)/);
+    expect(form).toMatch(/intake\.load\(customerId, value\)/);
+  });
+
+  it("caps the collection date at the received date", () => {
+    expect(form).toMatch(/name="pickup_date"[^>]*max=\{received/);
+  });
+});

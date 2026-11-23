@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Field, FormActions, Input, Select, SubmitButton, Textarea, useFieldControl,
 } from "@/components/form";
@@ -161,7 +161,7 @@ function numberOrNull(value: string): number | null {
 
 export function JobForm({
   action, customerAction, customers, drivers, staff,
-  order, items, seed, catalogue = [], defaultCustomerId, returnPath,
+  order, items, seed, catalogue = [], defaultCustomerId, defaultReceivedDate, returnPath,
   entryReceivedVia, intake,
 }: {
   action: (formData: FormData) => Promise<void>;
@@ -193,6 +193,11 @@ export function JobForm({
     list_price?: { unitPrice: number; bagPrice: number | null; taxable: boolean } | null;
   }>;
   defaultCustomerId?: string;
+  /**
+   * The received date a refused save came back with (`?received=`), so a job
+   * entered for an earlier day does not come back reading today.
+   */
+  defaultReceivedDate?: string;
   /** Where the quick-create returns to, so the job form is not restarted. */
   returnPath: string;
   /**
@@ -206,7 +211,8 @@ export function JobForm({
    * may read prices, a running quote. New jobs only; an edit is never prefilled.
    */
   intake?: {
-    load: (customerId: string) => Promise<IntakeDefaults | null>;
+    /** `receivedDate` is the day the laundry arrived; the return date counts from it. */
+    load: (customerId: string, receivedDate?: string) => Promise<IntakeDefaults | null>;
     quote?: ((customerId: string, itemsJson: string) => Promise<IntakeQuote | null>) | null;
     /** Worked out on the server for a customer the page opened with. */
     initial?: IntakeDefaults | null;
@@ -266,9 +272,30 @@ export function JobForm({
   // as their floor. Any earlier day may be chosen (2026-11-23): jobs are entered
   // after the fact, several days at a time, so the floor is the day the laundry
   // arrived — never today, which would refuse every job typed in retrospectively.
+  //
+  // A refused save comes back carrying the date that was posted
+  // (`defaultReceivedDate`), adopted the same way as the customer above, so the
+  // retry does not quietly record the job as received today.
+  //
+  // Read back through the business timezone, not the device's: the counter in
+  // Adelaide and a laptop set to UTC must see the same received date on the
+  // same job. Only the date is asked for — the time of day is the moment the
+  // job is taken in, which the server stamps (see `receivedInstant`).
+  const receivedCeiling = (() => {
+    const stored = order ? toZonedDate(order.received_at) : businessToday();
+    return stored > businessToday() ? stored : businessToday();
+  })();
+  const carriedReceived = defaultReceivedDate && /^\d{4}-\d{2}-\d{2}$/.test(defaultReceivedDate)
+      && defaultReceivedDate <= receivedCeiling
+    ? defaultReceivedDate : undefined;
   const [received, setReceived] = useState(
-    () => order ? toZonedDate(order.received_at) : businessToday(),
+    () => carriedReceived ?? (order ? toZonedDate(order.received_at) : businessToday()),
   );
+  const [lastReceivedDefault, setLastReceivedDefault] = useState(carriedReceived);
+  if (carriedReceived !== lastReceivedDefault) {
+    setLastReceivedDefault(carriedReceived);
+    if (carriedReceived) setReceived(carriedReceived);
+  }
 
   /**
    * Choosing a customer (brief 3.4). For a new job, their defaults arrive
@@ -279,13 +306,32 @@ export function JobForm({
   function chooseCustomer(id: string) {
     setCustomerId(id);
     if (editing || !intake || items?.length) return;
-    void intake.load(id).then((loaded) => {
+    void intake.load(id, received).then((loaded) => {
       if (!loaded) return;
       setDefaults(loaded);
       if (loaded.items.length) {
         setRows((current) => (untouched(current) ? rowsFrom(loaded.items) : current));
         setNextKey((key) => Math.max(key, loaded.items.length));
       }
+      setDue((current) => (current.touched ? current : { value: loaded.returnDate, touched: false }));
+    });
+  }
+
+  /**
+   * A new received date moves the suggested return date with it, while the
+   * counter has not set one themselves: a job that arrived last Tuesday is due
+   * back counted from last Tuesday, not from today (2026-11-23). Only the date
+   * is refreshed — the laundry rows the counter may already be editing are left
+   * alone — and an answer for a date since changed again is dropped.
+   */
+  const latestReceived = useRef(received);
+  function changeReceived(value: string) {
+    setReceived(value);
+    latestReceived.current = value;
+    if (editing || !intake || !customerId || due.touched) return;
+    void intake.load(customerId, value).then((loaded) => {
+      if (!loaded || latestReceived.current !== value) return;
+      setDefaults(loaded);
       setDue((current) => (current.touched ? current : { value: loaded.returnDate, touched: false }));
     });
   }
@@ -376,12 +422,6 @@ export function JobForm({
     setRows((current) => [...current, blankItem(nextKey)]);
     setNextKey((key) => key + 1);
   }
-
-  // Read back through the business timezone, not the device's: the counter in
-  // Sydney and a laptop set to UTC must see the same received date on the same
-  // job. Only the date is asked for — the time of day is the moment the job is
-  // taken in, which the server stamps (see `receivedInstant`).
-  const receivedDate = order ? toZonedDate(order.received_at) : businessToday();
 
   // The two real answers, plus whatever an older job already holds, so editing
   // one taken in under a retired option cannot rewrite how it arrived.
@@ -587,8 +627,8 @@ export function JobForm({
                   A job already carrying a future date keeps it as the ceiling,
                   so an edit that leaves the date alone can still be saved; the
                   server refuses any *change* to a future day. */}
-              <DateControl name="received_date" required value={received} onChange={setReceived}
-                           max={receivedDate > businessToday() ? receivedDate : businessToday()} />
+              <DateControl name="received_date" required value={received} onChange={changeReceived}
+                           max={receivedCeiling} />
             </Field>
             <Field label="Received via" name="received_via">
               <select id="received_via" name="received_via" className={CONTROL}
@@ -611,7 +651,10 @@ export function JobForm({
             {receivedVia === "driver_pickup" ? (
               <>
                 <Field label="Pickup date" name="pickup_date" hint="Optional.">
-                  <Input name="pickup_date" type="date" defaultValue={arrival?.pickup_date ?? undefined} />
+                  {/* Collected on or before the day it was received, which the
+                      server refuses otherwise — so the browser says so first. */}
+                  <Input name="pickup_date" type="date" defaultValue={arrival?.pickup_date ?? undefined}
+                         max={received || undefined} />
                 </Field>
                 <Field label="Collected by" name="pickup_driver_id" className="sm:col-span-2"
                        hint="Your existing drivers.">

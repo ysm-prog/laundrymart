@@ -21,11 +21,14 @@ import { parseOrderItems } from "./order-items";
 
 export type { IntakeDefaults } from "@/lib/orders/intake";
 
-export async function loadIntakeDefaults(customerId: string): Promise<IntakeDefaults | null> {
+export async function loadIntakeDefaults(
+  customerId: string, receivedDate?: string | null,
+): Promise<IntakeDefaults | null> {
   const session = await requireSession();
   if (!can(session.role, "orders.write")) return null;
   if (!z.uuid().safeParse(customerId).success) return null;
-  return intakeDefaultsFor(session.tenantId, customerId);
+  // `returnDateFrom` ignores anything that is not a plain past date.
+  return intakeDefaultsFor(session.tenantId, customerId, receivedDate);
 }
 
 export type IntakeQuote = {

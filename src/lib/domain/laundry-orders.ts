@@ -455,8 +455,8 @@ export function initialDeliveryRequired(order?: { delivery_required: boolean } |
  *
  * The counter no longer types a time — it is the moment they are standing there,
  * and asking for it was a field that was never wrong and always in the way. So a
- * new job takes the clock time now, on whichever date was chosen (a manager
- * backdating to yesterday gets this time yesterday, not midnight).
+ * new job takes the clock time now, on whichever date was chosen (a job
+ * backdated to yesterday gets this time yesterday, not midnight).
  *
  * An edit passes the job's existing `received_at` and keeps its time of day:
  * correcting the date must not quietly move an 8am drop-off to this afternoon.

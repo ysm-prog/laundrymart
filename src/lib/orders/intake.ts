@@ -1,7 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { getAdelaideToday } from "@/lib/domain/timezone";
 import { parseOperations } from "@/lib/domain/operations-settings";
-import { defaultReturnDate, prefillFromLastJob } from "@/lib/domain/intake";
+import { defaultReturnDate, prefillFromLastJob, returnDateFrom } from "@/lib/domain/intake";
 import type { OrderItemInput } from "@/lib/domain/laundry-orders";
 import { loadHolidaySet } from "@/lib/runs/holidays";
 
@@ -22,10 +22,16 @@ const WEEKDAYS = ["Mondays", "Tuesdays", "Wednesdays", "Thursdays", "Fridays", "
  * action** — it takes the tenant as an argument, so it must never be callable
  * from a browser; the action in `orders/intake-actions.ts` derives the tenant
  * from the session and calls this, and so does the new-job page.
+ *
+ * `receivedDate` is the day the laundry arrived, when it is not today: the
+ * return date is counted from that day, so a job entered after the fact is
+ * promised back when it really was (`returnDateFrom`).
  */
-export async function intakeDefaultsFor(tenantId: string, customerId: string): Promise<IntakeDefaults | null> {
+export async function intakeDefaultsFor(
+  tenantId: string, customerId: string, receivedDate?: string | null,
+): Promise<IntakeDefaults | null> {
   const supabase = await createClient();
-  const today = getAdelaideToday();
+  const from = returnDateFrom(receivedDate, getAdelaideToday());
 
   const [customer, tenant, lastJob, holidays] = await Promise.all([
     supabase.from("customers")
@@ -39,7 +45,7 @@ export async function intakeDefaultsFor(tenantId: string, customerId: string): P
       .eq("tenant_id", tenantId).eq("customer_id", customerId).neq("status", "cancelled")
       .order("received_at", { ascending: false }).limit(1)
       .maybeSingle<{ id: string; order_number: string }>(),
-    loadHolidaySet(supabase, tenantId, today),
+    loadHolidaySet(supabase, tenantId, from),
   ]);
   if (!customer.data) return null;
 
@@ -56,7 +62,7 @@ export async function intakeDefaultsFor(tenantId: string, customerId: string): P
     items: prefillFromLastJob(lastItems ?? []),
     lastOrderNumber: lastJob.data?.order_number ?? null,
     returnDate: defaultReturnDate({
-      today, roundWeekday: weekday, turnaroundDays: operations.defaultTurnaroundDays, holidays,
+      today: from, roundWeekday: weekday, turnaroundDays: operations.defaultTurnaroundDays, holidays,
     }),
     roundLabel: weekday
       ? `${customer.data.boards?.name ?? "their round"}, ${WEEKDAYS[weekday - 1]}`
