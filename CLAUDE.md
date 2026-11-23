@@ -3872,6 +3872,21 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-11-23 · Next.js 16.4.3 → 16.4.6, for a moderate advisory
+`npm audit --omit=dev` reported one moderate advisory on `next` 16.0.0–16.4.4: seven issues, mostly
+`use cache` and Cache Components leaks (which `src/` does not use), plus an SVG bypass in image
+optimisation, an HttpOnly cookie exposure on Edge routes and a response-injection issue on self-hosted
+apps. The build also stopped once on Next's own security warning. **No migration and no source change.**
+- `next` and `eslint-config-next` both go to `^16.4.6`, the latest 16.x and past the fixed 16.4.5.
+  Package sets 571 → 571: exactly the twelve `next`/`@next/*`/`eslint-config-next` entries moved.
+- Run from Next's own `next upgrade --agent=security`, in a separate git worktree. Two of its steps were
+  deliberately not taken: adding `experimental.agentUpgrade` to `next.config.mjs` (an experimental flag
+  in production config, unasked for) and its telemetry report to Vercel.
+- Dependabot's open #142 also lifts `next` (to 16.4.5) and bundles three unrelated runtime bumps; it
+  will rebase over this.
+- `verify` green: typecheck, lint, 1651 tests across 109 files, production build. `npm audit --omit=dev`
+  **0**. The built app served `/login` and `/design-preview` 200, and an app route redirected to sign-in.
+
 ### 2026-11-23 · Backdated laundry jobs, and Take laundry on a customer
 From the client's fix notes. **No migration; no schema, RLS or policy change.**
 - **A job can be received on any earlier day, by anybody who takes laundry in.** Two things refused

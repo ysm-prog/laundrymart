@@ -9,7 +9,11 @@ where that is genuinely what it is. The multi-tenancy architecture stays: one op
 fact about today's data, not a reason to drop `tenant_id`, RLS, or §23's rule that a read feeding a
 write names its tenant.
 
-## Latest: backdated jobs and Take laundry (2026-11-23)
+## Latest: Next.js 16.4.6 (2026-11-23)
+- `next` 16.4.3 → 16.4.6 for a moderate advisory; no source change. Done in a worktree, on the work
+  branch only; not yet on `Dev`/`Prod`. Dependabot #142 overlaps (bumps next to 16.4.5).
+
+## Previously: backdated jobs and Take laundry (2026-11-23)
 - Any role with `orders.write` can record a job received on an earlier day; future days still
   refused. Return-date `min` is now the received date, not today. No migration.
 - Take laundry button on a customer's record opens `/orders/new?customer=<id>`.
