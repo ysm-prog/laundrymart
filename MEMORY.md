@@ -17,8 +17,11 @@ write names its tenant.
   (`20261123230737`), probed as the Office manager; then merged to `Dev` and `Prod`.
 - Still to check live: as Angela, take a job in, confirm it opens Completed, open its draft invoice
   from the Charges card, issue and send.
-- Next.js 16.4.3 has moderate advisories (fixed in 16.4.5+); the build only stops on it under an
-  AI-agent environment. Not taken here.
+
+## Previously: Next.js 16.4.6 (2026-11-23)
+- `next` 16.4.3 → 16.4.6 for a moderate advisory; no source change. Done in a worktree, then on the work
+  branch. Merged to `Dev` and `Prod` (`deff08c`), CI green on both (runs 474, 475).
+  Dependabot #142 overlaps (bumps next to 16.4.5).
 
 ## Previously: backdated jobs and Take laundry (2026-11-23)
 - Any role with `orders.write` can record a job received on an earlier day; future days still
