@@ -72,7 +72,14 @@ export default async function CustomerDetailPage({
               ? <ButtonLink href={`/customers/${id}/prices`} variant="secondary">Laundry prices</ButtonLink>
               : null}
             {can(session.role, "agreements.write")
-              ? <ButtonLink href={`/agreements/new?customer=${id}`} variant="primary">New agreement</ButtonLink>
+              ? <ButtonLink href={`/agreements/new?customer=${id}`} variant="secondary">New agreement</ButtonLink>
+              : null}
+            {/* Take Laundry (2026-11-23): the counter is usually already looking at
+                the customer, so this opens the ordinary job form with them chosen
+                rather than making somebody search for them again. Same form, same
+                action — `?customer=` is the door the quick-create already uses. */}
+            {can(session.role, "orders.write")
+              ? <ButtonLink href={`/orders/new?customer=${id}`} variant="primary">Take laundry</ButtonLink>
               : null}
           </>
         }

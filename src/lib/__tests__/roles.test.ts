@@ -250,8 +250,8 @@ describe("job → invoice, and who the counter is", () => {
     }
   });
 
-  // The supervisor's set — cancel a job, backdate a receipt, edit a completed
-  // one — is not part of taking laundry in and did not move.
+  // The supervisor's set — cancel a job, edit a completed one — is not part of
+  // taking laundry in and did not move. (Backdating left it on 2026-11-23.)
   it("keeps orders.manage away from the counter", () => {
     expect(rolesWith("orders.manage")).toEqual([
       "platform_admin", "super_admin", "operations_manager",

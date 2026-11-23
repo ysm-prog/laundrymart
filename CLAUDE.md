@@ -407,12 +407,14 @@ the laundry pays its suppliers. Worth stating because most holders arrive by der
 reaches six roles; `roles.test.ts` pins the two sets against each other so a change to either
 fails a test rather than handing somebody the chart of accounts. `orders.*` follows the same split as routes: `write` creates and edits a
 laundry job, `status` walks it through the workflow, and `manage` is the supervisor's
-set — cancel a job, backdate a receipt, edit one already completed. **`super_admin`,
+set — cancel a job, edit one already completed. **`super_admin`,
 `operations_manager` and — since 2026-08-24 — `customer_service` hold the first three;
 `manage` is the first two alone.** The counter's `orders.*` had been taken away by 0025 and was
 given back because the alternative was making a counter hand an Office manager, which is 31
 screens to do the one job their role is named for (§26, now closed). `orders.manage` stayed
-where it was: cancelling a job and backdating a receipt are not part of taking laundry in.
+where it was: cancelling a job is not part of taking laundry in. **Backdating a receipt left
+`orders.manage` on 2026-11-23**: anybody holding `orders.write` may record a job as received on
+any earlier day, because jobs are entered after the fact (§18). A future day stays refused.
 **Since the status track landed, `orders.status` also buys the moves that used to be
 impossible rather than merely un-offered** — back a stage, forward two — but not the two that
 answer to somebody else: sending a job out from the office is still `orders.manage` (it steps
@@ -3870,6 +3872,28 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-11-23 · Backdated laundry jobs, and Take laundry on a customer
+From the client's fix notes. **No migration; no schema, RLS or policy change.**
+- **A job can be received on any earlier day, by anybody who takes laundry in.** Two things refused
+  it: `createOrder`/`updateOrder` sent a past received date back unless the caller held
+  `orders.manage`, and the form set `min` = today on the expected delivery and collection dates, so
+  the browser refused any return date before today — which every retrospective job has. Both are
+  gone. The return dates now take the received date as their floor (the server already refused a
+  return before receipt), and a received date in the future is still refused by the form, both
+  actions and 0055's trigger. A side effect worth knowing: an overdue job with a past delivery date
+  can be edited again; `min` = today had blocked that too.
+- **This moves backdating out of `orders.manage`**, reversing part of the 2026-08-24 decision at the
+  client's request. `orders.manage` keeps cancelling and editing a completed job.
+- **Take laundry** is on a customer's record header (`orders.write`), opening the ordinary job form
+  through `?customer=`, which already preselects and fills that customer's defaults. New agreement
+  became a secondary button so there is one primary action. Nothing about `/orders/new` changed.
+- `backdated-jobs.test.ts` (7), 4 of which fail against the old code. 1651 tests, `verify` green.
+  Driven in the browser on `/design-preview`: an 18 Nov receipt is accepted, a 19 Nov delivery is
+  accepted, a 17 Nov delivery and a 30 Dec receipt are refused.
+- **Not verified behind the auth gate.** Before trusting it: as the counter on `ats.coreit.com.au`,
+  open a customer, press Take laundry, set the received date to three days ago, save, and repeat
+  for two more days.
+
 ### 2026-11-19 · Handover accounts, and two access holes closed
 The developer's pre-handover checklist: test every login, fix Christian's, create a shared Manager
 and four Board logins, check each board sees only its own run. **One migration, `0064`, applied.**

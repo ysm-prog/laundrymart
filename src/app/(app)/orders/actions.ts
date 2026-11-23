@@ -17,7 +17,7 @@ import {
   leavesTheRound, receivedInstant, receivedInFuture, RECEIVED_IN_FUTURE_MESSAGE, validateItem,
   type OrderItemInput, type OrderStatus,
 } from "@/lib/domain/laundry-orders";
-import { businessToday, isClockTime, toInstant } from "@/lib/domain/timezone";
+import { isClockTime, toInstant } from "@/lib/domain/timezone";
 import { logOrderActivity } from "@/lib/orders/activity";
 import { autoAssignOnReady, autoAssignSentence } from "@/lib/runs/auto-assign";
 import { completeLaundryOrder } from "@/lib/orders/complete";
@@ -315,14 +315,11 @@ export async function createOrder(formData: FormData): Promise<void> {
   );
   if (problem) return fail(backToForm, problem);
 
-  // Backdating a receipt changes what the day's takings and the overdue list
-  // say, so it is a supervisor's action rather than a counter one.
-  if (parsed.data.received_date < businessToday()
-      && !can(session.role, "orders.manage")) {
-    return fail(backToForm, "Only a manager can record a job as received on an earlier day.");
-  }
-  // And never on a later one, for anybody (brief 1.5). 0055's trigger is the
-  // boundary; this is the sentence in front of it.
+  // Any earlier day is allowed, for anybody who may take laundry in
+  // (2026-11-23): a laundry enters jobs after the fact, several days at a time,
+  // and refusing a past date refused exactly that work. A later day never is,
+  // for anybody (brief 1.5). 0055's trigger is the boundary; this is the
+  // sentence in front of it.
   if (receivedInFuture(receivedInstant(parsed.data.received_date))) {
     return fail(backToForm, RECEIVED_IN_FUTURE_MESSAGE);
   }
@@ -453,9 +450,6 @@ export async function updateOrder(formData: FormData): Promise<void> {
   if (existing.status === "completed" && !can(session.role, "orders.manage")) {
     return fail(`/orders/${id.data}`,
       "This job is completed. Ask a manager if something recorded on it needs correcting.");
-  }
-  if (parsed.data.received_date < businessToday() && !can(session.role, "orders.manage")) {
-    return fail(backTo, "Only a manager can move a job's received date to an earlier day.");
   }
   // Changing the workflow under a job that has already been dispatched would
   // leave it in a state its own status does not allow.

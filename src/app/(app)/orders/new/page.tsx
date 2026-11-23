@@ -154,7 +154,6 @@ export default async function NewJobPage({
           source_pickup_id: collection.id,
         } : undefined}
         defaultCustomerId={chosenCustomer}
-        canBackdate={can(session.role, "orders.manage")}
         returnPath={returnPath}
         // The counter's own screen is a drop-off (the column's default); a
         // collection or a `?via=driver_pickup` link is a driver pickup.

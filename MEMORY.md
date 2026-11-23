@@ -9,7 +9,13 @@ where that is genuinely what it is. The multi-tenancy architecture stays: one op
 fact about today's data, not a reason to drop `tenant_id`, RLS, or §23's rule that a read feeding a
 write names its tenant.
 
-## Latest: handover accounts and 0064 (2026-11-19)
+## Latest: backdated jobs and Take laundry (2026-11-23)
+- Any role with `orders.write` can record a job received on an earlier day; future days still
+  refused. Return-date `min` is now the received date, not today. No migration.
+- Take laundry button on a customer's record opens `/orders/new?customer=<id>`.
+- Still to check live: enter three backdated jobs as the counter.
+
+## Previously: handover accounts and 0064 (2026-11-19)
 - Nine logins on Adelaide: Angelo (Owner), Christian + shared `manager@ats.example.com` (Office
   manager), `board1@`–`board4@ats.example.com` (one per board), Darshan and Jay (Core IT). Mario
   Forte's access removed (login kept); 11 `@roles.example.com` logins banned.

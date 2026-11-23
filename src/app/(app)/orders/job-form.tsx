@@ -161,7 +161,7 @@ function numberOrNull(value: string): number | null {
 
 export function JobForm({
   action, customerAction, customers, drivers, staff,
-  order, items, seed, catalogue = [], defaultCustomerId, canBackdate, returnPath,
+  order, items, seed, catalogue = [], defaultCustomerId, returnPath,
   entryReceivedVia, intake,
 }: {
   action: (formData: FormData) => Promise<void>;
@@ -193,8 +193,6 @@ export function JobForm({
     list_price?: { unitPrice: number; bagPrice: number | null; taxable: boolean } | null;
   }>;
   defaultCustomerId?: string;
-  /** `orders.manage` — only they may record a job as arriving on an earlier day. */
-  canBackdate: boolean;
   /** Where the quick-create returns to, so the job form is not restarted. */
   returnPath: string;
   /**
@@ -263,6 +261,13 @@ export function JobForm({
   }));
   const [defaults, setDefaults] = useState<IntakeDefaults | null>(
     editing ? null : intake?.initial ?? null,
+  );
+  // The received date is controlled only so the return dates below can take it
+  // as their floor. Any earlier day may be chosen (2026-11-23): jobs are entered
+  // after the fact, several days at a time, so the floor is the day the laundry
+  // arrived — never today, which would refuse every job typed in retrospectively.
+  const [received, setReceived] = useState(
+    () => order ? toZonedDate(order.received_at) : businessToday(),
   );
 
   /**
@@ -576,14 +581,14 @@ export function JobForm({
                      icon={<CalendarClock className="size-[1.15rem]" />}>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <Field label="Received date" name="received_date" required
-                   hint={canBackdate ? undefined : "Today. A manager can record an earlier day."}>
+                   hint="Any earlier day is fine — for laundry entered after it arrived.">
               {/* Never a day in the future (brief 1.5) — for a manager as well,
                   which is how LJ00031 was recorded as received two days ahead.
                   A job already carrying a future date keeps it as the ceiling,
                   so an edit that leaves the date alone can still be saved; the
                   server refuses any *change* to a future day. */}
-              <Input name="received_date" type="date" required defaultValue={receivedDate}
-                     max={receivedDate > businessToday() ? receivedDate : businessToday()} />
+              <DateControl name="received_date" required value={received} onChange={setReceived}
+                           max={receivedDate > businessToday() ? receivedDate : businessToday()} />
             </Field>
             <Field label="Received via" name="received_via">
               <select id="received_via" name="received_via" className={CONTROL}
@@ -904,7 +909,7 @@ export function JobForm({
                            ? `Their round's next visit — ${defaults.roundLabel}.`
                            : "Your usual turnaround. Change it in Settings › How you work."
                          : undefined}>
-                  <DateControl name="expected_delivery_date" required min={businessToday()}
+                  <DateControl name="expected_delivery_date" required min={received || undefined}
                                value={due.value}
                                onChange={(value) => setDue({ value, touched: true })} />
                 </Field>
@@ -982,7 +987,7 @@ export function JobForm({
                 </Notice>
                 <Field label="Expected collection date" name="expected_collection_date"
                        hint="Optional — leave blank if they did not say.">
-                  <Input name="expected_collection_date" type="date" min={businessToday()}
+                  <Input name="expected_collection_date" type="date" min={received || undefined}
                          defaultValue={order?.expected_collection_date ?? undefined} />
                 </Field>
               </div>
@@ -1050,11 +1055,14 @@ export function JobForm({
 
 /** A date box that the form controls, still wired to its `Field`'s hint and error. */
 function DateControl({
-  name, value, onChange, required, min,
-}: { name: string; value: string; onChange: (value: string) => void; required?: boolean; min?: string }) {
+  name, value, onChange, required, min, max,
+}: {
+  name: string; value: string; onChange: (value: string) => void;
+  required?: boolean; min?: string; max?: string;
+}) {
   const field = useFieldControl();
   return (
-    <input id={name} name={name} type="date" required={required} min={min}
+    <input id={name} name={name} type="date" required={required} min={min} max={max}
            value={value} onChange={(event) => onChange(event.target.value)}
            aria-describedby={field.describedBy} aria-invalid={field.invalid || undefined}
            className={CONTROL} />

@@ -95,8 +95,9 @@ export const CAPABILITIES = [
   // The counter's laundry jobs (`/orders`, labelled "Jobs"), split the same way
   // routes are: `write` creates and edits, `status` walks a job through the
   // workflow — the plant floor advances jobs it does not plan — and `manage` is
-  // the supervisor's set: cancel a job, backdate a receipt, reopen the edit form
-  // on one that is already completed.
+  // the supervisor's set: cancel a job, and reopen the edit form on one that is
+  // already completed. Backdating a receipt left this set on 2026-11-23 — jobs
+  // are entered after the fact, and anybody who takes laundry in may do it.
   "orders.read",
   "orders.write",
   "orders.status",
@@ -315,9 +316,10 @@ export const ROLE_CAPABILITIES: Record<Role, readonly Capability[]> = {
    * was being handed the largest surface in the application to do the one job
    * this role is named for.
    *
-   * `orders.manage` is deliberately **not** among them. Cancelling a job,
-   * backdating a receipt and editing one already completed are the supervisor's
-   * set (§3), and none of them is part of taking laundry in.
+   * `orders.manage` is deliberately **not** among them. Cancelling a job and
+   * editing one already completed are the supervisor's set (§3), and neither is
+   * part of taking laundry in. (Backdating a receipt was in that set until
+   * 2026-11-23; it now needs only `orders.write`.)
    *
    * The half that matters is not here: `0025` narrowed every *write* on the job
    * tables to two roles in RLS, so this list alone would let the counter open

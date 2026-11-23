@@ -1679,7 +1679,6 @@ export default function DesignPreviewPage() {
               catalogue={PREVIEW_JOB_CATALOGUE}
               drivers={[{ id: "d1", full_name: "Sam Okoye" }]}
               staff={[{ id: "s1", label: "Christian Mignone", role: "operations_manager" }]}
-              canBackdate={false}
               returnPath="/design-preview"
             />
           </section>

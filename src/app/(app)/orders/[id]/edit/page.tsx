@@ -74,7 +74,6 @@ export default async function EditJobPage({
         order={order}
         items={items ?? []}
         defaultCustomerId={customer}
-        canBackdate={can(session.role, "orders.manage")}
         returnPath={`/orders/${id}/edit`}
       />
     </PageContainer>
