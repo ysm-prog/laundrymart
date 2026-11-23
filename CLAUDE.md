@@ -1558,6 +1558,7 @@ produce on demand.
   reads as *not* simplified. Adds no table, column, function, policy or capability; changes no row.
   Six self-assertions. `simplified_workflow.test.sql` (13), which fails 9 without it;
   `laundry_orders.test.sql` now states `full` for its two laundries, because it proves that process.
+  **Applied 2026-11-23** (`20261123230737`) through the connector (§11).
 - `0050_pickup_to_job` — **a collection becomes a laundry job, exactly once.**
   `laundry_orders.source_pickup_id` (`on delete set null`),
   `uq_laundry_orders_source_pickup` (partial unique) and
@@ -2562,6 +2563,17 @@ reports six false gaps.
   `set_records_archived`, `sync_invoice_line_account`, `tenant_members`). That is the 0042 trap
   leaving its usual trace: text typed into `apply_migration` reformatted a little against the file.
   Worth knowing before anybody reads a raw `md5(prosrc)` mismatch as drift.
+
+**`0065_simplified_workflow` was applied on 2026-11-23** (`20261123230737`) through the connector,
+first attempt; its self-assertions passed. Before it the live guard's body (comments and whitespace
+stripped) hashed `4582843c…`, the same as a local database built without 0065, so the rebuild
+reverted nothing; after it, `1ef37b26…`, the same as one built with it. Still SECURITY INVOKER with
+`search_path` pinned, callable by neither `anon` nor `authenticated`, trigger attached once.
+Behaviour proved as `manager@ats.example.com` (Office manager) in a block that ended by raising: a
+new delivery job went straight to `completed` (**1 row**, billing `awaiting_review`), and a job on a
+round was still refused with rule 4's sentence. Nothing survived: 36 jobs before and after (24
+completed, 10 assigned, 1 ready, 1 cancelled), none moved. Live `settings.operations` is null, which
+reads as simplified. Advisors unchanged (32 definer helpers + leaked-password); 0 `anon` grants.
 
 **`0064_board_and_people_write` was applied on 2026-11-19** through the connector, first attempt;
 its self-assertions passed. Proved afterwards as each real login, rolled back: every board reads 1
@@ -3890,7 +3902,7 @@ invoice goes, because this app has no counter-cash concept.
 
 ## 18. Changelog
 ### 2026-11-23 · Simplified workflow: a new job is completed and ready to invoice on save
-The client's change request 3. **One migration, `0065`, written and NOT yet applied.**
+The client's change request 3. **One migration, `0065`, applied live on 2026-11-23 before the merge (§11).**
 - **The setting.** Settings › How you work › Workflow: *Simplified* (default) or *Full*. Stored as
   `operations.workflow`; absent means simplified, which is the live laundry's state today (it has
   never saved `operations`). Saving the form now always writes the field.
@@ -3914,8 +3926,8 @@ The client's change request 3. **One migration, `0065`, written and NOT yet appl
 - Checks: 1669 unit tests (18 new in `simplified-workflow.test.ts`, one mutation confirmed caught),
   typecheck, lint, build; all 65 migrations on a fresh Postgres 16, **796 pgTAP assertions across
   45 files**, 0 failing.
-- **Order matters:** apply `0065` before this code reaches `Prod`. Without it a *delivery* job is
-  created but refused completion (left at New with an error toast); pickups complete either way.
+- **Order mattered and was kept:** `0065` went on before the code reached `Prod`. Without it a
+  *delivery* job is created but refused completion (left at New with an error toast).
 - **Not verified behind the auth gate.** Before trusting it: as Angela, take a job in for a
   customer, check it opens Completed, open its draft invoice from the Charges card, issue and send.
 

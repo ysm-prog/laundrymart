@@ -13,8 +13,10 @@ write names its tenant.
 - Settings › How you work › Workflow: Simplified (default) / Full. Simplified completes a new job
   on save (as at its received instant, no handover recorded), priced and auto-approved onto the
   draft where clean. Never issues/sends. Job Charges card links to its draft invoice.
-- `0065` relaxes rule 4 from plant stages when simplified. **Written, not applied** — apply before
-  the code reaches Prod. Live guard was hash-identical to 0042 (checked).
+- `0065` relaxes rule 4 from plant stages when simplified. **Applied live 2026-11-23**
+  (`20261123230737`), probed as the Office manager; then merged to `Dev` and `Prod`.
+- Still to check live: as Angela, take a job in, confirm it opens Completed, open its draft invoice
+  from the Charges card, issue and send.
 - Next.js 16.4.3 has moderate advisories (fixed in 16.4.5+); the build only stops on it under an
   AI-agent environment. Not taken here.
 
