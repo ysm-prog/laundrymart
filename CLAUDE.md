@@ -3937,7 +3937,8 @@ than overwritten; only `CLAUDE.md` and `MEMORY.md` conflicted, both entries kept
 re-run green on the merged tree with 16.4.6 installed. Then a fast-forward to both, `Prod` never
 force-pushed. **CI green on all three jobs for both** (run 480 `Dev`, run 481 `Prod`); on `Prod`
 `verify.sh` ran 23:13:02 → 23:13:52 and the DB suite with 0065 in it 23:13:32 → 23:13:42, read off
-the step timestamps. **The Vercel production deploy is not confirmable from this session** (§5).
+the step timestamps. **The Vercel production deploy was confirmed green by the owner in the Vercel
+dashboard** — a person reading it, not a status this session could read (§5).
 
 ### 2026-11-23 · Next.js 16.4.3 → 16.4.6, for a moderate advisory
 `npm audit --omit=dev` reported one moderate advisory on `next` 16.0.0–16.4.4: seven issues, mostly

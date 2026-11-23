@@ -15,7 +15,7 @@ write names its tenant.
   draft where clean. Never issues/sends. Job Charges card links to its draft invoice.
 - `0065` relaxes rule 4 from plant stages when simplified. **Applied live 2026-11-23**
   (`20261123230737`), probed as the Office manager; then merged to `Dev` and `Prod` (`bf14cbb`),
-  CI green on both (runs 480, 481).
+  CI green on both (runs 480, 481); Vercel production deploy green (owner, dashboard).
 - Still to check live: as Angela, take a job in, confirm it opens Completed, open its draft invoice
   from the Charges card, issue and send.
 
