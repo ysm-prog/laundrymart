@@ -3978,8 +3978,10 @@ commits from another session (the Vercel confirmation for the earlier reviews, `
 were merged into the branch first; no conflicts and no source change, so the tree `verify` passed
 on is the one that shipped. Then a fast-forward to both; `Prod` never force-pushed. **CI green on
 all three jobs for both** (run 518 `Dev`, run 517 `Prod`; `Prod` ran 06:40:58 → 06:42:36Z, read off
-the run timestamps). **Nothing to apply**: no migration. **The Vercel production deploy is not
-confirmable from this session** (§5). Still to check live: refuse a take-in whose customer was
+the run timestamps). **Nothing to apply**: no migration. **The Vercel production deploy was
+confirmed green by the owner in the Vercel dashboard**, with `Prod` at `340199a` (this review plus a
+documentation-only record); a person reading it, not a status this session could read (§5). Still
+to check live: refuse a take-in whose customer was
 archived and confirm it reopens as "Pickup by driver" with its day and driver filled in.
 
 ### 2026-11-24 · Fourth review of the backdated jobs: four fixes
@@ -4003,10 +4005,10 @@ force-pushed. **CI green on all three jobs for both** (run 509 `Dev`, run 510 `P
 02:41:31 → 02:44:17Z, read off the run timestamps). **Nothing to apply**: no migration. **The
 Vercel production deploy was confirmed green by the owner in the Vercel dashboard** at about
 03:07Z, with `Prod` at `525783a`; a person reading it, not a status this session could read (§5).
-Still to check live: refuse
-a pickup change on a job out for delivery and confirm the form reopens as a delivery, and set a
-return date, choose a customer, change the received date at once, and confirm the "Filled in
-from…" note names that customer's last job.
+**Verified live by the client on 2026-11-24**: Angela ran both checks on `ats.coreit.com.au` — a
+refused pickup change on a job out for delivery, and a received-date change straight after choosing
+a customer — and reported them all working. Recorded as her report, not as something this session
+observed.
 
 ### 2026-11-24 · Third review of the backdated jobs: five fixes
 A review of the six fixes found five more. **No migration; no schema, RLS, capability or policy
