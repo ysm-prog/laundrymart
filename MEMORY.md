@@ -21,9 +21,10 @@ write names its tenant.
   (6 unit cases, 6 pgTAP). Found the gap closed above.
 
 ## Previously: second review of backdated jobs (2026-11-24)
-- Six fixes, merged to `Dev` and `Prod` (`f4756a2`): real-date check on `?received=` (no more 500),
-  ticketed intake loads, quick-create keeps the dates, `?due=`/`?collect=` carried back,
-  `orders/carry.ts`, `carriedDate` tested. No migration.
+- Six fixes: real-date check on `?received=` (no more 500), ticketed intake loads, quick-create
+  keeps the dates, `?due=`/`?collect=` carried back, `orders/carry.ts`, `carriedDate` tested.
+- Merged to `Dev` and `Prod` (`f4756a2`); CI green on both (runs 492, 493). No migration.
+  Still to check live: quick-create inside a backdated job keeps the received date.
 
 ## Previously: review fixes for backdated jobs (2026-11-23)
 - A refused save carries `?received=` back, so a backdated job is not reset to today; the suggested
