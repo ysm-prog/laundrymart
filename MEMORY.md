@@ -10,9 +10,10 @@ fact about today's data, not a reason to drop `tenant_id`, RLS, or §23's rule t
 write names its tenant.
 
 ## Latest: second review of backdated jobs (2026-11-24)
-- Six fixes on the branch, not yet merged: real-date check on `?received=` (no more 500),
-  ticketed intake loads, quick-create keeps the dates, `?due=`/`?collect=` carried back,
-  `orders/carry.ts`, `carriedDate` tested. No migration.
+- Six fixes: real-date check on `?received=` (no more 500), ticketed intake loads, quick-create
+  keeps the dates, `?due=`/`?collect=` carried back, `orders/carry.ts`, `carriedDate` tested.
+- Merged to `Dev` and `Prod` (`f4756a2`); CI green on both (runs 492, 493). No migration.
+  Still to check live: quick-create inside a backdated job keeps the received date.
 
 ## Previously: review fixes for backdated jobs (2026-11-23)
 - A refused save carries `?received=` back, so a backdated job is not reset to today; the suggested

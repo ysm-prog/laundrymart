@@ -3924,6 +3924,15 @@ policy change.**
   source regexes. Dropping the ceiling check, or reverting to the shape-only check, fails them.
 - 1688 tests across 111 files, `verify` green (typecheck, lint, tests, production build).
 
+**Merged to `Dev` and `Prod` on 2026-11-24** (`f4756a2`). Both had moved by one documentation-only
+commit from another session (`9d04bbe`, the client's check of the simplified workflow), so it was
+merged into the branch first; no conflicts. `verify` re-run green on the merged tree, **1688 tests
+across 111 files**, then a fast-forward to both. `Prod` never force-pushed. **CI green on all three
+jobs for both** (run 492 `Dev`, run 493 `Prod`; `Prod` ran 00:39:00 → 00:40:57Z, read off the run
+timestamps). **Nothing to apply**: no migration. **The Vercel production deploy is not confirmable
+from this session** (§5). Still to check live: start a backdated job, add a customer from inside
+the form, and confirm the received date is still the backdated one when the form comes back.
+
 ### 2026-11-23 · Review fixes for the backdated jobs
 Five findings from a review of the backdated-jobs and Next.js work. **No migration; no schema, RLS,
 capability or policy change.**
