@@ -21,17 +21,17 @@ write names its tenant.
 - Four fixes: intake tickets rule (`orders/intake-tickets.ts`, date ticket moves only when a
   request is sent), out-for-delivery refusal carries `delivery=yes`, customer-refused take-in drops
   `?pickup=`, stale ticket test rewritten. No migration.
-- Merged to `Dev` and `Prod` (`525783a`); CI green on both (runs 509, 510). Vercel deploy not
-  confirmable from here — check the dashboard.
+- Merged to `Dev` and `Prod` (`525783a`); CI green on both (runs 509, 510); Vercel deploy green
+  (owner confirmed in the dashboard).
 - Before trusting it live: refuse a pickup change on a job out for delivery (it should reopen as a
   delivery), and set a return date, pick a customer, then change the received date at once.
 
 ## Previously: third review of backdated jobs (2026-11-24)
 - Five fixes: two intake tickets (a date change no longer drops the customer's laundry),
   `?delivery=yes|no` carried back, customer-not-found keeps the dates, quick-create keeps collect +
-  pickup choice, collection date controlled. No migration.
-- Merged to `Dev` and `Prod` (`50830d1`); CI green on both (runs 502, 503). Vercel deploy not
-  confirmable from here — check the dashboard.
+  pickup choice, collection date controlled. No migration. On `Prod`; Vercel deploy green (owner
+  confirmed in the dashboard, with `Prod` at `525783a`).
+- Merged to `Dev` and `Prod` (`50830d1`); CI green on both (runs 502, 503).
 - Before trusting it live: refuse a backdated customer pickup's save (it should reopen as a pickup
   with its collection date), and change the received date right after choosing a customer.
 
