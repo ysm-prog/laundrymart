@@ -3929,7 +3929,9 @@ change.**
 neither branch held a commit this one lacked, so nothing was reconciled and `Prod` was never
 force-pushed. **CI green on all three jobs for both** (run 509 `Dev`, run 510 `Prod`; `Prod` ran
 02:41:31 → 02:44:17Z, read off the run timestamps). **Nothing to apply**: no migration. **The
-Vercel production deploy is not confirmable from this session** (§5). Still to check live: refuse
+Vercel production deploy was confirmed green by the owner in the Vercel dashboard** at about
+03:07Z, with `Prod` at `525783a`; a person reading it, not a status this session could read (§5).
+Still to check live: refuse
 a pickup change on a job out for delivery and confirm the form reopens as a delivery, and set a
 return date, choose a customer, change the received date at once, and confirm the "Filled in
 from…" note names that customer's last job.
