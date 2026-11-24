@@ -1,12 +1,15 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   DEFAULT_OPERATIONS, parseOperations, readOperationsForm,
 } from "@/lib/domain/operations-settings";
 import {
   actionsFor, buildStatusTrack, checkTransition, nextStatuses,
+  receivedDateMove, receivedInFuture, receivedInstant,
 } from "@/lib/domain/laundry-orders";
+import { billingPeriodFor } from "@/lib/domain/billing-period";
+import { toZonedDate } from "@/lib/domain/timezone";
 import { nextStepFor } from "@/lib/domain/job-next-step";
 import { describeOrderActivity } from "@/lib/domain/order-activity";
 
@@ -157,5 +160,171 @@ describe("the wiring", () => {
 
   it("names the tenant when it reads the setting", () => {
     expect(read("src/lib/orders/workflow.ts")).toMatch(/\.eq\("id", tenantId\)/);
+  });
+});
+
+/**
+ * A backdated job in the simplified workflow (2026-11-24). `createOrder` hands
+ * `completeLaundryOrder` the same `receivedAt` it inserted, so `completed_at` is
+ * the received instant, and the draft the job joins is chosen from that. These
+ * run the real chain — compose the instant, read its Adelaide date back, pick
+ * the period — rather than grepping for `at: receivedAt`, which only proves the
+ * argument is passed.
+ */
+describe("a backdated job completed on save", () => {
+  afterEach(() => { vi.useRealTimers(); });
+
+  /** What createOrder does with a received date, keyed in at `now`. */
+  function keyedIn(receivedDate: string, now: string) {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(now));
+    const receivedAt = receivedInstant(receivedDate);
+    return {
+      receivedAt,
+      future: receivedInFuture(receivedAt),
+      completedOn: toZonedDate(receivedAt),
+    };
+  }
+
+  it("bills last month's work to last month, even keyed in late at night", () => {
+    // 23:50 on 24 Nov in Adelaide (ACDT, +10:30), entering a job from 31 Oct.
+    const job = keyedIn("2026-10-31", "2026-11-24T13:20:00Z");
+    expect(job.future).toBe(false);
+    expect(job.completedOn).toBe("2026-10-31");
+    expect(billingPeriodFor("monthly_consolidated", job.completedOn))
+      .toEqual({ start: "2026-10-01", end: "2026-10-31" });
+  });
+
+  it("keeps the first of a month in that month, keyed in just after midnight", () => {
+    // 00:10 on 24 Nov in Adelaide is still 23 Nov in UTC.
+    const job = keyedIn("2026-11-01", "2026-11-23T13:40:00Z");
+    expect(job.completedOn).toBe("2026-11-01");
+    expect(billingPeriodFor("monthly_consolidated", job.completedOn))
+      .toEqual({ start: "2026-11-01", end: "2026-11-30" });
+  });
+
+  it("stays on its day across the October clock change", () => {
+    // Daylight saving starts 4 Oct 2026; a September job keyed in summer time.
+    const job = keyedIn("2026-09-30", "2026-11-24T13:20:00Z");
+    expect(job.completedOn).toBe("2026-09-30");
+    expect(billingPeriodFor("monthly_consolidated", job.completedOn)?.end).toBe("2026-09-30");
+  });
+
+  it("joins the week it was received in for a weekly customer", () => {
+    const job = keyedIn("2026-11-18", "2026-11-24T01:00:00Z");
+    expect(billingPeriodFor("weekly_consolidated", job.completedOn))
+      .toEqual({ start: "2026-11-16", end: "2026-11-22" });
+  });
+
+  it("is never completed before it was received", () => {
+    const job = keyedIn("2026-11-10", "2026-11-24T01:00:00Z");
+    // The same instant is written to both columns, so the pair cannot disagree.
+    expect(Date.parse(job.receivedAt)).toBeLessThan(Date.parse("2026-11-24T01:00:00Z"));
+    expect(job.completedOn).toBe("2026-11-10");
+  });
+
+  it("still refuses tomorrow before anything is created", () => {
+    expect(keyedIn("2026-11-25", "2026-11-24T01:00:00Z").future).toBe(true);
+    expect(keyedIn("2026-11-24", "2026-11-24T01:00:00Z").future).toBe(false);
+  });
+
+  it("refuses a future date ahead of the completion, so no job is half made", () => {
+    const read = (path: string) => readFileSync(join(process.cwd(), path), "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+    const actions = read("src/app/(app)/orders/actions.ts");
+    const create = actions.slice(actions.indexOf("export async function createOrder"),
+                                 actions.indexOf("export async function updateOrder"));
+    expect(create.indexOf("receivedInFuture(receivedAt)"))
+      .toBeLessThan(create.indexOf(".insert("));
+    expect(create.indexOf(".insert(")).toBeLessThan(create.indexOf("completeLaundryOrder("));
+  });
+});
+
+/**
+ * The gap the entry above recorded, closed (2026-11-24): correcting the received
+ * date of a job the simplified workflow already completed moves its completion
+ * date too, and its draft when the billing period changes.
+ */
+describe("a completed job's received date is corrected", () => {
+  const simplified = {
+    status: "completed" as const,
+    previousReceivedAt: "2026-12-02T02:00:00Z",
+    receivedAt: "2026-11-28T02:00:00Z",
+    completedAt: "2026-12-02T02:00:00Z",
+    handoverRecorded: false,
+    billingStatus: "invoice_generated",
+  };
+
+  it("carries the completion date with it when the job was completed on save", () => {
+    expect(receivedDateMove(simplified)).toEqual({ kind: "carry", completedAt: "2026-11-28T02:00:00Z" });
+  });
+
+  it("carries it later as well, so a job is never finished before it was received", () => {
+    expect(receivedDateMove({ ...simplified, receivedAt: "2026-12-05T02:00:00Z" }))
+      .toEqual({ kind: "carry", completedAt: "2026-12-05T02:00:00Z" });
+  });
+
+  it("recognises a simplified completion to the minute, not to the millisecond", () => {
+    expect(receivedDateMove({ ...simplified, completedAt: "2026-12-02T02:00:30.123Z" }).kind).toBe("carry");
+  });
+
+  it("does nothing when the date did not move or the job is not finished", () => {
+    expect(receivedDateMove({ ...simplified, receivedAt: simplified.previousReceivedAt }).kind).toBe("unchanged");
+    expect(receivedDateMove({ ...simplified, status: "new", completedAt: null }).kind).toBe("unchanged");
+  });
+
+  it("refuses once the invoice has gone to the customer", () => {
+    for (const billingStatus of ["invoice_sent", "paid"]) {
+      expect(receivedDateMove({ ...simplified, billingStatus }).kind).toBe("refuse");
+    }
+  });
+
+  it("leaves a real handover's completion date alone", () => {
+    const handedOver = {
+      ...simplified, handoverRecorded: true, completedAt: "2026-12-04T05:00:00Z",
+    };
+    expect(receivedDateMove(handedOver)).toEqual({ kind: "keep" });
+    // …but will not let the receipt move past it.
+    expect(receivedDateMove({ ...handedOver, receivedAt: "2026-12-06T02:00:00Z" }).kind).toBe("refuse");
+  });
+
+  it("treats a completion at some other time as a real one, even with no handover", () => {
+    const other = { ...simplified, completedAt: "2026-12-03T05:00:00Z" };
+    expect(receivedDateMove(other)).toEqual({ kind: "keep" });
+  });
+
+  describe("the wiring in updateOrder", () => {
+    const read = (path: string) => readFileSync(join(process.cwd(), path), "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+    const actions = read("src/app/(app)/orders/actions.ts");
+    const update = actions.slice(actions.indexOf("export async function updateOrder"),
+                                 actions.indexOf("export async function advanceOrder"));
+    const plan = actions.slice(actions.indexOf("async function planCompletionMove"));
+
+    it("asks the rule, and writes the completion date it returns", () => {
+      expect(plan).toMatch(/receivedDateMove\(/);
+      expect(update).toMatch(/completed_at: completion\.completedAt/);
+    });
+
+    it("writes the job before moving it, and takes it off before placing it", () => {
+      const write = update.indexOf(".update(row)");
+      const off = update.indexOf("removeJobFromDraft(");
+      const on = update.indexOf("placeApprovedJobs(");
+      expect(write).toBeGreaterThan(-1);
+      expect(off).toBeGreaterThan(write);
+      expect(on).toBeGreaterThan(off);
+    });
+
+    it("refuses an issued invoice and compares periods before moving", () => {
+      expect(plan).toMatch(/status !== "draft"/);
+      expect(plan).toMatch(/samePeriod\(/);
+    });
+
+    it("names the tenant on every read it makes", () => {
+      const reads = plan.match(/\.from\("[a-z_]+"\)/g) ?? [];
+      const tenantFilters = plan.match(/\.eq\("tenant_id", session\.tenantId\)/g) ?? [];
+      expect(reads.length).toBeGreaterThanOrEqual(4);
+      expect(tenantFilters.length).toBe(reads.length);
+    });
   });
 });

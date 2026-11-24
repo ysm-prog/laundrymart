@@ -14,6 +14,18 @@ write names its tenant.
   customer's laundry), `?delivery=yes|no` carried back, customer-not-found keeps the dates,
   quick-create keeps collect + pickup choice, collection date controlled. No migration.
 
+## Previously: a completed job's received date correction moves its completion (2026-11-24)
+- `receivedDateMove` + `planCompletionMove` in `updateOrder`: a simplified completion's
+  `completed_at` follows a corrected received date; across a billing period the job comes off its
+  draft and is placed on the new one. Refused once its invoice is issued or sent. No migration.
+- Merged to `Dev` and `Prod` (`80a843e`); CI green on both (runs 496, 497).
+- Before trusting it live: move a simplified job's received date into last month as the Office
+  manager and check it lands on last month's draft.
+
+## Previously: backdated jobs checked against the simplified workflow (2026-11-24)
+- Tests only: a backdated job completes as at its received instant and joins that month's draft
+  (6 unit cases, 6 pgTAP). Found the gap closed above.
+
 ## Previously: second review of backdated jobs (2026-11-24)
 - Six fixes: real-date check on `?received=` (no more 500), ticketed intake loads, quick-create
   keeps the dates, `?due=`/`?collect=` carried back, `orders/carry.ts`, `carriedDate` tested.

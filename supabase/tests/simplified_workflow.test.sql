@@ -10,7 +10,7 @@
 -- SECURITY INVOKER and reads the tenant's setting through RLS: a proof run as
 -- the superuser would pass whatever the tenants policy said.
 begin;
-select plan(13);
+select plan(21);
 
 insert into auth.users (id, email) values
   ('11111111-1111-1111-1111-111111111111','s@example.com'),
@@ -103,6 +103,52 @@ select throws_ok(
   'P0001',
   'a job cannot go from completed to out_for_delivery',
   'a finished job is terminal for every stage, not only the one it came from');
+
+-- A backdated job (2026-11-24): the counter types in on the 24th laundry that
+-- came in on 31 October, and `createOrder` completes it as at that instant.
+-- 23:50 on 31 October in Adelaide is 13:20 UTC, under daylight saving.
+select lives_ok(
+  $$insert into public.laundry_orders
+      (id, tenant_id, customer_id, order_number, delivery_required,
+       expected_delivery_date, received_at)
+    values ('d0000000-0000-0000-0000-00000000000f','aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+            'c0000000-0000-0000-0000-00000000000a','LJ00005', true,
+            '2026-11-02', '2026-10-31T13:20:00Z')$$,
+  'the counter takes in a job received last month');
+select lives_ok(
+  $$update public.laundry_orders
+       set status = 'completed', completed_at = '2026-10-31T13:20:00Z'
+     where id = 'd0000000-0000-0000-0000-00000000000f'$$,
+  'and completes it straight from New as at the day it was received');
+select is((select status from public.laundry_orders
+            where id = 'd0000000-0000-0000-0000-00000000000f'), 'completed',
+          'the backdated completion landed');
+select is((select completed_at from public.laundry_orders
+            where id = 'd0000000-0000-0000-0000-00000000000f'),
+          '2026-10-31T13:20:00Z'::timestamptz,
+          'the received instant is kept as the finishing time, not replaced with now');
+select is((select (completed_at at time zone 'Australia/Adelaide')::date
+             from public.laundry_orders
+            where id = 'd0000000-0000-0000-0000-00000000000f'),
+          '2026-10-31'::date,
+          'which is 31 October in Adelaide, so it joins October''s draft');
+select is((select billing_status from public.laundry_orders
+            where id = 'd0000000-0000-0000-0000-00000000000f'), 'awaiting_review',
+          'and it is in the billing queue like any other finished job');
+
+-- Correcting its received date carries the completion date with it (2026-11-24):
+-- nothing in the database refuses moving `completed_at` on a finished job, which
+-- is what `updateOrder` relies on.
+select lives_ok(
+  $$update public.laundry_orders
+       set received_at = '2026-10-28T02:00:00Z', completed_at = '2026-10-28T02:00:00Z'
+     where id = 'd0000000-0000-0000-0000-00000000000f'$$,
+  'a completed job''s received and completion dates can be corrected together');
+select is((select (completed_at at time zone 'Australia/Adelaide')::date
+             from public.laundry_orders
+            where id = 'd0000000-0000-0000-0000-00000000000f'),
+          '2026-10-28'::date,
+          'the correction landed, so the job now bills to the day it was really received');
 
 reset role;
 

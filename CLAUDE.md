@@ -660,6 +660,11 @@ key remains the way to reset or re-assert them through the Auth API, but nothing
   row), and it never issues or sends an invoice. 0065 relaxes 0042's rule 4 **only from a plant
   stage**: a delivery job already on a round still goes out first. Full is 0042 unchanged. Nothing
   about rounds, drivers or delivery is removed, and switching moves no existing job.
+  **Correcting the received date of a job completed that way moves its completion date with it**
+  (`receivedDateMove`, 2026-11-24), and if the billing period changes the job comes off its draft
+  and is placed on the new period's one (`removeJobFromDraft`, then `placeApprovedJobs`). Refused
+  once its invoice is issued or sent. A job with a real handover keeps its completion date, and its
+  receipt cannot move past it.
 - **A job is assigned to a Board and a Delivery Date, and the two records of that cannot
   disagree** (`guard_laundry_order_assignment`, 0016 retargeted by 0031). Eligibility first: a
   customer pickup is refused outright, so is a job still in the plant and a completed or
@@ -1849,7 +1854,7 @@ Proofs in `supabase/tests/`: `rls_isolation`, `rls_coverage`, `driver_scope`,
 `customer_record_scope`, `fleet_scope`, `pickup_intake`, `laundry_item_ownership`,
 `invoice_money_guards`, `invoice_issue_guard`, `billing_flow_guards`, `flow_runs_itself`,
 `operations_settings`, `billing_write_policies`, `hot_foreign_key_indexes`, `reopen_job_charges`,
-`invoice_sms`, `invoice_history_import`, `board_and_people_write`, `simplified_workflow` (**796 assertions** across 45 files).
+`invoice_sms`, `invoice_history_import`, `board_and_people_write`, `simplified_workflow` (**804 assertions** across 45 files).
 
 **Count assertions, not lines starting with `ok`.** pgTAP's function is literally named `ok`, so
 psql prints a centred `ok` **column header** above each result — and `grep -c '^\s*ok '` counts
@@ -3925,6 +3930,57 @@ change.**
   the redirect shows the carried date rather than its old value.
 - Tests in `backdated-jobs.test.ts` and `carry.test.ts`; the ticket and customer-refusal tests were
   confirmed to fail with their fix removed.
+
+### 2026-11-24 · Correcting a completed job's received date moves its completion date
+The gap the entry below found, closed on the owner's instruction. **No migration; no schema, RLS,
+capability or policy change.**
+- **The rule is `receivedDateMove`** (`lib/domain/laundry-orders.ts`, pure and tested). A job the
+  simplified workflow completed on save — no handover recorded, completed at its received instant
+  to the minute — has its completion date carried with a corrected received date, earlier or later.
+  A job with a real handover keeps its completion date, and the receipt cannot be moved past it.
+- **Its draft follows the period.** If the job is on a draft and the new date falls in another
+  billing period, `updateOrder` writes the job, takes it off the old draft (rebuilt without it) and
+  places it again through `placeApprovedJobs`, the routine approval uses. The toast names both
+  invoices. Same period, or a per-job draft: only the date moves.
+- **Refused, with the reason,** once the job's invoice has been issued or sent, and for a role
+  without `invoices.write` when the move would change drafts. Editing a completed job is
+  `orders.manage` already, held by the Owner and the Office manager, who both hold it.
+- `planCompletionMove` names the tenant on every read (§23); a source test counts them.
+- 11 unit tests (one mutation, carry turned into keep, fails 3); 2 pgTAP assertions that the
+  database lets both dates move together. 1706 tests across 111 files, `verify` green; **804 pgTAP
+  assertions across 45 files**, 0 failing.
+- **Not verified behind the auth gate.** Before trusting it: as the Office manager, open a job
+  created this month in the simplified workflow, change its received date to last month, save, and
+  check the toast names last month's draft and the job is on it.
+
+**Merged to `Dev` and `Prod` on 2026-11-24** (`80a843e`). `Prod` had moved by one documentation-only
+commit (`6ac6ed7`, the second review's merge record), so it was merged into the branch first; only
+`MEMORY.md` conflicted, both entries kept. `verify` re-run green on the merged tree, then a
+fast-forward to both; `Prod` never force-pushed. **CI green on all three jobs for both** (run 496
+`Dev`, run 497 `Prod`; `Prod` ran 01:08:57 → 01:10:38Z, read off the run timestamps). **Nothing to
+apply**: no migration. **The Vercel production deploy is not confirmable from this session** (§5).
+
+### 2026-11-24 · The backdated jobs checked against the simplified workflow
+The two changes of 2026-11-23 meet in `createOrder`: in the simplified workflow a new job is
+completed as at its received instant, so a backdated receipt decides which month's draft it joins.
+**Tests only. No migration; no schema, RLS, capability, policy or source change.**
+- **The chain was proved by running it, not by grepping for `at: receivedAt`.** Six cases in
+  `simplified-workflow.test.ts` compose the instant `createOrder` would with the clock faked, read
+  its Adelaide date back and pick the period: a 31 October job keyed in at 23:50 on 24 November
+  bills to October; a 1 November job keyed in just after midnight (still the 23rd in UTC) bills to
+  November; a September job keyed in under daylight saving stays in September; a weekly customer's
+  job joins the week it was received; tomorrow is still refused. Composing the instant in UTC fails
+  three of them, so they are not vacuous.
+- **A source-order check**: the future-date refusal comes before the insert and the insert before
+  the completion, so a refused date never leaves a half-made job.
+- **The database half** (`simplified_workflow.test.sql`, 13 → 19): as a real counter session, a
+  delivery job received on 31 October is inserted, completed straight from New with
+  `completed_at` set to its received instant, keeps that instant rather than now, reads as
+  31 October in Adelaide, and lands in the billing queue. Against a database without 0065 those
+  five fail by name.
+- **One gap found here: editing the received date of a completed simplified job left
+  `completed_at` behind.** Closed in the entry above.
+- 1695 tests across 111 files, `verify` green; **802 pgTAP assertions across 45 files**, 0 failing.
 
 ### 2026-11-24 · Second review of the backdated jobs: six fixes
 A review of the first round of fixes found six more. **No migration; no schema, RLS, capability or
