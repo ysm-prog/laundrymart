@@ -10,12 +10,14 @@
  * - `customer` moves each time a customer is chosen;
  * - `date` moves each time a date request is actually *sent* — a date change
  *   that sends nothing must not invalidate a customer answer it never replaces;
- * - `dateLanded` is the `date` ticket of the last date answer that was applied.
+ * - `dateLanded` is the `date` ticket of the last date answer that was applied;
+ * - `receivedEdits` moves on every received-date change, sent or not, so a date
+ *   answer for a day the counter has since left is never applied.
  *
  * A plain module, not part of the form, so the rule can be tested by outcome
  * rather than by reading the component's source.
  */
-export type IntakeTickets = { customer: number; date: number; dateLanded: number };
+export type IntakeTickets = { customer: number; date: number; dateLanded: number; receivedEdits: number };
 
 /**
  * - `drop`: another customer has been chosen since — none of it is theirs.
@@ -36,5 +38,6 @@ export function customerAnswerUse(sent: IntakeTickets, now: IntakeTickets): Cust
 
 /** A date answer applies only while neither the date nor the customer has moved on. */
 export function dateAnswerApplies(sent: IntakeTickets, now: IntakeTickets): boolean {
-  return now.date === sent.date && now.customer === sent.customer;
+  return now.date === sent.date && now.customer === sent.customer
+    && now.receivedEdits === sent.receivedEdits;
 }

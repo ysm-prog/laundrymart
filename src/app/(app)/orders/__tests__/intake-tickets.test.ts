@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { customerAnswerUse, dateAnswerApplies, type IntakeTickets } from "../intake-tickets";
 
-const at = (customer: number, date: number, dateLanded = 0): IntakeTickets => ({ customer, date, dateLanded });
+const at = (customer: number, date: number, dateLanded = 0, receivedEdits = date): IntakeTickets =>
+  ({ customer, date, dateLanded, receivedEdits });
 
 describe("customerAnswerUse", () => {
   it("drops the answer once another customer is chosen", () => {
@@ -29,5 +30,15 @@ describe("dateAnswerApplies", () => {
     expect(dateAnswerApplies(at(1, 1), at(1, 1))).toBe(true);
     expect(dateAnswerApplies(at(1, 1), at(1, 2))).toBe(false);
     expect(dateAnswerApplies(at(1, 1), at(2, 1))).toBe(false);
+  });
+
+  it("drops an answer for a received date the counter has since changed, even unsent", () => {
+    // A later change sent nothing (the return date was set by hand), so the
+    // date ticket did not move, but the answer is for a day no longer chosen.
+    expect(dateAnswerApplies(at(1, 1, 0, 1), at(1, 1, 0, 2))).toBe(false);
+  });
+
+  it("does not let an unsent received change drop a customer answer", () => {
+    expect(customerAnswerUse(at(1, 0, 0, 0), at(1, 0, 0, 3))).toBe("all");
   });
 });

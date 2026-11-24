@@ -129,6 +129,28 @@ describe("a refused save keeps the received date", () => {
     expect(actions).toMatch(/carryAnswers\(withoutParam\(backTo, "pickup"\), \{[^;]*customer: null \}\)/);
   });
 
+  it("treats a failed intake load as an empty answer", () => {
+    expect(form.match(/intake\.load\([^)]*\)\.catch\(\(\) => null\)\.then/g)?.length).toBe(2);
+  });
+
+  it("names a round date in the hint only while the box shows it", () => {
+    expect(form).toMatch(/defaults && !due\.touched && due\.value === defaults\.returnDate/);
+  });
+
+  it("counts every received change for the date answers, sent or not", () => {
+    const change = form.slice(form.indexOf("function changeReceived"));
+    expect(change.indexOf("++receivedEdits.current")).toBeGreaterThan(-1);
+    expect(change.indexOf("++receivedEdits.current")).toBeLessThan(change.indexOf("due.touched) return"));
+  });
+
+  it("brings back how the laundry arrived on both pages", () => {
+    for (const page of [create, edit]) {
+      expect(page).toMatch(/defaultReceivedVia=\{/);
+      expect(page).toMatch(/defaultPickupDate=\{/);
+      expect(page).toMatch(/defaultPickupDriverId=\{/);
+    }
+  });
+
   it("keeps a job out for delivery a delivery when its pickup change is refused", () => {
     expect(actions).toMatch(/delivery: true, collect: null \}\),\s*"This job is already out for delivery/);
   });

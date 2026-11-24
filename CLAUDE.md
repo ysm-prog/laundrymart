@@ -45,7 +45,8 @@ The master spec names a .NET 9 Web API; this build follows the supplied skeleton
   **A rejection redirects, so the browser's copy of the form is gone**: an action that refuses
   a post is responsible for handing back the answers that cost real work to give. The job form
   hands back the customer, the received date, both return dates and whether the customer collects
-  (`?customer=`, `?received=`, `?due=`, `?collect=`, `?delivery=yes|no`) through `orders/carry.ts`,
+  (`?customer=`, `?received=`, `?due=`, `?collect=`, `?delivery=yes|no`), and how the laundry arrived
+(`?via=`, plus `?picked=`/`?collector=` for a driver pickup) through `orders/carry.ts`,
   which its quick-create's return address uses too; the form adopts a carried date only if it is a
   real calendar date and, for the received date, not in the future (`carriedDate`). A refusal
   because the customer itself is unusable carries everything **but** the customer.
@@ -3910,6 +3911,30 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-11-24 · Fifth review of the backdated jobs: five fixes
+A review of the fourth round found five more. **No migration; no schema, RLS, capability or policy
+change.**
+- **A refused take-in no longer reopens as a counter drop-off.** Dropping `?pickup=` (so the
+  unusable customer is not re-seeded) also dropped the collection's seed, so Received via fell back
+  to "Dropped off at counter" and the pickup's day and driver went with it. Every refused save now
+  carries how the laundry arrived (`?via=`, and for a driver pickup `?picked=` and `?collector=`),
+  validated in `carry.ts` (`carriedVia`, `carriedUuid`) and adopted by the form on both pages. The
+  collection's rows are still not carried: a job for another customer cannot be taken in from that
+  collection anyway (0050's guard).
+- **The same fix closes an older gap**: a job started from `?via=driver_pickup` and refused for any
+  reason reopened as a drop-off, because `returnPath` never carried `via`.
+- **A date answer for a day the counter has left no longer applies.** Since the fourth review the
+  date ticket moves only when a request is sent, so a later change that sent nothing (the return
+  date set by hand) let an older answer set defaults for the old day. `receivedEdits` moves on every
+  change and `dateAnswerApplies` checks it; `customerAnswerUse` still ignores it.
+- **The return-date hint names a round only while the box shows that date.** A customer answer
+  that arrived while a date request was out, followed by an empty date answer, left "Their round's
+  next visit — …" under an empty or different date.
+- **A failed intake load is an empty answer** (`.catch(() => null)`), not an unhandled rejection.
+- Tests in `carry.test.ts`, `intake-tickets.test.ts` and `backdated-jobs.test.ts`; the
+  `receivedEdits` and pickup-only rules were each confirmed to fail with their fix removed.
+  1729 tests across 112 files, `verify` green.
+
 ### 2026-11-24 · Fourth review of the backdated jobs: four fixes
 A review of the third round found four more. **No migration; no schema, RLS, capability or policy
 change.**

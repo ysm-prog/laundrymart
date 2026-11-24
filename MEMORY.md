@@ -9,7 +9,15 @@ where that is genuinely what it is. The multi-tenancy architecture stays: one op
 fact about today's data, not a reason to drop `tenant_id`, RLS, or §23's rule that a read feeding a
 write names its tenant.
 
-## Latest: fourth review of backdated jobs (2026-11-24)
+## Latest: fifth review of backdated jobs (2026-11-24)
+- Five fixes: refused saves carry received-via + pickup day/driver (`?via=`, `?picked=`,
+  `?collector=`), so a refused take-in is not reopened as a drop-off; `receivedEdits` ticket drops
+  date answers for a day since left; round hint only while the box shows that date; intake loads
+  `.catch(() => null)`. No migration.
+- Before trusting it live: refuse a take-in whose customer was archived and check it reopens as
+  "Pickup by driver" with its day and driver.
+
+## Previously: fourth review of backdated jobs (2026-11-24)
 - Four fixes: intake tickets rule (`orders/intake-tickets.ts`, date ticket moves only when a
   request is sent), out-for-delivery refusal carries `delivery=yes`, customer-refused take-in drops
   `?pickup=`, stale ticket test rewritten. No migration.

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { answersFromForm, carriedDelivery, carryAnswers, withoutParam } from "../carry";
+import { answersFromForm, carriedDelivery, carriedUuid, carriedVia, carryAnswers, withoutParam } from "../carry";
 
 const ID = "8c2b996b-1111-4222-8333-944455556666";
 
@@ -67,5 +67,36 @@ describe("withoutParam", () => {
     expect(withoutParam("/orders/new?pickup=p1&via=driver_pickup", "pickup")).toBe("/orders/new?via=driver_pickup");
     expect(withoutParam("/orders/new?pickup=p1", "pickup")).toBe("/orders/new");
     expect(withoutParam("/orders/new", "pickup")).toBe("/orders/new");
+  });
+});
+
+describe("how the laundry arrived", () => {
+  const DRIVER = "1c2b996b-1111-4222-8333-944455556666";
+
+  it("carries a driver pickup with its day and driver", () => {
+    const form = new FormData();
+    form.set("received_via", "driver_pickup");
+    form.set("pickup_date", "2026-11-16");
+    form.set("pickup_driver_id", DRIVER);
+    expect(carryAnswers("/orders/new", { ...answersFromForm(form), delivery: null }))
+      .toBe(`/orders/new?via=driver_pickup&picked=2026-11-16&collector=${DRIVER}`);
+  });
+
+  it("leaves the pickup's day and driver off any other channel", () => {
+    expect(carryAnswers("/orders/new", { via: "customer_dropoff", picked: "2026-11-16", collector: DRIVER }))
+      .toBe("/orders/new?via=customer_dropoff");
+  });
+
+  it("refuses a channel that is not stored, and a driver that is not a uuid", () => {
+    expect(carryAnswers("/orders/new", { via: "teleport" })).toBe("/orders/new");
+    expect(carryAnswers("/orders/new", { via: "driver_pickup", picked: "2026-02-31", collector: "bob" }))
+      .toBe("/orders/new?via=driver_pickup");
+  });
+
+  it("reads them back, and nothing else", () => {
+    expect(carriedVia("driver_pickup")).toBe("driver_pickup");
+    for (const junk of [undefined, null, "", "teleport"]) expect(carriedVia(junk)).toBeUndefined();
+    expect(carriedUuid(DRIVER)).toBe(DRIVER);
+    expect(carriedUuid("bob")).toBeUndefined();
   });
 });

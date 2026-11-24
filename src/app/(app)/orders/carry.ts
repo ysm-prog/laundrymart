@@ -1,4 +1,5 @@
 import { isRealIsoDate } from "@/lib/domain/dates";
+import { RECEIVED_VIA, type ReceivedVia } from "@/lib/domain/laundry-orders";
 
 /**
  * What a job form hands back through a redirect (2026-11-23).
@@ -30,6 +31,15 @@ export type CarriedAnswers = {
    * hiding the collection date it was handed (2026-11-24).
    */
   delivery?: boolean | null;
+  /**
+   * How the laundry arrived, and for a driver pickup the day and the driver
+   * (`?via=`, `?picked=`, `?collector=`). Without them a refused save, and above
+   * all a refused take-in that loses its `?pickup=`, reopens as a counter
+   * drop-off and a corrected save records the wrong channel (2026-11-24).
+   */
+  via?: string | null;
+  picked?: string | null;
+  collector?: string | null;
 };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -43,6 +53,13 @@ export function carryAnswers(path: string, answers: CarriedAnswers): string {
     if (isRealIsoDate(value)) query.set(key, value);
   }
   if (typeof answers.delivery === "boolean") query.set("delivery", answers.delivery ? "yes" : "no");
+  const via = carriedVia(answers.via);
+  if (via) query.set("via", via);
+  // A pickup's day and driver mean nothing for any other channel.
+  if (via === "driver_pickup") {
+    if (isRealIsoDate(answers.picked)) query.set("picked", answers.picked);
+    if (answers.collector && UUID.test(answers.collector)) query.set("collector", answers.collector);
+  }
   const search = query.toString();
   return search ? `${base}?${search}` : base;
 }
@@ -61,6 +78,9 @@ export function answersFromForm(formData: FormData): CarriedAnswers {
     // The job form posts `delivery_required=on` only for a delivery, so its
     // absence is an answer: the customer collects.
     delivery: formData.get("delivery_required") === "on",
+    via: text("received_via"),
+    picked: text("pickup_date"),
+    collector: text("pickup_driver_id"),
   };
 }
 
@@ -82,4 +102,14 @@ export function carriedDelivery(value: string | null | undefined): boolean | und
   if (value === "yes") return true;
   if (value === "no") return false;
   return undefined;
+}
+
+/** `?via=` read back: one of the stored channels, or no answer at all. */
+export function carriedVia(value: string | null | undefined): ReceivedVia | undefined {
+  return (RECEIVED_VIA as readonly string[]).includes(value ?? "") ? (value as ReceivedVia) : undefined;
+}
+
+/** A carried uuid (`?collector=`) read back, or nothing. */
+export function carriedUuid(value: string | null | undefined): string | undefined {
+  return value && UUID.test(value) ? value : undefined;
 }

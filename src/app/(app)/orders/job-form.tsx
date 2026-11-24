@@ -20,7 +20,7 @@ import {
   type ItemOwnership, type OrderItemInput, type ReceivedVia,
 } from "@/lib/domain/laundry-orders";
 import { carriedDate, stepQuantity } from "@/lib/domain/intake";
-import { carriedDelivery, carryAnswers } from "./carry";
+import { carriedDelivery, carriedUuid, carriedVia, carryAnswers } from "./carry";
 import { customerAnswerUse, dateAnswerApplies, type IntakeTickets } from "./intake-tickets";
 import { money } from "@/lib/format";
 import type { IntakeQuote } from "./intake-actions";
@@ -164,7 +164,8 @@ function numberOrNull(value: string): number | null {
 export function JobForm({
   action, customerAction, customers, drivers, staff,
   order, items, seed, catalogue = [], defaultCustomerId, defaultReceivedDate,
-  defaultDueDate, defaultCollectDate, defaultDelivery, returnPath,
+  defaultDueDate, defaultCollectDate, defaultDelivery, defaultReceivedVia,
+  defaultPickupDate, defaultPickupDriverId, returnPath,
   entryReceivedVia, intake,
 }: {
   action: (formData: FormData) => Promise<void>;
@@ -212,6 +213,14 @@ export function JobForm({
    * so a pickup does not come back as a delivery with its collection date hidden.
    */
   defaultDelivery?: string;
+  /**
+   * How a refused save said the laundry arrived (`?via=`), and for a driver
+   * pickup its day and driver (`?picked=`, `?collector=`), so the retry does not
+   * come back as a counter drop-off.
+   */
+  defaultReceivedVia?: string;
+  defaultPickupDate?: string;
+  defaultPickupDriverId?: string;
   /** Where the quick-create returns to, so the job form is not restarted. */
   returnPath: string;
   /**
@@ -257,9 +266,21 @@ export function JobForm({
   // job stores. `order` wins where both are somehow set, because a stored answer
   // is a fact and a seed is a suggestion.
   const arrival = order ?? seed;
+  // A refused save's answer wins over the stored one, adopted the same way as
+  // the customer above.
+  const carriedViaChoice = carriedVia(defaultReceivedVia);
   const [receivedVia, setReceivedVia] = useState<string>(
-    () => initialReceivedVia(arrival, entryReceivedVia),
+    () => carriedViaChoice ?? initialReceivedVia(arrival, entryReceivedVia),
   );
+  const [lastViaDefault, setLastViaDefault] = useState(carriedViaChoice);
+  if (carriedViaChoice !== lastViaDefault) {
+    setLastViaDefault(carriedViaChoice);
+    if (carriedViaChoice) setReceivedVia(carriedViaChoice);
+  }
+  // The pickup's day and driver are uncontrolled, so a carried value is applied
+  // by keying the inputs on it: a new value is a fresh input.
+  const carriedPicked = carriedDate(defaultPickupDate);
+  const carriedDriver = carriedUuid(defaultPickupDriverId);
   // A refused save's answer wins over the stored one, adopted the same way as
   // the customer above.
   const carriedDeliveryChoice = carriedDelivery(defaultDelivery);
@@ -350,15 +371,20 @@ export function JobForm({
   const customerRequest = useRef(0);
   const dateRequest = useRef(0);
   const dateLanded = useRef(0);
+  const receivedEdits = useRef(0);
   function tickets(): IntakeTickets {
-    return { customer: customerRequest.current, date: dateRequest.current, dateLanded: dateLanded.current };
+    return {
+      customer: customerRequest.current, date: dateRequest.current,
+      dateLanded: dateLanded.current, receivedEdits: receivedEdits.current,
+    };
   }
   function chooseCustomer(id: string) {
     setCustomerId(id);
     ++customerRequest.current;
     const sent = tickets();
     if (editing || !intake || items?.length) return;
-    void intake.load(id, received).then((loaded) => {
+    // A failed load is an empty answer: the form stays as the counter left it.
+    void intake.load(id, received).catch(() => null).then((loaded) => {
       if (!loaded) return;
       const use = customerAnswerUse(sent, tickets());
       if (use === "drop") return;
@@ -382,12 +408,15 @@ export function JobForm({
    */
   function changeReceived(value: string) {
     setReceived(value);
+    // Every change moves this, sent or not, so an answer for a date the counter
+    // has since left never lands (see `dateAnswerApplies`).
+    ++receivedEdits.current;
     if (editing || !intake || !customerId || due.touched) return;
     // Counted only once a request is really sent: a change that sends nothing
     // must not stop an in-flight customer answer setting its defaults.
     ++dateRequest.current;
     const sent = tickets();
-    void intake.load(customerId, value).then((loaded) => {
+    void intake.load(customerId, value).catch(() => null).then((loaded) => {
       if (!loaded || !dateAnswerApplies(sent, tickets())) return;
       dateLanded.current = sent.date;
       setDefaults(loaded);
@@ -484,7 +513,7 @@ export function JobForm({
 
   // The two real answers, plus whatever an older job already holds, so editing
   // one taken in under a retired option cannot rewrite how it arrived.
-  const receivedViaChoices = receivedViaOptions(arrival?.received_via);
+  const receivedViaChoices = receivedViaOptions(arrival?.received_via ?? carriedViaChoice);
 
   return (
     <>
@@ -721,13 +750,14 @@ export function JobForm({
                 <Field label="Pickup date" name="pickup_date" hint="Optional.">
                   {/* Collected on or before the day it was received, which the
                       server refuses otherwise — so the browser says so first. */}
-                  <Input name="pickup_date" type="date" defaultValue={arrival?.pickup_date ?? undefined}
+                  <Input key={`picked-${carriedPicked ?? ""}`} name="pickup_date" type="date"
+                         defaultValue={carriedPicked ?? arrival?.pickup_date ?? undefined}
                          max={received || undefined} />
                 </Field>
                 <Field label="Collected by" name="pickup_driver_id" className="sm:col-span-2"
                        hint="Your existing drivers.">
-                  <Select name="pickup_driver_id" placeholder="Not recorded"
-                          defaultValue={arrival?.pickup_driver_id ?? undefined}
+                  <Select key={`collector-${carriedDriver ?? ""}`} name="pickup_driver_id" placeholder="Not recorded"
+                          defaultValue={carriedDriver ?? arrival?.pickup_driver_id ?? undefined}
                           options={drivers.map((driver) => ({ value: driver.id, label: driver.full_name }))} />
                 </Field>
               </>
@@ -1015,7 +1045,9 @@ export function JobForm({
             {deliveryRequired ? (
               <div className="grid gap-4 sm:grid-cols-2">
                 <Field label="Expected delivery date" name="expected_delivery_date" required
-                       hint={defaults && !due.touched
+                       // Only while the box holds the date those defaults worked
+                       // out: a hint naming a day the box does not show is wrong.
+                       hint={defaults && !due.touched && due.value === defaults.returnDate
                          ? defaults.roundLabel
                            ? `Their round's next visit — ${defaults.roundLabel}.`
                            : "Your usual turnaround. Change it in Settings › How you work."
