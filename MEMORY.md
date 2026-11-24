@@ -15,8 +15,7 @@ write names its tenant.
   draft and is placed on the new one. Refused once its invoice is issued or sent. No migration.
 - Merged to `Dev` and `Prod` (`80a843e`); CI green on both (runs 496, 497); Vercel deploy green
   (owner confirmed in the dashboard).
-- Before trusting it live: move a simplified job's received date into last month as the Office
-  manager and check it lands on last month's draft.
+- Verified live by the client: Angela tested it on `ats.coreit.com.au` and reported it all working.
 
 ## Previously: backdated jobs checked against the simplified workflow (2026-11-24)
 - Tests only: a backdated job completes as at its received instant and joins that month's draft
