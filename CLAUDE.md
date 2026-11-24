@@ -3953,7 +3953,9 @@ the branch rather than overwritten; only `CLAUDE.md` and `MEMORY.md` conflicted,
 `verify` re-run green on the merged tree, **1711 tests across 111 files**, then a fast-forward to
 both. `Prod` never force-pushed. **CI green on all three jobs for both** (run 502 `Dev`, run 503
 `Prod`; `Prod` ran 01:23:43 → 01:26:00Z, read off the run timestamps). **Nothing to apply**: no
-migration. **The Vercel production deploy is not confirmable from this session** (§5). Still to
+migration. **The Vercel production deploy was confirmed green by the owner in the Vercel
+dashboard** at about 03:07Z, when `Prod` stood at `525783a` (this review plus the fourth); a person
+reading it, not a status this session could read (§5). Still to
 check live: refuse a backdated customer pickup's save and confirm it reopens as a pickup with its
 collection date, and change the received date straight after choosing a customer and confirm their
 laundry rows stay.
