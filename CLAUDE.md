@@ -44,10 +44,11 @@ The master spec names a .NET 9 Web API; this build follows the supplied skeleton
   cannot be. `/api/sync` stays the one API exception for the offline outbox.
   **A rejection redirects, so the browser's copy of the form is gone**: an action that refuses
   a post is responsible for handing back the answers that cost real work to give. The job form
-  hands back the customer, the received date and both return dates (`?customer=`, `?received=`,
-  `?due=`, `?collect=`) through `orders/carry.ts`, which its quick-create's return address uses
-  too; the form adopts a carried date only if it is a real calendar date and, for the received
-  date, not in the future (`carriedDate`).
+  hands back the customer, the received date, both return dates and whether the customer collects
+  (`?customer=`, `?received=`, `?due=`, `?collect=`, `?delivery=yes|no`) through `orders/carry.ts`,
+  which its quick-create's return address uses too; the form adopts a carried date only if it is a
+  real calendar date and, for the received date, not in the future (`carriedDate`). A refusal
+  because the customer itself is unusable carries everything **but** the customer.
 - **`optionalText`/`optionalUuid`/`optionalDate` accept `null` as well as `""`.** An empty HTML
   input posts `""`, but a field composed in the browser and posted as JSON — the
   compose-locally-commit-once hidden field used by the job form, the contract wizard and the
@@ -3909,6 +3910,27 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-11-24 · Third review of the backdated jobs: five fixes
+A review of the six fixes found five more. **No migration; no schema, RLS, capability or policy
+change.**
+- **Changing the received date no longer throws away a customer's laundry.** The six fixes gave
+  both intake loads one shared ticket, so a date change while the customer's last job was loading
+  discarded its items. Now there are two tickets: a customer answer is dropped only when another
+  customer is chosen, and its items still apply after a date change; only its return date is left
+  to the date's own request.
+- **A refused customer pickup comes back as a customer pickup.** `delivery_required` was not
+  carried, so a new job reopened on Re-deliver, hid the carried collection date and asked for a
+  delivery date. It rides back as `?delivery=yes|no` (`carriedDelivery`) and is adopted during
+  render like the other answers.
+- **Customer not found keeps the dates.** Both actions sent this one refusal back bare, so a
+  backdated job reopened reading today. It now carries everything but the customer.
+- **The customer quick-create keeps the pickup choice and the collection date** as well as the
+  received and return date.
+- **The collection date is controlled**, like the return date, so a form that stays mounted across
+  the redirect shows the carried date rather than its old value.
+- Tests in `backdated-jobs.test.ts` and `carry.test.ts`; the ticket and customer-refusal tests were
+  confirmed to fail with their fix removed.
+
 ### 2026-11-24 · Correcting a completed job's received date moves its completion date
 The gap the entry below found, closed on the owner's instruction. **No migration; no schema, RLS,
 capability or policy change.**

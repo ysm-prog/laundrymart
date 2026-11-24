@@ -38,7 +38,7 @@ export default async function NewJobPage({
   searchParams,
 }: {
   searchParams: Promise<{ customer?: string; pickup?: string; via?: string; received?: string;
-    due?: string; collect?: string }>;
+    due?: string; collect?: string; delivery?: string }>;
 }) {
   const params = await searchParams;
   const session = await requireCapability("orders.write");
@@ -159,6 +159,7 @@ export default async function NewJobPage({
         defaultReceivedDate={params.received}
         defaultDueDate={params.due}
         defaultCollectDate={params.collect}
+        defaultDelivery={params.delivery}
         returnPath={returnPath}
         // The counter's own screen is a drop-off (the column's default); a
         // collection or a `?via=driver_pickup` link is a driver pickup.

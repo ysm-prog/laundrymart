@@ -9,7 +9,12 @@ where that is genuinely what it is. The multi-tenancy architecture stays: one op
 fact about today's data, not a reason to drop `tenant_id`, RLS, or §23's rule that a read feeding a
 write names its tenant.
 
-## Latest: a completed job's received date correction moves its completion (2026-11-24)
+## Latest: third review of backdated jobs (2026-11-24)
+- Five fixes on the branch, not yet merged: two intake tickets (a date change no longer drops the
+  customer's laundry), `?delivery=yes|no` carried back, customer-not-found keeps the dates,
+  quick-create keeps collect + pickup choice, collection date controlled. No migration.
+
+## Previously: a completed job's received date correction moves its completion (2026-11-24)
 - `receivedDateMove` + `planCompletionMove` in `updateOrder`: a simplified completion's
   `completed_at` follows a corrected received date; across a billing period the job comes off its
   draft and is placed on the new one. Refused once its invoice is issued or sent. No migration.

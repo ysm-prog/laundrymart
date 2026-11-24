@@ -88,9 +88,11 @@ describe("a refused save keeps the received date", () => {
     expect(create).toMatch(/defaultReceivedDate=\{params\.received\}/);
     expect(create).toMatch(/defaultDueDate=\{params\.due\}/);
     expect(create).toMatch(/defaultCollectDate=\{params\.collect\}/);
+    expect(create).toMatch(/defaultDelivery=\{params\.delivery\}/);
     expect(edit).toMatch(/defaultReceivedDate=\{received\}/);
     expect(edit).toMatch(/defaultDueDate=\{due\}/);
     expect(edit).toMatch(/defaultCollectDate=\{collect\}/);
+    expect(edit).toMatch(/defaultDelivery=\{delivery\}/);
   });
 
   it("only adopts a carried date that is real and not in the future", () => {
@@ -99,15 +101,34 @@ describe("a refused save keeps the received date", () => {
     expect(form).toMatch(/carriedDate\(defaultCollectDate\)/);
   });
 
-  it("keeps the received and return date through the customer quick-create", () => {
-    expect(form).toMatch(/name="return_to"\s+value=\{carryAnswers\(returnPath, \{\s*received,/);
+  it("keeps every answer through the customer quick-create", () => {
+    const back = form.match(/name="return_to"\s+value=\{carryAnswers\(returnPath, \{([\s\S]*?)\}\)\}/);
+    expect(back).not.toBeNull();
+    for (const key of ["received", "delivery:", "due:", "collect:"]) expect(back?.[1]).toContain(key);
   });
 
-  it("drops an intake answer a newer request has overtaken", () => {
-    const tickets = form.match(/const ticket = \+\+intakeRequest\.current/g) ?? [];
-    const checks = form.match(/ticket !== intakeRequest\.current/g) ?? [];
-    expect(tickets).toHaveLength(2);
-    expect(checks).toHaveLength(2);
+  it("adopts the carried delivery choice and keeps the collection date controlled", () => {
+    expect(form).toMatch(/carriedDelivery\(defaultDelivery\)/);
+    expect(form).toMatch(/if \(carriedDeliveryChoice !== undefined\) setDeliveryRequired/);
+    expect(form).toMatch(/<DateControl name="expected_collection_date"[\s\S]*?value=\{collect\}/);
+    expect(form).not.toMatch(/defaultValue=\{carriedCollect/);
+  });
+
+  it("keeps a customer's laundry when the date changes while it is loading", () => {
+    // Separate tickets: a date change never invalidates the customer answer.
+    expect(form).toMatch(/const ticket = \+\+customerRequest\.current/);
+    expect(form).toMatch(/const ticket = \+\+dateRequest\.current/);
+    expect(form).not.toMatch(/intakeRequest/);
+    // The items are applied before the date check that guards the return date.
+    const choose = form.slice(form.indexOf("function chooseCustomer"), form.indexOf("function changeReceived"));
+    expect(choose.indexOf("rowsFrom(loaded.items)")).toBeGreaterThan(-1);
+    expect(choose.indexOf("rowsFrom(loaded.items)"))
+      .toBeLessThan(choose.indexOf("dateTicket !== dateRequest.current"));
+  });
+
+  it("brings the dates back when the customer itself is refused", () => {
+    const refusals = actions.match(/carryAnswers\([^;]*customer: null \}\)/g) ?? [];
+    expect(refusals).toHaveLength(2);
   });
 
   it("counts the suggested return date from the received date", () => {

@@ -20,7 +20,7 @@ import {
   type ItemOwnership, type OrderItemInput, type ReceivedVia,
 } from "@/lib/domain/laundry-orders";
 import { carriedDate, stepQuantity } from "@/lib/domain/intake";
-import { carryAnswers } from "./carry";
+import { carriedDelivery, carryAnswers } from "./carry";
 import { money } from "@/lib/format";
 import type { IntakeQuote } from "./intake-actions";
 import type { IntakeDefaults } from "@/lib/orders/intake";
@@ -163,7 +163,7 @@ function numberOrNull(value: string): number | null {
 export function JobForm({
   action, customerAction, customers, drivers, staff,
   order, items, seed, catalogue = [], defaultCustomerId, defaultReceivedDate,
-  defaultDueDate, defaultCollectDate, returnPath,
+  defaultDueDate, defaultCollectDate, defaultDelivery, returnPath,
   entryReceivedVia, intake,
 }: {
   action: (formData: FormData) => Promise<void>;
@@ -206,6 +206,11 @@ export function JobForm({
    */
   defaultDueDate?: string;
   defaultCollectDate?: string;
+  /**
+   * Whether a refused save was a delivery or a customer pickup (`?delivery=`),
+   * so a pickup does not come back as a delivery with its collection date hidden.
+   */
+  defaultDelivery?: string;
   /** Where the quick-create returns to, so the job form is not restarted. */
   returnPath: string;
   /**
@@ -254,7 +259,17 @@ export function JobForm({
   const [receivedVia, setReceivedVia] = useState<string>(
     () => initialReceivedVia(arrival, entryReceivedVia),
   );
-  const [deliveryRequired, setDeliveryRequired] = useState(() => initialDeliveryRequired(order));
+  // A refused save's answer wins over the stored one, adopted the same way as
+  // the customer above.
+  const carriedDeliveryChoice = carriedDelivery(defaultDelivery);
+  const [deliveryRequired, setDeliveryRequired] = useState(
+    () => carriedDeliveryChoice ?? initialDeliveryRequired(order),
+  );
+  const [lastDeliveryDefault, setLastDeliveryDefault] = useState(carriedDeliveryChoice);
+  if (carriedDeliveryChoice !== lastDeliveryDefault) {
+    setLastDeliveryDefault(carriedDeliveryChoice);
+    if (carriedDeliveryChoice !== undefined) setDeliveryRequired(carriedDeliveryChoice);
+  }
   const [deliveryWindow, setDeliveryWindow] = useState<string>(
     order?.delivery_window ?? "no_specific_time",
   );
@@ -280,7 +295,18 @@ export function JobForm({
     setLastDueDefault(carriedDue);
     if (carriedDue) setDue({ value: carriedDue, touched: true });
   }
+  // Controlled for the same reason as the return date: the form can stay
+  // mounted across the redirect, and an uncontrolled input would keep its old
+  // value rather than the one carried back.
   const carriedCollect = carriedDate(defaultCollectDate);
+  const [collect, setCollect] = useState(
+    () => carriedCollect ?? order?.expected_collection_date ?? "",
+  );
+  const [lastCollectDefault, setLastCollectDefault] = useState(carriedCollect);
+  if (carriedCollect !== lastCollectDefault) {
+    setLastCollectDefault(carriedCollect);
+    if (carriedCollect) setCollect(carriedCollect);
+  }
   const [defaults, setDefaults] = useState<IntakeDefaults | null>(
     editing ? null : intake?.initial ?? null,
   );
@@ -317,21 +343,27 @@ export function JobForm({
    * the counter has started — and their round's next day fills the date unless
    * somebody has already set one. Both are offers; every field stays editable.
    */
-  // Every intake request takes a ticket, and only the latest one's answer is
-  // applied: a slow answer for an earlier customer or an earlier date must not
-  // land on top of a newer one.
-  const intakeRequest = useRef(0);
+  // Two tickets, one per kind of request, so a slow answer never lands on top
+  // of a newer one without a date change throwing away a customer's laundry.
+  // A customer answer is dropped only when another customer has been chosen
+  // since; its items still apply after a date change, and only its return
+  // date is left to the date's own request. A date answer is dropped when the
+  // date or the customer has changed since.
+  const customerRequest = useRef(0);
+  const dateRequest = useRef(0);
   function chooseCustomer(id: string) {
     setCustomerId(id);
-    const ticket = ++intakeRequest.current;
+    const ticket = ++customerRequest.current;
+    const dateTicket = dateRequest.current;
     if (editing || !intake || items?.length) return;
     void intake.load(id, received).then((loaded) => {
-      if (!loaded || ticket !== intakeRequest.current) return;
-      setDefaults(loaded);
+      if (!loaded || ticket !== customerRequest.current) return;
       if (loaded.items.length) {
         setRows((current) => (untouched(current) ? rowsFrom(loaded.items) : current));
         setNextKey((key) => Math.max(key, loaded.items.length));
       }
+      if (dateTicket !== dateRequest.current) return;
+      setDefaults(loaded);
       setDue((current) => (current.touched ? current : { value: loaded.returnDate, touched: false }));
     });
   }
@@ -345,10 +377,11 @@ export function JobForm({
    */
   function changeReceived(value: string) {
     setReceived(value);
-    const ticket = ++intakeRequest.current;
+    const ticket = ++dateRequest.current;
+    const customerTicket = customerRequest.current;
     if (editing || !intake || !customerId || due.touched) return;
     void intake.load(customerId, value).then((loaded) => {
-      if (!loaded || ticket !== intakeRequest.current) return;
+      if (!loaded || ticket !== dateRequest.current || customerTicket !== customerRequest.current) return;
       setDefaults(loaded);
       setDue((current) => (current.touched ? current : { value: loaded.returnDate, touched: false }));
     });
@@ -459,11 +492,14 @@ export function JobForm({
         <input type="hidden" name="status" value="active" />
         <input type="hidden" name="payment_terms_days" value="14" />
         {/* The answers already given ride the return address too, so adding a
-            customer does not reset the received or return date. */}
+            customer does not reset the received date, the return date or
+            whether the customer collects. */}
         <input type="hidden" name="return_to"
                value={carryAnswers(returnPath, {
                  received,
+                 delivery: deliveryRequired,
                  due: deliveryRequired && due.touched ? due.value : null,
+                 collect: deliveryRequired ? null : collect,
                })} />
       </form>
 
@@ -1054,8 +1090,8 @@ export function JobForm({
                 </Notice>
                 <Field label="Expected collection date" name="expected_collection_date"
                        hint="Optional — leave blank if they did not say.">
-                  <Input name="expected_collection_date" type="date" min={received || undefined}
-                         defaultValue={carriedCollect ?? order?.expected_collection_date ?? undefined} />
+                  <DateControl name="expected_collection_date" min={received || undefined}
+                               value={collect} onChange={setCollect} />
                 </Field>
               </div>
             )}
