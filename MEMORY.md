@@ -25,8 +25,9 @@ write names its tenant.
   `?pickup=`, stale ticket test rewritten. No migration.
 - Merged to `Dev` and `Prod` (`525783a`); CI green on both (runs 509, 510); Vercel deploy green
   (owner confirmed in the dashboard).
-- Before trusting it live: refuse a pickup change on a job out for delivery (it should reopen as a
-  delivery), and set a return date, pick a customer, then change the received date at once.
+- Verified live by the client: Angela ran both checks (out-for-delivery refusal reopens as a
+  delivery; received-date change after choosing a customer keeps the laundry) and reported them
+  all working.
 
 ## Previously: third review of backdated jobs (2026-11-24)
 - Five fixes: two intake tickets (a date change no longer drops the customer's laundry),
