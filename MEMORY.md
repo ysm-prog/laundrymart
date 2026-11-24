@@ -13,6 +13,7 @@ write names its tenant.
 - `receivedDateMove` + `planCompletionMove` in `updateOrder`: a simplified completion's
   `completed_at` follows a corrected received date; across a billing period the job comes off its
   draft and is placed on the new one. Refused once its invoice is issued or sent. No migration.
+- Merged to `Dev` and `Prod` (`80a843e`); CI green on both (runs 496, 497).
 - Before trusting it live: move a simplified job's received date into last month as the Office
   manager and check it lands on last month's draft.
 
