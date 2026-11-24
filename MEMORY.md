@@ -17,6 +17,8 @@ write names its tenant.
   restores `completed_at`. No migration.
 - Before trusting it live: in the simplified workflow, refuse a save with three laundry rows and
   check all three come back; add a customer mid-form on a driver pickup and check it stays one.
+- Merged to `Dev` and `Prod` (`15ff2dc`); CI green on both (runs 525, 526). Vercel deploy not
+  confirmable from here — check the dashboard.
 
 ## Previously: fifth review of backdated jobs (2026-11-24)
 - Five fixes: refused saves carry received-via + pickup day/driver (`?via=`, `?picked=`,

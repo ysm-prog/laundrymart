@@ -3949,6 +3949,15 @@ schema, RLS, capability or policy change.**
   skip, the failed-read rule and the quick-create carry were each confirmed to fail with their fix
   removed. 1744 tests across 113 files, `verify` green.
 
+**Merged to `Dev` and `Prod` on 2026-11-24** (`15ff2dc`). Both had moved by two documentation-only
+commits from another session (`340199a`, the client's live check of the fourth review; `5ca21a0`,
+the owner's Vercel confirmation for the fifth), merged in with no conflict and no source change; then
+both were fast-forwarded. `Prod` was never force-pushed. **CI green on all three jobs for both**
+(run 525 `Dev`, run 526 `Prod`; `Prod` ran 07:44:08 → 07:45:52Z, read off the run timestamps).
+**Nothing to apply**: no migration. **The Vercel production deploy is not confirmable from this
+session** (§5). Still to check live: in the simplified workflow, refuse a save with three laundry
+rows and check all three come back; add a customer mid-form on a driver pickup and check it stays one.
+
 ### 2026-11-24 · Fifth review of the backdated jobs: five fixes
 A review of the fourth round found five more. **No migration; no schema, RLS, capability or policy
 change.**
