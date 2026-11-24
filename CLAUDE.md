@@ -1848,7 +1848,7 @@ Proofs in `supabase/tests/`: `rls_isolation`, `rls_coverage`, `driver_scope`,
 `customer_record_scope`, `fleet_scope`, `pickup_intake`, `laundry_item_ownership`,
 `invoice_money_guards`, `invoice_issue_guard`, `billing_flow_guards`, `flow_runs_itself`,
 `operations_settings`, `billing_write_policies`, `hot_foreign_key_indexes`, `reopen_job_charges`,
-`invoice_sms`, `invoice_history_import`, `board_and_people_write`, `simplified_workflow` (**796 assertions** across 45 files).
+`invoice_sms`, `invoice_history_import`, `board_and_people_write`, `simplified_workflow` (**802 assertions** across 45 files).
 
 **Count assertions, not lines starting with `ok`.** pgTAP's function is literally named `ok`, so
 psql prints a centred `ok` **column header** above each result — and `grep -c '^\s*ok '` counts
@@ -3904,6 +3904,33 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-11-24 · The backdated jobs checked against the simplified workflow
+The two changes of 2026-11-23 meet in `createOrder`: in the simplified workflow a new job is
+completed as at its received instant, so a backdated receipt decides which month's draft it joins.
+**Tests only. No migration; no schema, RLS, capability, policy or source change.**
+- **The chain was proved by running it, not by grepping for `at: receivedAt`.** Six cases in
+  `simplified-workflow.test.ts` compose the instant `createOrder` would with the clock faked, read
+  its Adelaide date back and pick the period: a 31 October job keyed in at 23:50 on 24 November
+  bills to October; a 1 November job keyed in just after midnight (still the 23rd in UTC) bills to
+  November; a September job keyed in under daylight saving stays in September; a weekly customer's
+  job joins the week it was received; tomorrow is still refused. Composing the instant in UTC fails
+  three of them, so they are not vacuous.
+- **A source-order check**: the future-date refusal comes before the insert and the insert before
+  the completion, so a refused date never leaves a half-made job.
+- **The database half** (`simplified_workflow.test.sql`, 13 → 19): as a real counter session, a
+  delivery job received on 31 October is inserted, completed straight from New with
+  `completed_at` set to its received instant, keeps that instant rather than now, reads as
+  31 October in Adelaide, and lands in the billing queue. Against a database without 0065 those
+  five fail by name.
+- **One gap found and not fixed, because it needs a decision.** Editing the received date of a job
+  the simplified workflow already completed (Owner or Office manager only, `orders.manage`) moves
+  `received_at` and leaves `completed_at` where it was. Within a month that changes nothing that
+  is billed; across a month boundary the job stays on the original month's draft, and moving the
+  date later than the original leaves a job recorded as finished before it was received. The
+  remedy is to take the job off its draft and re-add it, or to have `updateOrder` move
+  `completed_at` with `received_at` for a simplified completion still on a draft.
+- 1695 tests across 111 files, `verify` green; **802 pgTAP assertions across 45 files**, 0 failing.
+
 ### 2026-11-24 · Second review of the backdated jobs: six fixes
 A review of the first round of fixes found six more. **No migration; no schema, RLS, capability or
 policy change.**

@@ -9,8 +9,13 @@ where that is genuinely what it is. The multi-tenancy architecture stays: one op
 fact about today's data, not a reason to drop `tenant_id`, RLS, or §23's rule that a read feeding a
 write names its tenant.
 
-## Latest: second review of backdated jobs (2026-11-24)
-- Six fixes on the branch, not yet merged: real-date check on `?received=` (no more 500),
+## Latest: backdated jobs checked against the simplified workflow (2026-11-24)
+- Tests only: a backdated job completes as at its received instant and joins that month's draft
+  (6 unit cases, 6 pgTAP). Open gap: editing a completed simplified job's received date leaves
+  `completed_at` behind, so across a month it stays on the old draft. Needs a decision.
+
+## Previously: second review of backdated jobs (2026-11-24)
+- Six fixes, merged to `Dev` and `Prod` (`f4756a2`): real-date check on `?received=` (no more 500),
   ticketed intake loads, quick-create keeps the dates, `?due=`/`?collect=` carried back,
   `orders/carry.ts`, `carriedDate` tested. No migration.
 

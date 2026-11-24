@@ -1,12 +1,15 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   DEFAULT_OPERATIONS, parseOperations, readOperationsForm,
 } from "@/lib/domain/operations-settings";
 import {
   actionsFor, buildStatusTrack, checkTransition, nextStatuses,
+  receivedInFuture, receivedInstant,
 } from "@/lib/domain/laundry-orders";
+import { billingPeriodFor } from "@/lib/domain/billing-period";
+import { toZonedDate } from "@/lib/domain/timezone";
 import { nextStepFor } from "@/lib/domain/job-next-step";
 import { describeOrderActivity } from "@/lib/domain/order-activity";
 
@@ -157,5 +160,82 @@ describe("the wiring", () => {
 
   it("names the tenant when it reads the setting", () => {
     expect(read("src/lib/orders/workflow.ts")).toMatch(/\.eq\("id", tenantId\)/);
+  });
+});
+
+/**
+ * A backdated job in the simplified workflow (2026-11-24). `createOrder` hands
+ * `completeLaundryOrder` the same `receivedAt` it inserted, so `completed_at` is
+ * the received instant, and the draft the job joins is chosen from that. These
+ * run the real chain — compose the instant, read its Adelaide date back, pick
+ * the period — rather than grepping for `at: receivedAt`, which only proves the
+ * argument is passed.
+ */
+describe("a backdated job completed on save", () => {
+  afterEach(() => { vi.useRealTimers(); });
+
+  /** What createOrder does with a received date, keyed in at `now`. */
+  function keyedIn(receivedDate: string, now: string) {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(now));
+    const receivedAt = receivedInstant(receivedDate);
+    return {
+      receivedAt,
+      future: receivedInFuture(receivedAt),
+      completedOn: toZonedDate(receivedAt),
+    };
+  }
+
+  it("bills last month's work to last month, even keyed in late at night", () => {
+    // 23:50 on 24 Nov in Adelaide (ACDT, +10:30), entering a job from 31 Oct.
+    const job = keyedIn("2026-10-31", "2026-11-24T13:20:00Z");
+    expect(job.future).toBe(false);
+    expect(job.completedOn).toBe("2026-10-31");
+    expect(billingPeriodFor("monthly_consolidated", job.completedOn))
+      .toEqual({ start: "2026-10-01", end: "2026-10-31" });
+  });
+
+  it("keeps the first of a month in that month, keyed in just after midnight", () => {
+    // 00:10 on 24 Nov in Adelaide is still 23 Nov in UTC.
+    const job = keyedIn("2026-11-01", "2026-11-23T13:40:00Z");
+    expect(job.completedOn).toBe("2026-11-01");
+    expect(billingPeriodFor("monthly_consolidated", job.completedOn))
+      .toEqual({ start: "2026-11-01", end: "2026-11-30" });
+  });
+
+  it("stays on its day across the October clock change", () => {
+    // Daylight saving starts 4 Oct 2026; a September job keyed in summer time.
+    const job = keyedIn("2026-09-30", "2026-11-24T13:20:00Z");
+    expect(job.completedOn).toBe("2026-09-30");
+    expect(billingPeriodFor("monthly_consolidated", job.completedOn)?.end).toBe("2026-09-30");
+  });
+
+  it("joins the week it was received in for a weekly customer", () => {
+    const job = keyedIn("2026-11-18", "2026-11-24T01:00:00Z");
+    expect(billingPeriodFor("weekly_consolidated", job.completedOn))
+      .toEqual({ start: "2026-11-16", end: "2026-11-22" });
+  });
+
+  it("is never completed before it was received", () => {
+    const job = keyedIn("2026-11-10", "2026-11-24T01:00:00Z");
+    // The same instant is written to both columns, so the pair cannot disagree.
+    expect(Date.parse(job.receivedAt)).toBeLessThan(Date.parse("2026-11-24T01:00:00Z"));
+    expect(job.completedOn).toBe("2026-11-10");
+  });
+
+  it("still refuses tomorrow before anything is created", () => {
+    expect(keyedIn("2026-11-25", "2026-11-24T01:00:00Z").future).toBe(true);
+    expect(keyedIn("2026-11-24", "2026-11-24T01:00:00Z").future).toBe(false);
+  });
+
+  it("refuses a future date ahead of the completion, so no job is half made", () => {
+    const read = (path: string) => readFileSync(join(process.cwd(), path), "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+    const actions = read("src/app/(app)/orders/actions.ts");
+    const create = actions.slice(actions.indexOf("export async function createOrder"),
+                                 actions.indexOf("export async function updateOrder"));
+    expect(create.indexOf("receivedInFuture(receivedAt)"))
+      .toBeLessThan(create.indexOf(".insert("));
+    expect(create.indexOf(".insert(")).toBeLessThan(create.indexOf("completeLaundryOrder("));
   });
 });
