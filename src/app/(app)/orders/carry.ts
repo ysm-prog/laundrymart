@@ -64,6 +64,19 @@ export function answersFromForm(formData: FormData): CarriedAnswers {
   };
 }
 
+/**
+ * The path with one query parameter taken off. A take-in refused because its
+ * customer is unusable must not come back to `?pickup=`, which re-seeds that
+ * very customer from the collection.
+ */
+export function withoutParam(path: string, key: string): string {
+  const [base = path, existing] = path.split("?");
+  const query = new URLSearchParams(existing);
+  query.delete(key);
+  const search = query.toString();
+  return search ? `${base}?${search}` : base;
+}
+
 /** `?delivery=yes|no` read back; anything else is no answer at all. */
 export function carriedDelivery(value: string | null | undefined): boolean | undefined {
   if (value === "yes") return true;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { answersFromForm, carriedDelivery, carryAnswers } from "../carry";
+import { answersFromForm, carriedDelivery, carryAnswers, withoutParam } from "../carry";
 
 const ID = "8c2b996b-1111-4222-8333-944455556666";
 
@@ -59,5 +59,13 @@ describe("carriedDelivery", () => {
     expect(carriedDelivery("yes")).toBe(true);
     expect(carriedDelivery("no")).toBe(false);
     for (const junk of [undefined, null, "", "true", "on"]) expect(carriedDelivery(junk)).toBeUndefined();
+  });
+});
+
+describe("withoutParam", () => {
+  it("takes one parameter off and keeps the rest", () => {
+    expect(withoutParam("/orders/new?pickup=p1&via=driver_pickup", "pickup")).toBe("/orders/new?via=driver_pickup");
+    expect(withoutParam("/orders/new?pickup=p1", "pickup")).toBe("/orders/new");
+    expect(withoutParam("/orders/new", "pickup")).toBe("/orders/new");
   });
 });

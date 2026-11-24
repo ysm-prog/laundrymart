@@ -21,6 +21,7 @@ import {
 } from "@/lib/domain/laundry-orders";
 import { carriedDate, stepQuantity } from "@/lib/domain/intake";
 import { carriedDelivery, carryAnswers } from "./carry";
+import { customerAnswerUse, dateAnswerApplies, type IntakeTickets } from "./intake-tickets";
 import { money } from "@/lib/format";
 import type { IntakeQuote } from "./intake-actions";
 import type { IntakeDefaults } from "@/lib/orders/intake";
@@ -343,27 +344,31 @@ export function JobForm({
    * the counter has started — and their round's next day fills the date unless
    * somebody has already set one. Both are offers; every field stays editable.
    */
-  // Two tickets, one per kind of request, so a slow answer never lands on top
-  // of a newer one without a date change throwing away a customer's laundry.
-  // A customer answer is dropped only when another customer has been chosen
-  // since; its items still apply after a date change, and only its return
-  // date is left to the date's own request. A date answer is dropped when the
-  // date or the customer has changed since.
+  // Tickets, so a slow answer never lands on top of a newer one without a date
+  // change throwing away a customer's laundry. `customerAnswerUse` and
+  // `dateAnswerApplies` (intake-tickets.ts) decide what still applies.
   const customerRequest = useRef(0);
   const dateRequest = useRef(0);
+  const dateLanded = useRef(0);
+  function tickets(): IntakeTickets {
+    return { customer: customerRequest.current, date: dateRequest.current, dateLanded: dateLanded.current };
+  }
   function chooseCustomer(id: string) {
     setCustomerId(id);
-    const ticket = ++customerRequest.current;
-    const dateTicket = dateRequest.current;
+    ++customerRequest.current;
+    const sent = tickets();
     if (editing || !intake || items?.length) return;
     void intake.load(id, received).then((loaded) => {
-      if (!loaded || ticket !== customerRequest.current) return;
+      if (!loaded) return;
+      const use = customerAnswerUse(sent, tickets());
+      if (use === "drop") return;
       if (loaded.items.length) {
         setRows((current) => (untouched(current) ? rowsFrom(loaded.items) : current));
         setNextKey((key) => Math.max(key, loaded.items.length));
       }
-      if (dateTicket !== dateRequest.current) return;
+      if (use === "items") return;
       setDefaults(loaded);
+      if (use === "items+defaults") return;
       setDue((current) => (current.touched ? current : { value: loaded.returnDate, touched: false }));
     });
   }
@@ -377,11 +382,14 @@ export function JobForm({
    */
   function changeReceived(value: string) {
     setReceived(value);
-    const ticket = ++dateRequest.current;
-    const customerTicket = customerRequest.current;
     if (editing || !intake || !customerId || due.touched) return;
+    // Counted only once a request is really sent: a change that sends nothing
+    // must not stop an in-flight customer answer setting its defaults.
+    ++dateRequest.current;
+    const sent = tickets();
     void intake.load(customerId, value).then((loaded) => {
-      if (!loaded || ticket !== dateRequest.current || customerTicket !== customerRequest.current) return;
+      if (!loaded || !dateAnswerApplies(sent, tickets())) return;
+      dateLanded.current = sent.date;
       setDefaults(loaded);
       setDue((current) => (current.touched ? current : { value: loaded.returnDate, touched: false }));
     });

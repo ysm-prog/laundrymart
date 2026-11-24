@@ -3910,6 +3910,21 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-11-24 · Fourth review of the backdated jobs: four fixes
+A review of the third round found four more. **No migration; no schema, RLS, capability or policy
+change.**
+- **A date change that asks for nothing no longer drops a customer's defaults.** The date ticket
+  moved on every change, including one that sends no request because the return date was set by
+  hand, so the customer answer then arriving lost its "filled in from" defaults. The ticket now
+  moves only when a request is sent, and a customer answer keeps its defaults unless a newer date
+  answer has already landed. The rule is `customerAnswerUse`/`dateAnswerApplies` in
+  `orders/intake-tickets.ts`, tested by outcome.
+- **A job out for delivery comes back as a delivery** when its change to a customer pickup is
+  refused, instead of reopening as the pickup that was just refused.
+- **A take-in refused because its customer is unusable drops `?pickup=`**, which would otherwise
+  re-seed the same customer from the collection (`withoutParam`).
+- The test that read the old ticket code is rewritten against the new rule.
+
 ### 2026-11-24 · Third review of the backdated jobs: five fixes
 A review of the six fixes found five more. **No migration; no schema, RLS, capability or policy
 change.**

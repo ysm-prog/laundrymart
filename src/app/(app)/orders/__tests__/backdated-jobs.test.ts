@@ -115,15 +115,22 @@ describe("a refused save keeps the received date", () => {
   });
 
   it("keeps a customer's laundry when the date changes while it is loading", () => {
-    // Separate tickets: a date change never invalidates the customer answer.
-    expect(form).toMatch(/const ticket = \+\+customerRequest\.current/);
-    expect(form).toMatch(/const ticket = \+\+dateRequest\.current/);
+    // The ticket rule is tested by outcome in intake-tickets.test.ts; this
+    // pins that the form uses it, and only counts a date request it sends.
+    expect(form).toMatch(/customerAnswerUse\(sent, tickets\(\)\)/);
+    expect(form).toMatch(/dateAnswerApplies\(sent, tickets\(\)\)/);
     expect(form).not.toMatch(/intakeRequest/);
-    // The items are applied before the date check that guards the return date.
-    const choose = form.slice(form.indexOf("function chooseCustomer"), form.indexOf("function changeReceived"));
-    expect(choose.indexOf("rowsFrom(loaded.items)")).toBeGreaterThan(-1);
-    expect(choose.indexOf("rowsFrom(loaded.items)"))
-      .toBeLessThan(choose.indexOf("dateTicket !== dateRequest.current"));
+    const change = form.slice(form.indexOf("function changeReceived"));
+    expect(change.indexOf("due.touched) return")).toBeGreaterThan(-1);
+    expect(change.indexOf("++dateRequest.current")).toBeGreaterThan(change.indexOf("due.touched) return"));
+  });
+
+  it("does not reopen a refused take-in on the collection that names that customer", () => {
+    expect(actions).toMatch(/carryAnswers\(withoutParam\(backTo, "pickup"\), \{[^;]*customer: null \}\)/);
+  });
+
+  it("keeps a job out for delivery a delivery when its pickup change is refused", () => {
+    expect(actions).toMatch(/delivery: true, collect: null \}\),\s*"This job is already out for delivery/);
   });
 
   it("brings the dates back when the customer itself is refused", () => {

@@ -11,7 +11,7 @@ import {
   optionalDate, optionalText, optionalUuid, returnTo, toObject,
 } from "@/lib/actions";
 import { parseOrderItems } from "./order-items";
-import { answersFromForm, carryAnswers } from "./carry";
+import { answersFromForm, carryAnswers, withoutParam } from "./carry";
 import {
   DELIVERY_WINDOWS, ORDER_PRIORITIES, ORDER_STATUS_LABELS, RECEIVED_VIA,
   STAGE_CONTROLS, capabilitiesForMove, checkTransition, isOrderStatus,
@@ -343,7 +343,8 @@ export async function createOrder(formData: FormData): Promise<void> {
     // Deliberately *without* the customer: carrying an id the database will not
     // stand behind would re-open the form still claiming that selection. The
     // dates still ride back, or a backdated job would reopen reading today.
-    return fail(carryAnswers(backTo, { ...answersFromForm(formData), customer: null }),
+    // `?pickup=` is dropped too: it would re-seed this same customer.
+    return fail(carryAnswers(withoutParam(backTo, "pickup"), { ...answersFromForm(formData), customer: null }),
       "That customer could not be found — please select one from the list.");
   }
 
@@ -500,7 +501,10 @@ export async function updateOrder(formData: FormData): Promise<void> {
   // Changing the workflow under a job that has already been dispatched would
   // leave it in a state its own status does not allow.
   if (!parsed.data.delivery_required && existing.status === "out_for_delivery") {
-    return fail(backTo, "This job is already out for delivery, so it cannot become a customer pickup.");
+    // Carried back as a delivery: reopening it as the pickup just refused would
+    // only be refused again.
+    return fail(carryAnswers(`/orders/${id.data}/edit`, { ...answersFromForm(formData), delivery: true, collect: null }),
+      "This job is already out for delivery, so it cannot become a customer pickup.");
   }
 
   // The customer is posted by the form and written back, so an edit is another
