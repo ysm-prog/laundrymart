@@ -3973,6 +3973,10 @@ fast-forward to both; `Prod` never force-pushed. **CI green on all three jobs fo
 apply**: no migration. **The Vercel production deploy was confirmed green by the owner in the Vercel
 dashboard** — a person reading it, not a status this session could read (§5).
 
+**Verified live by the client on 2026-11-24**: Angela tested the received-date correction on
+`ats.coreit.com.au` and reported it all working. Recorded as her report, not as something this
+session observed.
+
 ### 2026-11-24 · The backdated jobs checked against the simplified workflow
 The two changes of 2026-11-23 meet in `createOrder`: in the simplified workflow a new job is
 completed as at its received instant, so a backdated receipt decides which month's draft it joins.
