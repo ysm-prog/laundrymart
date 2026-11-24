@@ -3925,6 +3925,15 @@ change.**
   re-seed the same customer from the collection (`withoutParam`).
 - The test that read the old ticket code is rewritten against the new rule.
 
+**Merged to `Dev` and `Prod` on 2026-11-24** (`525783a`), both clean fast-forwards from `bcb9923`:
+neither branch held a commit this one lacked, so nothing was reconciled and `Prod` was never
+force-pushed. **CI green on all three jobs for both** (run 509 `Dev`, run 510 `Prod`; `Prod` ran
+02:41:31 → 02:44:17Z, read off the run timestamps). **Nothing to apply**: no migration. **The
+Vercel production deploy is not confirmable from this session** (§5). Still to check live: refuse
+a pickup change on a job out for delivery and confirm the form reopens as a delivery, and set a
+return date, choose a customer, change the received date at once, and confirm the "Filled in
+from…" note names that customer's last job.
+
 ### 2026-11-24 · Third review of the backdated jobs: five fixes
 A review of the six fixes found five more. **No migration; no schema, RLS, capability or policy
 change.**

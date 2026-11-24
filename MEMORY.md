@@ -12,7 +12,11 @@ write names its tenant.
 ## Latest: fourth review of backdated jobs (2026-11-24)
 - Four fixes: intake tickets rule (`orders/intake-tickets.ts`, date ticket moves only when a
   request is sent), out-for-delivery refusal carries `delivery=yes`, customer-refused take-in drops
-  `?pickup=`, stale ticket test rewritten. No migration. On the feature branch only, not merged.
+  `?pickup=`, stale ticket test rewritten. No migration.
+- Merged to `Dev` and `Prod` (`525783a`); CI green on both (runs 509, 510). Vercel deploy not
+  confirmable from here — check the dashboard.
+- Before trusting it live: refuse a pickup change on a job out for delivery (it should reopen as a
+  delivery), and set a return date, pick a customer, then change the received date at once.
 
 ## Previously: third review of backdated jobs (2026-11-24)
 - Five fixes: two intake tickets (a date change no longer drops the customer's laundry),
