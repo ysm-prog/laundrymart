@@ -3940,8 +3940,10 @@ commits from another session (the Vercel confirmation for the earlier reviews, `
 were merged into the branch first; no conflicts and no source change, so the tree `verify` passed
 on is the one that shipped. Then a fast-forward to both; `Prod` never force-pushed. **CI green on
 all three jobs for both** (run 518 `Dev`, run 517 `Prod`; `Prod` ran 06:40:58 → 06:42:36Z, read off
-the run timestamps). **Nothing to apply**: no migration. **The Vercel production deploy is not
-confirmable from this session** (§5). Still to check live: refuse a take-in whose customer was
+the run timestamps). **Nothing to apply**: no migration. **The Vercel production deploy was
+confirmed green by the owner in the Vercel dashboard**, with `Prod` at `340199a` (this review plus a
+documentation-only record); a person reading it, not a status this session could read (§5). Still
+to check live: refuse a take-in whose customer was
 archived and confirm it reopens as "Pickup by driver" with its day and driver filled in.
 
 ### 2026-11-24 · Fourth review of the backdated jobs: four fixes

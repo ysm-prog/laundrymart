@@ -14,8 +14,8 @@ write names its tenant.
   `?collector=`), so a refused take-in is not reopened as a drop-off; `receivedEdits` ticket drops
   date answers for a day since left; round hint only while the box shows that date; intake loads
   `.catch(() => null)`. No migration.
-- Merged to `Dev` and `Prod` (`ba8d8f8`); CI green on both (runs 518, 517). Vercel deploy not
-  confirmable from here — check the dashboard.
+- Merged to `Dev` and `Prod` (`ba8d8f8`); CI green on both (runs 518, 517). Vercel deploy green
+  (owner confirmed in the dashboard, with `Prod` at `340199a`).
 - Before trusting it live: refuse a take-in whose customer was archived and check it reopens as
   "Pickup by driver" with its day and driver.
 
