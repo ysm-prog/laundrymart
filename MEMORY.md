@@ -10,9 +10,13 @@ fact about today's data, not a reason to drop `tenant_id`, RLS, or §23's rule t
 write names its tenant.
 
 ## Latest: third review of backdated jobs (2026-11-24)
-- Five fixes on the branch, not yet merged: two intake tickets (a date change no longer drops the
-  customer's laundry), `?delivery=yes|no` carried back, customer-not-found keeps the dates,
-  quick-create keeps collect + pickup choice, collection date controlled. No migration.
+- Five fixes: two intake tickets (a date change no longer drops the customer's laundry),
+  `?delivery=yes|no` carried back, customer-not-found keeps the dates, quick-create keeps collect +
+  pickup choice, collection date controlled. No migration.
+- Merged to `Dev` and `Prod` (`50830d1`); CI green on both (runs 502, 503). Vercel deploy not
+  confirmable from here — check the dashboard.
+- Before trusting it live: refuse a backdated customer pickup's save (it should reopen as a pickup
+  with its collection date), and change the received date right after choosing a customer.
 
 ## Previously: a completed job's received date correction moves its completion (2026-11-24)
 - `receivedDateMove` + `planCompletionMove` in `updateOrder`: a simplified completion's

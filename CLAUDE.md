@@ -3931,6 +3931,18 @@ change.**
 - Tests in `backdated-jobs.test.ts` and `carry.test.ts`; the ticket and customer-refusal tests were
   confirmed to fail with their fix removed.
 
+**Merged to `Dev` and `Prod` on 2026-11-24** (`50830d1`). `Prod` moved twice while this was in
+flight, both from another session: the completion-date fix below (`80a843e`, which also touched
+`orders/actions.ts`) and a documentation-only Vercel confirmation (`b8a9e8a`). Each was merged into
+the branch rather than overwritten; only `CLAUDE.md` and `MEMORY.md` conflicted, both entries kept.
+`verify` re-run green on the merged tree, **1711 tests across 111 files**, then a fast-forward to
+both. `Prod` never force-pushed. **CI green on all three jobs for both** (run 502 `Dev`, run 503
+`Prod`; `Prod` ran 01:23:43 → 01:26:00Z, read off the run timestamps). **Nothing to apply**: no
+migration. **The Vercel production deploy is not confirmable from this session** (§5). Still to
+check live: refuse a backdated customer pickup's save and confirm it reopens as a pickup with its
+collection date, and change the received date straight after choosing a customer and confirm their
+laundry rows stay.
+
 ### 2026-11-24 · Correcting a completed job's received date moves its completion date
 The gap the entry below found, closed on the owner's instruction. **No migration; no schema, RLS,
 capability or policy change.**
