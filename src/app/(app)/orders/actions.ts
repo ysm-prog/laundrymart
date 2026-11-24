@@ -335,8 +335,10 @@ export async function createOrder(formData: FormData): Promise<void> {
   if (customerError) return fail(backToForm, describeDbError(customerError));
   if (!customer) {
     // Deliberately *without* the customer: carrying an id the database will not
-    // stand behind would re-open the form still claiming that selection.
-    return fail(backTo, "That customer could not be found — please select one from the list.");
+    // stand behind would re-open the form still claiming that selection. The
+    // dates still ride back, or a backdated job would reopen reading today.
+    return fail(carryAnswers(backTo, { ...answersFromForm(formData), customer: null }),
+      "That customer could not be found — please select one from the list.");
   }
 
   const deliveryAddress = await resolveDeliveryAddress(supabase, session.tenantId, parsed.data);
@@ -505,7 +507,8 @@ export async function updateOrder(formData: FormData): Promise<void> {
     .is("deleted_at", null)
     .maybeSingle<{ id: string }>();
   if (!customer) {
-    return fail(`/orders/${id.data}/edit`,
+    // As in createOrder: everything but the customer comes back.
+    return fail(carryAnswers(`/orders/${id.data}/edit`, { ...answersFromForm(formData), customer: null }),
       "That customer could not be found — please select one from the list.");
   }
 

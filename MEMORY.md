@@ -9,7 +9,12 @@ where that is genuinely what it is. The multi-tenancy architecture stays: one op
 fact about today's data, not a reason to drop `tenant_id`, RLS, or §23's rule that a read feeding a
 write names its tenant.
 
-## Latest: second review of backdated jobs (2026-11-24)
+## Latest: third review of backdated jobs (2026-11-24)
+- Five fixes on the branch, not yet merged: two intake tickets (a date change no longer drops the
+  customer's laundry), `?delivery=yes|no` carried back, customer-not-found keeps the dates,
+  quick-create keeps collect + pickup choice, collection date controlled. No migration.
+
+## Previously: second review of backdated jobs (2026-11-24)
 - Six fixes: real-date check on `?received=` (no more 500), ticketed intake loads, quick-create
   keeps the dates, `?due=`/`?collect=` carried back, `orders/carry.ts`, `carriedDate` tested.
 - Merged to `Dev` and `Prod` (`f4756a2`); CI green on both (runs 492, 493). No migration.

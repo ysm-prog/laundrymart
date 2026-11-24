@@ -24,6 +24,12 @@ export type CarriedAnswers = {
   due?: string | null;
   /** The expected collection date, for a customer pickup. */
   collect?: string | null;
+  /**
+   * Whether the job is delivered back (`true`) or collected by the customer
+   * (`false`). Without it a refused customer pickup comes back as a delivery,
+   * hiding the collection date it was handed (2026-11-24).
+   */
+  delivery?: boolean | null;
 };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -36,6 +42,7 @@ export function carryAnswers(path: string, answers: CarriedAnswers): string {
     const value = answers[key];
     if (isRealIsoDate(value)) query.set(key, value);
   }
+  if (typeof answers.delivery === "boolean") query.set("delivery", answers.delivery ? "yes" : "no");
   const search = query.toString();
   return search ? `${base}?${search}` : base;
 }
@@ -51,5 +58,15 @@ export function answersFromForm(formData: FormData): CarriedAnswers {
     received: text("received_date"),
     due: text("expected_delivery_date"),
     collect: text("expected_collection_date"),
+    // The job form posts `delivery_required=on` only for a delivery, so its
+    // absence is an answer: the customer collects.
+    delivery: formData.get("delivery_required") === "on",
   };
+}
+
+/** `?delivery=yes|no` read back; anything else is no answer at all. */
+export function carriedDelivery(value: string | null | undefined): boolean | undefined {
+  if (value === "yes") return true;
+  if (value === "no") return false;
+  return undefined;
 }

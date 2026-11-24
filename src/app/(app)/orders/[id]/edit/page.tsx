@@ -23,12 +23,12 @@ export default async function EditJobPage({
   params, searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ customer?: string; received?: string; due?: string; collect?: string }>;
+  searchParams: Promise<{ customer?: string; received?: string; due?: string; collect?: string; delivery?: string }>;
 }) {
   const { id } = await params;
   // Set when the customer quick-create has just returned, and when a rejected
   // `updateOrder` is coming back with the customer still chosen; see JobForm.
-  const { customer, received, due, collect } = await searchParams;
+  const { customer, received, due, collect, delivery } = await searchParams;
   const session = await requireCapability("orders.write");
 
   const supabase = await createClient();
@@ -77,6 +77,7 @@ export default async function EditJobPage({
         defaultReceivedDate={received}
         defaultDueDate={due}
         defaultCollectDate={collect}
+        defaultDelivery={delivery}
         returnPath={`/orders/${id}/edit`}
       />
     </PageContainer>
