@@ -1,4 +1,4 @@
-import { addDays } from "./dates";
+import { addDays, isRealIsoDate } from "./dates";
 import { isoWeekday, nextDeliveryDay } from "./automation";
 import type { OrderItemInput } from "./laundry-orders";
 
@@ -18,8 +18,20 @@ import type { OrderItemInput } from "./laundry-orders";
  * received date that is not a plain date, or is in the future, counts from today.
  */
 export function returnDateFrom(received: string | null | undefined, today: string): string {
-  if (!received || !/^\d{4}-\d{2}-\d{2}$/.test(received)) return today;
+  if (!isRealIsoDate(received)) return today;
   return received < today ? received : today;
+}
+
+/**
+ * A date a refused save carried back in the URL (`?received=`, `?due=`,
+ * `?collect=`), if it is one the form may adopt: a real day, and for the
+ * received date no later than the form's own ceiling. Anything else is
+ * dropped, so the form falls back to what it would have shown anyway.
+ */
+export function carriedDate(value: string | null | undefined, ceiling?: string): string | undefined {
+  if (!isRealIsoDate(value)) return undefined;
+  if (ceiling && value > ceiling) return undefined;
+  return value;
 }
 
 /**

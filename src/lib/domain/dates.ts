@@ -17,6 +17,18 @@ export function parseIso(date: IsoDate): Date {
   return parsed;
 }
 
+/**
+ * A YYYY-MM-DD string that names a day that exists. The shape alone is not
+ * enough: `2026-00-10` has it, sorts before today, and makes `parseIso` throw
+ * (2026-11-23), and `2026-02-31` has it and silently means 3 March. A value
+ * that arrives off a URL or a form is checked with this before it is used.
+ */
+export function isRealIsoDate(value: unknown): value is IsoDate {
+  if (typeof value !== "string" || !ISO.test(value)) return false;
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+}
+
 export function toIso(date: Date): IsoDate {
   return date.toISOString().slice(0, 10);
 }

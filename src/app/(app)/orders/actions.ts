@@ -11,6 +11,7 @@ import {
   optionalDate, optionalText, optionalUuid, returnTo, toObject,
 } from "@/lib/actions";
 import { parseOrderItems } from "./order-items";
+import { answersFromForm, carryAnswers } from "./carry";
 import {
   DELIVERY_WINDOWS, ORDER_PRIORITIES, ORDER_STATUS_LABELS, RECEIVED_VIA,
   STAGE_CONTROLS, capabilitiesForMove, checkTransition, isOrderStatus,
@@ -252,35 +253,16 @@ async function resolveDeliveryAddress(
 }
 
 /**
- * Where a rejected post goes back to, carrying the customer already chosen and
- * the day the laundry was received.
+ * Where a rejected post goes back to, carrying the answers already given.
  *
  * A failure redirects — that is the flash-cookie convention — so the form is
  * re-rendered by the server and anything held only in the browser is gone. The
- * customer is the one answer that costs a search to give again, and the form
- * already reads `?customer=` (it is how the quick-create returns), so the same
- * door is used rather than a second mechanism. The id is re-validated here
- * because it came off a form: only a well-formed uuid is ever put in the URL.
- *
- * The received date rides with it (2026-11-23) because it does not cost work to
- * give again — it costs *noticing*. The form starts at today, so a job entered
- * for last Tuesday that was refused would come back reading today, and the next
- * save would record it as received today with nothing on screen saying so.
- * Only a plain date is carried; the form still caps it at today.
+ * customer, the received date and the return date the counter picked ride the
+ * URL back (`carryAnswers`, shared with the quick-create's return address),
+ * and the form adopts each one it is handed.
  */
 function backWithCustomer(path: string, formData: FormData): string {
-  const [base = path, existing] = path.split("?");
-  const query = new URLSearchParams(existing);
-  const posted = formData.get("customer_id");
-  if (typeof posted === "string" && z.string().uuid().safeParse(posted).success) {
-    query.set("customer", posted);
-  }
-  const received = formData.get("received_date");
-  if (typeof received === "string" && /^\d{4}-\d{2}-\d{2}$/.test(received)) {
-    query.set("received", received);
-  }
-  const search = query.toString();
-  return search ? `${base}?${search}` : base;
+  return carryAnswers(path, answersFromForm(formData));
 }
 
 /** The job as it is now, with the two facts every guard here needs. */

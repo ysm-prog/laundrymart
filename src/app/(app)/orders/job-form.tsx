@@ -19,7 +19,8 @@ import {
   initialDeliveryRequired, initialReceivedVia, isBlankItem, receivedViaOptions,
   type ItemOwnership, type OrderItemInput, type ReceivedVia,
 } from "@/lib/domain/laundry-orders";
-import { stepQuantity } from "@/lib/domain/intake";
+import { carriedDate, stepQuantity } from "@/lib/domain/intake";
+import { carryAnswers } from "./carry";
 import { money } from "@/lib/format";
 import type { IntakeQuote } from "./intake-actions";
 import type { IntakeDefaults } from "@/lib/orders/intake";
@@ -161,7 +162,8 @@ function numberOrNull(value: string): number | null {
 
 export function JobForm({
   action, customerAction, customers, drivers, staff,
-  order, items, seed, catalogue = [], defaultCustomerId, defaultReceivedDate, returnPath,
+  order, items, seed, catalogue = [], defaultCustomerId, defaultReceivedDate,
+  defaultDueDate, defaultCollectDate, returnPath,
   entryReceivedVia, intake,
 }: {
   action: (formData: FormData) => Promise<void>;
@@ -198,6 +200,12 @@ export function JobForm({
    * entered for an earlier day does not come back reading today.
    */
   defaultReceivedDate?: string;
+  /**
+   * The return dates a refused save came back with (`?due=`, `?collect=`), so a
+   * promise the counter chose is not replaced by the computed default.
+   */
+  defaultDueDate?: string;
+  defaultCollectDate?: string;
   /** Where the quick-create returns to, so the job form is not restarted. */
   returnPath: string;
   /**
@@ -261,10 +269,18 @@ export function JobForm({
 
   // When the job is due back. Controlled, so choosing a customer can fill it
   // with their round's next day — until the counter changes it themselves.
+  // A date carried back from a refused save counts as one the counter chose.
+  const carriedDue = carriedDate(defaultDueDate);
   const [due, setDue] = useState(() => ({
-    value: order?.expected_delivery_date ?? intake?.initial?.returnDate ?? "",
-    touched: Boolean(order?.expected_delivery_date),
+    value: carriedDue ?? order?.expected_delivery_date ?? intake?.initial?.returnDate ?? "",
+    touched: Boolean(carriedDue ?? order?.expected_delivery_date),
   }));
+  const [lastDueDefault, setLastDueDefault] = useState(carriedDue);
+  if (carriedDue !== lastDueDefault) {
+    setLastDueDefault(carriedDue);
+    if (carriedDue) setDue({ value: carriedDue, touched: true });
+  }
+  const carriedCollect = carriedDate(defaultCollectDate);
   const [defaults, setDefaults] = useState<IntakeDefaults | null>(
     editing ? null : intake?.initial ?? null,
   );
@@ -285,9 +301,7 @@ export function JobForm({
     const stored = order ? toZonedDate(order.received_at) : businessToday();
     return stored > businessToday() ? stored : businessToday();
   })();
-  const carriedReceived = defaultReceivedDate && /^\d{4}-\d{2}-\d{2}$/.test(defaultReceivedDate)
-      && defaultReceivedDate <= receivedCeiling
-    ? defaultReceivedDate : undefined;
+  const carriedReceived = carriedDate(defaultReceivedDate, receivedCeiling);
   const [received, setReceived] = useState(
     () => carriedReceived ?? (order ? toZonedDate(order.received_at) : businessToday()),
   );
@@ -303,11 +317,16 @@ export function JobForm({
    * the counter has started — and their round's next day fills the date unless
    * somebody has already set one. Both are offers; every field stays editable.
    */
+  // Every intake request takes a ticket, and only the latest one's answer is
+  // applied: a slow answer for an earlier customer or an earlier date must not
+  // land on top of a newer one.
+  const intakeRequest = useRef(0);
   function chooseCustomer(id: string) {
     setCustomerId(id);
+    const ticket = ++intakeRequest.current;
     if (editing || !intake || items?.length) return;
     void intake.load(id, received).then((loaded) => {
-      if (!loaded) return;
+      if (!loaded || ticket !== intakeRequest.current) return;
       setDefaults(loaded);
       if (loaded.items.length) {
         setRows((current) => (untouched(current) ? rowsFrom(loaded.items) : current));
@@ -324,13 +343,12 @@ export function JobForm({
    * is refreshed — the laundry rows the counter may already be editing are left
    * alone — and an answer for a date since changed again is dropped.
    */
-  const latestReceived = useRef(received);
   function changeReceived(value: string) {
     setReceived(value);
-    latestReceived.current = value;
+    const ticket = ++intakeRequest.current;
     if (editing || !intake || !customerId || due.touched) return;
     void intake.load(customerId, value).then((loaded) => {
-      if (!loaded || latestReceived.current !== value) return;
+      if (!loaded || ticket !== intakeRequest.current) return;
       setDefaults(loaded);
       setDue((current) => (current.touched ? current : { value: loaded.returnDate, touched: false }));
     });
@@ -440,7 +458,13 @@ export function JobForm({
       <form id={QUICK_CREATE_FORM} action={customerAction}>
         <input type="hidden" name="status" value="active" />
         <input type="hidden" name="payment_terms_days" value="14" />
-        <input type="hidden" name="return_to" value={returnPath} />
+        {/* The answers already given ride the return address too, so adding a
+            customer does not reset the received or return date. */}
+        <input type="hidden" name="return_to"
+               value={carryAnswers(returnPath, {
+                 received,
+                 due: deliveryRequired && due.touched ? due.value : null,
+               })} />
       </form>
 
       <form action={action} className="space-y-4">
@@ -1031,7 +1055,7 @@ export function JobForm({
                 <Field label="Expected collection date" name="expected_collection_date"
                        hint="Optional — leave blank if they did not say.">
                   <Input name="expected_collection_date" type="date" min={received || undefined}
-                         defaultValue={order?.expected_collection_date ?? undefined} />
+                         defaultValue={carriedCollect ?? order?.expected_collection_date ?? undefined} />
                 </Field>
               </div>
             )}

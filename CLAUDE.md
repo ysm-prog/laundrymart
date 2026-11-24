@@ -44,7 +44,10 @@ The master spec names a .NET 9 Web API; this build follows the supplied skeleton
   cannot be. `/api/sync` stays the one API exception for the offline outbox.
   **A rejection redirects, so the browser's copy of the form is gone**: an action that refuses
   a post is responsible for handing back the answers that cost real work to give. The job form
-  does this for the customer, via the `?customer=` parameter its quick-create already uses.
+  hands back the customer, the received date and both return dates (`?customer=`, `?received=`,
+  `?due=`, `?collect=`) through `orders/carry.ts`, which its quick-create's return address uses
+  too; the form adopts a carried date only if it is a real calendar date and, for the received
+  date, not in the future (`carriedDate`).
 - **`optionalText`/`optionalUuid`/`optionalDate` accept `null` as well as `""`.** An empty HTML
   input posts `""`, but a field composed in the browser and posted as JSON — the
   compose-locally-commit-once hidden field used by the job form, the contract wizard and the
@@ -3901,6 +3904,26 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-11-24 · Second review of the backdated jobs: six fixes
+A review of the first round of fixes found six more. **No migration; no schema, RLS, capability or
+policy change.**
+- **An impossible date in the URL no longer crashes the new-job page.** `returnDateFrom` checked
+  only the `YYYY-MM-DD` shape, so `?received=2026-00-10` passed and `parseIso` threw inside
+  `defaultReturnDate`. `isRealIsoDate` (`dates.ts`) round-trips the string through `Date`, which
+  also catches `2026-02-31` (silently 3 March otherwise); both rules now use it.
+- **A slow intake answer can no longer overwrite a newer one.** Choosing a customer and changing
+  the received date each take a ticket from one ref, and only the latest ticket's answer is
+  applied. Before, choosing a customer had no check at all, so customer A's defaults could land on
+  customer B's job.
+- **The customer quick-create keeps the received and return date** — its `return_to` goes through
+  `carryAnswers` now. Before, adding a customer could reopen the form on today.
+- **A refused save keeps the return dates as well** (`?due=`, `?collect=`). A carried delivery date
+  counts as one the counter chose, so the computed default does not replace it.
+- **§2 states what the job form hands back**, and `orders/carry.ts` is the one place it is built.
+- **The carried-date rule is a pure helper with tests** (`carriedDate`, `carry.test.ts`), not just
+  source regexes. Dropping the ceiling check, or reverting to the shape-only check, fails them.
+- 1688 tests across 111 files, `verify` green (typecheck, lint, tests, production build).
+
 ### 2026-11-23 · Review fixes for the backdated jobs
 Five findings from a review of the backdated-jobs and Next.js work. **No migration; no schema, RLS,
 capability or policy change.**

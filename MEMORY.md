@@ -9,7 +9,12 @@ where that is genuinely what it is. The multi-tenancy architecture stays: one op
 fact about today's data, not a reason to drop `tenant_id`, RLS, or §23's rule that a read feeding a
 write names its tenant.
 
-## Latest: review fixes for backdated jobs (2026-11-23)
+## Latest: second review of backdated jobs (2026-11-24)
+- Six fixes on the branch, not yet merged: real-date check on `?received=` (no more 500),
+  ticketed intake loads, quick-create keeps the dates, `?due=`/`?collect=` carried back,
+  `orders/carry.ts`, `carriedDate` tested. No migration.
+
+## Previously: review fixes for backdated jobs (2026-11-23)
 - A refused save carries `?received=` back, so a backdated job is not reset to today; the suggested
   return date counts from the received date (`returnDateFrom`); collection date capped at received.
 - Merged to `Dev` and `Prod` (`698b1a9`) after the simplified workflow; CI green on both

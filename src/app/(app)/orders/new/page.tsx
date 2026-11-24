@@ -37,7 +37,8 @@ export const dynamic = "force-dynamic";
 export default async function NewJobPage({
   searchParams,
 }: {
-  searchParams: Promise<{ customer?: string; pickup?: string; via?: string; received?: string }>;
+  searchParams: Promise<{ customer?: string; pickup?: string; via?: string; received?: string;
+    due?: string; collect?: string }>;
 }) {
   const params = await searchParams;
   const session = await requireCapability("orders.write");
@@ -156,6 +157,8 @@ export default async function NewJobPage({
         defaultCustomerId={chosenCustomer}
         // A refused save comes back with the received date it posted.
         defaultReceivedDate={params.received}
+        defaultDueDate={params.due}
+        defaultCollectDate={params.collect}
         returnPath={returnPath}
         // The counter's own screen is a drop-off (the column's default); a
         // collection or a `?via=driver_pickup` link is a driver pickup.

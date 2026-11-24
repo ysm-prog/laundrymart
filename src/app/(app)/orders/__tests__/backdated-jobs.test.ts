@@ -75,15 +75,39 @@ describe("a refused save keeps the received date", () => {
   const create = code(read("orders/new/page.tsx"));
   const edit = code(read("orders/[id]/edit/page.tsx"));
 
-  it("carries the posted received date back through the redirect", () => {
-    expect(actions).toMatch(/formData\.get\("received_date"\)/);
-    expect(actions).toMatch(/query\.set\("received"/);
+  const carry = code(read("orders/carry.ts"));
+
+  it("carries the posted answers back through the redirect", () => {
+    expect(actions).toMatch(/carryAnswers\(path, answersFromForm\(formData\)\)/);
+    for (const field of ["received_date", "expected_delivery_date", "expected_collection_date"]) {
+      expect(carry).toContain(`text("${field}")`);
+    }
   });
 
-  it("hands it to the form on both pages", () => {
+  it("hands them to the form on both pages", () => {
     expect(create).toMatch(/defaultReceivedDate=\{params\.received\}/);
+    expect(create).toMatch(/defaultDueDate=\{params\.due\}/);
+    expect(create).toMatch(/defaultCollectDate=\{params\.collect\}/);
     expect(edit).toMatch(/defaultReceivedDate=\{received\}/);
-    expect(form).toMatch(/defaultReceivedDate/);
+    expect(edit).toMatch(/defaultDueDate=\{due\}/);
+    expect(edit).toMatch(/defaultCollectDate=\{collect\}/);
+  });
+
+  it("only adopts a carried date that is real and not in the future", () => {
+    expect(form).toMatch(/carriedDate\(defaultReceivedDate, receivedCeiling\)/);
+    expect(form).toMatch(/carriedDate\(defaultDueDate\)/);
+    expect(form).toMatch(/carriedDate\(defaultCollectDate\)/);
+  });
+
+  it("keeps the received and return date through the customer quick-create", () => {
+    expect(form).toMatch(/name="return_to"\s+value=\{carryAnswers\(returnPath, \{\s*received,/);
+  });
+
+  it("drops an intake answer a newer request has overtaken", () => {
+    const tickets = form.match(/const ticket = \+\+intakeRequest\.current/g) ?? [];
+    const checks = form.match(/ticket !== intakeRequest\.current/g) ?? [];
+    expect(tickets).toHaveLength(2);
+    expect(checks).toHaveLength(2);
   });
 
   it("counts the suggested return date from the received date", () => {

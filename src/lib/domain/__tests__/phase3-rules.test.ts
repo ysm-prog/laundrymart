@@ -5,7 +5,7 @@ import {
   boardBillingLabel, boardColumn, canApprove, canAssign, canMarkReady, normaliseDocket,
 } from "@/lib/domain/laundry-board";
 import {
-  defaultReturnDate, returnDateFrom, matchQuoteLines, prefillFromLastJob, stepQuantity,
+  carriedDate, defaultReturnDate, returnDateFrom, matchQuoteLines, prefillFromLastJob, stepQuantity,
 } from "@/lib/domain/intake";
 import {
   DEFAULT_OPERATIONS, parseOperations, readOperationsForm,
@@ -290,5 +290,34 @@ describe("returnDateFrom (2026-11-23)", () => {
     expect(returnDateFrom("2026-11-30", "2026-11-23")).toBe("2026-11-23");
     expect(returnDateFrom(undefined, "2026-11-23")).toBe("2026-11-23");
     expect(returnDateFrom("17/11/2026", "2026-11-23")).toBe("2026-11-23");
+  });
+  it("falls back to today on a date with the right shape that does not exist", () => {
+    // Both sort before today; the first would make parseIso throw downstream,
+    // the second would quietly roll over to 3 March.
+    expect(returnDateFrom("2026-00-10", "2026-11-23")).toBe("2026-11-23");
+    expect(returnDateFrom("2026-02-31", "2026-11-23")).toBe("2026-11-23");
+  });
+  it("leaves the default return date computable from what it returns", () => {
+    for (const junk of ["2026-00-10", "2026-13-01", "2026-02-31", "", "x"]) {
+      expect(() => defaultReturnDate({
+        today: returnDateFrom(junk, "2026-11-23"), roundWeekday: 2, turnaroundDays: 2,
+        holidays: new Set(),
+      })).not.toThrow();
+    }
+  });
+});
+
+describe("carriedDate (2026-11-24)", () => {
+  it("takes a real date", () => {
+    expect(carriedDate("2026-11-17")).toBe("2026-11-17");
+  });
+  it("refuses one past the ceiling, and accepts the ceiling itself", () => {
+    expect(carriedDate("2026-11-25", "2026-11-24")).toBeUndefined();
+    expect(carriedDate("2026-11-24", "2026-11-24")).toBe("2026-11-24");
+  });
+  it("refuses a missing, malformed or impossible date", () => {
+    for (const junk of [undefined, null, "", "17/11/2026", "2026-00-10", "2026-02-31"]) {
+      expect(carriedDate(junk)).toBeUndefined();
+    }
   });
 });
