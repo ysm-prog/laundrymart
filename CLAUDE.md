@@ -3981,8 +3981,9 @@ The client's change request 3. **One migration, `0065`, applied live on 2026-11-
   45 files**, 0 failing.
 - **Order mattered and was kept:** `0065` went on before the code reached `Prod`. Without it a
   *delivery* job is created but refused completion (left at New with an error toast).
-- **Not verified behind the auth gate.** Before trusting it: as Angela, take a job in for a
-  customer, check it opens Completed, open its draft invoice from the Charges card, issue and send.
+- **Verified live by the client on 2026-11-23**: Angela took a job in on `ats.coreit.com.au`, it
+  opened Completed, and the draft invoice from its Charges card issued and sent. Reported as
+  "all working"; recorded as her report, not as something this session observed.
 
 **Merged to `Dev` and `Prod` on 2026-11-23** (`bf14cbb`), after `0065` was applied live. Both had
 moved while this was in flight (the Next.js 16.4.6 upgrade below), so `Prod` was merged in rather
