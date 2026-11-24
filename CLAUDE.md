@@ -3936,7 +3936,8 @@ commit (`6ac6ed7`, the second review's merge record), so it was merged into the 
 `MEMORY.md` conflicted, both entries kept. `verify` re-run green on the merged tree, then a
 fast-forward to both; `Prod` never force-pushed. **CI green on all three jobs for both** (run 496
 `Dev`, run 497 `Prod`; `Prod` ran 01:08:57 → 01:10:38Z, read off the run timestamps). **Nothing to
-apply**: no migration. **The Vercel production deploy is not confirmable from this session** (§5).
+apply**: no migration. **The Vercel production deploy was confirmed green by the owner in the Vercel
+dashboard** — a person reading it, not a status this session could read (§5).
 
 ### 2026-11-24 · The backdated jobs checked against the simplified workflow
 The two changes of 2026-11-23 meet in `createOrder`: in the simplified workflow a new job is
