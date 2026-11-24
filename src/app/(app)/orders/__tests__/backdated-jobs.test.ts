@@ -166,6 +166,29 @@ describe("a refused save keeps the received date", () => {
     expect(form).toMatch(/intake\.load\(customerId, value\)/);
   });
 
+  it("carries how the laundry arrived and its rows through the customer quick-create", () => {
+    const quick = form.slice(form.indexOf("id={QUICK_CREATE_FORM}"), form.indexOf("<form action={action}"));
+    expect(quick).toMatch(/via: receivedVia/);
+    expect(quick).toMatch(/picked: pickupDate/);
+    expect(quick).toMatch(/collector: pickupDriver/);
+    expect(quick).toMatch(/rows: itemsPayload/);
+  });
+
+  it("brings the laundry rows back on both pages", () => {
+    for (const page of [create, edit]) expect(page).toMatch(/defaultRows=\{/);
+    expect(form).toMatch(/carriedItems\(defaultRows\)/);
+  });
+
+  it("puts the completion date back when the job cannot come off its old draft", () => {
+    const failed = actions.slice(actions.indexOf("if (!removed.ok)"), actions.indexOf("const placement ="));
+    expect(failed).toMatch(/update\(\{ completed_at: completion\.previousCompletedAt \}\)/);
+    expect(failed).toMatch(/\.eq\("tenant_id", session\.tenantId\)/);
+  });
+
+  it("still says a simplified take-in came from the collection", () => {
+    expect(actions).toMatch(/created\$\{from\} and completed/);
+  });
+
   it("caps the collection date at the received date", () => {
     expect(form).toMatch(/name="pickup_date"[^>]*max=\{received/);
   });

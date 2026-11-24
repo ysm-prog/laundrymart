@@ -30,6 +30,15 @@ describe("Today as an inbox (3.2)", () => {
       ["needs_price", "needs_driver", "problems", "drafts_ready", "overdue"]);
   });
 
+  it("offers Ready to complete instead of Needs a driver in the simplified workflow", () => {
+    expect(inboxSectionsFor("super_admin", { simplified: true })).toEqual(
+      ["needs_price", "ready_to_complete", "problems", "drafts_ready", "overdue"]);
+    // The counter cannot plan a round but can finish a job, so it gets the one
+    // job section that is any use to it.
+    expect(inboxSectionsFor("customer_service", { simplified: true })).toContain("ready_to_complete");
+    expect(inboxSectionsFor("customer_service")).not.toContain("ready_to_complete");
+  });
+
   it("never draws a section the role cannot act on", () => {
     for (const role of ["board", "driver", "customer_service", "warehouse_operator", "finance"] as const) {
       for (const key of inboxSectionsFor(role)) {

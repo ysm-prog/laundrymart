@@ -46,7 +46,9 @@ The master spec names a .NET 9 Web API; this build follows the supplied skeleton
   a post is responsible for handing back the answers that cost real work to give. The job form
   hands back the customer, the received date, both return dates and whether the customer collects
   (`?customer=`, `?received=`, `?due=`, `?collect=`, `?delivery=yes|no`), and how the laundry arrived
-(`?via=`, plus `?picked=`/`?collector=` for a driver pickup) through `orders/carry.ts`,
+  (`?via=`, plus `?picked=`/`?collector=` for a driver pickup), and the laundry rows themselves
+  (`?rows=`, read back leniently by `carriedItems` so a row the save was refused for comes back to
+  be fixed, and dropped whole past `MAX_CARRIED_ROWS`) through `orders/carry.ts`,
   which its quick-create's return address uses too; the form adopts a carried date only if it is a
   real calendar date and, for the received date, not in the future (`carriedDate`). A refusal
   because the customer itself is unusable carries everything **but** the customer.
@@ -661,11 +663,18 @@ key remains the way to reset or re-assert them through the Auth API, but nothing
   row), and it never issues or sends an invoice. 0065 relaxes 0042's rule 4 **only from a plant
   stage**: a delivery job already on a round still goes out first. Full is 0042 unchanged. Nothing
   about rounds, drivers or delivery is removed, and switching moves no existing job.
+  **In the simplified workflow a ready job is not put on a round automatically** (the
+  `simplified` skip in `autoAssignDecision`, 2026-11-24), since a job on a round can no longer be
+  completed off the shelf, and Today shows **Ready to complete** in place of Needs a driver.
+  **A settings read that fails, or a tenant row the caller cannot see, answers `full`**
+  (`workflowFromRead`), which is what the trigger does with an unreadable row — so a transient
+  error never completes a new job in a Full laundry. Only an absent key means simplified.
   **Correcting the received date of a job completed that way moves its completion date with it**
   (`receivedDateMove`, 2026-11-24), and if the billing period changes the job comes off its draft
   and is placed on the new period's one (`removeJobFromDraft`, then `placeApprovedJobs`). Refused
   once its invoice is issued or sent. A job with a real handover keeps its completion date, and its
-  receipt cannot move past it.
+  receipt cannot move past it. If the job cannot come off its old draft, its completion date is put
+  back, so a job is never billed in one month while saying it was finished in another.
 - **A job is assigned to a Board and a Delivery Date, and the two records of that cannot
   disagree** (`guard_laundry_order_assignment`, 0016 retargeted by 0031). Eligibility first: a
   customer pickup is refused outright, so is a job still in the plant and a completed or
@@ -3911,6 +3920,35 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-11-24 · Review of the whole backdated-jobs and simplified-workflow range: eight fixes
+A review of everything since the handover (`49dfe01..4865664`) found eight. **No migration; no
+schema, RLS, capability or policy change.**
+- **A ready job is no longer put on a round in the simplified workflow.** `autoAssignOnReady` never
+  read the workflow, so marking a delivery job ready for a customer with a round assigned it, and
+  0065 then refused to complete it off the shelf. `autoAssignDecision` skips with `simplified`.
+- **The customer quick-create carries how the laundry arrived**, with the pickup day and driver.
+  The fifth review fixed refused saves only. Both pickup fields are controlled now, so they can be
+  read when the quick-create's return address is built.
+- **An unreadable settings row is the full workflow, not the simplified one** (`workflowFromRead`).
+  Before, a failed read in a Full laundry made `createOrder` complete a new customer-pickup job on
+  save, and the code comment claiming the app and the trigger agreed was wrong.
+- **A refused save, and the quick-create, bring the laundry rows back** (`?rows=`,
+  `carriedItems`). Pre-existing: every refusal reset the list to the seed or the customer's last
+  job. Lenient on purpose, because a save is often refused for a row the counter needs back to fix;
+  a list longer than `MAX_CARRIED_ROWS` (3,000 characters of JSON) is not carried at all. Added
+  rows also get a key past every carried, stored or prefilled one, which they did not before.
+- **Today shows Ready to complete in the simplified workflow** instead of Needs a driver
+  (`inboxSectionsFor(role, { simplified })`), linking each job to its completion form.
+- **A simplified take-in still says it came from the collection** in its toast.
+- **The sent-invoice refusal says to void the invoice**, not "void or credit": a credit note does
+  not free the job.
+- **A failed move off the old draft puts the completion date back**, so the job stays consistently
+  in its old period, and the toast says so.
+- Tests in `carry.test.ts`, `backdated-jobs.test.ts`, `automation.test.ts`, `phase3-rules.test.ts`,
+  `simplified-workflow.test.ts` and the new `lib/orders/__tests__/workflow.test.ts`; the auto-assign
+  skip, the failed-read rule and the quick-create carry were each confirmed to fail with their fix
+  removed. 1744 tests across 113 files, `verify` green.
+
 ### 2026-11-24 · Fifth review of the backdated jobs: five fixes
 A review of the fourth round found five more. **No migration; no schema, RLS, capability or policy
 change.**

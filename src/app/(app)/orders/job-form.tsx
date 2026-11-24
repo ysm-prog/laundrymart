@@ -5,7 +5,7 @@ import {
   Field, FormActions, Input, Select, SubmitButton, Textarea, useFieldControl,
 } from "@/components/form";
 import {
-  Badge, ButtonLink, CONTROL, Eyebrow, FormSection, Notice, StatusBadge, cx, humanise,
+  Badge, ButtonLink, CONTROL, Eyebrow, FormSection, Notice, SELECT_CHEVRON, StatusBadge, cx, humanise,
 } from "@/components/ui";
 import {
   Building2, CalendarClock, Check, Minus, Plus, Search, Shirt, Truck,
@@ -20,7 +20,7 @@ import {
   type ItemOwnership, type OrderItemInput, type ReceivedVia,
 } from "@/lib/domain/laundry-orders";
 import { carriedDate, stepQuantity } from "@/lib/domain/intake";
-import { carriedDelivery, carriedUuid, carriedVia, carryAnswers } from "./carry";
+import { carriedDelivery, carriedItems, carriedUuid, carriedVia, carryAnswers } from "./carry";
 import { customerAnswerUse, dateAnswerApplies, type IntakeTickets } from "./intake-tickets";
 import { money } from "@/lib/format";
 import type { IntakeQuote } from "./intake-actions";
@@ -165,7 +165,7 @@ export function JobForm({
   action, customerAction, customers, drivers, staff,
   order, items, seed, catalogue = [], defaultCustomerId, defaultReceivedDate,
   defaultDueDate, defaultCollectDate, defaultDelivery, defaultReceivedVia,
-  defaultPickupDate, defaultPickupDriverId, returnPath,
+  defaultPickupDate, defaultPickupDriverId, defaultRows, returnPath,
   entryReceivedVia, intake,
 }: {
   action: (formData: FormData) => Promise<void>;
@@ -221,6 +221,12 @@ export function JobForm({
   defaultReceivedVia?: string;
   defaultPickupDate?: string;
   defaultPickupDriverId?: string;
+  /**
+   * The laundry rows a refused save or the quick-create came back with
+   * (`?rows=`), so the counter does not type the list again. They win over the
+   * job's stored rows, the collection's and the customer's last job.
+   */
+  defaultRows?: string;
   /** Where the quick-create returns to, so the job form is not restarted. */
   returnPath: string;
   /**
@@ -277,10 +283,22 @@ export function JobForm({
     setLastViaDefault(carriedViaChoice);
     if (carriedViaChoice) setReceivedVia(carriedViaChoice);
   }
-  // The pickup's day and driver are uncontrolled, so a carried value is applied
-  // by keying the inputs on it: a new value is a fresh input.
+  // The pickup's day and driver are controlled, so the quick-create can carry
+  // them too, and a carried value is adopted like the others.
   const carriedPicked = carriedDate(defaultPickupDate);
   const carriedDriver = carriedUuid(defaultPickupDriverId);
+  const [pickupDate, setPickupDate] = useState(() => carriedPicked ?? arrival?.pickup_date ?? "");
+  const [pickupDriver, setPickupDriver] = useState(() => carriedDriver ?? arrival?.pickup_driver_id ?? "");
+  const [lastPickedDefault, setLastPickedDefault] = useState(carriedPicked);
+  if (carriedPicked !== lastPickedDefault) {
+    setLastPickedDefault(carriedPicked);
+    if (carriedPicked) setPickupDate(carriedPicked);
+  }
+  const [lastDriverDefault, setLastDriverDefault] = useState(carriedDriver);
+  if (carriedDriver !== lastDriverDefault) {
+    setLastDriverDefault(carriedDriver);
+    if (carriedDriver) setPickupDriver(carriedDriver);
+  }
   // A refused save's answer wins over the stored one, adopted the same way as
   // the customer above.
   const carriedDeliveryChoice = carriedDelivery(defaultDelivery);
@@ -296,13 +314,28 @@ export function JobForm({
     order?.delivery_window ?? "no_specific_time",
   );
   const [customAddress, setCustomAddress] = useState(order?.delivery_address_source === "custom");
-  const [nextKey, setNextKey] = useState(1);
+  // Rows carried back by a refused save or the quick-create win over every
+  // other source: they are what the counter last typed.
+  const carriedRows = carriedItems(defaultRows);
+  // Past every key `rowsFrom` hands out, so an added row never shares one.
+  const [nextKey, setNextKey] = useState(() => Math.max(
+    1, carriedRows?.length ?? 0, items?.length ?? 0, editing ? 0 : intake?.initial?.items.length ?? 0,
+  ));
   const [rows, setRows] = useState<ItemRow[]>(() => {
+    if (carriedRows) return rowsFrom(carriedRows);
     if (items?.length) return rowsFrom(items);
     // The customer's last job (brief 3.4), for a customer the page opened with.
     if (!editing && intake?.initial?.items.length) return rowsFrom(intake.initial.items);
     return [blankItem(0)];
   });
+  const [lastRowsDefault, setLastRowsDefault] = useState(defaultRows);
+  if (defaultRows !== lastRowsDefault) {
+    setLastRowsDefault(defaultRows);
+    if (carriedRows) {
+      setRows(rowsFrom(carriedRows));
+      setNextKey((key) => Math.max(key, carriedRows.length));
+    }
+  }
 
   // When the job is due back. Controlled, so choosing a customer can fill it
   // with their round's next day — until the counter changes it themselves.
@@ -537,6 +570,10 @@ export function JobForm({
                  delivery: deliveryRequired,
                  due: deliveryRequired && due.touched ? due.value : null,
                  collect: deliveryRequired ? null : collect,
+                 via: receivedVia,
+                 picked: pickupDate,
+                 collector: pickupDriver,
+                 rows: itemsPayload,
                })} />
       </form>
 
@@ -750,15 +787,19 @@ export function JobForm({
                 <Field label="Pickup date" name="pickup_date" hint="Optional.">
                   {/* Collected on or before the day it was received, which the
                       server refuses otherwise — so the browser says so first. */}
-                  <Input key={`picked-${carriedPicked ?? ""}`} name="pickup_date" type="date"
-                         defaultValue={carriedPicked ?? arrival?.pickup_date ?? undefined}
-                         max={received || undefined} />
+                  <DateControl name="pickup_date" value={pickupDate} onChange={setPickupDate}
+                               max={received || undefined} />
                 </Field>
                 <Field label="Collected by" name="pickup_driver_id" className="sm:col-span-2"
                        hint="Your existing drivers.">
-                  <Select key={`collector-${carriedDriver ?? ""}`} name="pickup_driver_id" placeholder="Not recorded"
-                          defaultValue={carriedDriver ?? arrival?.pickup_driver_id ?? undefined}
-                          options={drivers.map((driver) => ({ value: driver.id, label: driver.full_name }))} />
+                  <select id="pickup_driver_id" name="pickup_driver_id"
+                          className={cx(CONTROL, SELECT_CHEVRON)}
+                          value={pickupDriver} onChange={(event) => setPickupDriver(event.target.value)}>
+                    <option value="">Not recorded</option>
+                    {drivers.map((driver) => (
+                      <option key={driver.id} value={driver.id}>{driver.full_name}</option>
+                    ))}
+                  </select>
                 </Field>
               </>
             ) : null}

@@ -38,7 +38,8 @@ export default async function NewJobPage({
   searchParams,
 }: {
   searchParams: Promise<{ customer?: string; pickup?: string; via?: string; received?: string;
-    due?: string; collect?: string; delivery?: string; picked?: string; collector?: string }>;
+    due?: string; collect?: string; delivery?: string; picked?: string; collector?: string;
+    rows?: string }>;
 }) {
   const params = await searchParams;
   const session = await requireCapability("orders.write");
@@ -166,6 +167,8 @@ export default async function NewJobPage({
         defaultReceivedVia={params.via}
         defaultPickupDate={params.picked}
         defaultPickupDriverId={params.collector}
+        // The laundry rows a refused save or the quick-create carried back.
+        defaultRows={params.rows}
         returnPath={returnPath}
         // The counter's own screen is a drop-off (the column's default); a
         // collection or a `?via=driver_pickup` link is a driver pickup.

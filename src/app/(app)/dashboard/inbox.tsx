@@ -112,6 +112,38 @@ export async function NeedsPrice({ session }: { session: Session }) {
                   moreHref="/invoices/awaiting?priced=needs_price" />;
 }
 
+/* ------------------------------------------------------ ready to complete */
+
+/**
+ * The simplified workflow's open jobs (2026-11-24): a new job is completed on
+ * save, so anything still in the plant is one whose completion failed or that
+ * predates the switch. The fix is the job page's completion form, which records
+ * who finished it and when, so the row links there rather than completing here.
+ */
+export async function ReadyToComplete({ session }: { session: Session }) {
+  const supabase = await createClient();
+  const { data, count } = await supabase
+    .from("laundry_orders")
+    .select("id, order_number, status, received_at, customers(business_name)", { count: "exact" })
+    .eq("tenant_id", session.tenantId)
+    .in("status", ["new", "in_progress", "ready_for_delivery"])
+    .order("received_at", { ascending: true })
+    .limit(INBOX_ROWS)
+    .returns<Array<{
+      id: string; order_number: string; status: string; received_at: string;
+      customers: { business_name: string } | null;
+    }>>();
+
+  const rows: Row[] = (data ?? []).map((job) => ({
+    key: job.id,
+    who: job.customers?.business_name ?? "Unknown customer",
+    what: <>{job.order_number} · received {formatDate(job.received_at)} · {humanise(job.status).toLowerCase()}</>,
+    action: <ActionLink href={`/orders/${job.id}`}>Complete it</ActionLink>,
+  }));
+  return <Section section="ready_to_complete" rows={rows} total={count ?? rows.length}
+                  moreHref="/orders" />;
+}
+
 /* --------------------------------------------------------- needs a driver */
 
 /**

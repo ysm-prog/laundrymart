@@ -9,7 +9,16 @@ where that is genuinely what it is. The multi-tenancy architecture stays: one op
 fact about today's data, not a reason to drop `tenant_id`, RLS, or §23's rule that a read feeding a
 write names its tenant.
 
-## Latest: fifth review of backdated jobs (2026-11-24)
+## Latest: review of the whole backdated + simplified range (2026-11-24)
+- Eight fixes: no auto-assign to a round in the simplified workflow; quick-create carries via +
+  pickup day/driver; unreadable settings = `full` (`workflowFromRead`); refused saves and the
+  quick-create carry the laundry rows (`?rows=`, `carriedItems`); Today shows Ready to complete in
+  simplified; take-in toast keeps "from the collection"; void-only refusal wording; failed draft move
+  restores `completed_at`. No migration.
+- Before trusting it live: in the simplified workflow, refuse a save with three laundry rows and
+  check all three come back; add a customer mid-form on a driver pickup and check it stays one.
+
+## Previously: fifth review of backdated jobs (2026-11-24)
 - Five fixes: refused saves carry received-via + pickup day/driver (`?via=`, `?picked=`,
   `?collector=`), so a refused take-in is not reopened as a drop-off; `receivedEdits` ticket drops
   date answers for a day since left; round hint only while the box shows that date; intake loads

@@ -279,6 +279,12 @@ describe("a completed job's received date is corrected", () => {
     }
   });
 
+  it("tells the user to void the invoice, never to credit it, which frees nothing", () => {
+    const move = receivedDateMove({ ...simplified, billingStatus: "invoice_sent" });
+    expect(move.kind === "refuse" && move.reason).toMatch(/Void that invoice first/);
+    expect(move.kind === "refuse" && move.reason).not.toMatch(/Void or credit/);
+  });
+
   it("leaves a real handover's completion date alone", () => {
     const handedOver = {
       ...simplified, handoverRecorded: true, completedAt: "2026-12-04T05:00:00Z",

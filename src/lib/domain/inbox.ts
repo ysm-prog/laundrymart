@@ -9,7 +9,8 @@ import { can, type Capability, type Role } from "@/lib/roles";
  * tested rule: a section is drawn only for a role that can act on it, and a
  * section that can only be looked at is not an inbox.
  */
-export type InboxSection = "needs_price" | "needs_driver" | "problems" | "drafts_ready" | "overdue";
+export type InboxSection =
+  | "needs_price" | "needs_driver" | "ready_to_complete" | "problems" | "drafts_ready" | "overdue";
 
 export const INBOX_SECTIONS: ReadonlyArray<{
   key: InboxSection;
@@ -28,6 +29,12 @@ export const INBOX_SECTIONS: ReadonlyArray<{
     empty: "Every ready delivery is on a round.",
   },
   {
+    // The simplified workflow's counterpart (2026-11-24): there a job still in
+    // the plant is completed off the shelf, not put on a round.
+    key: "ready_to_complete", title: "Ready to complete", capability: "orders.status",
+    empty: "No job is waiting to be completed.",
+  },
+  {
     key: "problems", title: "Problems and failed deliveries", capability: "operations.read",
     empty: "No stop is waiting on a decision.",
   },
@@ -41,9 +48,17 @@ export const INBOX_SECTIONS: ReadonlyArray<{
   },
 ];
 
-/** The sections this role is shown, in order. */
-export function inboxSectionsFor(role: Role): InboxSection[] {
-  return INBOX_SECTIONS.filter((section) => can(role, section.capability)).map((section) => section.key);
+/**
+ * The sections this role is shown, in order. The workflow decides which of the
+ * two job sections is drawn: the full process puts a ready delivery on a round
+ * ("Needs a driver"), the simplified one completes a job off the shelf ("Ready
+ * to complete"), and offering the other would send somebody the wrong way.
+ */
+export function inboxSectionsFor(role: Role, options: { simplified?: boolean } = {}): InboxSection[] {
+  const hidden: InboxSection = options.simplified ? "needs_driver" : "ready_to_complete";
+  return INBOX_SECTIONS
+    .filter((section) => section.key !== hidden && can(role, section.capability))
+    .map((section) => section.key);
 }
 
 /** At most this many rows per section; the rest are a count and a link. */

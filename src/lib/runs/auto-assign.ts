@@ -4,6 +4,7 @@ import { recordAudit } from "@/lib/audit";
 import { loadHolidaySet } from "@/lib/runs/holidays";
 import { formatAdelaideDate, getAdelaideToday } from "@/lib/domain/timezone";
 import { checkAssignable } from "@/lib/domain/run-assignment";
+import { workflowFromRead } from "@/lib/orders/workflow";
 import {
   autoAssignDecision, nextDeliveryDay, parseAutomation, type AutoAssignSkip,
 } from "@/lib/domain/automation";
@@ -55,7 +56,7 @@ export async function autoAssignOnReady(
       }>();
     if (!order) return { state: "failed", error: "that job could not be found" };
 
-    const [{ data: tenant }, { data: customer }] = await Promise.all([
+    const [{ data: tenant, error: tenantError }, { data: customer }] = await Promise.all([
       supabase.from("tenants").select("settings").eq("id", session.tenantId)
         .maybeSingle<{ settings: unknown }>(),
       supabase.from("customers").select("collection_board_id")
@@ -69,6 +70,8 @@ export async function autoAssignOnReady(
       deliveryRequired: order.delivery_required,
       assignedBoardId: order.assigned_board_id,
       customerBoardId: customer?.collection_board_id ?? null,
+      // The same reading `laundryWorkflow` makes, from the row already fetched.
+      workflow: workflowFromRead({ data: tenant ?? null, error: tenantError }),
     });
     if (!decision.assign) return { state: "skipped", skip: decision.skip };
 

@@ -1,5 +1,7 @@
 import { isRealIsoDate } from "@/lib/domain/dates";
-import { RECEIVED_VIA, type ReceivedVia } from "@/lib/domain/laundry-orders";
+import {
+  ITEM_TYPES, RECEIVED_VIA, type OrderItemInput, type ReceivedVia,
+} from "@/lib/domain/laundry-orders";
 
 /**
  * What a job form hands back through a redirect (2026-11-23).
@@ -40,7 +42,21 @@ export type CarriedAnswers = {
   via?: string | null;
   picked?: string | null;
   collector?: string | null;
+  /**
+   * The laundry list as the form posted it (its hidden `items` field), so a
+   * refused save or a quick-created customer does not cost the counter every
+   * row they typed (2026-11-24). Carried only while it fits
+   * (`MAX_CARRIED_ROWS`); a longer list is dropped rather than truncated.
+   */
+  rows?: string | null;
 };
+
+/**
+ * The longest laundry list carried in the URL, in characters of JSON. A dozen
+ * rows is well inside it; anything longer would push the redirect towards the
+ * size proxies refuse, so it is not carried at all rather than cut in half.
+ */
+export const MAX_CARRIED_ROWS = 3000;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -60,6 +76,10 @@ export function carryAnswers(path: string, answers: CarriedAnswers): string {
     if (isRealIsoDate(answers.picked)) query.set("picked", answers.picked);
     if (answers.collector && UUID.test(answers.collector)) query.set("collector", answers.collector);
   }
+  const rows = carriedItems(answers.rows);
+  const encoded = rows ? JSON.stringify(rows) : null;
+  // Re-checked after re-serialising, so the page reading it back keeps it.
+  if (encoded && encoded.length <= MAX_CARRIED_ROWS) query.set("rows", encoded);
   const search = query.toString();
   return search ? `${base}?${search}` : base;
 }
@@ -81,6 +101,7 @@ export function answersFromForm(formData: FormData): CarriedAnswers {
     via: text("received_via"),
     picked: text("pickup_date"),
     collector: text("pickup_driver_id"),
+    rows: text("items"),
   };
 }
 
@@ -112,4 +133,44 @@ export function carriedVia(value: string | null | undefined): ReceivedVia | unde
 /** A carried uuid (`?collector=`) read back, or nothing. */
 export function carriedUuid(value: string | null | undefined): string | undefined {
   return value && UUID.test(value) ? value : undefined;
+}
+
+const optionalString = (value: unknown) => (typeof value === "string" && value.trim() ? value : null);
+const optionalNumber = (value: unknown) => (typeof value === "number" && Number.isFinite(value) ? value : null);
+
+/**
+ * `?rows=` read back into laundry rows, or nothing. Lenient on purpose: a save
+ * is often refused *because* of a row, and the counter needs that row back to
+ * fix it, so nothing here is validated beyond its shape — `createOrder` and
+ * `updateOrder` validate it again on the next save. Rows that say nothing at
+ * all are left out, so an empty form does not come back as a list.
+ */
+export function carriedItems(value: string | null | undefined): OrderItemInput[] | undefined {
+  if (!value || value.length > MAX_CARRIED_ROWS) return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    return undefined;
+  }
+  if (!Array.isArray(parsed)) return undefined;
+  const items = parsed.flatMap((entry): OrderItemInput[] => {
+    if (!entry || typeof entry !== "object") return [];
+    const row = entry as Record<string, unknown>;
+    const item: OrderItemInput = {
+      item_id: typeof row.item_id === "string" && UUID.test(row.item_id) ? row.item_id : null,
+      item_type: (ITEM_TYPES as readonly unknown[]).includes(row.item_type) ? String(row.item_type) : "other",
+      custom_description: optionalString(row.custom_description),
+      quantity_type: row.quantity_type === "bulk_lot" ? "bulk_lot" : "exact",
+      exact_quantity: optionalNumber(row.exact_quantity),
+      bag_count: optionalNumber(row.bag_count),
+      estimated_quantity: optionalNumber(row.estimated_quantity),
+      notes: optionalString(row.notes),
+      ownership: row.ownership === "rental" || row.ownership === "own" ? row.ownership : null,
+    };
+    const says = item.item_id || item.custom_description || item.notes
+      || item.exact_quantity != null || item.bag_count != null || item.estimated_quantity != null;
+    return says ? [item] : [];
+  });
+  return items.length ? items : undefined;
 }

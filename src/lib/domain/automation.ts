@@ -101,7 +101,7 @@ export function nextDeliveryDay(
 
 /** Why a job that has just become Ready was not given to a round automatically. */
 export type AutoAssignSkip =
-  | "setting_off" | "not_delivery" | "no_round" | "not_ready" | "already_assigned";
+  | "setting_off" | "simplified" | "not_delivery" | "no_round" | "not_ready" | "already_assigned";
 
 export function autoAssignDecision(input: {
   settings: AutomationSettings;
@@ -109,8 +109,16 @@ export function autoAssignDecision(input: {
   deliveryRequired: boolean;
   assignedBoardId: string | null;
   customerBoardId: string | null;
+  /**
+   * The laundry's workflow (change request 3). In the simplified workflow a
+   * ready delivery job is completed off the shelf, and putting it on a round
+   * would stop exactly that — 0065 relaxes rule 4 only from a plant stage — so
+   * nothing is assigned automatically (2026-11-24). Absent is the full process.
+   */
+  workflow?: "simplified" | "full";
 }): { assign: true; boardId: string } | { assign: false; skip: AutoAssignSkip } {
   if (!input.settings.autoAssignOnReady) return { assign: false, skip: "setting_off" };
+  if (input.workflow === "simplified") return { assign: false, skip: "simplified" };
   if (!input.deliveryRequired) return { assign: false, skip: "not_delivery" };
   if (input.status !== "ready_for_delivery") return { assign: false, skip: "not_ready" };
   if (input.assignedBoardId) return { assign: false, skip: "already_assigned" };

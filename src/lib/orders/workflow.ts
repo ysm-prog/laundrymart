@@ -11,13 +11,22 @@ type Supabase = Awaited<ReturnType<typeof createClient>>;
  * tenant (§23): a platform admin's session reads every laundry, and this answer
  * decides what a write scoped to one of them does.
  *
- * A read that fails answers with the default — the simplified workflow — which
- * is also what the database assumes when the key is absent, so a transient
- * error cannot make the app offer a move the trigger would refuse.
+ * An absent key is the simplified workflow, here and in 0065. A read that
+ * **fails**, or a tenant row the caller cannot see, is answered as `full`
+ * instead (2026-11-24): that is what the trigger does with a row it cannot
+ * read, and it is the safe answer — the simplified workflow completes a new job
+ * on save, and a transient error in a Full laundry must not finish a job nobody
+ * meant to finish.
  */
 export async function laundryWorkflow(supabase: Supabase, tenantId: string): Promise<Workflow> {
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from("tenants").select("settings").eq("id", tenantId)
     .maybeSingle<{ settings: unknown }>();
-  return parseOperations(data?.settings).workflow;
+  return workflowFromRead({ data, error });
+}
+
+/** The rule above, apart from the query so it can be tested. */
+export function workflowFromRead(read: { data: { settings: unknown } | null; error: unknown }): Workflow {
+  if (read.error || !read.data) return "full";
+  return parseOperations(read.data.settings).workflow;
 }

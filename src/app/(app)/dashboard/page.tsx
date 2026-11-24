@@ -12,7 +12,8 @@ import { DEFAULT_AR_TRUSTED_FROM, arTrustedFrom, trustedReceivablesFilter } from
 import { PLANT_STAGES } from "./plant-stages";
 import { parseOperations } from "@/lib/domain/operations-settings";
 import { inboxSectionsFor, type InboxSection } from "@/lib/domain/inbox";
-import { DraftsReady, NeedsDriver, NeedsPrice, Overdue, Problems } from "./inbox";
+import { DraftsReady, NeedsDriver, NeedsPrice, Overdue, Problems, ReadyToComplete } from "./inbox";
+import { laundryWorkflow } from "@/lib/orders/workflow";
 
 export const metadata = { title: "Today" };
 export const dynamic = "force-dynamic";
@@ -43,7 +44,9 @@ export default async function DashboardPage({
   const date = today();
   const seesMoney = can(session.role, "invoices.read");
   const seesOperations = can(session.role, "operations.read");
-  const sections = inboxSectionsFor(session.role);
+  // Which of the two job sections the inbox draws follows the workflow.
+  const simplified = await laundryWorkflow(await createClient(), session.tenantId) === "simplified";
+  const sections = inboxSectionsFor(session.role, { simplified });
   const plant = await plantIsOn(session.tenantId);
 
   // The person doing first-time setup needs admin.read (sites live there).
@@ -137,6 +140,7 @@ export default async function DashboardPage({
 const INBOX: Record<InboxSection, (props: { session: Session }) => Promise<React.JSX.Element>> = {
   needs_price: NeedsPrice,
   needs_driver: NeedsDriver,
+  ready_to_complete: ReadyToComplete,
   problems: Problems,
   drafts_ready: DraftsReady,
   overdue: Overdue,

@@ -62,6 +62,10 @@ describe("whether a ready job goes onto a round by itself (brief 2.2)", () => {
       .toMatchObject({ skip: "setting_off" });
     expect(autoAssignDecision({ ...base, status: "in_progress" })).toMatchObject({ skip: "not_ready" });
   });
+  it("never assigns in the simplified workflow, where a ready job is completed off the shelf", () => {
+    expect(autoAssignDecision({ ...base, workflow: "simplified" })).toEqual({ assign: false, skip: "simplified" });
+    expect(autoAssignDecision({ ...base, workflow: "full" })).toEqual({ assign: true, boardId: "board-1" });
+  });
 });
 
 describe("a clean job is approved without a person (brief 2.3)", () => {

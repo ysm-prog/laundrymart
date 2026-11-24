@@ -448,8 +448,11 @@ export async function createOrder(formData: FormData): Promise<void> {
       : finished.approval?.state === "approved"
         ? autoApproveSentence(finished.approval)
         : autoPriceSentence(finished.pricing);
+    // A take-in still says it came from the collection: that link is what stops
+    // the same collection being taken in twice, and nothing else on screen says it.
+    const from = parsed.data.source_pickup_id ? " from the collection" : "";
     return done(`/orders/${order.id}`,
-      `Job ${order.order_number} created and completed — it is ready to invoice.${priced}`,
+      `Job ${order.order_number} created${from} and completed — it is ready to invoice.${priced}`,
       { href: `/orders/${order.id}/docket`, label: "Print the docket" });
   }
 
@@ -588,8 +591,17 @@ export async function updateOrder(formData: FormData): Promise<void> {
   if (completion.moveFrom) {
     const removed = await removeJobFromDraft(supabase, session, completion.moveFrom.invoiceId, id.data);
     if (!removed.ok) {
+      // Still on the old draft, so its completion date goes back with it: a job
+      // billed on November's draft must not say it was finished in December.
+      const { error: restoreError } = await supabase
+        .from("laundry_orders").update({ completed_at: completion.previousCompletedAt })
+        .eq("tenant_id", session.tenantId).eq("id", id.data);
       return fail(`/orders/${id.data}`,
-        `Job ${existing.order_number} was updated, but it could not be taken off ${completion.moveFrom.invoiceNumber}: ${removed.error}`);
+        `Job ${existing.order_number} was updated, but it could not be taken off `
+        + `${completion.moveFrom.invoiceNumber} (${removed.error}), so `
+        + (restoreError
+          ? `its completion date could not be put back either (${describeDbError(restoreError)}) — check it before issuing.`
+          : "it stays there with its completion date unchanged."));
     }
     const placement = (await placeApprovedJobs(supabase, session, [id.data])).get(id.data);
     moved = placement?.kind === "placed"
@@ -628,7 +640,12 @@ export async function updateOrder(formData: FormData): Promise<void> {
 }
 
 type CompletionPlan =
-  | { ok: true; completedAt: string | null; moveFrom: { invoiceId: string; invoiceNumber: string } | null }
+  | {
+      ok: true; completedAt: string | null;
+      moveFrom: { invoiceId: string; invoiceNumber: string } | null;
+      /** What `completed_at` was, so a failed draft move can put it back. */
+      previousCompletedAt?: string | null;
+    }
   | { ok: false; error: string };
 
 /**
@@ -713,7 +730,11 @@ async function planCompletionMove(
         + `and it is on ${invoice.invoice_number}. Ask somebody who manages invoices to make this change.`,
     };
   }
-  return { ok: true, completedAt: move.completedAt, moveFrom: { invoiceId: invoice.id, invoiceNumber: invoice.invoice_number } };
+  return {
+    ok: true, completedAt: move.completedAt,
+    moveFrom: { invoiceId: invoice.id, invoiceNumber: invoice.invoice_number },
+    previousCompletedAt: job.completed_at,
+  };
 }
 
 /* ----------------------------------------------------------- status moves */

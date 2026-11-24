@@ -561,7 +561,8 @@ export function receivedDateMove(job: {
       return {
         kind: "refuse",
         reason: "This job is on an invoice that has already been sent, so its received date "
-          + "cannot change the month it was billed in. Void or credit that invoice first.",
+          + "cannot change the month it was billed in. Void that invoice first — a credit note "
+          + "does not take the job off it.",
       };
     }
     return { kind: "carry", completedAt: job.receivedAt };
