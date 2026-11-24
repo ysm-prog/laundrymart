@@ -9,10 +9,16 @@ where that is genuinely what it is. The multi-tenancy architecture stays: one op
 fact about today's data, not a reason to drop `tenant_id`, RLS, or §23's rule that a read feeding a
 write names its tenant.
 
-## Latest: backdated jobs checked against the simplified workflow (2026-11-24)
+## Latest: a completed job's received date correction moves its completion (2026-11-24)
+- `receivedDateMove` + `planCompletionMove` in `updateOrder`: a simplified completion's
+  `completed_at` follows a corrected received date; across a billing period the job comes off its
+  draft and is placed on the new one. Refused once its invoice is issued or sent. No migration.
+- Before trusting it live: move a simplified job's received date into last month as the Office
+  manager and check it lands on last month's draft.
+
+## Previously: backdated jobs checked against the simplified workflow (2026-11-24)
 - Tests only: a backdated job completes as at its received instant and joins that month's draft
-  (6 unit cases, 6 pgTAP). Open gap: editing a completed simplified job's received date leaves
-  `completed_at` behind, so across a month it stays on the old draft. Needs a decision.
+  (6 unit cases, 6 pgTAP). Found the gap closed above.
 
 ## Previously: second review of backdated jobs (2026-11-24)
 - Six fixes, merged to `Dev` and `Prod` (`f4756a2`): real-date check on `?received=` (no more 500),

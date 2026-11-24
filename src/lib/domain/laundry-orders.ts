@@ -509,6 +509,74 @@ export function futureReceiptCutoff(now: Date = new Date()): string {
 export const RECEIVED_IN_FUTURE_MESSAGE =
   "The received date is in the future. Laundry can only be recorded as received today or earlier.";
 
+/**
+ * What a change to a completed job's received date does to its completion date
+ * (2026-11-24). The simplified workflow completes a new job **as at its received
+ * instant** (`createOrder`), and that completion date decides which billing
+ * period — and so which month's draft — the job joins. So correcting the
+ * received date of such a job has to move the completion date with it, or a job
+ * re-dated from 2 December to 28 November stays on December's draft, and one
+ * moved later is recorded as finished before it was received.
+ *
+ * Four answers, because the action does different things with each:
+ *
+ * - `unchanged` — the received date did not move, or the job is not finished.
+ * - `carry` — a simplified completion (no handover recorded, completed at the
+ *   received instant to the minute): the completion date follows the received
+ *   date. The action then moves the job to the right draft if the period changed.
+ * - `keep` — a completion of its own (somebody handed the laundry over), still
+ *   on or after the new received date: nothing else moves.
+ * - `refuse` — either a real completion that would now come before the receipt,
+ *   or a simplified one already on an invoice the customer has been sent, whose
+ *   period cannot change under them.
+ */
+export type ReceivedDateMove =
+  | { kind: "unchanged" }
+  | { kind: "carry"; completedAt: string }
+  | { kind: "keep" }
+  | { kind: "refuse"; reason: string };
+
+/** Billing statuses whose invoice has gone to the customer. */
+const SENT_BILLING_STATUSES = new Set(["invoice_sent", "paid"]);
+
+const minuteOf = (instant: string) => Math.floor(Date.parse(instant) / 60_000);
+
+export function receivedDateMove(job: {
+  status: OrderStatus;
+  previousReceivedAt: string;
+  receivedAt: string;
+  completedAt: string | null;
+  /** True when a delivery or a collection was recorded (`delivered_at`/`collected_at`). */
+  handoverRecorded: boolean;
+  billingStatus: string | null;
+}): ReceivedDateMove {
+  if (minuteOf(job.receivedAt) === minuteOf(job.previousReceivedAt)) return { kind: "unchanged" };
+  if (job.status !== "completed" || !job.completedAt) return { kind: "unchanged" };
+
+  const simplified = !job.handoverRecorded
+    && minuteOf(job.completedAt) === minuteOf(job.previousReceivedAt);
+
+  if (simplified) {
+    if (job.billingStatus && SENT_BILLING_STATUSES.has(job.billingStatus)) {
+      return {
+        kind: "refuse",
+        reason: "This job is on an invoice that has already been sent, so its received date "
+          + "cannot change the month it was billed in. Void or credit that invoice first.",
+      };
+    }
+    return { kind: "carry", completedAt: job.receivedAt };
+  }
+
+  if (Date.parse(job.receivedAt) > Date.parse(job.completedAt)) {
+    return {
+      kind: "refuse",
+      reason: "The received date would be after the job was completed. "
+        + "Choose a date on or before the day it was finished.",
+    };
+  }
+  return { kind: "keep" };
+}
+
 export const DELIVERY_WINDOWS = ["morning", "afternoon", "specific_time", "no_specific_time"] as const;
 export type DeliveryWindow = (typeof DELIVERY_WINDOWS)[number];
 export const DELIVERY_WINDOW_LABELS: Record<DeliveryWindow, string> = {

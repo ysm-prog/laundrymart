@@ -659,6 +659,11 @@ key remains the way to reset or re-assert them through the Auth API, but nothing
   row), and it never issues or sends an invoice. 0065 relaxes 0042's rule 4 **only from a plant
   stage**: a delivery job already on a round still goes out first. Full is 0042 unchanged. Nothing
   about rounds, drivers or delivery is removed, and switching moves no existing job.
+  **Correcting the received date of a job completed that way moves its completion date with it**
+  (`receivedDateMove`, 2026-11-24), and if the billing period changes the job comes off its draft
+  and is placed on the new period's one (`removeJobFromDraft`, then `placeApprovedJobs`). Refused
+  once its invoice is issued or sent. A job with a real handover keeps its completion date, and its
+  receipt cannot move past it.
 - **A job is assigned to a Board and a Delivery Date, and the two records of that cannot
   disagree** (`guard_laundry_order_assignment`, 0016 retargeted by 0031). Eligibility first: a
   customer pickup is refused outright, so is a job still in the plant and a completed or
@@ -1848,7 +1853,7 @@ Proofs in `supabase/tests/`: `rls_isolation`, `rls_coverage`, `driver_scope`,
 `customer_record_scope`, `fleet_scope`, `pickup_intake`, `laundry_item_ownership`,
 `invoice_money_guards`, `invoice_issue_guard`, `billing_flow_guards`, `flow_runs_itself`,
 `operations_settings`, `billing_write_policies`, `hot_foreign_key_indexes`, `reopen_job_charges`,
-`invoice_sms`, `invoice_history_import`, `board_and_people_write`, `simplified_workflow` (**802 assertions** across 45 files).
+`invoice_sms`, `invoice_history_import`, `board_and_people_write`, `simplified_workflow` (**804 assertions** across 45 files).
 
 **Count assertions, not lines starting with `ok`.** pgTAP's function is literally named `ok`, so
 psql prints a centred `ok` **column header** above each result — and `grep -c '^\s*ok '` counts
@@ -3904,6 +3909,28 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-11-24 · Correcting a completed job's received date moves its completion date
+The gap the entry below found, closed on the owner's instruction. **No migration; no schema, RLS,
+capability or policy change.**
+- **The rule is `receivedDateMove`** (`lib/domain/laundry-orders.ts`, pure and tested). A job the
+  simplified workflow completed on save — no handover recorded, completed at its received instant
+  to the minute — has its completion date carried with a corrected received date, earlier or later.
+  A job with a real handover keeps its completion date, and the receipt cannot be moved past it.
+- **Its draft follows the period.** If the job is on a draft and the new date falls in another
+  billing period, `updateOrder` writes the job, takes it off the old draft (rebuilt without it) and
+  places it again through `placeApprovedJobs`, the routine approval uses. The toast names both
+  invoices. Same period, or a per-job draft: only the date moves.
+- **Refused, with the reason,** once the job's invoice has been issued or sent, and for a role
+  without `invoices.write` when the move would change drafts. Editing a completed job is
+  `orders.manage` already, held by the Owner and the Office manager, who both hold it.
+- `planCompletionMove` names the tenant on every read (§23); a source test counts them.
+- 11 unit tests (one mutation, carry turned into keep, fails 3); 2 pgTAP assertions that the
+  database lets both dates move together. 1706 tests across 111 files, `verify` green; **804 pgTAP
+  assertions across 45 files**, 0 failing.
+- **Not verified behind the auth gate.** Before trusting it: as the Office manager, open a job
+  created this month in the simplified workflow, change its received date to last month, save, and
+  check the toast names last month's draft and the job is on it.
+
 ### 2026-11-24 · The backdated jobs checked against the simplified workflow
 The two changes of 2026-11-23 meet in `createOrder`: in the simplified workflow a new job is
 completed as at its received instant, so a backdated receipt decides which month's draft it joins.
@@ -3922,13 +3949,8 @@ completed as at its received instant, so a backdated receipt decides which month
   `completed_at` set to its received instant, keeps that instant rather than now, reads as
   31 October in Adelaide, and lands in the billing queue. Against a database without 0065 those
   five fail by name.
-- **One gap found and not fixed, because it needs a decision.** Editing the received date of a job
-  the simplified workflow already completed (Owner or Office manager only, `orders.manage`) moves
-  `received_at` and leaves `completed_at` where it was. Within a month that changes nothing that
-  is billed; across a month boundary the job stays on the original month's draft, and moving the
-  date later than the original leaves a job recorded as finished before it was received. The
-  remedy is to take the job off its draft and re-add it, or to have `updateOrder` move
-  `completed_at` with `received_at` for a simplified completion still on a draft.
+- **One gap found here: editing the received date of a completed simplified job left
+  `completed_at` behind.** Closed in the entry above.
 - 1695 tests across 111 files, `verify` green; **802 pgTAP assertions across 45 files**, 0 failing.
 
 ### 2026-11-24 · Second review of the backdated jobs: six fixes

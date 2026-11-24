@@ -6,7 +6,7 @@ import {
 } from "@/lib/domain/operations-settings";
 import {
   actionsFor, buildStatusTrack, checkTransition, nextStatuses,
-  receivedInFuture, receivedInstant,
+  receivedDateMove, receivedInFuture, receivedInstant,
 } from "@/lib/domain/laundry-orders";
 import { billingPeriodFor } from "@/lib/domain/billing-period";
 import { toZonedDate } from "@/lib/domain/timezone";
@@ -237,5 +237,94 @@ describe("a backdated job completed on save", () => {
     expect(create.indexOf("receivedInFuture(receivedAt)"))
       .toBeLessThan(create.indexOf(".insert("));
     expect(create.indexOf(".insert(")).toBeLessThan(create.indexOf("completeLaundryOrder("));
+  });
+});
+
+/**
+ * The gap the entry above recorded, closed (2026-11-24): correcting the received
+ * date of a job the simplified workflow already completed moves its completion
+ * date too, and its draft when the billing period changes.
+ */
+describe("a completed job's received date is corrected", () => {
+  const simplified = {
+    status: "completed" as const,
+    previousReceivedAt: "2026-12-02T02:00:00Z",
+    receivedAt: "2026-11-28T02:00:00Z",
+    completedAt: "2026-12-02T02:00:00Z",
+    handoverRecorded: false,
+    billingStatus: "invoice_generated",
+  };
+
+  it("carries the completion date with it when the job was completed on save", () => {
+    expect(receivedDateMove(simplified)).toEqual({ kind: "carry", completedAt: "2026-11-28T02:00:00Z" });
+  });
+
+  it("carries it later as well, so a job is never finished before it was received", () => {
+    expect(receivedDateMove({ ...simplified, receivedAt: "2026-12-05T02:00:00Z" }))
+      .toEqual({ kind: "carry", completedAt: "2026-12-05T02:00:00Z" });
+  });
+
+  it("recognises a simplified completion to the minute, not to the millisecond", () => {
+    expect(receivedDateMove({ ...simplified, completedAt: "2026-12-02T02:00:30.123Z" }).kind).toBe("carry");
+  });
+
+  it("does nothing when the date did not move or the job is not finished", () => {
+    expect(receivedDateMove({ ...simplified, receivedAt: simplified.previousReceivedAt }).kind).toBe("unchanged");
+    expect(receivedDateMove({ ...simplified, status: "new", completedAt: null }).kind).toBe("unchanged");
+  });
+
+  it("refuses once the invoice has gone to the customer", () => {
+    for (const billingStatus of ["invoice_sent", "paid"]) {
+      expect(receivedDateMove({ ...simplified, billingStatus }).kind).toBe("refuse");
+    }
+  });
+
+  it("leaves a real handover's completion date alone", () => {
+    const handedOver = {
+      ...simplified, handoverRecorded: true, completedAt: "2026-12-04T05:00:00Z",
+    };
+    expect(receivedDateMove(handedOver)).toEqual({ kind: "keep" });
+    // …but will not let the receipt move past it.
+    expect(receivedDateMove({ ...handedOver, receivedAt: "2026-12-06T02:00:00Z" }).kind).toBe("refuse");
+  });
+
+  it("treats a completion at some other time as a real one, even with no handover", () => {
+    const other = { ...simplified, completedAt: "2026-12-03T05:00:00Z" };
+    expect(receivedDateMove(other)).toEqual({ kind: "keep" });
+  });
+
+  describe("the wiring in updateOrder", () => {
+    const read = (path: string) => readFileSync(join(process.cwd(), path), "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+    const actions = read("src/app/(app)/orders/actions.ts");
+    const update = actions.slice(actions.indexOf("export async function updateOrder"),
+                                 actions.indexOf("export async function advanceOrder"));
+    const plan = actions.slice(actions.indexOf("async function planCompletionMove"));
+
+    it("asks the rule, and writes the completion date it returns", () => {
+      expect(plan).toMatch(/receivedDateMove\(/);
+      expect(update).toMatch(/completed_at: completion\.completedAt/);
+    });
+
+    it("writes the job before moving it, and takes it off before placing it", () => {
+      const write = update.indexOf(".update(row)");
+      const off = update.indexOf("removeJobFromDraft(");
+      const on = update.indexOf("placeApprovedJobs(");
+      expect(write).toBeGreaterThan(-1);
+      expect(off).toBeGreaterThan(write);
+      expect(on).toBeGreaterThan(off);
+    });
+
+    it("refuses an issued invoice and compares periods before moving", () => {
+      expect(plan).toMatch(/status !== "draft"/);
+      expect(plan).toMatch(/samePeriod\(/);
+    });
+
+    it("names the tenant on every read it makes", () => {
+      const reads = plan.match(/\.from\("[a-z_]+"\)/g) ?? [];
+      const tenantFilters = plan.match(/\.eq\("tenant_id", session\.tenantId\)/g) ?? [];
+      expect(reads.length).toBeGreaterThanOrEqual(4);
+      expect(tenantFilters.length).toBe(reads.length);
+    });
   });
 });

@@ -15,10 +15,16 @@ import { answersFromForm, carryAnswers } from "./carry";
 import {
   DELIVERY_WINDOWS, ORDER_PRIORITIES, ORDER_STATUS_LABELS, RECEIVED_VIA,
   STAGE_CONTROLS, capabilitiesForMove, checkTransition, isOrderStatus,
-  leavesTheRound, receivedInstant, receivedInFuture, RECEIVED_IN_FUTURE_MESSAGE, validateItem,
+  leavesTheRound, receivedDateMove, receivedInstant, receivedInFuture, RECEIVED_IN_FUTURE_MESSAGE,
+  validateItem,
   type OrderItemInput, type OrderStatus,
 } from "@/lib/domain/laundry-orders";
-import { isClockTime, toInstant } from "@/lib/domain/timezone";
+import { isClockTime, toInstant, toZonedDate } from "@/lib/domain/timezone";
+import {
+  billingPeriodFor, describePeriod, samePeriod, type BillingPeriod,
+} from "@/lib/domain/billing-period";
+import { removeJobFromDraft } from "@/lib/invoices/open-draft";
+import { placeApprovedJobs } from "@/lib/orders/approve";
 import { logOrderActivity } from "@/lib/orders/activity";
 import { autoAssignOnReady, autoAssignSentence } from "@/lib/runs/auto-assign";
 import { completeLaundryOrder } from "@/lib/orders/complete";
@@ -525,8 +531,21 @@ export async function updateOrder(formData: FormData): Promise<void> {
     return fail(backTo, RECEIVED_IN_FUTURE_MESSAGE);
   }
 
+  // A completed job whose received date moves (2026-11-24). The simplified
+  // workflow completed it *as at* its received instant, so the completion date —
+  // which decides the billing period and the draft it sits on — moves with it.
+  // `receivedDateMove` is the rule; this is the reading it needs and the draft it
+  // may have to change.
+  const completion = existing.status === "completed" && !unchanged
+    ? await planCompletionMove(supabase, session, id.data, existing.received_at, received)
+    : { ok: true as const, completedAt: null, moveFrom: null };
+  if (!completion.ok) return fail(backTo, completion.error);
+
   const deliveryAddress = await resolveDeliveryAddress(supabase, session.tenantId, parsed.data);
-  const row = toRow(parsed.data, deliveryAddress, received);
+  const row = {
+    ...toRow(parsed.data, deliveryAddress, received),
+    ...(completion.completedAt ? { completed_at: completion.completedAt } : {}),
+  };
 
   const { data: before } = await supabase
     .from("laundry_orders")
@@ -555,6 +574,27 @@ export async function updateOrder(formData: FormData): Promise<void> {
       `The job details were saved but the laundry list was not: ${describeDbError(itemsError)}`);
   }
 
+  // Its period changed, so its charges go to the draft for the new one: off the
+  // old draft (which is rebuilt without it) and placed again, the way approval
+  // places a job. Both are the existing routines, so this cannot bill it twice.
+  let moved = "";
+  if (completion.moveFrom) {
+    const removed = await removeJobFromDraft(supabase, session, completion.moveFrom.invoiceId, id.data);
+    if (!removed.ok) {
+      return fail(`/orders/${id.data}`,
+        `Job ${existing.order_number} was updated, but it could not be taken off ${completion.moveFrom.invoiceNumber}: ${removed.error}`);
+    }
+    const placement = (await placeApprovedJobs(supabase, session, [id.data])).get(id.data);
+    moved = placement?.kind === "placed"
+      ? ` It moved from ${removed.invoiceNumber} to ${placement.invoiceNumber}`
+        + `${placement.period ? ` (${placement.period})` : ""}.`
+      : ` It came off ${removed.invoiceNumber} but could not be placed on the right draft`
+        + ` (${placement?.kind === "failed" ? placement.reason : "nothing was invoiced"})`
+        + " — it is waiting in Awaiting invoice.";
+    revalidatePath("/invoices/drafts");
+    revalidatePath("/invoices/awaiting");
+  }
+
   await logOrderActivity(supabase, session, id.data, {
     activity_type: "updated",
     previous: before ?? null,
@@ -566,6 +606,7 @@ export async function updateOrder(formData: FormData): Promise<void> {
       expected_collection_date: row.expected_collection_date,
       delivery_address: row.delivery_address,
       received_at: row.received_at,
+      ...(completion.completedAt ? { completed_at: completion.completedAt } : {}),
       items: items.length,
     },
   });
@@ -576,7 +617,96 @@ export async function updateOrder(formData: FormData): Promise<void> {
 
   revalidatePath(LIST);
   revalidatePath(`/orders/${id.data}`);
-  return done(`/orders/${id.data}`, `Job ${existing.order_number} updated.`);
+  return done(`/orders/${id.data}`, `Job ${existing.order_number} updated.${moved}`);
+}
+
+type CompletionPlan =
+  | { ok: true; completedAt: string | null; moveFrom: { invoiceId: string; invoiceNumber: string } | null }
+  | { ok: false; error: string };
+
+/**
+ * What a new received date does to a completed job: whether the completion date
+ * follows it, and whether its charges must move to another period's draft.
+ * Reads only; `updateOrder` does the writes. Every read names the tenant (§23).
+ */
+async function planCompletionMove(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  session: { tenantId: string; role: Parameters<typeof can>[0] },
+  orderId: string, previousReceivedAt: string, receivedAt: string,
+): Promise<CompletionPlan> {
+  const { data: job } = await supabase
+    .from("laundry_orders")
+    .select("completed_at, delivered_at, collected_at, billing_status, customer_id")
+    .eq("tenant_id", session.tenantId)
+    .eq("id", orderId)
+    .maybeSingle<{
+      completed_at: string | null; delivered_at: string | null; collected_at: string | null;
+      billing_status: string | null; customer_id: string;
+    }>();
+  if (!job) return { ok: false, error: "That job could not be found." };
+
+  const move = receivedDateMove({
+    status: "completed",
+    previousReceivedAt, receivedAt,
+    completedAt: job.completed_at,
+    handoverRecorded: Boolean(job.delivered_at || job.collected_at),
+    billingStatus: job.billing_status,
+  });
+  if (move.kind === "refuse") return { ok: false, error: move.reason };
+  if (move.kind !== "carry") return { ok: true, completedAt: null, moveFrom: null };
+  if (job.billing_status !== "invoice_generated") {
+    return { ok: true, completedAt: move.completedAt, moveFrom: null };
+  }
+
+  // On an invoice: find it. A void one has released the job already.
+  const { data: links } = await supabase
+    .from("invoice_source_jobs")
+    .select("invoice_id")
+    .eq("tenant_id", session.tenantId)
+    .eq("order_id", orderId);
+  const ids = (links ?? []).map((link) => link.invoice_id as string);
+  const { data: invoices } = ids.length === 0 ? { data: [] } : await supabase
+    .from("invoices")
+    .select("id, invoice_number, status, period_start, period_end")
+    .eq("tenant_id", session.tenantId)
+    .in("id", ids)
+    .neq("status", "void");
+  const invoice = (invoices ?? [])[0] as {
+    id: string; invoice_number: string; status: string;
+    period_start: string | null; period_end: string | null;
+  } | undefined;
+  if (!invoice) return { ok: true, completedAt: move.completedAt, moveFrom: null };
+
+  if (invoice.status !== "draft") {
+    return {
+      ok: false,
+      error: `This job is on ${invoice.invoice_number}, which has been issued, so its received date `
+        + "cannot change the month it was billed in. Void that invoice first.",
+    };
+  }
+  // A per-job draft has no period to be wrong about.
+  if (!invoice.period_start || !invoice.period_end) {
+    return { ok: true, completedAt: move.completedAt, moveFrom: null };
+  }
+
+  const { data: customer } = await supabase
+    .from("customers")
+    .select("billing_method")
+    .eq("tenant_id", session.tenantId)
+    .eq("id", job.customer_id)
+    .maybeSingle<{ billing_method: string | null }>();
+  const current: BillingPeriod = { start: invoice.period_start, end: invoice.period_end };
+  const next = billingPeriodFor(customer?.billing_method, toZonedDate(move.completedAt));
+  if (samePeriod(current, next)) return { ok: true, completedAt: move.completedAt, moveFrom: null };
+
+  if (!can(session.role, "invoices.write")) {
+    return {
+      ok: false,
+      error: `That date moves the job from ${describePeriod(current)} to another billing period, `
+        + `and it is on ${invoice.invoice_number}. Ask somebody who manages invoices to make this change.`,
+    };
+  }
+  return { ok: true, completedAt: move.completedAt, moveFrom: { invoiceId: invoice.id, invoiceNumber: invoice.invoice_number } };
 }
 
 /* ----------------------------------------------------------- status moves */
