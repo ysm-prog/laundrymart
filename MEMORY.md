@@ -22,8 +22,7 @@ write names its tenant.
 - `0065` relaxes rule 4 from plant stages when simplified. **Applied live 2026-11-23**
   (`20261123230737`), probed as the Office manager; then merged to `Dev` and `Prod` (`bf14cbb`),
   CI green on both (runs 480, 481); Vercel production deploy green (owner, dashboard).
-- Still to check live: as Angela, take a job in, confirm it opens Completed, open its draft invoice
-  from the Charges card, issue and send.
+- Checked live by Angela (2026-11-23): job opened Completed, draft invoice issued and sent. All working.
 
 ## Previously: Next.js 16.4.6 (2026-11-23)
 - `next` 16.4.3 → 16.4.6 for a moderate advisory; no source change. Done in a worktree, then on the work
