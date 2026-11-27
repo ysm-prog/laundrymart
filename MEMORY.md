@@ -12,7 +12,7 @@ write names its tenant.
 ## Latest: the lot price is a setting (2026-11-27)
 - `0067`: `tenant_lot_prices` (pricing roles read; Owner/Office manager write), 0066's trigger reads
   it, $40 default. Card on Money › Laundry prices; job form reads the saved price.
-- 0067 applied live (`20261127035137`), proved as real logins (§11). **Not merged** — waiting on the owner's go-ahead for `Dev`/`Prod`.
+- 0067 applied live (`20261127035137`), proved as real logins (§11). Merged to `Dev` and `Prod` (`894faae`).
   No price saved yet, so live is still the $40 default.
 
 ## Previously: Laundry by Lot (2026-11-27)

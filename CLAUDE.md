@@ -3995,6 +3995,11 @@ migration, `0067`, applied 2026-11-27 before the merge (§11).**
   a browser at 390/1440 in both themes: 0 errors, no overflow inside it.
 - **Order kept:** 0067 went on before the code reached `Prod`, since the prices page and the job
   form read the new table.
+- **Merged to `Dev` and `Prod` on 2026-11-27** (`894faae`), both clean fast-forwards from `0d40e23`;
+  `Prod` never force-pushed. CI runs 539 (`Dev`) and 540 (`Prod`). The Vercel production deploy is
+  not confirmable from this session (§5).
+- **Before trusting it live:** as the Owner, open Money › Laundry prices, save a lot price, then
+  take a job in by the lot and check the job form's total uses it.
 
 ### 2026-11-27 · Laundry by Lot
 The client's request: book laundry by the number of lots rather than item by item, at $40.00 a lot
