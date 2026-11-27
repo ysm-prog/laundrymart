@@ -3991,8 +3991,9 @@ merge (§11).**
   three jobs for both** (run 531 `Dev`, run 532 `Prod`; `Prod` ran 02:51:17 → 02:53:51Z). **The
   Vercel production deploy was confirmed green by the owner in the Vercel dashboard** — a person
   reading it, not a status this session could read (§5).
-- **Before trusting it:** on `ats.coreit.com.au` take a job in by the lot (10),
-  check the job page reads $440.00, and that it lands on the customer's draft as one Per Lot line.
+- **Verified live by the owner on 2026-11-27**: a 10-lot job taken in on `ats.coreit.com.au`
+  read $440.00 and landed on the customer's draft as one "Laundry Services – Per Lot" line.
+  Recorded as their report, not as something this session observed.
 
 ### 2026-11-24 · Review of the whole backdated-jobs and simplified-workflow range: eight fixes
 A review of everything since the handover (`49dfe01..4865664`) found eight. **No migration; no
