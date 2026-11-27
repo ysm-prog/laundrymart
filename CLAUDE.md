@@ -3989,7 +3989,8 @@ merge (§11).**
 - **Merged to `Dev` and `Prod` on 2026-11-27** (`970ffa4`), both clean fast-forwards from
   `223b7ec`; `Prod` never force-pushed. 0066 went on the hosted project first. **CI green on all
   three jobs for both** (run 531 `Dev`, run 532 `Prod`; `Prod` ran 02:51:17 → 02:53:51Z). **The
-  Vercel production deploy is not confirmable from this session** (§5).
+  Vercel production deploy was confirmed green by the owner in the Vercel dashboard** — a person
+  reading it, not a status this session could read (§5).
 - **Before trusting it:** on `ats.coreit.com.au` take a job in by the lot (10),
   check the job page reads $440.00, and that it lands on the customer's draft as one Per Lot line.
 
