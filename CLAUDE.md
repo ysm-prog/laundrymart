@@ -3996,7 +3996,8 @@ migration, `0067`, applied 2026-11-27 before the merge (§11).**
 - **Order kept:** 0067 went on before the code reached `Prod`, since the prices page and the job
   form read the new table.
 - **Merged to `Dev` and `Prod` on 2026-11-27** (`894faae`), both clean fast-forwards from `0d40e23`;
-  `Prod` never force-pushed. CI runs 539 (`Dev`) and 540 (`Prod`). The Vercel production deploy is
+  `Prod` never force-pushed. **CI green on all three jobs for both** (run 539 `Dev`, run 540
+  `Prod`; `Prod`'s `verify.sh` ran 03:58:30 → 03:59:37Z). The Vercel production deploy is
   not confirmable from this session (§5).
 - **Before trusting it live:** as the Owner, open Money › Laundry prices, save a lot price, then
   take a job in by the lot and check the job form's total uses it.
