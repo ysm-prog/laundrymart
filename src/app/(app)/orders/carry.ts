@@ -49,7 +49,19 @@ export type CarriedAnswers = {
    * (`MAX_CARRIED_ROWS`); a longer list is dropped rather than truncated.
    */
   rows?: string | null;
+  /**
+   * A job booked by the lot (0066): whether the Laundry by Lot switch was on,
+   * the number of lots and the item notes (`?booking=lot`, `?lots=`,
+   * `?lotnotes=`). Without them a refused lot booking reopens as an itemised
+   * job with one empty row, and the counter has to find the switch again.
+   */
+  booking?: string | null;
+  lots?: string | null;
+  lotNotes?: string | null;
 };
+
+/** The longest lot note carried in the URL; a longer one is cut rather than dropped. */
+export const MAX_CARRIED_LOT_NOTES = 500;
 
 /**
  * The longest laundry list carried in the URL, in characters of JSON. A dozen
@@ -80,6 +92,19 @@ export function carryAnswers(path: string, answers: CarriedAnswers): string {
   const encoded = rows ? JSON.stringify(rows) : null;
   // Re-checked after re-serialising, so the page reading it back keeps it.
   if (encoded && encoded.length <= MAX_CARRIED_ROWS) query.set("rows", encoded);
+  // Standard is carried too: editing a lot booking, switching it off and being
+  // refused must not reopen it as the lot booking it was stored as.
+  if (answers.booking === "standard") query.set("booking", "standard");
+  if (answers.booking === "lot") {
+    query.set("booking", "lot");
+    // Carried as typed — a save refused for "0" lots comes back saying 0, so the
+    // box the toast talks about holds the value it talks about — but only while
+    // it is a short run of digits, so the URL never carries anything else.
+    const lots = answers.lots?.trim();
+    if (lots && /^\d{1,4}$/.test(lots)) query.set("lots", lots);
+    const notes = answers.lotNotes?.trim();
+    if (notes) query.set("lotnotes", notes.slice(0, MAX_CARRIED_LOT_NOTES));
+  }
   const search = query.toString();
   return search ? `${base}?${search}` : base;
 }
@@ -102,6 +127,9 @@ export function answersFromForm(formData: FormData): CarriedAnswers {
     picked: text("pickup_date"),
     collector: text("pickup_driver_id"),
     rows: text("items"),
+    booking: text("booking_type"),
+    lots: text("lot_count"),
+    lotNotes: text("lot_notes"),
   };
 }
 
@@ -128,6 +156,16 @@ export function carriedDelivery(value: string | null | undefined): boolean | und
 /** `?via=` read back: one of the stored channels, or no answer at all. */
 export function carriedVia(value: string | null | undefined): ReceivedVia | undefined {
   return (RECEIVED_VIA as readonly string[]).includes(value ?? "") ? (value as ReceivedVia) : undefined;
+}
+
+/** `?booking=` read back: `standard` or `lot`, or no answer at all. */
+export function carriedBooking(value: string | null | undefined): "standard" | "lot" | undefined {
+  return value === "lot" || value === "standard" ? value : undefined;
+}
+
+/** `?lots=` read back: up to four digits, or no answer at all. */
+export function carriedLots(value: string | null | undefined): string | undefined {
+  return value && /^\d{1,4}$/.test(value) ? value : undefined;
 }
 
 /** A carried uuid (`?collector=`) read back, or nothing. */

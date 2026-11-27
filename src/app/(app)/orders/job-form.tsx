@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  Field, FormActions, Input, Select, SubmitButton, Textarea, useFieldControl,
+  Field, FormActions, Input, Select, SubmitButton, Switch, Textarea, useFieldControl,
 } from "@/components/form";
 import {
   Badge, ButtonLink, CONTROL, Eyebrow, FormSection, Notice, SELECT_CHEVRON, StatusBadge, cx, humanise,
@@ -20,7 +20,10 @@ import {
   type ItemOwnership, type OrderItemInput, type ReceivedVia,
 } from "@/lib/domain/laundry-orders";
 import { carriedDate, stepQuantity } from "@/lib/domain/intake";
-import { carriedDelivery, carriedItems, carriedUuid, carriedVia, carryAnswers } from "./carry";
+import {
+  carriedBooking, carriedDelivery, carriedItems, carriedLots, carriedUuid, carriedVia, carryAnswers,
+} from "./carry";
+import { MAX_LOTS, describeLots, lotPricing, readLotCount } from "@/lib/domain/lot-booking";
 import { customerAnswerUse, dateAnswerApplies, type IntakeTickets } from "./intake-tickets";
 import { money } from "@/lib/format";
 import type { IntakeQuote } from "./intake-actions";
@@ -166,7 +169,7 @@ export function JobForm({
   order, items, seed, catalogue = [], defaultCustomerId, defaultReceivedDate,
   defaultDueDate, defaultCollectDate, defaultDelivery, defaultReceivedVia,
   defaultPickupDate, defaultPickupDriverId, defaultRows, returnPath,
-  entryReceivedVia, intake,
+  entryReceivedVia, intake, lotPrice, defaultBooking, defaultLots, defaultLotNotes,
 }: {
   action: (formData: FormData) => Promise<void>;
   /** The existing `createCustomer` action — this module adds no customer flow. */
@@ -229,6 +232,17 @@ export function JobForm({
   defaultRows?: string;
   /** Where the quick-create returns to, so the job form is not restarted. */
   returnPath: string;
+  /**
+   * The lot price to show beside Number of Lots (0066): the standard price for
+   * a new job, the price stored on the booking for an edit. Passed only to a
+   * role that may read prices; null for everyone else, who sees that the job is
+   * priced at the standard lot rate without seeing the figure.
+   */
+  lotPrice?: { unitPriceExGst: number; gstRate: number } | null;
+  /** A refused save's Laundry by Lot answers (`?booking=`, `?lots=`, `?lotnotes=`). */
+  defaultBooking?: string;
+  defaultLots?: string;
+  defaultLotNotes?: string;
   /**
    * How a new job arrived, decided by where it was started (brief 3.4): the
    * counter's own screen is a drop-off, a collection is a driver pickup.
@@ -336,6 +350,38 @@ export function JobForm({
       setNextKey((key) => Math.max(key, carriedRows.length));
     }
   }
+
+  // **Laundry by Lot** (0066). Off for a new job; on for a job already booked
+  // that way; a refused save's answer wins over both, adopted the way the
+  // customer is. The itemised rows above stay in state while it is on, so
+  // switching it off again brings back exactly what was there.
+  const carriedBookingChoice = carriedBooking(defaultBooking);
+  const [byLot, setByLot] = useState(
+    () => (carriedBookingChoice ?? order?.booking_type ?? "standard") === "lot",
+  );
+  const [lastBookingDefault, setLastBookingDefault] = useState(carriedBookingChoice);
+  if (carriedBookingChoice !== lastBookingDefault) {
+    setLastBookingDefault(carriedBookingChoice);
+    if (carriedBookingChoice) setByLot(carriedBookingChoice === "lot");
+  }
+  const carriedLotCount = carriedLots(defaultLots);
+  const [lots, setLots] = useState(
+    () => carriedLotCount ?? (order?.lot_count ? String(order.lot_count) : ""),
+  );
+  const [lastLotsDefault, setLastLotsDefault] = useState(carriedLotCount);
+  if (carriedLotCount !== lastLotsDefault) {
+    setLastLotsDefault(carriedLotCount);
+    if (carriedLotCount) setLots(carriedLotCount);
+  }
+  const [lotNotes, setLotNotes] = useState(() => defaultLotNotes ?? order?.lot_notes ?? "");
+  const [lastLotNotesDefault, setLastLotNotesDefault] = useState(defaultLotNotes);
+  if (defaultLotNotes !== lastLotNotesDefault) {
+    setLastLotNotesDefault(defaultLotNotes);
+    if (defaultLotNotes !== undefined) setLotNotes(defaultLotNotes);
+  }
+  const lotCount = readLotCount(lots);
+  const lotTotals = lotCount.ok && lotPrice
+    ? lotPricing(lotCount.lots, lotPrice.unitPriceExGst, lotPrice.gstRate) : null;
 
   // When the job is due back. Controlled, so choosing a customer can fill it
   // with their round's next day — until the counter changes it themselves.
@@ -507,13 +553,14 @@ export function JobForm({
   const [quote, setQuote] = useState<{ key: string; value: IntakeQuote | null } | null>(null);
   useEffect(() => {
     const ask = intake?.quote;
-    if (!ask || !customerId) return;
+    if (!ask || !customerId || byLot) return;
     const timer = setTimeout(() => {
       void ask(customerId, itemsPayload).then((value) => setQuote({ key: quoteKey, value }));
     }, 400);
     return () => clearTimeout(timer);
-  }, [intake?.quote, customerId, itemsPayload, quoteKey]);
-  const liveQuote = quote && quote.key === quoteKey ? quote.value : null;
+  }, [intake?.quote, customerId, itemsPayload, quoteKey, byLot]);
+  // A lot booking has its own price, below; the item quote says nothing about it.
+  const liveQuote = !byLot && quote && quote.key === quoteKey ? quote.value : null;
 
   // The quote answers per non-blank row, in order — the server reads the rows
   // with the same parser `createOrder` uses, which drops blank ones.
@@ -573,13 +620,20 @@ export function JobForm({
                  via: receivedVia,
                  picked: pickupDate,
                  collector: pickupDriver,
-                 rows: itemsPayload,
+                 rows: byLot ? null : itemsPayload,
+                 booking: byLot ? "lot" : "standard",
+                 lots,
+                 lotNotes,
                })} />
       </form>
 
       <form action={action} className="space-y-4">
         {editing ? <input type="hidden" name="id" value={order.id} /> : null}
-        <input type="hidden" name="items" value={itemsPayload} />
+        {/* A lot booking posts no laundry rows (0066): the rows the counter may
+            have typed before switching it on stay in the browser, untouched, in
+            case they switch it off again — but they are not part of this job. */}
+        <input type="hidden" name="items" value={byLot ? "[]" : itemsPayload} />
+        <input type="hidden" name="booking_type" value={byLot ? "lot" : "standard"} />
         <input type="hidden" name="return_to" value={returnPath} />
         <input type="hidden" name="customer_id" value={customerId} />
         {/* The collection this job is taken in from (0050). Posted rather than
@@ -809,9 +863,11 @@ export function JobForm({
         {/* -------------------------------------------------------- laundry --- */}
         <FormSection
           title="Laundry details"
-          description="What is in the bag. Count it, or take it as a bulk lot."
+          description={byLot
+            ? "Booked by the lot: how many lots, and anything worth noting."
+            : "What is in the bag. Count it, or take it as a bulk lot."}
           icon={<Shirt className="size-[1.15rem]" />}
-          actions={
+          actions={byLot ? undefined :
             <button type="button" onClick={addRow}
                     className="inline-flex min-h-10 items-center gap-1.5 rounded-lg border
                                border-strong bg-surface px-3.5 text-sm font-medium shadow-xs
@@ -820,6 +876,72 @@ export function JobForm({
             </button>
           }
         >
+          <div className="mb-3 rounded-lg border bg-surface-muted/40 px-3 py-1">
+            <Switch id="laundry-by-lot" label="Laundry by Lot"
+                    hint="Book a number of lots at the standard lot price, instead of listing each item."
+                    checked={byLot} onChange={setByLot} />
+          </div>
+
+          {byLot ? (
+            <div className="space-y-4">
+              <div className="grid gap-4 sm:grid-cols-[auto_1fr]">
+                <div className="space-y-1">
+                  <label htmlFor="lot_count" className="block text-sm font-medium text-foreground">
+                    Number of Lots <span className="text-danger" aria-hidden>*</span>
+                  </label>
+                  <div className="flex items-center gap-1">
+                    <button type="button" aria-label="One lot fewer"
+                            onClick={() => setLots((current) => stepQuantity(current, -1))}
+                            className="flex size-11 items-center justify-center rounded-lg border
+                                       border-control-border bg-surface transition hover:bg-surface-muted">
+                      <Minus className="size-4" aria-hidden />
+                    </button>
+                    <input id="lot_count" name="lot_count" required
+                           className={cx(CONTROL, "w-24 text-center sm:w-28")}
+                           type="number" min={1} max={MAX_LOTS} step={1} inputMode="numeric"
+                           aria-describedby="lot_count-price"
+                           aria-invalid={lots.trim() !== "" && !lotCount.ok ? true : undefined}
+                           value={lots} onChange={(event) => setLots(event.target.value)} />
+                    <button type="button" aria-label="One lot more"
+                            onClick={() => setLots((current) => stepQuantity(current, 1))}
+                            className="flex size-11 items-center justify-center rounded-lg border
+                                       border-control-border bg-surface transition hover:bg-surface-muted">
+                      <Plus className="size-4" aria-hidden />
+                    </button>
+                  </div>
+                </div>
+                <div id="lot_count-price" className="self-end text-sm" aria-live="polite">
+                  {lots.trim() !== "" && !lotCount.ok ? (
+                    <p className="font-medium text-danger">{lotCount.error}</p>
+                  ) : lotTotals ? (
+                    <dl className="grid max-w-sm grid-cols-[1fr_auto] gap-x-4 gap-y-0.5 tabular-nums">
+                      <dt className="text-muted-foreground">
+                        {describeLots(lotTotals.lots)} × {money(lotTotals.unitPriceExGst)} excl. GST
+                      </dt>
+                      <dd className="text-right">{money(lotTotals.totalExGst)}</dd>
+                      <dt className="text-muted-foreground">GST</dt>
+                      <dd className="text-right">{money(lotTotals.gstAmount)}</dd>
+                      <dt className="font-semibold">Total incl. GST</dt>
+                      <dd className="text-right font-semibold">{money(lotTotals.totalIncGst)}</dd>
+                    </dl>
+                  ) : (
+                    <p className="text-muted-foreground">
+                      {lotPrice
+                        ? "Enter the number of lots to see the price."
+                        : "Priced at the standard lot rate when the job is saved."}
+                    </p>
+                  )}
+                </div>
+              </div>
+              <label className="block space-y-1">
+                <span className="block text-sm font-medium text-foreground">Item Notes</span>
+                <textarea name="lot_notes" className={cx(CONTROL, "min-h-[5.5rem] resize-y py-2.5")}
+                          maxLength={1000} placeholder="Optional — anything worth knowing about these lots"
+                          value={lotNotes} onChange={(event) => setLotNotes(event.target.value)} />
+              </label>
+            </div>
+          ) : (
+          <>
           {defaults?.lastOrderNumber && defaults.items.length ? (
             <p className="mb-3 text-sm text-muted-foreground">
               Filled in from {defaults.lastOrderNumber}, their last job. Change anything that is different.
@@ -1041,6 +1163,8 @@ export function JobForm({
               </li>
             ))}
           </ul>
+          </>
+          )}
 
         </FormSection>
 
@@ -1217,7 +1341,14 @@ export function JobForm({
               {liveQuote.unpricedCount > 0 ? <span className="font-normal text-warning"> · {liveQuote.unpricedCount} not priced</span> : null}
             </span>
           ) : null}
+          {byLot && lotTotals ? (
+            <span className="text-sm font-semibold" aria-live="polite">
+              {money(lotTotals.totalIncGst)} incl. GST
+            </span>
+          ) : null}
           <span className="ml-auto hidden text-sm text-muted-foreground sm:inline">
+            {byLot ? (lotCount.ok ? `Laundry by lot · ${describeLots(lotCount.lots)}` : "Laundry by lot") : null}
+            {byLot ? null : <>
             {rows.length === 1 ? "1 laundry item" : `${rows.length} laundry items`}
             {/* Every row, not the first one: "2 laundry items · 100 × Towels"
                 hid the 40 hand towels (2026-10-12). */}
@@ -1229,6 +1360,7 @@ export function JobForm({
               bag_count: numberOrNull(row.bagCount),
               estimated_quantity: numberOrNull(row.estimatedQuantity),
             })), 3)}` : ""}
+            </>}
           </span>
         </FormActions>
       </form>

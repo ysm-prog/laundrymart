@@ -4,7 +4,8 @@ import { notFound } from "next/navigation";
 import { requireCapability } from "@/lib/auth/context";
 import { createClient } from "@/lib/supabase/server";
 import { can } from "@/lib/roles";
-import { date as formatDate, dateTime, time as formatTime } from "@/lib/format";
+import { date as formatDate, dateTime, money, time as formatTime } from "@/lib/format";
+import { describeLots } from "@/lib/domain/lot-booking";
 import { defaultStaffId, listMembers, memberNames, staffMembers } from "@/lib/directory";
 import {
   DELIVERY_WINDOW_LABELS, PRIORITY_LABELS, RECEIVED_VIA_LABELS,
@@ -464,6 +465,13 @@ export default async function JobDetailPage({
       </div>
 
       {/* ---------------------------------------------------------- laundry --- */}
+      {order.booking_type === "lot" ? (
+        <Card title="Laundry" description="Booked by the lot.">
+          <LotBookingDetails orderId={order.id} tenantId={session.tenantId}
+                             lots={order.lot_count ?? 0} notes={order.lot_notes ?? null}
+                             showPrice={can(session.role, "pricing.read")} />
+        </Card>
+      ) : (
       <Card title="Laundry" description="What the customer brought in.">
         <DataTable
           label="Laundry items"
@@ -498,6 +506,7 @@ export default async function JobDetailPage({
           ]}
         />
       </Card>
+      )}
 
       {/* --------------------------------------------------------- delivery --- */}
       <Card title={delivery ? "Delivery" : "Customer pickup"}>
@@ -582,5 +591,48 @@ function Row({ label, value }: { label: string; value: string | null | undefined
       <dt className="text-muted-foreground">{label}</dt>
       <dd className="min-w-0 text-right font-medium break-words">{value || "—"}</dd>
     </div>
+  );
+}
+
+/**
+ * A lot booking's laundry card (0066): the number of lots, the item notes, and —
+ * for a role that may read prices — what it costs, read from the price fixed on
+ * the booking. The price table is gated on `can_read_pricing()`, so the read is
+ * skipped rather than made for anybody else.
+ */
+async function LotBookingDetails({
+  orderId, tenantId, lots, notes, showPrice,
+}: { orderId: string; tenantId: string; lots: number; notes: string | null; showPrice: boolean }) {
+  const price = showPrice
+    ? (await (await createClient())
+        .from("laundry_order_lot_prices")
+        .select("unit_price_ex_gst, total_ex_gst, gst_amount, total_inc_gst")
+        .eq("tenant_id", tenantId).eq("order_id", orderId)
+        .maybeSingle<{
+          unit_price_ex_gst: number | string; total_ex_gst: number | string;
+          gst_amount: number | string; total_inc_gst: number | string;
+        }>()).data
+    : null;
+  return (
+    <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-[auto_1fr]">
+      <dt className="text-muted-foreground">Booking</dt>
+      <dd className="font-medium">Laundry by lot</dd>
+      <dt className="text-muted-foreground">Number of lots</dt>
+      <dd className="font-medium tabular-nums">{describeLots(lots)}</dd>
+      <dt className="text-muted-foreground">Item notes</dt>
+      <dd>{notes ?? "—"}</dd>
+      {price ? (
+        <>
+          <dt className="text-muted-foreground">Price per lot</dt>
+          <dd className="tabular-nums">{money(Number(price.unit_price_ex_gst))} excl. GST</dd>
+          <dt className="text-muted-foreground">Total excl. GST</dt>
+          <dd className="tabular-nums">{money(Number(price.total_ex_gst))}</dd>
+          <dt className="text-muted-foreground">GST</dt>
+          <dd className="tabular-nums">{money(Number(price.gst_amount))}</dd>
+          <dt className="text-muted-foreground">Total incl. GST</dt>
+          <dd className="font-semibold tabular-nums">{money(Number(price.total_inc_gst))}</dd>
+        </>
+      ) : null}
+    </dl>
   );
 }

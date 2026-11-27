@@ -44,7 +44,11 @@ describe("an item code is required where there is an item master", () => {
   it("asks both writers, not just the one that creates a job", () => {
     // An edit that could drop the code would leave the five stranded jobs
     // stranded, and would be a second door onto the state this closes.
-    const calls = actions.match(/crossFieldProblem\(\s*\n?\s*parsed\.data, items, await hasItemMaster\(/g) ?? [];
+    // A lot booking (0066) has no rows, so the item master is asked only for an
+    // itemised job — in both writers.
+    const calls = actions.match(
+      /crossFieldProblem\(\s*parsed\.data, items,\s*booking\.type === "standard" && await hasItemMaster\(/g,
+    ) ?? [];
     expect(calls).toHaveLength(2);
   });
 

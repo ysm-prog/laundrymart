@@ -779,8 +779,13 @@ export function describeItem(item: OrderItemInput, label?: string | null): strin
 export function summariseItems(
   items: readonly OrderItemInput[],
   limit = 2,
-  options: { ownership?: boolean } = {},
+  options: { ownership?: boolean; lotCount?: number | null } = {},
 ): string {
+  // A job booked by the lot (0066) has no rows to summarise; its count is the
+  // whole of what it says about the laundry.
+  if (options.lotCount && options.lotCount > 0) {
+    return `${options.lotCount.toLocaleString("en-AU")} ${options.lotCount === 1 ? "lot" : "lots"}`;
+  }
   if (items.length === 0) return "No items";
   const shown = items.slice(0, limit)
     .map((item) => (options.ownership ? describeItemWithOwnership(item) : describeItem(item)))

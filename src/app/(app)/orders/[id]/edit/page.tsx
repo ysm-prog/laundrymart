@@ -8,6 +8,8 @@ import type { LaundryOrder, LaundryOrderItem } from "@/lib/db/types";
 import { updateOrder } from "../../actions";
 import { loadJobFormData } from "../../form-data";
 import { JobForm } from "../../job-form";
+import { STANDARD_LOT_PRICE_EX_GST } from "@/lib/domain/lot-booking";
+import { GST_RATE_FALLBACK } from "@/lib/domain/items";
 
 export const metadata = { title: "Edit job" };
 export const dynamic = "force-dynamic";
@@ -26,12 +28,15 @@ export default async function EditJobPage({
   searchParams: Promise<{
     customer?: string; received?: string; due?: string; collect?: string; delivery?: string;
     via?: string; picked?: string; collector?: string; rows?: string;
+    booking?: string; lots?: string; lotnotes?: string;
   }>;
 }) {
   const { id } = await params;
   // Set when the customer quick-create has just returned, and when a rejected
   // `updateOrder` is coming back with the customer still chosen; see JobForm.
-  const { customer, received, due, collect, delivery, via, picked, collector, rows } = await searchParams;
+  const {
+    customer, received, due, collect, delivery, via, picked, collector, rows, booking, lots, lotnotes,
+  } = await searchParams;
   const session = await requireCapability("orders.write");
 
   const supabase = await createClient();
@@ -46,6 +51,23 @@ export default async function EditJobPage({
   if (!order) notFound();
   if (order.status === "cancelled") redirect(`/orders/${id}`);
   if (order.status === "completed" && !can(session.role, "orders.manage")) redirect(`/orders/${id}`);
+
+  // The lot price beside Number of Lots (0066), for a role that may read prices:
+  // the price this booking was taken at, or — for a job not yet booked by the
+  // lot — today's standard price, which is what switching it over would fix.
+  let lotPrice: { unitPriceExGst: number; gstRate: number } | null = null;
+  if (can(session.role, "pricing.read")) {
+    const [{ data: stored }, { data: tenant }] = await Promise.all([
+      supabase.from("laundry_order_lot_prices").select("unit_price_ex_gst, gst_rate")
+        .eq("tenant_id", session.tenantId).eq("order_id", id)
+        .maybeSingle<{ unit_price_ex_gst: number | string; gst_rate: number | string }>(),
+      supabase.from("tenants").select("gst_rate").eq("id", session.tenantId)
+        .maybeSingle<{ gst_rate: number | string | null }>(),
+    ]);
+    lotPrice = stored
+      ? { unitPriceExGst: Number(stored.unit_price_ex_gst), gstRate: Number(stored.gst_rate) }
+      : { unitPriceExGst: STANDARD_LOT_PRICE_EX_GST, gstRate: Number(tenant?.gst_rate ?? GST_RATE_FALLBACK) };
+  }
 
   const { customers, catalogue, drivers, staff } =
     await loadJobFormData(customer ?? order.customer_id, order.assigned_to ?? undefined);
@@ -85,6 +107,10 @@ export default async function EditJobPage({
         defaultPickupDate={picked}
         defaultPickupDriverId={collector}
         defaultRows={rows}
+        defaultBooking={booking}
+        defaultLots={lots}
+        defaultLotNotes={lotnotes}
+        lotPrice={lotPrice}
         returnPath={`/orders/${id}/edit`}
       />
     </PageContainer>

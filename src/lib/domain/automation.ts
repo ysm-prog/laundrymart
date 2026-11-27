@@ -145,7 +145,9 @@ export type PricedLine = {
  * price somebody keyed into MYOB, not a rate agreed for this customer — so a job
  * priced from it waits for a person.
  */
-const LIST_MODELS = new Set(["per_item", "per_bag"]);
+// `per_lot` (0066) is a lot booking's own stored price — the standard lot rate
+// fixed the day it was booked — so it is a rate, not an item's list price.
+const LIST_MODELS = new Set(["per_item", "per_bag", "per_lot"]);
 
 export type CleanVerdict =
   | { clean: true }

@@ -624,14 +624,19 @@ export function pricingSourceLabel(
   const list = "the laundry price list";
   const itemPrice = "the item's selling price";
 
+  const lotPrice = "the standard lot price";
+
   const fromCard = Boolean(card) && lines.some((line) => line.source_agreement_id);
   const fromItem = lines.some((line) => !line.source_agreement_id && line.pricing_model === "item_price");
-  const fromList = lines.some((line) => !line.source_agreement_id && line.pricing_model !== "item_price");
+  const fromLot = lines.some((line) => !line.source_agreement_id && line.pricing_model === "per_lot");
+  const fromList = lines.some((line) => !line.source_agreement_id
+    && line.pricing_model !== "item_price" && line.pricing_model !== "per_lot");
 
   const parts = [
     ...(fromCard && card ? [`${card.agreement_number} v${card.version}`] : []),
     ...(fromList ? [list] : []),
     ...(fromItem ? [itemPrice] : []),
+    ...(fromLot ? [lotPrice] : []),
   ];
   if (parts.length === 0) return list;
   if (parts.length === 1) return parts[0]!;

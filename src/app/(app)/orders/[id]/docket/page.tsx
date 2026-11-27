@@ -1,3 +1,4 @@
+import { describeLots } from "@/lib/domain/lot-booking";
 import { notFound } from "next/navigation";
 import { requireCapability } from "@/lib/auth/context";
 import { createClient } from "@/lib/supabase/server";
@@ -28,13 +29,15 @@ export default async function DocketPage({ params }: { params: Promise<{ id: str
     supabase.from("laundry_orders")
       .select("id, order_number, received_at, delivery_required, due_date, special_instructions, " +
               "customers(business_name, customer_number), " +
-              "board:boards!laundry_orders_assigned_board_id_fkey(name), assigned_delivery_date")
+              "board:boards!laundry_orders_assigned_board_id_fkey(name), assigned_delivery_date, " +
+              "booking_type, lot_count, lot_notes")
       .eq("tenant_id", session.tenantId).eq("id", id)
       .maybeSingle<{
         id: string; order_number: string; received_at: string; delivery_required: boolean;
         due_date: string | null; special_instructions: string | null;
         customers: { business_name: string; customer_number: string } | null;
         board: { name: string } | null; assigned_delivery_date: string | null;
+        booking_type: string | null; lot_count: number | null; lot_notes: string | null;
       }>(),
     supabase.from("laundry_order_items")
       .select("item_id, item_type, custom_description, quantity_type, exact_quantity, bag_count, estimated_quantity, notes, ownership, items(item_code, name)")
@@ -77,6 +80,13 @@ export default async function DocketPage({ params }: { params: Promise<{ id: str
               : "Customer collects from the counter"}</dd></div>
         </dl>
 
+        {order.booking_type === "lot" ? (
+          <div className="border-t border-black/20 py-3 text-sm">
+            {/* No price: the docket goes in the bag (0066 keeps prices off it too). */}
+            <p className="text-lg font-semibold">Laundry by lot · {describeLots(order.lot_count ?? 0)}</p>
+            {order.lot_notes ? <p className="mt-1 text-black/70">{order.lot_notes}</p> : null}
+          </div>
+        ) : (
         <table className="w-full border-t border-black/20 text-sm">
           <thead><tr className="text-left text-black/60"><th className="py-2">Item</th><th className="py-2">Laundry</th></tr></thead>
           <tbody>
@@ -92,6 +102,7 @@ export default async function DocketPage({ params }: { params: Promise<{ id: str
             ))}
           </tbody>
         </table>
+        )}
 
         {order.special_instructions ? (
           <p className="mt-3 border-t border-black/20 pt-3 text-sm">

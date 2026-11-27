@@ -54,6 +54,12 @@ export type ConsolidatableCharge = {
    * two charges coded differently never merge into one line.
    */
   gl_account_id?: string | null;
+  /**
+   * How the charge was priced. Optional for the same reason; read only to
+   * recognise a lot booking's charge (`per_lot`, 0066), which names no item and
+   * is still the same thing said twice when two jobs are booked by the lot.
+   */
+  pricing_model?: string | null;
 };
 
 /** The job a charge came off. `date` is the day it counts as, already resolved. */
@@ -114,7 +120,10 @@ export type ConsolidatedLine = {
  * silently absorbed three events is not.
  */
 export function isMergeable(charge: ConsolidatableCharge): boolean {
-  return Boolean(charge.source_item_id) || Boolean(charge.source_laundry_item_type);
+  return Boolean(charge.source_item_id) || Boolean(charge.source_laundry_item_type)
+    // Ten lots on one job and five on the next are fifteen lots at the lot price,
+    // not two events: a lot is a quantity of laundry, like a towel (0066).
+    || charge.pricing_model === "per_lot";
 }
 
 /**
@@ -133,7 +142,9 @@ export function consolidationKey(charge: ConsolidatableCharge): string | null {
   if (!isMergeable(charge)) return null;
   const identity = charge.source_item_id
     ? `item:${charge.source_item_id}`
-    : `type:${charge.source_laundry_item_type}`;
+    : charge.source_laundry_item_type
+      ? `type:${charge.source_laundry_item_type}`
+      : "lot";
   return [
     identity,
     charge.charge_type,
@@ -347,7 +358,9 @@ export function itemTotals(entries: readonly ChargeEntry[]): ItemTotal[] {
     if (!isMergeable(charge)) continue;
     const key = charge.source_item_id
       ? `item:${charge.source_item_id}`
-      : `type:${charge.source_laundry_item_type}`;
+      : charge.source_laundry_item_type
+        ? `type:${charge.source_laundry_item_type}`
+        : "lot";
     const existing = byKey.get(key);
     if (existing) {
       existing.quantity = round2(existing.quantity + charge.quantity);

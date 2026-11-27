@@ -250,6 +250,48 @@ export function Checkbox({
   );
 }
 
+/**
+ * An on/off switch, for a choice that changes what the form asks next (the job
+ * form's Laundry by Lot). A `<button role="switch">` rather than a checkbox, so
+ * it reads as a mode and announces as one; controlled, because the form redraws
+ * around it. Posts nothing itself — the caller posts the answer it implies.
+ *
+ * The whole row is the hit area (44px), and the state is carried by the knob's
+ * position and the written On/Off, never by colour alone.
+ */
+export function Switch({
+  id, label, hint, checked, onChange,
+}: {
+  id: string; label: string; hint?: string; checked: boolean; onChange: (checked: boolean) => void;
+}) {
+  const hintId = hint ? `${id}-hint` : undefined;
+  return (
+    <div className="flex min-h-11 items-center justify-between gap-4">
+      <div className="min-w-0">
+        <label htmlFor={id} className="block cursor-pointer text-sm font-semibold text-foreground">
+          {label}
+        </label>
+        {hint ? <p id={hintId} className="text-xs text-muted-foreground">{hint}</p> : null}
+      </div>
+      <button id={id} type="button" role="switch" aria-checked={checked} aria-describedby={hintId}
+              onClick={() => onChange(!checked)}
+              className="inline-flex min-h-11 shrink-0 items-center gap-2 rounded-lg px-1">
+        <span aria-hidden className="text-xs font-medium text-muted-foreground">{checked ? "On" : "Off"}</span>
+        <span aria-hidden
+              className={cx(
+                "relative inline-flex h-7 w-12 items-center rounded-full border transition",
+                checked ? "border-primary bg-primary" : "border-control-border bg-surface-muted",
+              )}>
+          <span className={cx(
+            "absolute size-5 rounded-full bg-surface shadow-sm transition-transform",
+            checked ? "translate-x-6" : "translate-x-1",
+          )} />
+        </span>
+      </button>
+    </div>
+  );
+}
+
 /** Weekday picker for service patterns — ISO 1=Mon … 7=Sun. */
 export function WeekdayPicker({
   name, defaultValue = [],

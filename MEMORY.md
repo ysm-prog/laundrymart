@@ -9,7 +9,15 @@ where that is genuinely what it is. The multi-tenancy architecture stays: one op
 fact about today's data, not a reason to drop `tenant_id`, RLS, or §23's rule that a read feeding a
 write names its tenant.
 
-## Latest: review of the whole backdated + simplified range (2026-11-24)
+## Latest: Laundry by Lot (2026-11-27)
+- Job form switch "Laundry by Lot" → Number of Lots + Item Notes; $40/lot excl. GST fixed on the
+  booking by 0066's trigger in `laundry_order_lot_prices` (pricing roles only). One "Laundry
+  Services – Per Lot" charge, GST-inclusive ($44/lot), auto-approvable, merges across jobs.
+- **0066 written and NOT applied.** It must go on before the code reaches `Prod`: the job pages
+  select `lot_count`/`booking_type`, and without the column every job list errors.
+- Branch `claude/funny-lamport-83bmy5`, not merged.
+
+## Previously: review of the whole backdated + simplified range (2026-11-24)
 - Eight fixes: no auto-assign to a round in the simplified workflow; quick-create carries via +
   pickup day/driver; unreadable settings = `full` (`workflowFromRead`); refused saves and the
   quick-create carry the laundry rows (`?rows=`, `carriedItems`); Today shows Ready to complete in

@@ -1,3 +1,4 @@
+import { describeLots } from "@/lib/domain/lot-booking";
 import { notFound } from "next/navigation";
 import { MapPin, Phone } from "lucide-react";
 import { requireCapability } from "@/lib/auth/context";
@@ -146,7 +147,12 @@ export default async function BoardJobPage({
         </Card>
 
         <Card title="Laundry" description="What is in this job, as it was taken in at the counter.">
-          {job.laundry_order_items.length === 0 ? (
+          {job.lot_count ? (
+            <div className="text-sm">
+              <p className="font-medium">Laundry by lot · {describeLots(job.lot_count)}</p>
+              {job.lot_notes ? <p className="mt-1 text-muted-foreground">{job.lot_notes}</p> : null}
+            </div>
+          ) : job.laundry_order_items.length === 0 ? (
             <p className="text-sm text-muted-foreground">No laundry items recorded.</p>
           ) : (
             <ul className="divide-y">

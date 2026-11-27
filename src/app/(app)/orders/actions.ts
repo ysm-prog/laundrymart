@@ -11,6 +11,7 @@ import {
   optionalDate, optionalText, optionalUuid, returnTo, toObject,
 } from "@/lib/actions";
 import { parseOrderItems } from "./order-items";
+import { bookingColumns, readBookingForm, type BookingAnswer } from "@/lib/domain/lot-booking";
 import { answersFromForm, carryAnswers, withoutParam } from "./carry";
 import {
   DELIVERY_WINDOWS, ORDER_PRIORITIES, ORDER_STATUS_LABELS, RECEIVED_VIA,
@@ -139,11 +140,17 @@ async function hasItemMaster(
  */
 function crossFieldProblem(
   input: OrderInput, items: OrderItemInput[], itemCodeRequired: boolean,
+  booking: Extract<BookingAnswer, { ok: true }> = { ok: true, type: "standard" },
 ): string | null {
-  if (items.length === 0) return "Please add at least one laundry item.";
-  for (const [index, item] of items.entries()) {
-    const problem = validateItem(item, index + 1, { itemCodeRequired });
-    if (problem) return problem;
+  // A lot booking (0066) carries no laundry rows, so none of the item rules
+  // apply — not the item code, not the count, not Rental or Own. Its own rule,
+  // a positive whole number of lots, was settled by `readBookingForm`.
+  if (booking.type === "standard") {
+    if (items.length === 0) return "Please add at least one laundry item.";
+    for (const [index, item] of items.entries()) {
+      const problem = validateItem(item, index + 1, { itemCodeRequired });
+      if (problem) return problem;
+    }
   }
 
   if (input.delivery_required) {
@@ -307,13 +314,20 @@ export async function createOrder(formData: FormData): Promise<void> {
   const parsed = orderSchema.safeParse(toObject(formData));
   if (!parsed.success) return fail(backToForm, firstIssue(parsed.error));
 
+  const booking = readBookingForm(toObject(formData));
+  if (!booking.ok) return fail(backToForm, booking.error);
+
   const parsedItems = parseOrderItems(formData.get("items"));
   if (!parsedItems.ok) return fail(backToForm, parsedItems.problem);
-  const items = parsedItems.items;
+  // A lot booking posts no rows; one that somehow did is still saved without
+  // them, so a job is never both.
+  const items = booking.type === "lot" ? [] : parsedItems.items;
 
   const supabase = await createClient();
   const problem = crossFieldProblem(
-    parsed.data, items, await hasItemMaster(supabase, session.tenantId),
+    parsed.data, items,
+    booking.type === "standard" && await hasItemMaster(supabase, session.tenantId),
+    booking,
   );
   if (problem) return fail(backToForm, problem);
 
@@ -360,6 +374,9 @@ export async function createOrder(formData: FormData): Promise<void> {
     .from("laundry_orders")
     .insert({
       ...toRow(parsed.data, deliveryAddress, receivedAt),
+      // The lot price is not written here, or anywhere in the app: 0066's
+      // trigger fixes it on the booking at today's standard price.
+      ...bookingColumns(booking),
       tenant_id: session.tenantId,
       depot_id: session.depotId ?? customer.depot_id,
       created_by: session.userId,
@@ -379,8 +396,10 @@ export async function createOrder(formData: FormData): Promise<void> {
   if (error) return fail(backToForm, describeDbError(error));
 
   // One transaction inside Postgres — see save_laundry_order_items in 0014.
-  const { error: itemsError } = await supabase
-    .rpc("save_laundry_order_items", { p_order_id: order.id, p_items: items });
+  // A lot booking has no rows to save.
+  const { error: itemsError } = booking.type === "lot"
+    ? { error: null }
+    : await supabase.rpc("save_laundry_order_items", { p_order_id: order.id, p_items: items });
   if (itemsError) {
     // The job is one statement old and nothing can reference it yet, so the
     // honest outcome is that it never existed rather than an empty job sitting
@@ -399,6 +418,7 @@ export async function createOrder(formData: FormData): Promise<void> {
     next: {
       status: "new",
       items: items.length,
+      ...(booking.type === "lot" ? { booking_type: "lot", lots: booking.lots } : {}),
       delivery_required: parsed.data.delivery_required,
       priority: parsed.data.priority,
       // On the timeline because "where did these counts come from?" is the first
@@ -478,13 +498,20 @@ export async function updateOrder(formData: FormData): Promise<void> {
   const parsed = orderSchema.safeParse(toObject(formData));
   if (!parsed.success) return fail(backTo, firstIssue(parsed.error));
 
+  const booking = readBookingForm(toObject(formData));
+  if (!booking.ok) return fail(backTo, booking.error);
+
   const parsedItems = parseOrderItems(formData.get("items"));
   if (!parsedItems.ok) return fail(backTo, parsedItems.problem);
-  const items = parsedItems.items;
+  // Switching a job to a lot booking clears its rows below, in the same atomic
+  // replace an itemised edit uses.
+  const items = booking.type === "lot" ? [] : parsedItems.items;
 
   const supabase = await createClient();
   const problem = crossFieldProblem(
-    parsed.data, items, await hasItemMaster(supabase, session.tenantId),
+    parsed.data, items,
+    booking.type === "standard" && await hasItemMaster(supabase, session.tenantId),
+    booking,
   );
   if (problem) return fail(backTo, problem);
 
@@ -554,6 +581,9 @@ export async function updateOrder(formData: FormData): Promise<void> {
   const deliveryAddress = await resolveDeliveryAddress(supabase, session.tenantId, parsed.data);
   const row = {
     ...toRow(parsed.data, deliveryAddress, received),
+    // Its stored lot price stays as it was booked; 0066's trigger recomputes
+    // the totals from it if the count changed.
+    ...bookingColumns(booking),
     ...(completion.completedAt ? { completed_at: completion.completedAt } : {}),
   };
 
@@ -561,7 +591,7 @@ export async function updateOrder(formData: FormData): Promise<void> {
     .from("laundry_orders")
     .select(
       "priority, assigned_to, delivery_required, expected_delivery_date, " +
-      "expected_collection_date, delivery_address, received_at",
+      "expected_collection_date, delivery_address, received_at, booking_type, lot_count",
     )
     .eq("tenant_id", session.tenantId)
     .eq("id", id.data)
@@ -627,6 +657,8 @@ export async function updateOrder(formData: FormData): Promise<void> {
       received_at: row.received_at,
       ...(completion.completedAt ? { completed_at: completion.completedAt } : {}),
       items: items.length,
+      booking_type: row.booking_type,
+      lot_count: row.lot_count,
     },
   });
   await recordAudit(session, {

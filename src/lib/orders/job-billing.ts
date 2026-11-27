@@ -12,6 +12,9 @@ import { itemPriceListFor, priceListFor, type LaundryPriceRow } from "@/lib/doma
 import type { OrderItemInput } from "@/lib/domain/laundry-orders";
 import { checkBillingTransition, isBillingStatus, type BillingStatus } from "@/lib/domain/billing";
 import { logOrderActivity } from "@/lib/orders/activity";
+import {
+  LOT_LINE_DESCRIPTION, describeLots, lotChargeLine, type StoredLotPrice,
+} from "@/lib/domain/lot-booking";
 
 /**
  * Reading a job's money, in one place.
@@ -199,7 +202,52 @@ export type PricedJob = {
 export async function priceJobFromRateCard(
   supabase: Client, tenantId: string, job: Pick<JobForBilling, "id" | "customer_id">,
 ): Promise<PricedJob> {
+  // A job booked by the lot (0066) is priced from its own stored lot price —
+  // fixed the day it was booked — and from nothing else: it has no items for a
+  // rate card or a price list to answer about. Every pricing path comes through
+  // here (completion, Price this job, Price Selected), so they cannot differ.
+  const lot = await loadLotBooking(supabase, tenantId, job.id);
+  if (lot) {
+    if (!lot.price) {
+      return {
+        lines: [],
+        unpriced: [{
+          itemType: "other", label: LOT_LINE_DESCRIPTION, description: describeLots(lot.lots),
+          reason: "no_rate",
+        }],
+        card: null,
+      };
+    }
+    return { lines: [lotChargeLine(lot.lots, lot.price)], unpriced: [], card: null };
+  }
   return priceItemsForCustomer(supabase, tenantId, job.customer_id, await loadJobItems(supabase, job.id));
+}
+
+/**
+ * A lot booking's count and stored price, or null for an itemised job.
+ *
+ * The tenant is named on both reads (§23). The price is read on whichever
+ * client the caller holds: a pricing role through `can_read_pricing()`, and the
+ * completion pricer on the service role. A caller who may read neither gets a
+ * booking with no price, which reports as unpriced rather than as $0.
+ */
+export async function loadLotBooking(
+  supabase: Client, tenantId: string, orderId: string,
+): Promise<{ lots: number; notes: string | null; price: StoredLotPrice | null } | null> {
+  const { data: job } = await supabase
+    .from("laundry_orders")
+    .select("booking_type, lot_count, lot_notes")
+    .eq("tenant_id", tenantId)
+    .eq("id", orderId)
+    .maybeSingle<{ booking_type: string | null; lot_count: number | null; lot_notes: string | null }>();
+  if (!job || job.booking_type !== "lot" || !job.lot_count) return null;
+  const { data: price } = await supabase
+    .from("laundry_order_lot_prices")
+    .select("unit_price_ex_gst, gst_rate, total_ex_gst, gst_amount, total_inc_gst")
+    .eq("tenant_id", tenantId)
+    .eq("order_id", orderId)
+    .maybeSingle<StoredLotPrice>();
+  return { lots: job.lot_count, notes: job.lot_notes, price: price ?? null };
 }
 
 /**

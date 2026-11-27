@@ -171,7 +171,9 @@ describe("a refused save keeps the received date", () => {
     expect(quick).toMatch(/via: receivedVia/);
     expect(quick).toMatch(/picked: pickupDate/);
     expect(quick).toMatch(/collector: pickupDriver/);
-    expect(quick).toMatch(/rows: itemsPayload/);
+    // Not for a lot booking (0066), which posts no rows; its lot answers ride instead.
+    expect(quick).toMatch(/rows: byLot \? null : itemsPayload/);
+    expect(quick).toMatch(/booking: byLot \? "lot" : "standard"/);
   });
 
   it("brings the laundry rows back on both pages", () => {

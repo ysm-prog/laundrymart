@@ -341,7 +341,7 @@ async function LaundryJobs({
   const { data, count } = await supabase
     .from("laundry_orders")
     .select(
-      "id, order_number, status, priority, received_at, due_date, delivery_required, " +
+      "id, order_number, status, priority, received_at, due_date, delivery_required, lot_count, " +
       "laundry_order_items(item_type, custom_description, quantity_type, exact_quantity, " +
       "bag_count, estimated_quantity)",
       { count: "exact" },
@@ -352,6 +352,7 @@ async function LaundryJobs({
     .returns<Array<{
       id: string; order_number: string; status: string; priority: string;
       received_at: string; due_date: string | null; delivery_required: boolean;
+      lot_count: number | null;
       laundry_order_items: Array<{
         item_type: string; custom_description: string | null; quantity_type: string;
         exact_quantity: number | null; bag_count: number | null; estimated_quantity: number | null;
@@ -404,7 +405,7 @@ async function LaundryJobs({
           { header: "Received", cell: (row) => date(row.received_at) },
           {
             header: "Laundry",
-            cell: (row) => summariseItems(row.laundry_order_items ?? []),
+            cell: (row) => summariseItems(row.laundry_order_items ?? [], 2, { lotCount: row.lot_count }),
             hideBelow: "md",
           },
           {

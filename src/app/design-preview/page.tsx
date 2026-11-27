@@ -1679,6 +1679,9 @@ export default function DesignPreviewPage() {
               catalogue={PREVIEW_JOB_CATALOGUE}
               drivers={[{ id: "d1", full_name: "Sam Okoye" }]}
               staff={[{ id: "s1", label: "Christian Mignone", role: "operations_manager" }]}
+              /* The standard lot price (0066), as a pricing role sees it, so the
+                 Laundry by Lot switch draws its live ex/GST/inc total here. */
+              lotPrice={{ unitPriceExGst: 40, gstRate: 0.1 }}
               returnPath="/design-preview"
             />
           </section>

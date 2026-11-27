@@ -70,6 +70,8 @@ type Row = {
   assigned_delivery_date: string | null;
   boards: { id: string; name: string } | null;
   customers: { id: string; business_name: string; trading_name: string | null } | null;
+  /** A lot booking's count (0066). Null on an itemised job. */
+  lot_count: number | null;
   laundry_order_items: Array<{
     item_type: string;
     custom_description: string | null;
@@ -378,7 +380,7 @@ async function JobList({ params, canCreate }: { params: Search; canCreate: boole
       // on it is named. An ambiguous one is rejected by
       // PostgREST at request time: compile-clean, test-clean and dead in
       // production (see the 2026-08-05 changelog).
-      "boards!laundry_orders_assigned_board_id_fkey(id, name), " +
+      "boards!laundry_orders_assigned_board_id_fkey(id, name), lot_count, " +
       "laundry_order_items(item_type, custom_description, quantity_type, exact_quantity, " +
       "bag_count, estimated_quantity)",
       { count: "exact" },
@@ -489,7 +491,7 @@ async function JobList({ params, canCreate }: { params: Search; canCreate: boole
           },
           {
             header: "Laundry",
-            cell: (row) => summariseItems(row.laundry_order_items ?? []),
+            cell: (row) => summariseItems(row.laundry_order_items ?? [], 2, { lotCount: row.lot_count }),
             hideBelow: "lg",
           },
           { header: "Received", cell: (row) => dateTime(row.received_at), hideBelow: "lg" },

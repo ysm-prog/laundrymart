@@ -654,6 +654,21 @@ key remains the way to reset or re-assert them through the Auth API, but nothing
   asked, where `due_date` is a generated column (delivery date, or collection date for a
   pickup job). A job's laundry list is replaced through `save_laundry_order_items()`, one
   transaction, because a delete-then-insert over PostgREST has a window with no items in it.
+- **A job may be booked by the lot instead of item by item** (0066, the client's request of
+  2026-11-27). The job form's **Laundry by Lot** switch (off by default, on both creation routes —
+  Customer laundry › New and a customer's Take laundry, which are one form) replaces the item rows
+  with **Number of Lots** (a positive whole number, 1–9,999) and **Item Notes**. Stored on the job
+  as `booking_type = 'lot'`, `lot_count`, `lot_notes`; a check constraint keeps a job one or the
+  other. **The price is not on the job**: `laundry_order_lot_prices` holds the unit price excl. GST,
+  the GST rate and the three totals, readable through `can_read_pricing()` only, and written by the
+  `sync_lot_booking_price` trigger and nothing else — the unit price is fixed the day the job
+  becomes a lot booking (`standard_lot_price_ex_gst()`, **$40.00**), never changed afterwards, and
+  the totals are recomputed from it when the count changes. The TypeScript twin is
+  `lib/domain/lot-booking.ts`, pinned to the SQL price by a test. Pricing (`priceJobFromRateCard`,
+  so completion, Price this job and Price Selected alike) makes one charge, **Laundry Services –
+  Per Lot**, quantity = lots, at the GST-inclusive unit price ($44.00) — a line amount is inclusive
+  (0043), so 10 lots invoice as `10 × $44.00 = $440.00, includes GST $40.00`. `per_lot` counts as a
+  rate for automatic approval and merges across jobs on a monthly draft. A lot job has no item rows.
 - **In the simplified workflow a new job is finished as it is saved** (0065, change request 3,
   2026-11-23). `settings.operations.workflow` — `simplified` (the default, and what an absent key
   means in both the app and the database) or `full`, on Settings › How you work. Simplified:
@@ -1569,6 +1584,15 @@ produce on demand.
   - Adds no table, column or function; changes no row. Eight self-assertions.
     `board_and_people_write.test.sql` (18), which fails 12 on a database without 0064.
     **Applied 2026-11-19** (§11).
+- `0066_laundry_by_lot` — **a job booked by the number of lots.** `laundry_orders.booking_type`
+  (`standard` default)/`lot_count`/`lot_notes` and `chk_laundry_orders_booking_type`;
+  `laundry_order_lot_prices` (one row per lot booking, RLS on, one SELECT policy on
+  `can_read_pricing()`, **no write policy** and no write grant to `authenticated` — 0029's default
+  privileges had granted every verb, which the migration's own assertion caught);
+  `standard_lot_price_ex_gst()` (40.00); `sync_lot_booking_price()` (SECURITY DEFINER, so the
+  counter can book a lot without being able to read or write a price) and its AFTER INSERT/UPDATE
+  OF `booking_type, lot_count` trigger. Changes no existing row — every job reads `standard`.
+  Ten self-assertions. `laundry_by_lot.test.sql` (20). **Not yet applied live.**
 - `0065_simplified_workflow` — **a delivery job may be completed off the shelf, when the laundry
   says so.** `guard_laundry_order_transition` rebuilt from **0042's** body (the latest ancestor;
   the live body was hash-identical to it, checked before writing), rule 4 skipped when the job is in
@@ -1864,7 +1888,8 @@ Proofs in `supabase/tests/`: `rls_isolation`, `rls_coverage`, `driver_scope`,
 `customer_record_scope`, `fleet_scope`, `pickup_intake`, `laundry_item_ownership`,
 `invoice_money_guards`, `invoice_issue_guard`, `billing_flow_guards`, `flow_runs_itself`,
 `operations_settings`, `billing_write_policies`, `hot_foreign_key_indexes`, `reopen_job_charges`,
-`invoice_sms`, `invoice_history_import`, `board_and_people_write`, `simplified_workflow` (**804 assertions** across 45 files).
+`invoice_sms`, `invoice_history_import`, `board_and_people_write`, `simplified_workflow`,
+`laundry_by_lot` (**824 assertions** across 46 files).
 
 **Count assertions, not lines starting with `ok`.** pgTAP's function is literally named `ok`, so
 psql prints a centred `ok` **column header** above each result — and `grep -c '^\s*ok '` counts
@@ -3920,6 +3945,37 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-11-27 · Laundry by Lot
+The client's request: book laundry by the number of lots rather than item by item, at $40.00 a lot
+excl. GST, from both laundry creation routes. **One migration, `0066`, written and NOT applied.**
+- **The form.** A `Switch` (`components/form.tsx`, `role="switch"`, new) at the top of Laundry
+  details. On: Number of Lots (−/+ steppers, required, whole numbers) and Item Notes, with a live
+  "10 lots × $40.00 excl. GST / GST / Total incl. GST" for a role that may read prices (the
+  counter sees that it is priced at the standard rate, not the figure — the running quote's rule).
+  The item rows, Add item, kind of laundry, quantity type and Rental or Own are not drawn and not
+  validated; the rows stay in the browser, so switching off brings them back. Both creation routes
+  are the same form, so one change covers both.
+- **The actions.** `readBookingForm` (pure) in `createOrder` and `updateOrder`; a lot booking saves
+  no item rows and skips the item-code rule. Refusals carry `?booking=`, `?lots=`, `?lotnotes=`.
+- **The money** is the database's (§4): the price row is created by trigger at today's standard
+  price and keeps it, so a later price change cannot reach a booking already taken. Invoices get
+  "Laundry Services – Per Lot" through the existing price → approve → draft → issue path, and
+  lot lines from several jobs merge into one line on the monthly draft.
+- **Shown** on the job page (lots, notes, and for pricing roles the four figures), the docket (no
+  price), All jobs, the customer's jobs, My Runs and the round's job page ("10 lots").
+- **Different from the client's example, on purpose:** the invoice prints the GST-inclusive unit
+  price ($44.00) and "Includes GST", because every invoice line in this app is GST-inclusive (0043,
+  the Xero-model template). Same money: $440.00 with $40.00 GST. The ex-GST $40.00/$400.00 are on
+  the booking.
+- Checks: `lot-booking.test.ts` (33; the merge and auto-approval guards confirmed to fail when
+  removed), two source tests rewritten to the decision; 1777 tests, `verify` green; all 66
+  migrations on a fresh Postgres 16, **824 pgTAP assertions across 46 files**, 0 failing. Driven in
+  a browser at 390 and 1440 on `/design-preview`: switch on hides the item fields and posts
+  `items=[]`, 10 lots shows $400/$40/$440, a decimal is refused in words, switching off restores the
+  rows, 0 console errors, 0 overflow.
+- **Before trusting it:** apply 0066, then on `ats.coreit.com.au` take a job in by the lot (10),
+  check the job page reads $440.00, and that it lands on the customer's draft as one Per Lot line.
+
 ### 2026-11-24 · Review of the whole backdated-jobs and simplified-workflow range: eight fixes
 A review of everything since the handover (`49dfe01..4865664`) found eight. **No migration; no
 schema, RLS, capability or policy change.**

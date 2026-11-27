@@ -639,6 +639,16 @@ export type LaundryOrder = {
    * importantly, does *not* cross from the collection onto the job.
    */
   source_pickup_id: Uuid | null;
+
+  /**
+   * `standard` (itemised laundry) or `lot` — booked by the number of lots
+   * (0066). Optional in the type because rows read before 0066 do not carry it;
+   * absent reads as `standard`. A lot booking's price is not here: it is in
+   * `laundry_order_lot_prices`, which only a pricing role can read.
+   */
+  booking_type?: "standard" | "lot" | string;
+  lot_count?: number | null;
+  lot_notes?: string | null;
 };
 
 export type LaundryOrderItem = {
