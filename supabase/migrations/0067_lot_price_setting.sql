@@ -18,7 +18,7 @@
 --
 -- **Who may change it**: the Owner and the Office manager — the `pricing.write`
 -- holders in `roles.ts` (the `JOB_TO_INVOICE` block), and the two roles 0025
--- already lets write the rest of the job→invoice flow. `lot-price.test.ts` pins
+-- already lets write the rest of the job→invoice flow. `lot-price-setting.test.ts` pins
 -- the list below against `roles.ts`.
 --
 -- No row means the default: `standard_lot_price_ex_gst()`, still $40.00. So

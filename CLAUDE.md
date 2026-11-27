@@ -1595,7 +1595,8 @@ produce on demand.
   `tenants.settings`**, because every member reads `tenants` — a price there is the disclosure
   0017/0033/0036/0066 each closed. Bookings already taken keep their price (the trigger still
   inserts `on conflict do nothing`), so saving a new price re-prices nothing. Changes no row.
-  Ten self-assertions. `lot_price_setting.test.sql` (16). **Not yet applied.**
+  Ten self-assertions. `lot_price_setting.test.sql` (16). **Applied 2026-11-27** (`20261127035137`)
+  through the connector (§11).
 - `0066_laundry_by_lot` — **a job booked by the number of lots.** `laundry_orders.booking_type`
   (`standard` default)/`lot_count`/`lot_notes` and `chk_laundry_orders_booking_type`;
   `laundry_order_lot_prices` (one row per lot booking, RLS on, one SELECT policy on
@@ -2620,6 +2621,17 @@ reports six false gaps.
   `set_records_archived`, `sync_invoice_line_account`, `tenant_members`). That is the 0042 trap
   leaving its usual trace: text typed into `apply_migration` reformatted a little against the file.
   Worth knowing before anybody reads a raw `md5(prosrc)` mismatch as drift.
+
+**`0067_lot_price_setting` was applied on 2026-11-27** (`20261127035137`) through the connector,
+first attempt; its self-assertions passed. Pre-flight: the table absent, and the live
+`sync_lot_booking_price` body (comments and whitespace stripped) hashed `37bc7bb6…`, the same as
+the repo's 0066, so the rebuild reverted nothing. Proved as real logins in a block that ended by
+raising: the shared Manager set $45.00 (**1 row**); a 10-lot job booked after it read
+$450.00/$45.00/$495.00 at $45.00, while one booked before kept $40.00/$440.00; Board 1 read **0**
+settings and its write was refused **42501**. Nothing survived: 0 settings, 0 lot prices, 38 jobs.
+Advisors unchanged (32 definer helpers + leaked-password; the new function is not callable by
+`authenticated`); 0 `anon` grants; 0 tables without RLS. **No lot price is saved yet, so the live
+price is still the $40.00 default.**
 
 **`0066_laundry_by_lot` was applied on 2026-11-27** (`20261127024958`) through the connector,
 first attempt; its ten self-assertions passed. Pre-flight: none of its objects existed, one laundry at
@@ -3971,7 +3983,7 @@ invoice goes, because this app has no counter-cash concept.
 ## 18. Changelog
 ### 2026-11-27 · The lot price is a setting
 The owner's request after Laundry by Lot went live: the $40.00 was fixed in code and SQL. **One
-migration, `0067`, written and NOT applied.**
+migration, `0067`, applied 2026-11-27 before the merge (§11).**
 - **Money › Laundry prices › Laundry by lot**: the price of one lot excl. GST with its GST-inclusive
   equivalent, editable by the Owner and the Office manager (`saveLotPrice`, `pricing.write`,
   `readLotPrice`: more than $0, at most two decimals, at most $100,000), read-only to other pricing
@@ -3981,8 +3993,8 @@ migration, `0067`, written and NOT applied.**
 - Checks: `lot-price-setting.test.ts` (22), 1799 tests in all; `lot_price_setting.test.sql` (16), 840 pgTAP
   assertions across 47 files on a fresh Postgres 16, 0 failing; `verify` green. The card checked in
   a browser at 390/1440 in both themes: 0 errors, no overflow inside it.
-- **Order matters:** apply 0067 before the code reaches `Prod`, or the prices page and the job form
-  read a table that does not exist.
+- **Order kept:** 0067 went on before the code reached `Prod`, since the prices page and the job
+  form read the new table.
 
 ### 2026-11-27 · Laundry by Lot
 The client's request: book laundry by the number of lots rather than item by item, at $40.00 a lot
