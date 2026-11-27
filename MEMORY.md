@@ -14,6 +14,8 @@ write names its tenant.
   booking by 0066's trigger in `laundry_order_lot_prices` (pricing roles only). One "Laundry
   Services – Per Lot" charge, GST-inclusive ($44/lot), auto-approvable, merges across jobs.
 - 0066 applied live 2026-11-27 (`20261127024958`), verified as real logins (§11).
+- Merged to `Dev` and `Prod` (`970ffa4`); CI green on both (runs 531, 532). Vercel deploy not
+  confirmable from here — check the dashboard.
 - Before trusting it live: book 10 lots on `ats.coreit.com.au`, check $440.00 on the job and one
   "Laundry Services – Per Lot" line on the customer's draft.
 

@@ -3986,6 +3986,10 @@ merge (§11).**
   a browser at 390 and 1440 on `/design-preview`: switch on hides the item fields and posts
   `items=[]`, 10 lots shows $400/$40/$440, a decimal is refused in words, switching off restores the
   rows, 0 console errors, 0 overflow.
+- **Merged to `Dev` and `Prod` on 2026-11-27** (`970ffa4`), both clean fast-forwards from
+  `223b7ec`; `Prod` never force-pushed. 0066 went on the hosted project first. **CI green on all
+  three jobs for both** (run 531 `Dev`, run 532 `Prod`; `Prod` ran 02:51:17 → 02:53:51Z). **The
+  Vercel production deploy is not confirmable from this session** (§5).
 - **Before trusting it:** on `ats.coreit.com.au` take a job in by the lot (10),
   check the job page reads $440.00, and that it lands on the customer's draft as one Per Lot line.
 
