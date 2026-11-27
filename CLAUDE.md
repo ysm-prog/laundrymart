@@ -662,7 +662,8 @@ key remains the way to reset or re-assert them through the Auth API, but nothing
   other. **The price is not on the job**: `laundry_order_lot_prices` holds the unit price excl. GST,
   the GST rate and the three totals, readable through `can_read_pricing()` only, and written by the
   `sync_lot_booking_price` trigger and nothing else — the unit price is fixed the day the job
-  becomes a lot booking (`standard_lot_price_ex_gst()`, **$40.00**), never changed afterwards, and
+  becomes a lot booking (the laundry's **lot price setting**, `tenant_lot_prices` (0067), on Money ›
+  Laundry prices; **$40.00** where none is saved), never changed afterwards, and
   the totals are recomputed from it when the count changes. The TypeScript twin is
   `lib/domain/lot-booking.ts`, pinned to the SQL price by a test. Pricing (`priceJobFromRateCard`,
   so completion, Price this job and Price Selected alike) makes one charge, **Laundry Services –
@@ -1584,6 +1585,17 @@ produce on demand.
   - Adds no table, column or function; changes no row. Eight self-assertions.
     `board_and_people_write.test.sql` (18), which fails 12 on a database without 0064.
     **Applied 2026-11-19** (§11).
+- `0067_lot_price_setting` — **the lot price is the laundry's to set.** `tenant_lot_prices` (one
+  row per laundry: `unit_price_ex_gst`, `0 < price <= 100000`; RLS on, SELECT on
+  `can_read_pricing()`, INSERT/UPDATE on `has_role(super_admin, operations_manager)` — the
+  `pricing.write` holders, pinned by `lot-price-setting.test.ts`; no DELETE policy; grants restated
+  from nothing because 0029's defaults include TRUNCATE, which RLS does not cover);
+  `standard_lot_price_ex_gst(t)` (the saved price, else 0066's $40.00; DEFINER, off the RPC
+  surface); and 0066's `sync_lot_booking_price` rebuilt from its body to read it. **Not in
+  `tenants.settings`**, because every member reads `tenants` — a price there is the disclosure
+  0017/0033/0036/0066 each closed. Bookings already taken keep their price (the trigger still
+  inserts `on conflict do nothing`), so saving a new price re-prices nothing. Changes no row.
+  Ten self-assertions. `lot_price_setting.test.sql` (16). **Not yet applied.**
 - `0066_laundry_by_lot` — **a job booked by the number of lots.** `laundry_orders.booking_type`
   (`standard` default)/`lot_count`/`lot_notes` and `chk_laundry_orders_booking_type`;
   `laundry_order_lot_prices` (one row per lot booking, RLS on, one SELECT policy on
@@ -1890,7 +1902,7 @@ Proofs in `supabase/tests/`: `rls_isolation`, `rls_coverage`, `driver_scope`,
 `invoice_money_guards`, `invoice_issue_guard`, `billing_flow_guards`, `flow_runs_itself`,
 `operations_settings`, `billing_write_policies`, `hot_foreign_key_indexes`, `reopen_job_charges`,
 `invoice_sms`, `invoice_history_import`, `board_and_people_write`, `simplified_workflow`,
-`laundry_by_lot` (**824 assertions** across 46 files).
+`laundry_by_lot`, `lot_price_setting` (**840 assertions** across 47 files).
 
 **Count assertions, not lines starting with `ok`.** pgTAP's function is literally named `ok`, so
 psql prints a centred `ok` **column header** above each result — and `grep -c '^\s*ok '` counts
@@ -3957,6 +3969,21 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-11-27 · The lot price is a setting
+The owner's request after Laundry by Lot went live: the $40.00 was fixed in code and SQL. **One
+migration, `0067`, written and NOT applied.**
+- **Money › Laundry prices › Laundry by lot**: the price of one lot excl. GST with its GST-inclusive
+  equivalent, editable by the Owner and the Office manager (`saveLotPrice`, `pricing.write`,
+  `readLotPrice`: more than $0, at most two decimals, at most $100,000), read-only to other pricing
+  roles, absent for everyone else. Audited with the old and new price.
+- The job form's live lot total reads the saved price (`loadStandardLotPrice`), on both creation
+  routes and on an edit of a job not yet booked by the lot. A job already booked keeps its price.
+- Checks: `lot-price-setting.test.ts` (22), 1799 tests in all; `lot_price_setting.test.sql` (16), 840 pgTAP
+  assertions across 47 files on a fresh Postgres 16, 0 failing; `verify` green. The card checked in
+  a browser at 390/1440 in both themes: 0 errors, no overflow inside it.
+- **Order matters:** apply 0067 before the code reaches `Prod`, or the prices page and the job form
+  read a table that does not exist.
+
 ### 2026-11-27 · Laundry by Lot
 The client's request: book laundry by the number of lots rather than item by item, at $40.00 a lot
 excl. GST, from both laundry creation routes. **One migration, `0066`, applied 2026-11-27 before the

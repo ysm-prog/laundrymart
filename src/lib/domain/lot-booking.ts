@@ -9,10 +9,11 @@
  * The money is the database's: `sync_lot_booking_price` fixes the unit price on
  * the day a job becomes a lot booking and recomputes the totals whenever the
  * count changes. `lotPricing` here is the same arithmetic, for the form's live
- * total and for the invoice line, and `STANDARD_LOT_PRICE_EX_GST` is pinned to
- * the migration's `standard_lot_price_ex_gst()` by a test — two copies of one
- * number, each checked against the other, the arrangement `issueGaps` has with
- * `guard_invoice_issue`.
+ * total and for the invoice line. The price a new booking takes is the
+ * laundry's own setting (`tenant_lot_prices`, 0067, edited on Money › Laundry
+ * prices), and `STANDARD_LOT_PRICE_EX_GST` is the default used where none has
+ * been saved — pinned to the migration's `standard_lot_price_ex_gst()` by a
+ * test, two copies of one number each checked against the other.
  *
  * Pure, with no database access, so the rule is reachable from a unit test.
  */
@@ -23,8 +24,37 @@ import type { JobChargeLine } from "@/lib/domain/job-pricing";
 export const BOOKING_TYPES = ["standard", "lot"] as const;
 export type BookingType = (typeof BOOKING_TYPES)[number];
 
-/** The standard price of one lot, excluding GST. Changing it is a migration too. */
+/**
+ * The default price of one lot, excluding GST — what a laundry that has never
+ * saved a lot price charges. Since 0067 the price itself is a setting.
+ */
 export const STANDARD_LOT_PRICE_EX_GST = 40;
+
+/** The lot price setting's ceiling, the same as 0067's check constraint. */
+export const MAX_LOT_PRICE = 100000;
+
+/**
+ * Read a posted lot price (excluding GST). Dollars and cents, more than zero,
+ * at most two decimal places — a third would be rounded away by the
+ * `numeric(12,2)` column, and a price somebody typed must not silently become
+ * a different one.
+ */
+export function readLotPrice(
+  raw: unknown,
+): { ok: true; price: number } | { ok: false; error: string } {
+  const typed = typeof raw === "string" ? raw : typeof raw === "number" ? String(raw) : "";
+  const text = typed.trim().replace(/^\$/, "");
+  if (text === "") return { ok: false, error: "Enter the price of one lot." };
+  if (!/^\d+(\.\d{1,2})?$/.test(text)) {
+    return { ok: false, error: "The lot price is dollars and cents, like 40 or 42.50." };
+  }
+  const price = Number(text);
+  if (price <= 0) return { ok: false, error: "The lot price must be more than $0.00." };
+  if (price > MAX_LOT_PRICE) {
+    return { ok: false, error: `The lot price cannot be more than $${MAX_LOT_PRICE.toLocaleString("en-AU")}.` };
+  }
+  return { ok: true, price };
+}
 
 /** The check constraint's ceiling (0066): a lot count is 1 to 9,999. */
 export const MAX_LOTS = 9999;

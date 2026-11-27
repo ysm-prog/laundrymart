@@ -11,6 +11,7 @@ import {
 } from "@/lib/domain/laundry-prices";
 import { ITEM_TYPES } from "@/lib/domain/laundry-orders";
 import { tenantGstRate } from "@/lib/gst";
+import { readLotPrice, STANDARD_LOT_PRICE_EX_GST } from "@/lib/domain/lot-booking";
 import { parsePriceForm, PRESENT_FIELD } from "./price-form";
 
 /**
@@ -373,4 +374,60 @@ export async function fillPricesFromItems(formData: FormData): Promise<void> {
   revalidatePath(path);
   return done(path, `Priced ${inserts.length} item ${inserts.length === 1 ? "code" : "codes"} `
     + "from your item list. Nothing you had already priced was changed.");
+}
+
+/**
+ * Save the laundry's standard lot price (0067) — what a job booked by the lot
+ * from now on costs, excluding GST.
+ *
+ * **Bookings already taken keep the price they were booked at.** 0066's trigger
+ * fixes the unit price on the job the moment it becomes a lot booking and never
+ * moves it, so this changes no existing job, draft or invoice; the screen says so.
+ *
+ * Gated on `pricing.write` — the Owner and the Office manager, the same two roles
+ * 0067's write policies name. Written on the caller's RLS-bound client, so the
+ * database is the boundary: a write the policy refuses comes back with no row,
+ * and this says so rather than reporting a save that did not happen.
+ */
+export async function saveLotPrice(formData: FormData): Promise<void> {
+  const session = await assertCapability("pricing.write");
+  const path = returnTo(formData, "/invoices/prices");
+
+  const read = readLotPrice(formData.get("lot_price_ex_gst"));
+  if (!read.ok) return fail(path, read.error);
+
+  const supabase = await createClient();
+  const { data: before } = await supabase
+    .from("tenant_lot_prices").select("unit_price_ex_gst")
+    .eq("tenant_id", session.tenantId)
+    .maybeSingle<{ unit_price_ex_gst: number | string }>();
+
+  const { data: saved, error } = await supabase
+    .from("tenant_lot_prices")
+    .upsert(
+      {
+        tenant_id: session.tenantId,
+        unit_price_ex_gst: read.price,
+        updated_at: new Date().toISOString(),
+        updated_by: session.userId,
+      },
+      { onConflict: "tenant_id" },
+    )
+    .select("unit_price_ex_gst")
+    .maybeSingle<{ unit_price_ex_gst: number | string }>();
+  if (error) return fail(path, describeDbError(error));
+  if (!saved) return fail(path, "The lot price was not saved. Your role cannot change prices.");
+
+  const previous = before ? Number(before.unit_price_ex_gst) : STANDARD_LOT_PRICE_EX_GST;
+  await recordAudit(session, {
+    entity: "lot_price",
+    entityId: session.tenantId,
+    action: "update",
+    summary: `Standard lot price: $${previous.toFixed(2)} → $${read.price.toFixed(2)} excl. GST`,
+    metadata: { previous, price: read.price },
+  });
+
+  revalidatePath(path);
+  return done(path, `The lot price is now $${read.price.toFixed(2)} a lot, excluding GST. `
+    + "Lots booked from now on use it; bookings already taken keep their price.");
 }

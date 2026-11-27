@@ -9,7 +9,12 @@ where that is genuinely what it is. The multi-tenancy architecture stays: one op
 fact about today's data, not a reason to drop `tenant_id`, RLS, or §23's rule that a read feeding a
 write names its tenant.
 
-## Latest: Laundry by Lot (2026-11-27)
+## Latest: the lot price is a setting (2026-11-27)
+- `0067`: `tenant_lot_prices` (pricing roles read; Owner/Office manager write), 0066's trigger reads
+  it, $40 default. Card on Money › Laundry prices; job form reads the saved price.
+- On branch `claude/funny-lamport-83bmy5` only. **0067 not applied; not merged.** Apply 0067 first.
+
+## Previously: Laundry by Lot (2026-11-27)
 - Job form switch "Laundry by Lot" → Number of Lots + Item Notes; $40/lot excl. GST fixed on the
   booking by 0066's trigger in `laundry_order_lot_prices` (pricing roles only). One "Laundry
   Services – Per Lot" charge, GST-inclusive ($44/lot), auto-approvable, merges across jobs.

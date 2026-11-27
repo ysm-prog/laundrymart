@@ -12,8 +12,7 @@ import { CUSTOMER_LIMIT, loadJobFormData } from "../form-data";
 import { JobForm } from "../job-form";
 import { loadIntakeDefaults, quoteIntake } from "../intake-actions";
 import { intakeDefaultsFor } from "@/lib/orders/intake";
-import { STANDARD_LOT_PRICE_EX_GST } from "@/lib/domain/lot-booking";
-import { GST_RATE_FALLBACK } from "@/lib/domain/items";
+import { loadStandardLotPrice } from "@/lib/orders/lot-price";
 
 export const metadata = { title: "New job" };
 export const dynamic = "force-dynamic";
@@ -103,18 +102,14 @@ export default async function NewJobPage({
     ? await intakeDefaultsFor(session.tenantId, chosenCustomer, params.received)
     : null;
 
-  // The lot price shown beside Number of Lots (0066): today's standard price at
-  // this laundry's GST rate — the price 0066's trigger will fix on the booking.
-  // Only for a role that may read prices, the same rule as the running quote.
+  // The lot price shown beside Number of Lots: this laundry's standard price
+  // today (0067's setting, or the default) at its GST rate — the price 0066's
+  // trigger will fix on the booking. Only for a role that may read prices, the
+  // same rule as the running quote.
   let lotPrice: { unitPriceExGst: number; gstRate: number } | null = null;
   if (can(session.role, "pricing.read")) {
-    const { data: tenant } = await (await createClient())
-      .from("tenants").select("gst_rate").eq("id", session.tenantId)
-      .maybeSingle<{ gst_rate: number | string | null }>();
-    lotPrice = {
-      unitPriceExGst: STANDARD_LOT_PRICE_EX_GST,
-      gstRate: Number(tenant?.gst_rate ?? GST_RATE_FALLBACK),
-    };
+    const standard = await loadStandardLotPrice(await createClient(), session.tenantId);
+    lotPrice = { unitPriceExGst: standard.unitPriceExGst, gstRate: standard.gstRate };
   }
 
   // Back to *this* form, seed and all. A rejection redirects, so the browser's

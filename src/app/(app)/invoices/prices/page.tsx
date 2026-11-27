@@ -7,6 +7,8 @@ import { buildItemPriceRows } from "@/lib/domain/laundry-prices";
 import { SubmitButton } from "@/components/form";
 import { ItemPriceTable } from "./item-price-table";
 import { AddItemCard } from "./add-item-card";
+import { LotPriceCard } from "./lot-price-card";
+import { loadStandardLotPrice } from "@/lib/orders/lot-price";
 import { fillPricesFromItems } from "./actions";
 import { PRICE_LIST_ITEM_COLUMNS, type PriceListItem } from "./items";
 
@@ -34,6 +36,11 @@ export default async function LaundryPricesPage() {
   const session = await requireCapability("invoices.read");
   const writable = can(session.role, "invoices.write");
   const canAddItems = can(session.role, "items.write");
+  // The lot price is a price like the rest of this screen: shown to a role that
+  // may read prices (`can_read_pricing()` is the database's copy), changed by a
+  // `pricing.write` holder.
+  const showLotPrice = can(session.role, "pricing.read");
+  const lotPriceWritable = can(session.role, "pricing.write");
 
   const supabase = await createClient();
 
@@ -41,7 +48,7 @@ export default async function LaundryPricesPage() {
   // admin's session reads every laundry, an id from this list is posted straight
   // back into a write scoped to one, and the usual list is the rows with
   // `customer_id is null` — unfiltered, two laundries' defaults both come back.
-  const [{ data: items }, { data: prices }] = await Promise.all([
+  const [{ data: items }, { data: prices }, lotPrice] = await Promise.all([
     supabase
       .from("items")
       .select(PRICE_LIST_ITEM_COLUMNS)
@@ -61,6 +68,7 @@ export default async function LaundryPricesPage() {
       .eq("tenant_id", session.tenantId)
       .is("customer_id", null)
       .returns<LaundryPriceRow[]>(),
+    showLotPrice ? loadStandardLotPrice(supabase, session.tenantId) : Promise.resolve(null),
   ]);
 
   const rows = buildItemPriceRows(items ?? [], prices ?? [], null);
@@ -136,6 +144,15 @@ export default async function LaundryPricesPage() {
           writable={writable}
           submitLabel="Save usual prices"
         />
+
+        {lotPrice ? (
+          <LotPriceCard
+            unitPriceExGst={lotPrice.unitPriceExGst}
+            gstRate={lotPrice.gstRate}
+            saved={lotPrice.saved}
+            writable={lotPriceWritable}
+          />
+        ) : null}
 
         {canAddItems ? <AddItemCard /> : null}
       </div>

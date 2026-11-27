@@ -8,8 +8,7 @@ import type { LaundryOrder, LaundryOrderItem } from "@/lib/db/types";
 import { updateOrder } from "../../actions";
 import { loadJobFormData } from "../../form-data";
 import { JobForm } from "../../job-form";
-import { STANDARD_LOT_PRICE_EX_GST } from "@/lib/domain/lot-booking";
-import { GST_RATE_FALLBACK } from "@/lib/domain/items";
+import { loadStandardLotPrice } from "@/lib/orders/lot-price";
 
 export const metadata = { title: "Edit job" };
 export const dynamic = "force-dynamic";
@@ -52,21 +51,21 @@ export default async function EditJobPage({
   if (order.status === "cancelled") redirect(`/orders/${id}`);
   if (order.status === "completed" && !can(session.role, "orders.manage")) redirect(`/orders/${id}`);
 
-  // The lot price beside Number of Lots (0066), for a role that may read prices:
-  // the price this booking was taken at, or — for a job not yet booked by the
-  // lot — today's standard price, which is what switching it over would fix.
+  // The lot price beside Number of Lots, for a role that may read prices: the
+  // price this booking was taken at, or — for a job not yet booked by the lot —
+  // the laundry's standard price today (0067), which is what switching it over
+  // would fix.
   let lotPrice: { unitPriceExGst: number; gstRate: number } | null = null;
   if (can(session.role, "pricing.read")) {
-    const [{ data: stored }, { data: tenant }] = await Promise.all([
+    const [{ data: stored }, standard] = await Promise.all([
       supabase.from("laundry_order_lot_prices").select("unit_price_ex_gst, gst_rate")
         .eq("tenant_id", session.tenantId).eq("order_id", id)
         .maybeSingle<{ unit_price_ex_gst: number | string; gst_rate: number | string }>(),
-      supabase.from("tenants").select("gst_rate").eq("id", session.tenantId)
-        .maybeSingle<{ gst_rate: number | string | null }>(),
+      loadStandardLotPrice(supabase, session.tenantId),
     ]);
     lotPrice = stored
       ? { unitPriceExGst: Number(stored.unit_price_ex_gst), gstRate: Number(stored.gst_rate) }
-      : { unitPriceExGst: STANDARD_LOT_PRICE_EX_GST, gstRate: Number(tenant?.gst_rate ?? GST_RATE_FALLBACK) };
+      : { unitPriceExGst: standard.unitPriceExGst, gstRate: standard.gstRate };
   }
 
   const { customers, catalogue, drivers, staff } =

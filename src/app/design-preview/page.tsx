@@ -41,6 +41,7 @@ import { ItemPriceTable } from "@/app/(app)/invoices/prices/item-price-table";
 import { StatementSelection } from "@/app/(app)/invoices/statements/statement-selection";
 import type { StatementListRow } from "@/lib/domain/statement";
 import { AddItemCard } from "@/app/(app)/invoices/prices/add-item-card";
+import { LotPriceCard } from "@/app/(app)/invoices/prices/lot-price-card";
 import { StatusTrack } from "@/app/(app)/orders/[id]/status-track";
 import type { LaundryPriceRow } from "@/lib/domain/laundry-billing";
 import { buildItemPriceRows } from "@/lib/domain/laundry-prices";
@@ -1100,6 +1101,10 @@ export default function DesignPreviewPage() {
               submitLabel="Save their prices"
             />
             <AddItemCard returnTo="/design-preview" />
+            <div id="lot-price-preview" className="space-y-4">
+              <LotPriceCard unitPriceExGst={42.5} gstRate={0.1} saved writable />
+              <LotPriceCard unitPriceExGst={40} gstRate={0.1} saved={false} writable={false} />
+            </div>
           </section>
 
           {/* --------------------------------------------- billing review ----- */}
