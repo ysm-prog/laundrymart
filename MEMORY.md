@@ -13,9 +13,9 @@ write names its tenant.
 - Job form switch "Laundry by Lot" → Number of Lots + Item Notes; $40/lot excl. GST fixed on the
   booking by 0066's trigger in `laundry_order_lot_prices` (pricing roles only). One "Laundry
   Services – Per Lot" charge, GST-inclusive ($44/lot), auto-approvable, merges across jobs.
-- **0066 written and NOT applied.** It must go on before the code reaches `Prod`: the job pages
-  select `lot_count`/`booking_type`, and without the column every job list errors.
-- Branch `claude/funny-lamport-83bmy5`, not merged.
+- 0066 applied live 2026-11-27 (`20261127024958`), verified as real logins (§11).
+- Before trusting it live: book 10 lots on `ats.coreit.com.au`, check $440.00 on the job and one
+  "Laundry Services – Per Lot" line on the customer's draft.
 
 ## Previously: review of the whole backdated + simplified range (2026-11-24)
 - Eight fixes: no auto-assign to a round in the simplified workflow; quick-create carries via +

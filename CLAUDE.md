@@ -1592,7 +1592,8 @@ produce on demand.
   `standard_lot_price_ex_gst()` (40.00); `sync_lot_booking_price()` (SECURITY DEFINER, so the
   counter can book a lot without being able to read or write a price) and its AFTER INSERT/UPDATE
   OF `booking_type, lot_count` trigger. Changes no existing row — every job reads `standard`.
-  Ten self-assertions. `laundry_by_lot.test.sql` (20). **Not yet applied live.**
+  Ten self-assertions. `laundry_by_lot.test.sql` (20). **Applied 2026-11-27** (`20261127024958`)
+  through the connector (§11).
 - `0065_simplified_workflow` — **a delivery job may be completed off the shelf, when the laundry
   says so.** `guard_laundry_order_transition` rebuilt from **0042's** body (the latest ancestor;
   the live body was hash-identical to it, checked before writing), rule 4 skipped when the job is in
@@ -2607,6 +2608,17 @@ reports six false gaps.
   `set_records_archived`, `sync_invoice_line_account`, `tenant_members`). That is the 0042 trap
   leaving its usual trace: text typed into `apply_migration` reformatted a little against the file.
   Worth knowing before anybody reads a raw `md5(prosrc)` mismatch as drift.
+
+**`0066_laundry_by_lot` was applied on 2026-11-27** (`20261127024958`) through the connector,
+first attempt; its ten self-assertions passed. Pre-flight: none of its objects existed, one laundry at
+GST 0.1000, 38 jobs. Afterwards both function bodies (comments and whitespace stripped) hash the same
+as a local database built from the repo (`8b8caea9…`, `fbe74fda…`); the trigger function is SECURITY
+DEFINER and callable by neither `anon` nor `authenticated`. Proved as real logins in a block that
+ended by raising: the shared Manager booked 10 lots (**1 row**) and read $400.00/$40.00/$440.00 at
+$40.00; changing the count to 2 read $80/$8/$88; 0 lots was refused by the check constraint; a board
+read **0** price rows and its insert was refused **42501**. Nothing survived: 38 jobs, 0 lot prices,
+0 non-standard jobs, 18,683 invoices. Advisors unchanged (32 definer helpers + leaked-password);
+0 `anon` grants; 0 tables without RLS.
 
 **`0065_simplified_workflow` was applied on 2026-11-23** (`20261123230737`) through the connector,
 first attempt; its self-assertions passed. Before it the live guard's body (comments and whitespace
@@ -3947,7 +3959,8 @@ invoice goes, because this app has no counter-cash concept.
 ## 18. Changelog
 ### 2026-11-27 · Laundry by Lot
 The client's request: book laundry by the number of lots rather than item by item, at $40.00 a lot
-excl. GST, from both laundry creation routes. **One migration, `0066`, written and NOT applied.**
+excl. GST, from both laundry creation routes. **One migration, `0066`, applied 2026-11-27 before the
+merge (§11).**
 - **The form.** A `Switch` (`components/form.tsx`, `role="switch"`, new) at the top of Laundry
   details. On: Number of Lots (−/+ steppers, required, whole numbers) and Item Notes, with a live
   "10 lots × $40.00 excl. GST / GST / Total incl. GST" for a role that may read prices (the
@@ -3973,7 +3986,7 @@ excl. GST, from both laundry creation routes. **One migration, `0066`, written a
   a browser at 390 and 1440 on `/design-preview`: switch on hides the item fields and posts
   `items=[]`, 10 lots shows $400/$40/$440, a decimal is refused in words, switching off restores the
   rows, 0 console errors, 0 overflow.
-- **Before trusting it:** apply 0066, then on `ats.coreit.com.au` take a job in by the lot (10),
+- **Before trusting it:** on `ats.coreit.com.au` take a job in by the lot (10),
   check the job page reads $440.00, and that it lands on the customer's draft as one Per Lot line.
 
 ### 2026-11-24 · Review of the whole backdated-jobs and simplified-workflow range: eight fixes
