@@ -9,7 +9,13 @@ where that is genuinely what it is. The multi-tenancy architecture stays: one op
 fact about today's data, not a reason to drop `tenant_id`, RLS, or §23's rule that a read feeding a
 write names its tenant.
 
-## Latest: the lot price is a setting (2026-11-27)
+## Latest: Dependabot #146 + safe half of #147 (2026-11-28)
+- Runtime: supabase-js 2.119.2, lucide-react 1.82.0, resend 6.41.0. Dev: Playwright 1.65.1, Tailwind
+  4.3.5, @types/node 26.6.11, postcss 8.5.34, vitest 5.1.2. TS 7 / ESLint 10 still blocked
+  (typescript-eslint 8.74.0 peer `<6.1.0`). No source change. verify green, 1799 tests.
+- Close #146 and #147 on GitHub once merged.
+
+## Previously: the lot price is a setting (2026-11-27)
 - `0067`: `tenant_lot_prices` (pricing roles read; Owner/Office manager write), 0066's trigger reads
   it, $40 default. Card on Money › Laundry prices; job form reads the saved price.
 - 0067 applied live (`20261127035137`), proved as real logins (§11). Merged to `Dev` and `Prod` (`894faae`); CI green on both (runs 539, 540). Vercel deploy green (owner confirmed in the dashboard).

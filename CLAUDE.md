@@ -3981,6 +3981,23 @@ invoice goes, because this app has no counter-cash concept.
   preview deployment connects to itself — and must be registered on the Xero app.
 
 ## 18. Changelog
+### 2026-11-28 · Dependabot's #146 and the safe half of #147
+**No migration; no schema, RLS, capability or source change**: `git diff` over `src/` and
+`supabase/` is empty.
+- **#146, runtime:** `@supabase/supabase-js` 2.118.0 → 2.119.2 (with its five sub-packages),
+  `lucide-react` 1.61.0 → 1.82.0, `resend` 6.34.1 → 6.41.0. npm took the newest release inside each
+  range, so two land past the versions Dependabot named (1.77.0 and 6.39.0).
+- **#147, the six that are safe:** `@playwright/test` 1.65.1 (still pinned exactly),
+  `@tailwindcss/postcss` and `tailwindcss` 4.3.5, `@types/node` 26.6.11, `postcss` 8.5.34, `vitest`
+  5.1.2. **TypeScript 7 and ESLint 10 are not taken**, for the sixth time (§10a). `typescript-eslint`
+  8.74.0 still declares `typescript: >=4.8.4 <6.1.0`, which is #147's red lint.
+- **Package sets (§10a):** 571 → 558, 62 in and 75 out. Tailwind 4.3.5 now shares vite's
+  `lightningcss` 1.33.0, so its own 1.32.0 copy and bindings are gone; `rolldown` 1.2.14 → 1.3.4 and
+  `vite` 8.3.4 → 8.4.0 came with vitest. Everything outside #146 is `dev: true`.
+- `npm audit --omit=dev --audit-level=high`: **0**. The full tree reports 7 moderate (`minimatch`
+  under the linter's nested `typescript-eslint`), identical before the bump, so not introduced here.
+- `verify` green: typecheck, lint, **1799 tests across 115 files**, production build.
+
 ### 2026-11-27 · The lot price is a setting
 The owner's request after Laundry by Lot went live: the $40.00 was fixed in code and SQL. **One
 migration, `0067`, applied 2026-11-27 before the merge (§11).**
