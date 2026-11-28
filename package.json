@@ -19,7 +19,7 @@
     "prepare": "lefthook install || true"
   },
   "dependencies": {
-    "@react-pdf/renderer": "^4.9.0",
+    "@react-pdf/renderer": "^4.9.1",
     "@supabase/ssr": "^0.12.5",
     "@supabase/supabase-js": "^2.119.2",
     "lucide-react": "^1.82.0",
